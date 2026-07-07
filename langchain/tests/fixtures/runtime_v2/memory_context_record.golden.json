@@ -1,0 +1,12 @@
+{
+  "id": "project/demo::context",
+  "namespace": "project/demo",
+  "kind": "context",
+  "key": "context",
+  "text": "remember this",
+  "metadata": {
+    "scope": "project",
+    "path": "/tmp/notes.md"
+  },
+  "created_at": null
+}

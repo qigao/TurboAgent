@@ -1,0 +1,9 @@
+{
+  "id": "project/demo::notes",
+  "namespace": "project/demo",
+  "kind": "json",
+  "key": "notes",
+  "text": null,
+  "metadata": null,
+  "created_at": null
+}

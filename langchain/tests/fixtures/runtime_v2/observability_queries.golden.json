@@ -1,0 +1,29 @@
+{
+  "review_threads_sorted": {
+    "filters": {
+      "status": "interrupted",
+      "has_pending_review": true,
+      "has_handoff": true,
+      "active_agent": "planner"
+    },
+    "expected_thread_ids": ["thread_interrupt"]
+  },
+  "replan_error_threads": {
+    "filters": {
+      "has_model_error": true,
+      "has_guardrail_rejection": true,
+      "replan_requested": true,
+      "current_interrupt_reason": "replan_requested",
+      "latest_run_status": "interrupted"
+    },
+    "expected_thread_ids": ["thread_replan"]
+  },
+  "thread_id_sorted_limit": {
+    "filters": {
+      "sort_by": "thread_id",
+      "sort_order": "asc",
+      "limit": 2
+    },
+    "expected_thread_ids": ["thread_complete", "thread_interrupt"]
+  }
+}

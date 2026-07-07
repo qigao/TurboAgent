@@ -1,0 +1,125 @@
+{
+  "start_missing_graph_name": {
+    "id": "req-invalid-start-params",
+    "method": "runtime.start",
+    "params": {
+      "thread_id": "remote-thread-invalid"
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "start_options_not_object": {
+    "id": "req-invalid-start-options",
+    "method": "runtime.start",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-invalid",
+      "options": "bad"
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "resume_missing_checkpoint_id": {
+    "id": "req-invalid-resume-params",
+    "method": "runtime.resume",
+    "params": {
+      "graph_name": "remote-skeleton"
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "resume_wrong_graph_name_type": {
+    "id": "req-invalid-resume-graph-type",
+    "method": "runtime.resume",
+    "params": {
+      "graph_name": 123,
+      "checkpoint_id": "ckpt_fake"
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "get_thread_state_wrong_type": {
+    "id": "req-invalid-thread-state-type",
+    "method": "runtime.getThreadState",
+    "params": {
+      "thread_id": 123
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "get_checkpoint_context_wrong_type": {
+    "id": "req-invalid-checkpoint-context-type",
+    "method": "runtime.getCheckpointContext",
+    "params": {
+      "checkpoint_id": 123
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "list_indexes_filters_not_object": {
+    "id": "req-invalid-list-filters",
+    "method": "runtime.listObservabilityIndexesFiltered",
+    "params": {
+      "filters": "bad"
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "apply_command_missing_kind": {
+    "id": "req-invalid-command-kind",
+    "method": "runtime.applyCommand",
+    "params": {
+      "checkpoint_id": "ckpt_fake",
+      "command": {}
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "thread_command_missing_graph_name": {
+    "id": "req-invalid-thread-command-graph",
+    "method": "runtime.resumeThreadCommandBindGraph",
+    "params": {
+      "thread_id": "remote-thread-invalid",
+      "command": {
+        "kind": "append_feedback",
+        "text": "hi"
+      }
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "thread_command_wrong_command_type": {
+    "id": "req-invalid-thread-command-type",
+    "method": "runtime.resumeThreadCommandBindGraph",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-invalid",
+      "command": "bad"
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "thread_state_wrong_graph_name_type": {
+    "id": "req-invalid-thread-state-graph-type",
+    "method": "runtime.resumeThreadBindGraph",
+    "params": {
+      "graph_name": 123,
+      "thread_id": "remote-thread-invalid",
+      "state": {
+        "patched": true
+      }
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "thread_state_patch_missing_patch": {
+    "id": "req-invalid-thread-state-patch",
+    "method": "runtime.resumeThreadStatePatchBindGraph",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-invalid"
+    },
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  }
+}

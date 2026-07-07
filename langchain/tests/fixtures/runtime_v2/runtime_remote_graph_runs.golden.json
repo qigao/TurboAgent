@@ -1,0 +1,172 @@
+{
+  "resume_request": {
+    "id": "req-resume",
+    "method": "runtime.resume",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "checkpoint_id_required": true
+    }
+  },
+  "resume_response": {
+    "id": "req-resume",
+    "summary": {
+      "thread_id": "remote-thread-1",
+      "status": "completed"
+    },
+    "state": {
+      "visited_start": true,
+      "visited_end": true
+    }
+  },
+  "fork_request": {
+    "id": "req-fork",
+    "method": "runtime.fork",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "checkpoint_id_required": true
+    }
+  },
+  "fork_response": {
+    "id": "req-fork",
+    "summary": {
+      "thread_id": "remote-thread-1",
+      "status": "completed"
+    },
+    "state": {
+      "visited_start": true,
+      "visited_end": true
+    }
+  },
+  "thread_command_fork_request": {
+    "id": "req-thread-fork",
+    "method": "runtime.forkThreadCommandBindGraph",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-2",
+      "command": {
+        "kind": "append_user_message",
+        "text": "fork from thread command"
+      }
+    }
+  },
+  "thread_command_fork_response": {
+    "id": "req-thread-fork",
+    "summary": {
+      "thread_id": "remote-thread-2",
+      "status": "completed"
+    },
+    "state": {
+      "visited_end": true
+    }
+  },
+  "thread_command_resume_request": {
+    "id": "req-thread-resume",
+    "method": "runtime.resumeThreadCommandBindGraph",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-2",
+      "command": {
+        "kind": "append_user_message",
+        "text": "resume from thread command"
+      }
+    }
+  },
+  "thread_command_resume_response": {
+    "id": "req-thread-resume",
+    "summary": {
+      "thread_id": "remote-thread-2",
+      "status": "completed"
+    },
+    "state": {
+      "visited_end": true
+    }
+  },
+  "thread_state_resume_request": {
+    "id": "req-thread-resume-state",
+    "method": "runtime.resumeThreadBindGraph",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-3",
+      "state": {
+        "patched": true
+      }
+    }
+  },
+  "thread_state_resume_response": {
+    "id": "req-thread-resume-state",
+    "summary": {
+      "thread_id": "remote-thread-3",
+      "status": "completed"
+    },
+    "state": {
+      "patched": true,
+      "visited_end": true
+    }
+  },
+  "thread_state_fork_request": {
+    "id": "req-thread-fork-state",
+    "method": "runtime.forkThreadBindGraph",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-4",
+      "state": {
+        "patched": true
+      }
+    }
+  },
+  "thread_state_fork_response": {
+    "id": "req-thread-fork-state",
+    "summary": {
+      "thread_id": "remote-thread-4",
+      "status": "completed"
+    },
+    "state": {
+      "patched": true,
+      "visited_end": true
+    }
+  },
+  "thread_state_patch_resume_request": {
+    "id": "req-thread-resume-patch",
+    "method": "runtime.resumeThreadStatePatchBindGraph",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-5",
+      "state_patch": {
+        "patched_via_state_patch": true
+      }
+    }
+  },
+  "thread_state_patch_resume_response": {
+    "id": "req-thread-resume-patch",
+    "summary": {
+      "thread_id": "remote-thread-5",
+      "status": "completed"
+    },
+    "state": {
+      "patched_via_state_patch": true,
+      "visited_end": true
+    }
+  },
+  "thread_state_patch_fork_request": {
+    "id": "req-thread-fork-patch",
+    "method": "runtime.forkThreadStatePatchBindGraph",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-6",
+      "state_patch": {
+        "patched_via_state_patch": true
+      }
+    }
+  },
+  "thread_state_patch_fork_response": {
+    "id": "req-thread-fork-patch",
+    "summary": {
+      "thread_id": "remote-thread-6",
+      "status": "completed"
+    },
+    "state": {
+      "patched_via_state_patch": true,
+      "visited_end": true
+    }
+  }
+}

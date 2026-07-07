@@ -1,0 +1,27 @@
+{
+  "context_query": [
+    {
+      "id": "project/demo::context",
+      "namespace": "project/demo",
+      "kind": "context",
+      "key": "context",
+      "text": "remember this",
+      "metadata": {
+        "scope": "project",
+        "path": "/tmp/notes.md"
+      },
+      "created_at": null
+    }
+  ],
+  "json_query": [
+    {
+      "id": "project/demo::notes",
+      "namespace": "project/demo",
+      "kind": "json",
+      "key": "notes",
+      "text": null,
+      "metadata": null,
+      "created_at": null
+    }
+  ]
+}

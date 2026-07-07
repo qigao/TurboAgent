@@ -1,0 +1,7 @@
+add_subdirectory(croar) 
+add_subdirectory(monocypher)
+add_subdirectory(sds)
+add_subdirectory(cjwt)
+add_subdirectory(cxml)
+add_subdirectory(mir)
+add_subdirectory(wasm3)

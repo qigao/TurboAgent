@@ -1,0 +1,22 @@
+{
+  "completed": {
+    "kind": "subgraph_result",
+    "status": "completed",
+    "ok": true,
+    "completed": true,
+    "interrupted": false,
+    "failed": false,
+    "pending_checkpoint_id": null,
+    "pending_node": null
+  },
+  "interrupted": {
+    "kind": "subgraph_result",
+    "status": "interrupted",
+    "ok": true,
+    "completed": false,
+    "interrupted": true,
+    "failed": false,
+    "pending_checkpoint_id": "ckpt_child_pending",
+    "pending_node": "review"
+  }
+}

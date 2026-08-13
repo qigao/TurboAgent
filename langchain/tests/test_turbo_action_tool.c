@@ -216,7 +216,7 @@ spec("turbo action tool") {
     turbo_tool_registry_destroy(tool_registry);
   }
 
-  it("should bridge action tools into bind-native tool registry execution") {
+  it("should bridge action tools into TurboParser JSON-native tool registry execution") {
     turbo_action_tool_registry_t *action_registry = turbo_action_tool_registry_create();
     turbo_action_tool_definition_t definition = {
         .name = "echo",
@@ -228,32 +228,32 @@ spec("turbo action tool") {
         .handler = echo_handler,
     };
     turbo_tool_registry_t *tool_registry;
-    turbo_runtime_data_bind_value_t *args = turbo_runtime_data_bind_value_create_object();
-    turbo_runtime_data_bind_value_t *message =
-        turbo_runtime_data_bind_value_create_string("hi");
-    turbo_runtime_data_bind_value_t *result = NULL;
+    json_value_t *args = turbo_json_create_object();
+    json_value_t *message =
+        turbo_json_create_string("hi");
+    json_value_t *result = NULL;
 
     check_not_null(action_registry);
     check_not_null(args);
     check_not_null(message);
-    check_int_eq(turbo_runtime_data_bind_object_set(args, "message", message),
-                 TURBO_RUNTIME_DATA_BIND_OK);
+    check_int_eq(turbo_runtime_json_object_set(args, "message", message),
+                 TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_action_tool_registry_add(action_registry, &definition),
                  TURBO_ACTION_TOOL_OK);
 
     tool_registry = turbo_action_tool_registry_build_tool_registry_bridge(action_registry);
     check_not_null(tool_registry);
-    check_int_eq(turbo_tool_registry_execute_bind(tool_registry, "echo", args, &result),
+    check_int_eq(turbo_tool_registry_execute_json_value(tool_registry, "echo", args, &result),
                  TURBO_TOOL_OK);
     check_not_null(result);
-    check_true(turbo_runtime_data_bind_value_as_bool(
-        turbo_runtime_data_bind_object_get(result, "ok"), 0));
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result, "echo")),
+    check_true(turbo_runtime_json_value_as_bool(
+        turbo_json_object_get(result, "ok"), 0));
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result, "echo")),
                  "hi");
 
-    turbo_runtime_data_bind_value_destroy(result);
-    turbo_runtime_data_bind_value_destroy(args);
+    turbo_runtime_json_destroy(result);
+    turbo_runtime_json_destroy(args);
     turbo_tool_registry_destroy(tool_registry);
     turbo_action_tool_registry_destroy(action_registry);
   }

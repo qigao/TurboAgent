@@ -129,21 +129,21 @@ const turbo_graph_checkpoint_t *turbo_graph_run_log_checkpoint(const turbo_graph
 
 static turbo_graph_exec_status_t turbo_graph_run_log_finalize(
     turbo_graph_run_log_t *log, turbo_graph_exec_status_t status,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   if (!log) {
     return TURBO_GRAPH_EXEC_INVALID_ARGUMENT;
   }
 
   if (log->capture_status != TURBO_GRAPH_EXEC_OK) {
     if (out_state && *out_state) {
-      turbo_runtime_data_bind_value_destroy(*out_state);
+      turbo_runtime_json_destroy(*out_state);
       *out_state = NULL;
     }
     return log->capture_status;
   }
   if (turbo_event_log_status(log->events) != TURBO_EVENT_LOG_OK) {
     if (out_state && *out_state) {
-      turbo_runtime_data_bind_value_destroy(*out_state);
+      turbo_runtime_json_destroy(*out_state);
       *out_state = NULL;
     }
     return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
@@ -151,10 +151,10 @@ static turbo_graph_exec_status_t turbo_graph_run_log_finalize(
   return status;
 }
 
-turbo_graph_exec_status_t turbo_graph_run_bind_log(
-    turbo_graph_t *graph, const turbo_runtime_data_bind_value_t *state,
+turbo_graph_exec_status_t turbo_graph_run_json_value_log(
+    turbo_graph_t *graph, const json_value_t *state,
     const turbo_graph_run_options_t *options, turbo_graph_run_log_t *log,
-    turbo_graph_run_result_t *out_result, turbo_runtime_data_bind_value_t **out_state) {
+    turbo_graph_run_result_t *out_result, json_value_t **out_state) {
   turbo_graph_run_options_t effective_options;
   turbo_graph_run_log_capture_ctx_t capture;
   turbo_graph_exec_status_t status;
@@ -178,15 +178,15 @@ turbo_graph_exec_status_t turbo_graph_run_bind_log(
   effective_options.checkpoint_cb = turbo_graph_run_log_capture_checkpoint;
   effective_options.checkpoint_user_data = &capture;
 
-  status = turbo_graph_run_bind_stream(graph, state, &effective_options, turbo_event_log_capture_bind,
+  status = turbo_graph_run_json_value_stream(graph, state, &effective_options, turbo_event_log_capture_json_value,
                                        log->events, out_result, out_state);
   return turbo_graph_run_log_finalize(log, status, out_state);
 }
 
-turbo_graph_exec_status_t turbo_graph_run_checkpoint_bind_log(
+turbo_graph_exec_status_t turbo_graph_run_checkpoint_json_value_log(
     turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
     const turbo_graph_run_options_t *options, turbo_graph_run_log_t *log,
-    turbo_graph_run_result_t *out_result, turbo_runtime_data_bind_value_t **out_state) {
+    turbo_graph_run_result_t *out_result, json_value_t **out_state) {
   turbo_graph_checkpoint_t *checkpoint_copy = NULL;
   turbo_graph_run_options_t effective_options;
   turbo_graph_run_log_capture_ctx_t capture;
@@ -216,8 +216,8 @@ turbo_graph_exec_status_t turbo_graph_run_checkpoint_bind_log(
   effective_options.checkpoint_cb = turbo_graph_run_log_capture_checkpoint;
   effective_options.checkpoint_user_data = &capture;
 
-  status = turbo_graph_run_checkpoint_bind_stream(
-      graph, checkpoint_copy, &effective_options, turbo_event_log_capture_bind, log->events, out_result,
+  status = turbo_graph_run_checkpoint_json_value_stream(
+      graph, checkpoint_copy, &effective_options, turbo_event_log_capture_json_value, log->events, out_result,
       out_state);
   turbo_graph_checkpoint_destroy(checkpoint_copy);
   return turbo_graph_run_log_finalize(log, status, out_state);

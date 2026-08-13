@@ -39,20 +39,20 @@ CXX_C_API const turbo_graph_checkpoint_t *
 turbo_graph_run_log_checkpoint(const turbo_graph_run_log_t *log);
 
 /**
- * @brief Execute one bind-native graph run and capture canonical events plus latest checkpoint.
+ * @brief Execute one TurboParser JSON-native graph run and capture canonical events plus latest checkpoint.
  */
-CXX_C_API turbo_graph_exec_status_t turbo_graph_run_bind_log(
-    turbo_graph_t *graph, const turbo_runtime_data_bind_value_t *state,
+CXX_C_API turbo_graph_exec_status_t turbo_graph_run_json_value_log(
+    turbo_graph_t *graph, const json_value_t *state,
     const turbo_graph_run_options_t *options, turbo_graph_run_log_t *log,
-    turbo_graph_run_result_t *out_result, turbo_runtime_data_bind_value_t **out_state);
+    turbo_graph_run_result_t *out_result, json_value_t **out_state);
 
 /**
- * @brief Resume one bind-native graph run from checkpoint and capture canonical events.
+ * @brief Resume one TurboParser JSON-native graph run from checkpoint and capture canonical events.
  */
-CXX_C_API turbo_graph_exec_status_t turbo_graph_run_checkpoint_bind_log(
+CXX_C_API turbo_graph_exec_status_t turbo_graph_run_checkpoint_json_value_log(
     turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
     const turbo_graph_run_options_t *options, turbo_graph_run_log_t *log,
-    turbo_graph_run_result_t *out_result, turbo_runtime_data_bind_value_t **out_state);
+    turbo_graph_run_result_t *out_result, json_value_t **out_state);
 
 #ifdef __cplusplus
 }

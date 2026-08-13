@@ -112,8 +112,10 @@ CXX_C_API void turbo_agent_destroy(turbo_agent_t *agent);
 
 #include "turbo_agent_extensions.h"
 #include "turbo_agent_memory_store.h"
+#include "turbo_agent_resilience.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_state.h"
+#include "turbo_agent_tool_executor.h"
 
 #ifdef __cplusplus
 }

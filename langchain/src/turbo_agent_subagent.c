@@ -205,36 +205,36 @@ static void turbo_agent_subagent_tool_release_app(turbo_agent_app_t *app, int ow
   }
 }
 
-static const turbo_runtime_data_bind_value_t *turbo_agent_subagent_resolve_messages(
-    const turbo_runtime_data_bind_value_t *arguments) {
-  const turbo_runtime_data_bind_value_t *messages;
+static const json_value_t *turbo_agent_subagent_resolve_messages(
+    const json_value_t *arguments) {
+  const json_value_t *messages;
 
   if (!arguments) {
     return NULL;
   }
-  if (turbo_runtime_data_bind_value_kind(arguments) == TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+  if (turbo_json_type(arguments) == TURBO_JSON_ARRAY) {
     return arguments;
   }
-  if (turbo_runtime_data_bind_value_kind(arguments) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (turbo_json_type(arguments) != TURBO_JSON_OBJECT) {
     return NULL;
   }
-  messages = turbo_runtime_data_bind_object_get(arguments, "messages");
+  messages = turbo_json_object_get(arguments, "messages");
   if (!messages ||
-      turbo_runtime_data_bind_value_kind(messages) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+      turbo_json_type(messages) != TURBO_JSON_ARRAY) {
     return NULL;
   }
   return messages;
 }
 
-static char *turbo_agent_subagent_serialize_bind_value(
-    const turbo_runtime_data_bind_value_t *value) {
+static char *turbo_agent_subagent_serialize_json_value(
+    const json_value_t *value) {
   json_value_t *json_value;
   char *serialized;
 
   if (!value) {
     return NULL;
   }
-  json_value = turbo_runtime_data_bind_value_to_json(value);
+  json_value = turbo_json_clone(value);
   if (!json_value) {
     return NULL;
   }
@@ -244,28 +244,28 @@ static char *turbo_agent_subagent_serialize_bind_value(
 }
 
 static char *turbo_agent_subagent_resolve_input_text(
-    const turbo_runtime_data_bind_value_t *arguments) {
-  const turbo_runtime_data_bind_value_t *input_value;
+    const json_value_t *arguments) {
+  const json_value_t *input_value;
   const char *text;
 
   if (!arguments) {
     return NULL;
   }
-  if (turbo_runtime_data_bind_value_kind(arguments) == TURBO_RUNTIME_DATA_BIND_VALUE_STRING) {
-    text = turbo_runtime_data_bind_value_as_string(arguments);
+  if (turbo_json_type(arguments) == TURBO_JSON_STRING) {
+    text = turbo_runtime_json_value_as_string(arguments);
     return text ? turbo_agent_subagent_strdup(text) : NULL;
   }
-  if (turbo_runtime_data_bind_value_kind(arguments) == TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
-    input_value = turbo_runtime_data_bind_object_get(arguments, "input");
+  if (turbo_json_type(arguments) == TURBO_JSON_OBJECT) {
+    input_value = turbo_json_object_get(arguments, "input");
     if (input_value) {
-      if (turbo_runtime_data_bind_value_kind(input_value) == TURBO_RUNTIME_DATA_BIND_VALUE_STRING) {
-        text = turbo_runtime_data_bind_value_as_string(input_value);
+      if (turbo_json_type(input_value) == TURBO_JSON_STRING) {
+        text = turbo_runtime_json_value_as_string(input_value);
         return text ? turbo_agent_subagent_strdup(text) : NULL;
       }
-      return turbo_agent_subagent_serialize_bind_value(input_value);
+      return turbo_agent_subagent_serialize_json_value(input_value);
     }
   }
-  return turbo_agent_subagent_serialize_bind_value(arguments);
+  return turbo_agent_subagent_serialize_json_value(arguments);
 }
 
 static int turbo_agent_subagent_result_set_base(json_value_t *result, const json_value_t *summary) {
@@ -367,10 +367,10 @@ static int turbo_agent_subagent_result_set_base(json_value_t *result, const json
   return 0;
 }
 
-static turbo_runtime_data_bind_value_t *turbo_agent_subagent_build_text_result(
+static json_value_t *turbo_agent_subagent_build_text_result(
     const json_value_t *summary, const char *text) {
   json_value_t *result;
-  turbo_runtime_data_bind_value_t *bind_result;
+  json_value_t *json_value_result;
 
   result = turbo_json_create_object();
   if (!result) {
@@ -382,16 +382,16 @@ static turbo_runtime_data_bind_value_t *turbo_agent_subagent_build_text_result(
   }
   turbo_json_object_set_string(result, "output_text", text ? text : "");
 
-  bind_result = turbo_runtime_data_bind_value_from_json(result);
+  json_value_result = turbo_json_clone(result);
   turbo_free_json(&result);
-  return bind_result;
+  return json_value_result;
 }
 
-static turbo_runtime_data_bind_value_t *turbo_agent_subagent_build_json_result(
+static json_value_t *turbo_agent_subagent_build_json_result(
     const json_value_t *summary, const json_value_t *output_json) {
   json_value_t *result;
   json_value_t *output_clone;
-  turbo_runtime_data_bind_value_t *bind_result;
+  json_value_t *json_value_result;
   char *serialized = NULL;
 
   if (!output_json) {
@@ -421,21 +421,21 @@ static turbo_runtime_data_bind_value_t *turbo_agent_subagent_build_json_result(
   turbo_json_object_add(result, "output_json", output_clone);
   turbo_json_serialize_free(serialized);
 
-  bind_result = turbo_runtime_data_bind_value_from_json(result);
+  json_value_result = turbo_json_clone(result);
   turbo_free_json(&result);
-  return bind_result;
+  return json_value_result;
 }
 
 static int turbo_agent_subagent_invoke_with_app(
     turbo_agent_subagent_tool_t *tool, turbo_agent_app_t *app,
-    const turbo_runtime_data_bind_value_t *arguments,
-    turbo_runtime_data_bind_value_t **out_result) {
-  const turbo_runtime_data_bind_value_t *messages;
+    const json_value_t *arguments,
+    json_value_t **out_result) {
+  const json_value_t *messages;
   char *text = NULL;
   char *output_text = NULL;
   json_value_t *summary = NULL;
   json_value_t *output_json = NULL;
-  turbo_runtime_data_bind_value_t *result = NULL;
+  json_value_t *result = NULL;
   int rc = -1;
 
   if (!tool || !app || !out_result) {
@@ -477,15 +477,15 @@ static int turbo_agent_subagent_invoke_with_app(
   turbo_free_json(&output_json);
 
   if (rc != 0 || !result) {
-    turbo_runtime_data_bind_value_destroy(result);
+    turbo_runtime_json_destroy(result);
     return -1;
   }
   *out_result = result;
   return 0;
 }
 
-static int turbo_agent_subagent_bind_handler(const turbo_runtime_data_bind_value_t *arguments,
-                                             turbo_runtime_data_bind_value_t **out_result,
+static int turbo_agent_subagent_json_value_handler(const json_value_t *arguments,
+                                             json_value_t **out_result,
                                              void *user_data) {
   turbo_agent_subagent_tool_t *tool = (turbo_agent_subagent_tool_t *)user_data;
   turbo_agent_app_t *app;
@@ -508,8 +508,8 @@ static int turbo_agent_subagent_bind_handler(const turbo_runtime_data_bind_value
 static int turbo_agent_subagent_handler(const char *arguments_json, char **out_output,
                                         void *user_data) {
   json_value_t *arguments = NULL;
-  turbo_runtime_data_bind_value_t *bind_arguments = NULL;
-  turbo_runtime_data_bind_value_t *bind_result = NULL;
+  json_value_t *json_value_arguments = NULL;
+  json_value_t *json_value_result = NULL;
   json_value_t *result_json = NULL;
   char *serialized = NULL;
   int rc = -1;
@@ -529,21 +529,21 @@ static int turbo_agent_subagent_handler(const char *arguments_json, char **out_o
     return -1;
   }
 
-  bind_arguments = turbo_runtime_data_bind_value_from_json(arguments);
+  json_value_arguments = turbo_json_clone(arguments);
   turbo_free_json(&arguments);
-  if (!bind_arguments) {
+  if (!json_value_arguments) {
     return -1;
   }
 
-  rc = turbo_agent_subagent_bind_handler(bind_arguments, &bind_result, user_data);
-  turbo_runtime_data_bind_value_destroy(bind_arguments);
-  if (rc != 0 || !bind_result) {
-    turbo_runtime_data_bind_value_destroy(bind_result);
+  rc = turbo_agent_subagent_json_value_handler(json_value_arguments, &json_value_result, user_data);
+  turbo_runtime_json_destroy(json_value_arguments);
+  if (rc != 0 || !json_value_result) {
+    turbo_runtime_json_destroy(json_value_result);
     return -1;
   }
 
-  result_json = turbo_runtime_data_bind_value_to_json(bind_result);
-  turbo_runtime_data_bind_value_destroy(bind_result);
+  result_json = turbo_json_clone(json_value_result);
+  turbo_runtime_json_destroy(json_value_result);
   if (!result_json) {
     return -1;
   }
@@ -580,7 +580,7 @@ static turbo_tool_status_t turbo_agent_subagent_prepare_definition(
   out_definition->parameters_schema = config->parameters_schema;
   out_definition->strict = config->strict;
   out_definition->handler = turbo_agent_subagent_handler;
-  out_definition->bind_handler = turbo_agent_subagent_bind_handler;
+  out_definition->json_value_handler = turbo_agent_subagent_json_value_handler;
   out_definition->user_data = tool;
   out_definition->user_data_free = turbo_agent_subagent_tool_destroy;
   return TURBO_TOOL_OK;

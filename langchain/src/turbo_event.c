@@ -4,17 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int turbo_event_set_string_field(turbo_runtime_data_bind_value_t *object, const char *key,
+static int turbo_event_set_string_field(json_value_t *object, const char *key,
                                         const char *value) {
-  turbo_runtime_data_bind_value_t *field_value;
+  json_value_t *field_value;
 
-  field_value = turbo_runtime_data_bind_value_create_string(value ? value : "");
+  field_value = turbo_json_create_string(value ? value : "");
   if (!field_value) {
     return -1;
   }
 
-  if (turbo_runtime_data_bind_object_set(object, key, field_value) != TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(field_value);
+  if (turbo_runtime_json_object_set(object, key, field_value) != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field_value);
     return -1;
   }
 
@@ -22,8 +22,8 @@ static int turbo_event_set_string_field(turbo_runtime_data_bind_value_t *object,
 }
 
 static int turbo_event_set_optional_string_or_null_field(
-    turbo_runtime_data_bind_value_t *object, const char *key, const char *value, int set_null) {
-  turbo_runtime_data_bind_value_t *field_value = NULL;
+    json_value_t *object, const char *key, const char *value, int set_null) {
+  json_value_t *field_value = NULL;
 
   if (!object || !key) {
     return -1;
@@ -32,64 +32,64 @@ static int turbo_event_set_optional_string_or_null_field(
     return 0;
   }
 
-  field_value = value ? turbo_runtime_data_bind_value_create_string(value)
-                      : turbo_runtime_data_bind_value_create_null();
+  field_value = value ? turbo_json_create_string(value)
+                      : turbo_json_create_null();
   if (!field_value) {
     return -1;
   }
-  if (turbo_runtime_data_bind_object_set(object, key, field_value) != TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(field_value);
+  if (turbo_runtime_json_object_set(object, key, field_value) != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field_value);
     return -1;
   }
 
   return 0;
 }
 
-static int turbo_event_string_or_null_schema_field(turbo_runtime_data_bind_value_t *properties,
+static int turbo_event_string_or_null_schema_field(json_value_t *properties,
                                                    const char *key, int allow_null) {
-  turbo_runtime_data_bind_value_t *field = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *type_value = NULL;
+  json_value_t *field = turbo_json_create_object();
+  json_value_t *type_value = NULL;
 
   if (!properties || !key || !field) {
-    turbo_runtime_data_bind_value_destroy(field);
+    turbo_runtime_json_destroy(field);
     return -1;
   }
 
   if (allow_null) {
-    turbo_runtime_data_bind_value_t *types = turbo_runtime_data_bind_value_create_array();
+    json_value_t *types = turbo_json_create_array();
     if (!types) {
-      turbo_runtime_data_bind_value_destroy(field);
+      turbo_runtime_json_destroy(field);
       return -1;
     }
-    if (turbo_runtime_data_bind_array_append(
-            types, turbo_runtime_data_bind_value_create_string("string")) !=
-            TURBO_RUNTIME_DATA_BIND_OK ||
-        turbo_runtime_data_bind_array_append(types,
-                                             turbo_runtime_data_bind_value_create_string("null")) !=
-            TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(types);
-      turbo_runtime_data_bind_value_destroy(field);
+    if (turbo_runtime_json_array_append(
+            types, turbo_json_create_string("string")) !=
+            TURBO_RUNTIME_JSON_OK ||
+        turbo_runtime_json_array_append(types,
+                                             turbo_json_create_string("null")) !=
+            TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(types);
+      turbo_runtime_json_destroy(field);
       return -1;
     }
     type_value = types;
   } else {
-    type_value = turbo_runtime_data_bind_value_create_string("string");
+    type_value = turbo_json_create_string("string");
     if (!type_value) {
-      turbo_runtime_data_bind_value_destroy(field);
+      turbo_runtime_json_destroy(field);
       return -1;
     }
   }
 
-  if (turbo_runtime_data_bind_object_set(field, "type", type_value) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(type_value);
-    turbo_runtime_data_bind_value_destroy(field);
+  if (turbo_runtime_json_object_set(field, "type", type_value) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(type_value);
+    turbo_runtime_json_destroy(field);
     return -1;
   }
   type_value = NULL;
-  if (turbo_runtime_data_bind_object_set(properties, key, field) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(field);
+  if (turbo_runtime_json_object_set(properties, key, field) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field);
     return -1;
   }
 
@@ -97,50 +97,50 @@ static int turbo_event_string_or_null_schema_field(turbo_runtime_data_bind_value
 }
 
 static int turbo_event_tool_result_optional_field_valid(
-    const turbo_runtime_data_bind_value_t *event, const char *key, int allow_null) {
-  const turbo_runtime_data_bind_value_t *value;
-  turbo_runtime_data_bind_value_kind_t kind;
+    const json_value_t *event, const char *key, int allow_null) {
+  const json_value_t *value;
+  turbo_json_type_t kind;
 
   if (!event || !key) {
     return 0;
   }
 
-  value = turbo_runtime_data_bind_object_get(event, key);
+  value = turbo_json_object_get(event, key);
   if (!value) {
     return 1;
   }
 
-  kind = turbo_runtime_data_bind_value_kind(value);
-  return kind == TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-                 (allow_null && kind == TURBO_RUNTIME_DATA_BIND_VALUE_NULL)
+  kind = turbo_json_type(value);
+  return kind == TURBO_JSON_STRING ||
+                 (allow_null && kind == TURBO_JSON_NULL)
              ? 1
              : 0;
 }
 
 static int turbo_event_required_string_or_null_field_valid(
-    const turbo_runtime_data_bind_value_t *event, const char *key, int allow_null) {
-  const turbo_runtime_data_bind_value_t *value;
-  turbo_runtime_data_bind_value_kind_t kind;
+    const json_value_t *event, const char *key, int allow_null) {
+  const json_value_t *value;
+  turbo_json_type_t kind;
 
   if (!event || !key) {
     return 0;
   }
 
-  value = turbo_runtime_data_bind_object_get(event, key);
+  value = turbo_json_object_get(event, key);
   if (!value) {
     return 0;
   }
 
-  kind = turbo_runtime_data_bind_value_kind(value);
-  return kind == TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-                 (allow_null && kind == TURBO_RUNTIME_DATA_BIND_VALUE_NULL)
+  kind = turbo_json_type(value);
+  return kind == TURBO_JSON_STRING ||
+                 (allow_null && kind == TURBO_JSON_NULL)
              ? 1
              : 0;
 }
 
-static int turbo_event_tool_result_attach_child_fields_from_bind_object(
-    turbo_runtime_data_bind_value_t *event, const turbo_runtime_data_bind_value_t *object) {
-  const turbo_runtime_data_bind_value_t *value;
+static int turbo_event_tool_result_attach_child_fields_from_json_value_object(
+    json_value_t *event, const json_value_t *object) {
+  const json_value_t *value;
   const char *text = NULL;
   int allow_null = 0;
   size_t i;
@@ -161,21 +161,21 @@ static int turbo_event_tool_result_attach_child_fields_from_bind_object(
   };
 
   if (!event || !object ||
-      turbo_runtime_data_bind_value_kind(object) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+      turbo_json_type(object) != TURBO_JSON_OBJECT) {
     return 0;
   }
 
   for (i = 0; i < sizeof(field_map) / sizeof(field_map[0]); ++i) {
-    if (turbo_runtime_data_bind_object_get(event, field_map[i].target_key)) {
+    if (turbo_json_object_get(event, field_map[i].target_key)) {
       continue;
     }
-    value = turbo_runtime_data_bind_object_get(object, field_map[i].primary_key);
+    value = turbo_json_object_get(object, field_map[i].primary_key);
     if (!value) {
       continue;
     }
     allow_null = field_map[i].allow_null &&
-                 turbo_runtime_data_bind_value_kind(value) == TURBO_RUNTIME_DATA_BIND_VALUE_NULL;
-    text = turbo_runtime_data_bind_value_as_string(value);
+                 turbo_json_type(value) == TURBO_JSON_NULL;
+    text = turbo_runtime_json_value_as_string(value);
     if (!text && !allow_null) {
       continue;
     }
@@ -189,7 +189,7 @@ static int turbo_event_tool_result_attach_child_fields_from_bind_object(
 }
 
 static int turbo_event_tool_result_attach_child_fields_from_output_json(
-    turbo_runtime_data_bind_value_t *event, const char *output) {
+    json_value_t *event, const char *output) {
   json_value_t *output_json = NULL;
   const json_value_t *value;
   const char *value_key = NULL;
@@ -222,7 +222,7 @@ static int turbo_event_tool_result_attach_child_fields_from_output_json(
   }
 
   for (i = 0; i < sizeof(field_map) / sizeof(field_map[0]); ++i) {
-    if (turbo_runtime_data_bind_object_get(event, field_map[i].target_key)) {
+    if (turbo_json_object_get(event, field_map[i].target_key)) {
       continue;
     }
     value_key = NULL;
@@ -251,60 +251,60 @@ static int turbo_event_tool_result_attach_child_fields_from_output_json(
   return 0;
 }
 
-static turbo_runtime_data_bind_value_t *turbo_event_tool_call_schema_bind(void) {
-  turbo_runtime_data_bind_value_t *schema = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *properties = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *required = turbo_runtime_data_bind_value_create_array();
-  turbo_runtime_data_bind_value_t *field = NULL;
+static json_value_t *turbo_event_tool_call_schema_json_value(void) {
+  json_value_t *schema = turbo_json_create_object();
+  json_value_t *properties = turbo_json_create_object();
+  json_value_t *required = turbo_json_create_array();
+  json_value_t *field = NULL;
 
   if (!schema || !properties || !required) {
-    turbo_runtime_data_bind_value_destroy(schema);
-    turbo_runtime_data_bind_value_destroy(properties);
-    turbo_runtime_data_bind_value_destroy(required);
+    turbo_runtime_json_destroy(schema);
+    turbo_runtime_json_destroy(properties);
+    turbo_runtime_json_destroy(required);
     return NULL;
   }
 
   turbo_event_set_string_field(schema, "type", "object");
-  turbo_runtime_data_bind_object_set(schema, "properties", properties);
-  turbo_runtime_data_bind_object_set(schema, "required", required);
+  turbo_runtime_json_object_set(schema, "properties", properties);
+  turbo_runtime_json_object_set(schema, "required", required);
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "call_id", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("call_id"));
+  turbo_runtime_json_object_set(properties, "call_id", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("call_id"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "name", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("name"));
+  turbo_runtime_json_object_set(properties, "name", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("name"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "arguments", field);
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("arguments"));
+  turbo_runtime_json_object_set(properties, "arguments", field);
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("arguments"));
 
   return schema;
 }
 
-const char *turbo_event_kind_bind(const turbo_runtime_data_bind_value_t *event) {
-  const turbo_runtime_data_bind_value_t *kind;
+const char *turbo_event_kind_json_value(const json_value_t *event) {
+  const json_value_t *kind;
 
-  if (!event || turbo_runtime_data_bind_value_kind(event) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (!event || turbo_json_type(event) != TURBO_JSON_OBJECT) {
     return NULL;
   }
 
-  kind = turbo_runtime_data_bind_object_get(event, "kind");
-  if (!kind || turbo_runtime_data_bind_value_kind(kind) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING) {
+  kind = turbo_json_object_get(event, "kind");
+  if (!kind || turbo_json_type(kind) != TURBO_JSON_STRING) {
     return NULL;
   }
 
-  return turbo_runtime_data_bind_value_as_string(kind);
+  return turbo_runtime_json_value_as_string(kind);
 }
 
-int turbo_event_stream_mode_accepts_bind(
-    turbo_event_stream_mode_t mode, const turbo_runtime_data_bind_value_t *event) {
-  const char *kind = turbo_event_kind_bind(event);
+int turbo_event_stream_mode_accepts_json_value(
+    turbo_event_stream_mode_t mode, const json_value_t *event) {
+  const char *kind = turbo_event_kind_json_value(event);
 
   if (!kind) {
     return 0;
@@ -325,182 +325,182 @@ int turbo_event_stream_mode_accepts_bind(
   }
 }
 
-void turbo_event_stream_filter_sink_bind(
-    const turbo_runtime_data_bind_value_t *event, void *user_data) {
+void turbo_event_stream_filter_sink_json_value(
+    const json_value_t *event, void *user_data) {
   turbo_event_stream_filter_t *filter = (turbo_event_stream_filter_t *)user_data;
 
   if (!filter || !filter->sink) {
     return;
   }
-  if (!turbo_event_stream_mode_accepts_bind(filter->mode, event)) {
+  if (!turbo_event_stream_mode_accepts_json_value(filter->mode, event)) {
     return;
   }
   filter->sink(event, filter->sink_user_data);
 }
 
-int turbo_event_validate_bind(const turbo_runtime_data_bind_value_t *event) {
-  const char *kind = turbo_event_kind_bind(event);
+int turbo_event_validate_json_value(const json_value_t *event) {
+  const char *kind = turbo_event_kind_json_value(event);
 
   if (!kind) {
     return -1;
   }
 
   if (strcmp(kind, "model") == 0) {
-    return turbo_event_model_validate_bind(event);
+    return turbo_event_model_validate_json_value(event);
   }
   if (strcmp(kind, "trace") == 0) {
-    return turbo_event_trace_validate_bind(event);
+    return turbo_event_trace_validate_json_value(event);
   }
   if (strcmp(kind, "tool_result") == 0) {
-    return turbo_event_tool_result_validate_bind(event);
+    return turbo_event_tool_result_validate_json_value(event);
   }
   if (strcmp(kind, "handoff") == 0) {
-    return turbo_event_handoff_validate_bind(event);
+    return turbo_event_handoff_validate_json_value(event);
   }
 
   return -1;
 }
 
-turbo_runtime_data_bind_value_t *turbo_event_model_schema_bind(void) {
-  turbo_runtime_data_bind_value_t *schema = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *properties = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *required = turbo_runtime_data_bind_value_create_array();
-  turbo_runtime_data_bind_value_t *field = NULL;
-  turbo_runtime_data_bind_value_t *items = NULL;
+json_value_t *turbo_event_model_schema_json_value(void) {
+  json_value_t *schema = turbo_json_create_object();
+  json_value_t *properties = turbo_json_create_object();
+  json_value_t *required = turbo_json_create_array();
+  json_value_t *field = NULL;
+  json_value_t *items = NULL;
 
   if (!schema || !properties || !required) {
-    turbo_runtime_data_bind_value_destroy(schema);
-    turbo_runtime_data_bind_value_destroy(properties);
-    turbo_runtime_data_bind_value_destroy(required);
+    turbo_runtime_json_destroy(schema);
+    turbo_runtime_json_destroy(properties);
+    turbo_runtime_json_destroy(required);
     return NULL;
   }
 
   turbo_event_set_string_field(schema, "type", "object");
-  turbo_runtime_data_bind_object_set(schema, "properties", properties);
-  turbo_runtime_data_bind_object_set(schema, "required", required);
+  turbo_runtime_json_object_set(schema, "properties", properties);
+  turbo_runtime_json_object_set(schema, "required", required);
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "kind", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("kind"));
+  turbo_runtime_json_object_set(properties, "kind", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("kind"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "response_id", field);
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("response_id"));
+  turbo_runtime_json_object_set(properties, "response_id", field);
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("response_id"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "output_text", field);
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("output_text"));
+  turbo_runtime_json_object_set(properties, "output_text", field);
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("output_text"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "array");
-  items = turbo_event_tool_call_schema_bind();
+  items = turbo_event_tool_call_schema_json_value();
   if (!field || !items) {
-    turbo_runtime_data_bind_value_destroy(field);
-    turbo_runtime_data_bind_value_destroy(items);
-    turbo_runtime_data_bind_value_destroy(schema);
+    turbo_runtime_json_destroy(field);
+    turbo_runtime_json_destroy(items);
+    turbo_runtime_json_destroy(schema);
     return NULL;
   }
-  turbo_runtime_data_bind_object_set(field, "items", items);
-  turbo_runtime_data_bind_object_set(properties, "tool_calls", field);
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("tool_calls"));
+  turbo_runtime_json_object_set(field, "items", items);
+  turbo_runtime_json_object_set(properties, "tool_calls", field);
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("tool_calls"));
 
   return schema;
 }
 
-turbo_runtime_data_bind_value_t *turbo_event_trace_schema_bind(void) {
-  turbo_runtime_data_bind_value_t *schema = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *properties = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *required = turbo_runtime_data_bind_value_create_array();
-  turbo_runtime_data_bind_value_t *field = NULL;
+json_value_t *turbo_event_trace_schema_json_value(void) {
+  json_value_t *schema = turbo_json_create_object();
+  json_value_t *properties = turbo_json_create_object();
+  json_value_t *required = turbo_json_create_array();
+  json_value_t *field = NULL;
 
   if (!schema || !properties || !required) {
-    turbo_runtime_data_bind_value_destroy(schema);
-    turbo_runtime_data_bind_value_destroy(properties);
-    turbo_runtime_data_bind_value_destroy(required);
+    turbo_runtime_json_destroy(schema);
+    turbo_runtime_json_destroy(properties);
+    turbo_runtime_json_destroy(required);
     return NULL;
   }
 
   turbo_event_set_string_field(schema, "type", "object");
-  turbo_runtime_data_bind_object_set(schema, "properties", properties);
-  turbo_runtime_data_bind_object_set(schema, "required", required);
+  turbo_runtime_json_object_set(schema, "properties", properties);
+  turbo_runtime_json_object_set(schema, "required", required);
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "kind", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("kind"));
+  turbo_runtime_json_object_set(properties, "kind", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("kind"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "name", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("name"));
+  turbo_runtime_json_object_set(properties, "name", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("name"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "detail", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("detail"));
+  turbo_runtime_json_object_set(properties, "detail", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("detail"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "payload", field);
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("payload"));
+  turbo_runtime_json_object_set(properties, "payload", field);
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("payload"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "integer");
-  turbo_runtime_data_bind_object_set(properties, "status", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("status"));
+  turbo_runtime_json_object_set(properties, "status", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("status"));
 
   return schema;
 }
 
-turbo_runtime_data_bind_value_t *turbo_event_tool_result_schema_bind(void) {
-  turbo_runtime_data_bind_value_t *schema = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *properties = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *required = turbo_runtime_data_bind_value_create_array();
-  turbo_runtime_data_bind_value_t *field = NULL;
+json_value_t *turbo_event_tool_result_schema_json_value(void) {
+  json_value_t *schema = turbo_json_create_object();
+  json_value_t *properties = turbo_json_create_object();
+  json_value_t *required = turbo_json_create_array();
+  json_value_t *field = NULL;
 
   if (!schema || !properties || !required) {
-    turbo_runtime_data_bind_value_destroy(schema);
-    turbo_runtime_data_bind_value_destroy(properties);
-    turbo_runtime_data_bind_value_destroy(required);
+    turbo_runtime_json_destroy(schema);
+    turbo_runtime_json_destroy(properties);
+    turbo_runtime_json_destroy(required);
     return NULL;
   }
 
   turbo_event_set_string_field(schema, "type", "object");
-  turbo_runtime_data_bind_object_set(schema, "properties", properties);
-  turbo_runtime_data_bind_object_set(schema, "required", required);
+  turbo_runtime_json_object_set(schema, "properties", properties);
+  turbo_runtime_json_object_set(schema, "required", required);
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "kind", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("kind"));
+  turbo_runtime_json_object_set(properties, "kind", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("kind"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "name", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("name"));
+  turbo_runtime_json_object_set(properties, "name", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("name"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "arguments_json", field);
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("arguments_json"));
+  turbo_runtime_json_object_set(properties, "arguments_json", field);
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("arguments_json"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "output", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("output"));
+  turbo_runtime_json_object_set(properties, "output", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("output"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "integer");
-  turbo_runtime_data_bind_object_set(properties, "status", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("status"));
+  turbo_runtime_json_object_set(properties, "status", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("status"));
 
   if (turbo_event_string_or_null_schema_field(properties, "child_thread_id", 0) != 0 ||
       turbo_event_string_or_null_schema_field(properties, "child_run_id", 0) != 0 ||
@@ -511,101 +511,101 @@ turbo_runtime_data_bind_value_t *turbo_event_tool_result_schema_bind(void) {
       turbo_event_string_or_null_schema_field(properties, "parent_tool_name", 0) != 0 ||
       turbo_event_string_or_null_schema_field(properties, "parent_graph_run_id", 0) != 0 ||
       turbo_event_string_or_null_schema_field(properties, "call_frame_id", 0) != 0) {
-    turbo_runtime_data_bind_value_destroy(schema);
+    turbo_runtime_json_destroy(schema);
     return NULL;
   }
 
   return schema;
 }
 
-turbo_runtime_data_bind_value_t *turbo_event_handoff_schema_bind(void) {
-  turbo_runtime_data_bind_value_t *schema = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *properties = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *required = turbo_runtime_data_bind_value_create_array();
-  turbo_runtime_data_bind_value_t *field = NULL;
+json_value_t *turbo_event_handoff_schema_json_value(void) {
+  json_value_t *schema = turbo_json_create_object();
+  json_value_t *properties = turbo_json_create_object();
+  json_value_t *required = turbo_json_create_array();
+  json_value_t *field = NULL;
 
   if (!schema || !properties || !required) {
-    turbo_runtime_data_bind_value_destroy(schema);
-    turbo_runtime_data_bind_value_destroy(properties);
-    turbo_runtime_data_bind_value_destroy(required);
+    turbo_runtime_json_destroy(schema);
+    turbo_runtime_json_destroy(properties);
+    turbo_runtime_json_destroy(required);
     return NULL;
   }
 
   turbo_event_set_string_field(schema, "type", "object");
-  turbo_runtime_data_bind_object_set(schema, "properties", properties);
-  turbo_runtime_data_bind_object_set(schema, "required", required);
+  turbo_runtime_json_object_set(schema, "properties", properties);
+  turbo_runtime_json_object_set(schema, "required", required);
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "kind", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("kind"));
+  turbo_runtime_json_object_set(properties, "kind", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("kind"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "string");
-  turbo_runtime_data_bind_object_set(properties, "phase", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("phase"));
+  turbo_runtime_json_object_set(properties, "phase", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("phase"));
 
   if (turbo_event_string_or_null_schema_field(properties, "from_agent", 1) != 0 ||
       turbo_event_string_or_null_schema_field(properties, "target_agent", 1) != 0 ||
       turbo_event_string_or_null_schema_field(properties, "reason", 1) != 0 ||
       turbo_event_string_or_null_schema_field(properties, "active_agent", 1) != 0) {
-    turbo_runtime_data_bind_value_destroy(schema);
+    turbo_runtime_json_destroy(schema);
     return NULL;
   }
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("from_agent"));
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("target_agent"));
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("reason"));
-  turbo_runtime_data_bind_array_append(required,
-                                       turbo_runtime_data_bind_value_create_string("active_agent"));
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("from_agent"));
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("target_agent"));
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("reason"));
+  turbo_runtime_json_array_append(required,
+                                       turbo_json_create_string("active_agent"));
 
-  field = turbo_runtime_data_bind_value_create_object();
+  field = turbo_json_create_object();
   turbo_event_set_string_field(field, "type", "integer");
-  turbo_runtime_data_bind_object_set(properties, "status", field);
-  turbo_runtime_data_bind_array_append(required, turbo_runtime_data_bind_value_create_string("status"));
+  turbo_runtime_json_object_set(properties, "status", field);
+  turbo_runtime_json_array_append(required, turbo_json_create_string("status"));
 
   return schema;
 }
 
-int turbo_event_model_validate_bind(const turbo_runtime_data_bind_value_t *event) {
-  const turbo_runtime_data_bind_value_t *kind;
-  const turbo_runtime_data_bind_value_t *response_id;
-  const turbo_runtime_data_bind_value_t *output_text;
-  const turbo_runtime_data_bind_value_t *tool_calls;
+int turbo_event_model_validate_json_value(const json_value_t *event) {
+  const json_value_t *kind;
+  const json_value_t *response_id;
+  const json_value_t *output_text;
+  const json_value_t *tool_calls;
   size_t i;
 
-  if (!event || turbo_runtime_data_bind_value_kind(event) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (!event || turbo_json_type(event) != TURBO_JSON_OBJECT) {
     return -1;
   }
 
-  kind = turbo_runtime_data_bind_object_get(event, "kind");
-  response_id = turbo_runtime_data_bind_object_get(event, "response_id");
-  output_text = turbo_runtime_data_bind_object_get(event, "output_text");
-  tool_calls = turbo_runtime_data_bind_object_get(event, "tool_calls");
+  kind = turbo_json_object_get(event, "kind");
+  response_id = turbo_json_object_get(event, "response_id");
+  output_text = turbo_json_object_get(event, "output_text");
+  tool_calls = turbo_json_object_get(event, "tool_calls");
 
   if (!kind || !response_id || !output_text || !tool_calls) {
     return -1;
   }
-  if (strcmp(turbo_runtime_data_bind_value_as_string(kind), "model") != 0) {
+  if (strcmp(turbo_runtime_json_value_as_string(kind), "model") != 0) {
     return -1;
   }
-  if (turbo_runtime_data_bind_value_kind(response_id) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-      turbo_runtime_data_bind_value_kind(output_text) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-      turbo_runtime_data_bind_value_kind(tool_calls) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+  if (turbo_json_type(response_id) != TURBO_JSON_STRING ||
+      turbo_json_type(output_text) != TURBO_JSON_STRING ||
+      turbo_json_type(tool_calls) != TURBO_JSON_ARRAY) {
     return -1;
   }
 
-  for (i = 0; i < turbo_runtime_data_bind_value_size(tool_calls); ++i) {
-    const turbo_runtime_data_bind_value_t *call = turbo_runtime_data_bind_array_get(tool_calls, i);
+  for (i = 0; i < turbo_runtime_json_value_size(tool_calls); ++i) {
+    const json_value_t *call = turbo_json_array_get(tool_calls, i);
 
-    if (!call || turbo_runtime_data_bind_value_kind(call) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+    if (!call || turbo_json_type(call) != TURBO_JSON_OBJECT) {
       return -1;
     }
-    if (!turbo_runtime_data_bind_object_get(call, "call_id") ||
-        !turbo_runtime_data_bind_object_get(call, "name") ||
-        !turbo_runtime_data_bind_object_get(call, "arguments")) {
+    if (!turbo_json_object_get(call, "call_id") ||
+        !turbo_json_object_get(call, "name") ||
+        !turbo_json_object_get(call, "arguments")) {
       return -1;
     }
   }
@@ -613,62 +613,62 @@ int turbo_event_model_validate_bind(const turbo_runtime_data_bind_value_t *event
   return 0;
 }
 
-int turbo_event_trace_validate_bind(const turbo_runtime_data_bind_value_t *event) {
-  const turbo_runtime_data_bind_value_t *kind;
-  const turbo_runtime_data_bind_value_t *name;
-  const turbo_runtime_data_bind_value_t *detail;
-  const turbo_runtime_data_bind_value_t *payload;
-  const turbo_runtime_data_bind_value_t *status;
+int turbo_event_trace_validate_json_value(const json_value_t *event) {
+  const json_value_t *kind;
+  const json_value_t *name;
+  const json_value_t *detail;
+  const json_value_t *payload;
+  const json_value_t *status;
 
-  if (!event || turbo_runtime_data_bind_value_kind(event) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (!event || turbo_json_type(event) != TURBO_JSON_OBJECT) {
     return -1;
   }
 
-  kind = turbo_runtime_data_bind_object_get(event, "kind");
-  name = turbo_runtime_data_bind_object_get(event, "name");
-  detail = turbo_runtime_data_bind_object_get(event, "detail");
-  payload = turbo_runtime_data_bind_object_get(event, "payload");
-  status = turbo_runtime_data_bind_object_get(event, "status");
+  kind = turbo_json_object_get(event, "kind");
+  name = turbo_json_object_get(event, "name");
+  detail = turbo_json_object_get(event, "detail");
+  payload = turbo_json_object_get(event, "payload");
+  status = turbo_json_object_get(event, "status");
   if (!kind || !name || !detail || !payload || !status) {
     return -1;
   }
-  if (strcmp(turbo_runtime_data_bind_value_as_string(kind), "trace") != 0) {
+  if (strcmp(turbo_runtime_json_value_as_string(kind), "trace") != 0) {
     return -1;
   }
-  if (turbo_runtime_data_bind_value_kind(name) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-      turbo_runtime_data_bind_value_kind(detail) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-      turbo_runtime_data_bind_value_kind(payload) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING) {
+  if (turbo_json_type(name) != TURBO_JSON_STRING ||
+      turbo_json_type(detail) != TURBO_JSON_STRING ||
+      turbo_json_type(payload) != TURBO_JSON_STRING) {
     return -1;
   }
-  return turbo_runtime_data_bind_value_kind(status) == TURBO_RUNTIME_DATA_BIND_VALUE_INT64 ? 0 : -1;
+  return turbo_json_type(status) == TURBO_JSON_NUMBER ? 0 : -1;
 }
 
-int turbo_event_tool_result_validate_bind(const turbo_runtime_data_bind_value_t *event) {
-  const turbo_runtime_data_bind_value_t *kind;
-  const turbo_runtime_data_bind_value_t *name;
-  const turbo_runtime_data_bind_value_t *arguments_json;
-  const turbo_runtime_data_bind_value_t *output;
-  const turbo_runtime_data_bind_value_t *status;
+int turbo_event_tool_result_validate_json_value(const json_value_t *event) {
+  const json_value_t *kind;
+  const json_value_t *name;
+  const json_value_t *arguments_json;
+  const json_value_t *output;
+  const json_value_t *status;
 
-  if (!event || turbo_runtime_data_bind_value_kind(event) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (!event || turbo_json_type(event) != TURBO_JSON_OBJECT) {
     return -1;
   }
 
-  kind = turbo_runtime_data_bind_object_get(event, "kind");
-  name = turbo_runtime_data_bind_object_get(event, "name");
-  arguments_json = turbo_runtime_data_bind_object_get(event, "arguments_json");
-  output = turbo_runtime_data_bind_object_get(event, "output");
-  status = turbo_runtime_data_bind_object_get(event, "status");
+  kind = turbo_json_object_get(event, "kind");
+  name = turbo_json_object_get(event, "name");
+  arguments_json = turbo_json_object_get(event, "arguments_json");
+  output = turbo_json_object_get(event, "output");
+  status = turbo_json_object_get(event, "status");
   if (!kind || !name || !arguments_json || !output || !status) {
     return -1;
   }
-  if (strcmp(turbo_runtime_data_bind_value_as_string(kind), "tool_result") != 0) {
+  if (strcmp(turbo_runtime_json_value_as_string(kind), "tool_result") != 0) {
     return -1;
   }
-  if (turbo_runtime_data_bind_value_kind(name) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-      turbo_runtime_data_bind_value_kind(arguments_json) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-      turbo_runtime_data_bind_value_kind(output) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-      turbo_runtime_data_bind_value_kind(status) != TURBO_RUNTIME_DATA_BIND_VALUE_INT64) {
+  if (turbo_json_type(name) != TURBO_JSON_STRING ||
+      turbo_json_type(arguments_json) != TURBO_JSON_STRING ||
+      turbo_json_type(output) != TURBO_JSON_STRING ||
+      turbo_json_type(status) != TURBO_JSON_NUMBER) {
     return -1;
   }
   if (!turbo_event_tool_result_optional_field_valid(event, "child_thread_id", 0) ||
@@ -686,26 +686,26 @@ int turbo_event_tool_result_validate_bind(const turbo_runtime_data_bind_value_t 
   return 0;
 }
 
-int turbo_event_handoff_validate_bind(const turbo_runtime_data_bind_value_t *event) {
-  const turbo_runtime_data_bind_value_t *kind;
-  const turbo_runtime_data_bind_value_t *phase;
-  const turbo_runtime_data_bind_value_t *status;
+int turbo_event_handoff_validate_json_value(const json_value_t *event) {
+  const json_value_t *kind;
+  const json_value_t *phase;
+  const json_value_t *status;
 
-  if (!event || turbo_runtime_data_bind_value_kind(event) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (!event || turbo_json_type(event) != TURBO_JSON_OBJECT) {
     return -1;
   }
 
-  kind = turbo_runtime_data_bind_object_get(event, "kind");
-  phase = turbo_runtime_data_bind_object_get(event, "phase");
-  status = turbo_runtime_data_bind_object_get(event, "status");
+  kind = turbo_json_object_get(event, "kind");
+  phase = turbo_json_object_get(event, "phase");
+  status = turbo_json_object_get(event, "status");
   if (!kind || !phase || !status) {
     return -1;
   }
-  if (strcmp(turbo_runtime_data_bind_value_as_string(kind), "handoff") != 0) {
+  if (strcmp(turbo_runtime_json_value_as_string(kind), "handoff") != 0) {
     return -1;
   }
-  if (turbo_runtime_data_bind_value_kind(phase) != TURBO_RUNTIME_DATA_BIND_VALUE_STRING ||
-      turbo_runtime_data_bind_value_kind(status) != TURBO_RUNTIME_DATA_BIND_VALUE_INT64) {
+  if (turbo_json_type(phase) != TURBO_JSON_STRING ||
+      turbo_json_type(status) != TURBO_JSON_NUMBER) {
     return -1;
   }
   if (!turbo_event_required_string_or_null_field_valid(event, "from_agent", 1) ||
@@ -718,11 +718,11 @@ int turbo_event_handoff_validate_bind(const turbo_runtime_data_bind_value_t *eve
   return 0;
 }
 
-turbo_runtime_data_bind_value_t *
-turbo_event_model_create_bind(const char *response_id, const char *output_text,
-                              const turbo_runtime_data_bind_value_t *tool_calls) {
-  turbo_runtime_data_bind_value_t *event = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *tool_calls_copy;
+json_value_t *
+turbo_event_model_create_json_value(const char *response_id, const char *output_text,
+                              const json_value_t *tool_calls) {
+  json_value_t *event = turbo_json_create_object();
+  json_value_t *tool_calls_copy;
 
   if (!event) {
     return NULL;
@@ -731,122 +731,122 @@ turbo_event_model_create_bind(const char *response_id, const char *output_text,
   if (turbo_event_set_string_field(event, "kind", "model") != 0 ||
       turbo_event_set_string_field(event, "response_id", response_id ? response_id : "") != 0 ||
       turbo_event_set_string_field(event, "output_text", output_text ? output_text : "") != 0) {
-    turbo_runtime_data_bind_value_destroy(event);
+    turbo_runtime_json_destroy(event);
     return NULL;
   }
 
   if (tool_calls) {
-    tool_calls_copy = turbo_runtime_data_bind_value_clone(tool_calls);
+    tool_calls_copy = turbo_json_clone(tool_calls);
   } else {
-    tool_calls_copy = turbo_runtime_data_bind_value_create_array();
+    tool_calls_copy = turbo_json_create_array();
   }
   if (!tool_calls_copy) {
-    turbo_runtime_data_bind_value_destroy(event);
+    turbo_runtime_json_destroy(event);
     return NULL;
   }
 
-  if (turbo_runtime_data_bind_object_set(event, "tool_calls", tool_calls_copy) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(tool_calls_copy);
-    turbo_runtime_data_bind_value_destroy(event);
+  if (turbo_runtime_json_object_set(event, "tool_calls", tool_calls_copy) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(tool_calls_copy);
+    turbo_runtime_json_destroy(event);
     return NULL;
   }
 
   return event;
 }
 
-turbo_runtime_data_bind_value_t *turbo_event_trace_create_bind(const char *name,
+json_value_t *turbo_event_trace_create_json_value(const char *name,
                                                                const char *detail,
                                                                const char *payload,
                                                                int64_t status) {
-  turbo_runtime_data_bind_value_t *event = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *status_value;
+  json_value_t *event = turbo_json_create_object();
+  json_value_t *status_value;
 
   if (!event) {
     return NULL;
   }
 
-  status_value = turbo_runtime_data_bind_value_create_int64(status);
+  status_value = turbo_json_create_int64(status);
   if (!status_value || turbo_event_set_string_field(event, "kind", "trace") != 0 ||
       turbo_event_set_string_field(event, "name", name ? name : "") != 0 ||
       turbo_event_set_string_field(event, "detail", detail ? detail : "") != 0 ||
       turbo_event_set_string_field(event, "payload", payload ? payload : "") != 0 ||
-      turbo_runtime_data_bind_object_set(event, "status", status_value) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(status_value);
-    turbo_runtime_data_bind_value_destroy(event);
+      turbo_runtime_json_object_set(event, "status", status_value) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(status_value);
+    turbo_runtime_json_destroy(event);
     return NULL;
   }
 
   return event;
 }
 
-turbo_runtime_data_bind_value_t *turbo_event_tool_result_create_bind(
+json_value_t *turbo_event_tool_result_create_json_value(
     const char *name, const char *arguments_json, const char *output,
-    const turbo_runtime_data_bind_value_t *output_value, int64_t status) {
-  turbo_runtime_data_bind_value_t *event = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *status_value;
-  turbo_runtime_data_bind_value_t *output_value_copy = NULL;
+    const json_value_t *output_value, int64_t status) {
+  json_value_t *event = turbo_json_create_object();
+  json_value_t *status_value;
+  json_value_t *output_value_copy = NULL;
 
   if (!event) {
     return NULL;
   }
 
-  status_value = turbo_runtime_data_bind_value_create_int64(status);
+  status_value = turbo_json_create_int64(status);
   if (!status_value || turbo_event_set_string_field(event, "kind", "tool_result") != 0 ||
       turbo_event_set_string_field(event, "name", name ? name : "") != 0 ||
       turbo_event_set_string_field(event, "arguments_json", arguments_json ? arguments_json : "{}") !=
           0 ||
       turbo_event_set_string_field(event, "output", output ? output : "") != 0 ||
-      turbo_runtime_data_bind_object_set(event, "status", status_value) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(status_value);
-    turbo_runtime_data_bind_value_destroy(event);
+      turbo_runtime_json_object_set(event, "status", status_value) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(status_value);
+    turbo_runtime_json_destroy(event);
     return NULL;
   }
 
   if (output_value) {
-    output_value_copy = turbo_runtime_data_bind_value_clone(output_value);
+    output_value_copy = turbo_json_clone(output_value);
     if (!output_value_copy ||
-        turbo_runtime_data_bind_object_set(event, "output_value", output_value_copy) !=
-            TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(output_value_copy);
-      turbo_runtime_data_bind_value_destroy(event);
+        turbo_runtime_json_object_set(event, "output_value", output_value_copy) !=
+            TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(output_value_copy);
+      turbo_runtime_json_destroy(event);
       return NULL;
     }
   }
 
   if ((output_value &&
-       turbo_event_tool_result_attach_child_fields_from_bind_object(event, output_value) != 0) ||
+       turbo_event_tool_result_attach_child_fields_from_json_value_object(event, output_value) != 0) ||
       turbo_event_tool_result_attach_child_fields_from_output_json(event, output) != 0) {
-    turbo_runtime_data_bind_value_destroy(event);
+    turbo_runtime_json_destroy(event);
     return NULL;
   }
 
   return event;
 }
 
-turbo_runtime_data_bind_value_t *turbo_event_handoff_create_bind(
+json_value_t *turbo_event_handoff_create_json_value(
     const char *phase, const char *from_agent, const char *target_agent, const char *reason,
     const char *active_agent, int64_t status) {
-  turbo_runtime_data_bind_value_t *event = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *status_value;
+  json_value_t *event = turbo_json_create_object();
+  json_value_t *status_value;
 
   if (!event) {
     return NULL;
   }
 
-  status_value = turbo_runtime_data_bind_value_create_int64(status);
+  status_value = turbo_json_create_int64(status);
   if (!status_value || turbo_event_set_string_field(event, "kind", "handoff") != 0 ||
       turbo_event_set_string_field(event, "phase", phase ? phase : "") != 0 ||
       turbo_event_set_optional_string_or_null_field(event, "from_agent", from_agent, 1) != 0 ||
       turbo_event_set_optional_string_or_null_field(event, "target_agent", target_agent, 1) != 0 ||
       turbo_event_set_optional_string_or_null_field(event, "reason", reason, 1) != 0 ||
       turbo_event_set_optional_string_or_null_field(event, "active_agent", active_agent, 1) != 0 ||
-      turbo_runtime_data_bind_object_set(event, "status", status_value) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(status_value);
-    turbo_runtime_data_bind_value_destroy(event);
+      turbo_runtime_json_object_set(event, "status", status_value) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(status_value);
+    turbo_runtime_json_destroy(event);
     return NULL;
   }
 

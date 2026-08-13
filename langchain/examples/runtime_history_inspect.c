@@ -16,13 +16,13 @@ static const char *runtime_history_text(const char *text) {
 
 static int runtime_history_write_bool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   runtime_history_bool_write_t *write = (runtime_history_bool_write_t *)user_data;
-  turbo_runtime_data_bind_value_t *value = turbo_runtime_data_bind_value_create_bool(write->value);
+  json_value_t *value = turbo_json_create_bool(write->value);
 
   if (!value) {
     return -1;
   }
-  return turbo_runtime_data_bind_object_set(ctx->bind_state, write->key, value) ==
-                 TURBO_RUNTIME_DATA_BIND_OK
+  return turbo_runtime_json_object_set(ctx->json_value_state, write->key, value) ==
+                 TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
 }
@@ -35,14 +35,14 @@ static turbo_graph_t *runtime_history_create_graph(void) {
   if (!graph) {
     return NULL;
   }
-  if (turbo_graph_add_bind_node(graph, "start", runtime_history_write_bool_node, &start) !=
+  if (turbo_graph_add_json_value_node(graph, "start", runtime_history_write_bool_node, &start) !=
           TURBO_GRAPH_EXEC_OK ||
       turbo_graph_add_node(graph, "review", turbo_agent_review_node, NULL) !=
           TURBO_GRAPH_EXEC_OK ||
-      turbo_graph_add_bind_node(graph, "end", runtime_history_write_bool_node, &end) !=
+      turbo_graph_add_json_value_node(graph, "end", runtime_history_write_bool_node, &end) !=
           TURBO_GRAPH_EXEC_OK ||
-      turbo_graph_add_bind_edge(graph, "start", "review", NULL, NULL) != TURBO_GRAPH_EXEC_OK ||
-      turbo_graph_add_bind_edge(graph, "review", "end", NULL, NULL) != TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_add_json_value_edge(graph, "start", "review", NULL, NULL) != TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_add_json_value_edge(graph, "review", "end", NULL, NULL) != TURBO_GRAPH_EXEC_OK ||
       turbo_graph_set_entry(graph, "start") != TURBO_GRAPH_EXEC_OK) {
     turbo_graph_destroy(graph);
     return NULL;
@@ -50,9 +50,9 @@ static turbo_graph_t *runtime_history_create_graph(void) {
   return graph;
 }
 
-static turbo_runtime_data_bind_value_t *runtime_history_initial_state(void) {
+static json_value_t *runtime_history_initial_state(void) {
   json_value_t *state = turbo_agent_state_create();
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   if (!state) {
     return NULL;
@@ -62,23 +62,23 @@ static turbo_runtime_data_bind_value_t *runtime_history_initial_state(void) {
     turbo_free_json(&state);
     return NULL;
   }
-  bound = turbo_runtime_data_bind_value_from_json(state);
+  bound = turbo_json_clone(state);
   turbo_free_json(&state);
   return bound;
 }
 
-static turbo_runtime_data_bind_value_t *runtime_history_approve_review_command(void) {
-  turbo_runtime_data_bind_value_t *command =
-      turbo_runtime_data_bind_value_create_object();
+static json_value_t *runtime_history_approve_review_command(void) {
+  json_value_t *command =
+      turbo_json_create_object();
 
   if (!command) {
     return NULL;
   }
-  if (turbo_runtime_data_bind_object_set(
+  if (turbo_runtime_json_object_set(
           command, "kind",
-          turbo_runtime_data_bind_value_create_string("approve_review")) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(command);
+          turbo_json_create_string("approve_review")) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(command);
     return NULL;
   }
   return command;
@@ -97,11 +97,11 @@ int main(void) {
   turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
   turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
   turbo_graph_t *graph = runtime_history_create_graph();
-  turbo_runtime_data_bind_value_t *state = runtime_history_initial_state();
-  turbo_runtime_data_bind_value_t *result_state = NULL;
-  turbo_runtime_data_bind_value_t *command = NULL;
-  turbo_runtime_data_bind_value_t *override = NULL;
-  turbo_runtime_data_bind_value_t *history = NULL;
+  json_value_t *state = runtime_history_initial_state();
+  json_value_t *result_state = NULL;
+  json_value_t *command = NULL;
+  json_value_t *override = NULL;
+  json_value_t *history = NULL;
   json_value_t *summary = NULL;
   json_value_t *thread_record = NULL;
   json_value_t *run_record = NULL;
@@ -122,7 +122,7 @@ int main(void) {
   options.interrupt_before_nodes = interrupt_before_review;
   options.interrupt_before_count = 1;
   if (turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state) != 0) {
-    fprintf(stderr, "start_bind_graph failed\n");
+    fprintf(stderr, "start_json_value_graph failed\n");
     return 1;
   }
 
@@ -145,7 +145,7 @@ int main(void) {
       turbo_agent_runtime_get_checkpoint(runtime, checkpoint_id, &checkpoint_record) != 0 ||
       turbo_agent_runtime_list_runs(runtime, thread_id, &runs) != 0 ||
       turbo_agent_runtime_list_checkpoints(runtime, run_id, &checkpoints) != 0 ||
-      turbo_agent_runtime_load_history_events_bind(runtime, run_id, NULL, &history) != 0) {
+      turbo_agent_runtime_load_history_events_json_value(runtime, run_id, NULL, &history) != 0) {
     fprintf(stderr, "runtime query failed\n");
     return 1;
   }
@@ -155,19 +155,19 @@ int main(void) {
   runtime_history_print_record_header("checkpoint record", checkpoint_record);
   printf("list_runs count: %zu\n", turbo_json_array_size(runs));
   printf("list_checkpoints count: %zu\n", turbo_json_array_size(checkpoints));
-  printf("history event count: %zu\n", turbo_runtime_data_bind_value_size(history));
+  printf("history event count: %zu\n", turbo_runtime_json_value_size(history));
 
   command = runtime_history_approve_review_command();
-  turbo_runtime_data_bind_value_destroy(result_state);
+  turbo_runtime_json_destroy(result_state);
   result_state = NULL;
   if (!command ||
-      turbo_agent_runtime_prepare_checkpoint_command_override_bind(runtime, checkpoint_id, command, &override) != 0 ||
+      turbo_agent_runtime_prepare_checkpoint_command_override_json_value(runtime, checkpoint_id, command, &override) != 0 ||
       !override) {
     fprintf(stderr, "failed to build review override\n");
     return 1;
   }
   if (turbo_agent_runtime_exec_resume(runtime, graph, override, NULL, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = checkpoint_id }, &summary, &result_state) != 0) {
-    fprintf(stderr, "resume_bind_graph failed\n");
+    fprintf(stderr, "resume_json_value_graph failed\n");
     return 1;
   }
   printf("resumed status: %s\n", runtime_history_text(turbo_json_get_string(summary, "status")));
@@ -178,11 +178,11 @@ int main(void) {
   turbo_free_json(&checkpoint_record);
   turbo_free_json(&runs);
   turbo_free_json(&checkpoints);
-  turbo_runtime_data_bind_value_destroy(command);
-  turbo_runtime_data_bind_value_destroy(history);
-  turbo_runtime_data_bind_value_destroy(result_state);
-  turbo_runtime_data_bind_value_destroy(override);
-  turbo_runtime_data_bind_value_destroy(state);
+  turbo_runtime_json_destroy(command);
+  turbo_runtime_json_destroy(history);
+  turbo_runtime_json_destroy(result_state);
+  turbo_runtime_json_destroy(override);
+  turbo_runtime_json_destroy(state);
   turbo_graph_destroy(graph);
   turbo_agent_runtime_destroy(runtime);
   return 0;

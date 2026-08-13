@@ -6,21 +6,25 @@ spec("turbo langchain public api") {
   it("should expose the aggregate public header as a usable core surface") {
     turbo_graph_t *graph = turbo_graph_create("public-api");
     turbo_chain_t *chain = turbo_chain_create("public-api");
-    turbo_runtime_data_bind_value_t *runtime_value =
-        turbo_runtime_data_bind_value_create_object();
-    turbo_runtime_data_bind_value_t *chain_state = turbo_chain_state_create_bind();
-    void *chain_run_bind_stream = (void *)turbo_chain_run_bind_stream;
-    void *graph_run_bind_stream = (void *)turbo_graph_run_bind_stream;
-    void *graph_run_checkpoint_bind = (void *)turbo_graph_run_checkpoint_bind;
-    void *graph_run_checkpoint_bind_stream = (void *)turbo_graph_run_checkpoint_bind_stream;
+    json_value_t *runtime_value =
+        turbo_json_create_object();
+    json_value_t *chain_state = turbo_chain_state_create_json_value();
+    void *chain_run_json_value_stream = (void *)turbo_chain_run_json_value_stream;
+    void *graph_run_json_value_stream = (void *)turbo_graph_run_json_value_stream;
+    void *graph_run_json_value_stream_controlled =
+        (void *)turbo_graph_run_json_value_stream_controlled;
+    void *graph_run_checkpoint_json_value = (void *)turbo_graph_run_checkpoint_json_value;
+    void *graph_run_checkpoint_json_value_stream = (void *)turbo_graph_run_checkpoint_json_value_stream;
+    void *graph_run_checkpoint_json_value_stream_controlled =
+        (void *)turbo_graph_run_checkpoint_json_value_stream_controlled;
     void *graph_run_log_create = (void *)turbo_graph_run_log_create;
-    void *graph_run_bind_log = (void *)turbo_graph_run_bind_log;
+    void *graph_run_json_value_log = (void *)turbo_graph_run_json_value_log;
     void *graph_checkpoint_clone = (void *)turbo_graph_checkpoint_clone;
     void *state_graph_create = (void *)turbo_state_graph_create;
     void *state_graph_add_channel = (void *)turbo_state_graph_add_channel;
-    void *state_graph_add_bind_node = (void *)turbo_state_graph_add_bind_node;
+    void *state_graph_add_json_value_node = (void *)turbo_state_graph_add_json_value_node;
     void *state_graph_add_subgraph_node = (void *)turbo_state_graph_add_subgraph_node;
-    void *state_graph_add_bind_edge = (void *)turbo_state_graph_add_bind_edge;
+    void *state_graph_add_json_value_edge = (void *)turbo_state_graph_add_json_value_edge;
     void *state_graph_snapshot_schema_version =
         (void *)turbo_state_graph_snapshot_schema_version;
     void *state_graph_serialize_snapshot = (void *)turbo_state_graph_serialize_snapshot;
@@ -93,48 +97,48 @@ spec("turbo langchain public api") {
         (void *)turbo_state_graph_store_save_snapshot;
     void *state_graph_store_load_snapshot =
         (void *)turbo_state_graph_store_load_snapshot;
-    void *prompt_bind = (void *)turbo_prompt_render_template_bind;
-    void *prompt_message_schema = (void *)turbo_prompt_message_schema_bind;
+    void *prompt_json_value = (void *)turbo_prompt_render_template_json_value;
+    void *prompt_message_schema = (void *)turbo_prompt_message_schema_json_value;
     void *prompt_openai_codec = (void *)turbo_prompt_messages_to_openai_chat_json;
     void *prompt_responses_codec = (void *)turbo_prompt_messages_to_openai_responses_json;
     void *prompt_anthropic_codec = (void *)turbo_prompt_messages_to_anthropic_json;
     void *provider_wire_codec = (void *)turbo_model_provider_messages_to_wire_json;
     void *provider_event_codec = (void *)turbo_model_provider_response_to_event_json;
     void *provider_sse_event_codec = (void *)turbo_model_provider_sse_to_event_json;
-    void *provider_event_bind_codec = (void *)turbo_model_provider_response_to_event_bind;
-    void *provider_event_emit_bind = (void *)turbo_model_provider_response_emit_bind;
-    void *provider_sse_event_bind_codec = (void *)turbo_model_provider_sse_to_event_bind;
-    void *provider_sse_emit_bind = (void *)turbo_model_provider_sse_emit_bind;
-    void *event_kind_bind = (void *)turbo_event_kind_bind;
-    void *event_stream_mode_accepts_bind =
-        (void *)turbo_event_stream_mode_accepts_bind;
-    void *event_stream_filter_sink_bind =
-        (void *)turbo_event_stream_filter_sink_bind;
-    void *event_validate_any_bind = (void *)turbo_event_validate_bind;
-    void *event_schema_bind = (void *)turbo_event_model_schema_bind;
+    void *provider_event_json_value_codec = (void *)turbo_model_provider_response_to_event_json_value;
+    void *provider_event_emit_json_value = (void *)turbo_model_provider_response_emit_json_value;
+    void *provider_sse_event_json_value_codec = (void *)turbo_model_provider_sse_to_event_json_value;
+    void *provider_sse_emit_json_value = (void *)turbo_model_provider_sse_emit_json_value;
+    void *event_kind_json_value = (void *)turbo_event_kind_json_value;
+    void *event_stream_mode_accepts_json_value =
+        (void *)turbo_event_stream_mode_accepts_json_value;
+    void *event_stream_filter_sink_json_value =
+        (void *)turbo_event_stream_filter_sink_json_value;
+    void *event_validate_any_json_value = (void *)turbo_event_validate_json_value;
+    void *event_schema_json_value = (void *)turbo_event_model_schema_json_value;
     void *event_log_create = (void *)turbo_event_log_create;
-    void *event_log_capture = (void *)turbo_event_log_capture_bind;
-    void *event_log_events = (void *)turbo_event_log_events_bind;
+    void *event_log_capture = (void *)turbo_event_log_capture_json_value;
+    void *event_log_events = (void *)turbo_event_log_events_json_value;
     void *event_log_reset = (void *)turbo_event_log_reset;
-    void *event_log_load_events = (void *)turbo_event_log_load_events_bind;
-    void *trace_event_schema_bind = (void *)turbo_event_trace_schema_bind;
-    void *tool_result_event_schema_bind = (void *)turbo_event_tool_result_schema_bind;
-    void *handoff_event_schema_bind = (void *)turbo_event_handoff_schema_bind;
-    void *trace_event_validate_bind = (void *)turbo_event_trace_validate_bind;
-    void *trace_event_create_bind = (void *)turbo_event_trace_create_bind;
-    void *event_validate_bind = (void *)turbo_event_model_validate_bind;
-    void *event_create_bind = (void *)turbo_event_model_create_bind;
-    void *tool_result_event_validate_bind = (void *)turbo_event_tool_result_validate_bind;
-    void *tool_result_event_create_bind = (void *)turbo_event_tool_result_create_bind;
-    void *handoff_event_validate_bind = (void *)turbo_event_handoff_validate_bind;
-    void *handoff_event_create_bind = (void *)turbo_event_handoff_create_bind;
+    void *event_log_load_events = (void *)turbo_event_log_load_events_json_value;
+    void *trace_event_schema_json_value = (void *)turbo_event_trace_schema_json_value;
+    void *tool_result_event_schema_json_value = (void *)turbo_event_tool_result_schema_json_value;
+    void *handoff_event_schema_json_value = (void *)turbo_event_handoff_schema_json_value;
+    void *trace_event_validate_json_value = (void *)turbo_event_trace_validate_json_value;
+    void *trace_event_create_json_value = (void *)turbo_event_trace_create_json_value;
+    void *event_validate_json_value = (void *)turbo_event_model_validate_json_value;
+    void *event_create_json_value = (void *)turbo_event_model_create_json_value;
+    void *tool_result_event_validate_json_value = (void *)turbo_event_tool_result_validate_json_value;
+    void *tool_result_event_create_json_value = (void *)turbo_event_tool_result_create_json_value;
+    void *handoff_event_validate_json_value = (void *)turbo_event_handoff_validate_json_value;
+    void *handoff_event_create_json_value = (void *)turbo_event_handoff_create_json_value;
     void *runnable_create = (void *)turbo_runnable_create;
-    void *runnable_invoke_bind = (void *)turbo_runnable_invoke_bind;
-    void *runnable_invoke_bind_stream = (void *)turbo_runnable_invoke_bind_stream;
-    void *runnable_invoke_bind_log = (void *)turbo_runnable_invoke_bind_log;
-    void *runnable_batch_bind = (void *)turbo_runnable_batch_bind;
+    void *runnable_invoke_json_value = (void *)turbo_runnable_invoke_json_value;
+    void *runnable_invoke_json_value_stream = (void *)turbo_runnable_invoke_json_value_stream;
+    void *runnable_invoke_json_value_log = (void *)turbo_runnable_invoke_json_value_log;
+    void *runnable_batch_json_value = (void *)turbo_runnable_batch_json_value;
     void *runnable_pipe = (void *)turbo_runnable_pipe;
-    void *runnable_wrap_bind = (void *)turbo_runnable_wrap_bind;
+    void *runnable_wrap_json_value = (void *)turbo_runnable_wrap_json_value;
     void *runnable_from_state_graph = (void *)turbo_runnable_from_state_graph;
     void *runnable_from_agent_session = (void *)turbo_runnable_from_agent_session;
     void *runnable_from_agent_app = (void *)turbo_runnable_from_agent_app;
@@ -144,7 +148,7 @@ spec("turbo langchain public api") {
         (void *)turbo_langchain_runnable_from_session;
     void *langchain_runnable_from_agent =
         (void *)turbo_langchain_runnable_from_agent;
-    void *chain_run_bind_log = (void *)turbo_chain_run_bind_log;
+    void *chain_run_json_value_log = (void *)turbo_chain_run_json_value_log;
     void *agent_policy_default = (void *)turbo_agent_policy_default;
     void *agent_policy_validate_path = (void *)turbo_agent_policy_validate_path;
     void *agent_policy_is_dangerous_command =
@@ -236,7 +240,7 @@ spec("turbo langchain public api") {
     void *text_splitter_split_text = (void *)turbo_text_splitter_split_text;
     void *document_loader_load_text_file =
         (void *)turbo_document_loader_load_text_file;
-    void *agent_trace_bind_sink = (void *)turbo_agent_add_trace_bind_sink;
+    void *agent_trace_json_value_sink = (void *)turbo_agent_add_trace_json_value_sink;
     void *agent_runtime_create = (void *)turbo_agent_runtime_create;
     void *agent_runtime_destroy = (void *)turbo_agent_runtime_destroy;
     void *agent_runtime_remote_create = (void *)turbo_agent_runtime_remote_create;
@@ -255,13 +259,13 @@ spec("turbo langchain public api") {
     void *agent_runtime_remote_client_get_startup_diagnostics =
         (void *)turbo_agent_runtime_remote_client_get_startup_diagnostics;
     void *agent_runtime_remote_client_start =
-        (void *)turbo_agent_runtime_remote_client_start_bind_graph;
+        (void *)turbo_agent_runtime_remote_client_start_json_value_graph;
     void *agent_runtime_remote_client_resume =
-        (void *)turbo_agent_runtime_remote_client_resume_bind_graph;
+        (void *)turbo_agent_runtime_remote_client_resume_json_value_graph;
     void *agent_runtime_remote_client_fork =
-        (void *)turbo_agent_runtime_remote_client_fork_bind_graph;
+        (void *)turbo_agent_runtime_remote_client_fork_json_value_graph;
     void *agent_runtime_remote_client_get_thread_state =
-        (void *)turbo_agent_runtime_remote_client_get_thread_state_bind;
+        (void *)turbo_agent_runtime_remote_client_get_thread_state_json_value;
     void *agent_runtime_remote_client_get_checkpoint_context =
         (void *)turbo_agent_runtime_remote_client_get_checkpoint_context;
     void *agent_runtime_remote_client_get_run =
@@ -271,11 +275,11 @@ spec("turbo langchain public api") {
     void *agent_runtime_remote_client_list_checkpoints =
         (void *)turbo_agent_runtime_remote_client_list_checkpoints;
     void *agent_runtime_remote_client_load_history_events =
-        (void *)turbo_agent_runtime_remote_client_load_history_events_bind;
+        (void *)turbo_agent_runtime_remote_client_load_history_events_json_value;
     void *agent_runtime_remote_client_get_run_trace_events =
-        (void *)turbo_agent_runtime_remote_client_get_run_trace_events_bind;
+        (void *)turbo_agent_runtime_remote_client_get_run_trace_events_json_value;
     void *agent_runtime_remote_client_get_checkpoint_trace_events =
-        (void *)turbo_agent_runtime_remote_client_get_checkpoint_trace_events_bind;
+        (void *)turbo_agent_runtime_remote_client_get_checkpoint_trace_events_json_value;
     void *agent_runtime_remote_client_get_memory_record =
         (void *)turbo_agent_runtime_remote_client_get_memory_record;
     void *agent_runtime_remote_client_delete_memory_record =
@@ -291,7 +295,7 @@ spec("turbo langchain public api") {
     void *agent_runtime_remote_client_list_memory_records =
         (void *)turbo_agent_runtime_remote_client_list_memory_records;
     void *agent_runtime_remote_client_get_thread_timeline =
-        (void *)turbo_agent_runtime_remote_client_get_thread_timeline_bind;
+        (void *)turbo_agent_runtime_remote_client_get_thread_timeline_json_value;
     void *agent_runtime_remote_client_get_branch_tree =
         (void *)turbo_agent_runtime_remote_client_get_branch_tree;
     void *agent_runtime_remote_client_get_observability_index =
@@ -313,9 +317,9 @@ spec("turbo langchain public api") {
     void *agent_runtime_remote_client_get_child_multi_agent_inspect =
         (void *)turbo_agent_runtime_remote_client_get_child_multi_agent_inspect;
     void *agent_runtime_remote_client_resume_thread_command =
-        (void *)turbo_agent_runtime_remote_client_resume_thread_command_bind;
+        (void *)turbo_agent_runtime_remote_client_resume_thread_command_json_value;
     void *agent_runtime_remote_client_fork_thread_command =
-        (void *)turbo_agent_runtime_remote_client_fork_thread_command_bind;
+        (void *)turbo_agent_runtime_remote_client_fork_thread_command_json_value;
     void *agent_remote_session_create = (void *)turbo_agent_remote_session_create;
     void *agent_remote_session_destroy = (void *)turbo_agent_remote_session_destroy;
     void *agent_remote_session_client = (void *)turbo_agent_remote_session_client;
@@ -325,12 +329,12 @@ spec("turbo langchain public api") {
         (void *)turbo_agent_remote_session_last_checkpoint_id;
     void *agent_remote_session_get_startup_diagnostics =
         (void *)turbo_agent_remote_session_get_startup_diagnostics;
-    void *agent_remote_session_start = (void *)turbo_agent_remote_session_start_bind_graph;
+    void *agent_remote_session_start = (void *)turbo_agent_remote_session_start_json_value_graph;
     void *agent_remote_session_start_text = (void *)turbo_agent_remote_session_start_text;
     void *agent_remote_session_start_messages =
         (void *)turbo_agent_remote_session_start_messages;
-    void *agent_remote_session_resume = (void *)turbo_agent_remote_session_resume_bind_graph;
-    void *agent_remote_session_fork = (void *)turbo_agent_remote_session_fork_bind_graph;
+    void *agent_remote_session_resume = (void *)turbo_agent_remote_session_resume_json_value_graph;
+    void *agent_remote_session_fork = (void *)turbo_agent_remote_session_fork_json_value_graph;
     void *agent_remote_session_invoke_text = (void *)turbo_agent_remote_session_invoke_text;
     void *agent_remote_session_invoke_messages_text =
         (void *)turbo_agent_remote_session_invoke_messages_text;
@@ -343,7 +347,7 @@ spec("turbo langchain public api") {
     void *agent_remote_session_get_pending_run =
         (void *)turbo_agent_remote_session_get_pending_run;
     void *agent_remote_session_get_thread_state =
-        (void *)turbo_agent_remote_session_get_thread_state_bind;
+        (void *)turbo_agent_remote_session_get_thread_state_json_value;
     void *agent_remote_session_memory_list_records =
         (void *)turbo_agent_remote_session_memory_list_records;
     void *agent_remote_session_memory_delete_record =
@@ -363,15 +367,15 @@ spec("turbo langchain public api") {
     void *agent_remote_session_get_observability_index =
         (void *)turbo_agent_remote_session_get_observability_index;
     void *agent_remote_session_get_thread_timeline =
-        (void *)turbo_agent_remote_session_get_thread_timeline_bind;
+        (void *)turbo_agent_remote_session_get_thread_timeline_json_value;
     void *agent_remote_session_load_thread_history_events =
-        (void *)turbo_agent_remote_session_load_thread_history_events_bind;
+        (void *)turbo_agent_remote_session_load_thread_history_events_json_value;
     void *agent_remote_session_replay_thread_history =
-        (void *)turbo_agent_remote_session_replay_thread_history_bind;
+        (void *)turbo_agent_remote_session_replay_thread_history_json_value;
     void *agent_remote_session_observe_thread_history =
-        (void *)turbo_agent_remote_session_observe_thread_history_bind;
+        (void *)turbo_agent_remote_session_observe_thread_history_json_value;
     void *agent_remote_session_get_thread_trace_events =
-        (void *)turbo_agent_remote_session_get_thread_trace_events_bind;
+        (void *)turbo_agent_remote_session_get_thread_trace_events_json_value;
     void *agent_remote_session_get_branch_tree =
         (void *)turbo_agent_remote_session_get_branch_tree;
     void *agent_remote_session_list_thread_lineage =
@@ -393,15 +397,15 @@ spec("turbo langchain public api") {
     void *agent_remote_session_get_child_checkpoint_context =
         (void *)turbo_agent_remote_session_get_child_checkpoint_context;
     void *agent_remote_session_get_child_thread_timeline =
-        (void *)turbo_agent_remote_session_get_child_thread_timeline_bind;
+        (void *)turbo_agent_remote_session_get_child_thread_timeline_json_value;
     void *agent_remote_session_get_child_branch_tree =
         (void *)turbo_agent_remote_session_get_child_branch_tree;
     void *agent_remote_session_list_child_checkpoints =
         (void *)turbo_agent_remote_session_list_child_checkpoints;
     void *agent_remote_session_load_child_history_events =
-        (void *)turbo_agent_remote_session_load_child_history_events_bind;
+        (void *)turbo_agent_remote_session_load_child_history_events_json_value;
     void *agent_remote_session_get_child_trace_events =
-        (void *)turbo_agent_remote_session_get_child_trace_events_bind;
+        (void *)turbo_agent_remote_session_get_child_trace_events_json_value;
     void *agent_remote_session_get_child_inspect =
         (void *)turbo_agent_remote_session_get_child_inspect;
     void *agent_remote_session_get_child_orchestration_inspect =
@@ -409,9 +413,9 @@ spec("turbo langchain public api") {
     void *agent_remote_session_get_child_multi_agent_inspect =
         (void *)turbo_agent_remote_session_get_child_multi_agent_inspect;
     void *agent_remote_session_resume_thread_command =
-        (void *)turbo_agent_remote_session_resume_thread_command_bind;
+        (void *)turbo_agent_remote_session_resume_thread_command_json_value;
     void *agent_remote_session_fork_thread_command =
-        (void *)turbo_agent_remote_session_fork_thread_command_bind;
+        (void *)turbo_agent_remote_session_fork_thread_command_json_value;
     void *agent_remote_app_create = (void *)turbo_agent_remote_app_create;
     void *agent_remote_app_destroy = (void *)turbo_agent_remote_app_destroy;
     void *agent_remote_app_session = (void *)turbo_agent_remote_app_session;
@@ -422,11 +426,11 @@ spec("turbo langchain public api") {
         (void *)turbo_agent_remote_app_last_checkpoint_id;
     void *agent_remote_app_get_startup_diagnostics =
         (void *)turbo_agent_remote_app_get_startup_diagnostics;
-    void *agent_remote_app_start = (void *)turbo_agent_remote_app_start_bind_graph;
+    void *agent_remote_app_start = (void *)turbo_agent_remote_app_start_json_value_graph;
     void *agent_remote_app_start_text = (void *)turbo_agent_remote_app_start_text;
     void *agent_remote_app_start_messages = (void *)turbo_agent_remote_app_start_messages;
-    void *agent_remote_app_resume = (void *)turbo_agent_remote_app_resume_bind_graph;
-    void *agent_remote_app_fork = (void *)turbo_agent_remote_app_fork_bind_graph;
+    void *agent_remote_app_resume = (void *)turbo_agent_remote_app_resume_json_value_graph;
+    void *agent_remote_app_fork = (void *)turbo_agent_remote_app_fork_json_value_graph;
     void *agent_remote_app_invoke_text = (void *)turbo_agent_remote_app_invoke_text;
     void *agent_remote_app_invoke_messages_text =
         (void *)turbo_agent_remote_app_invoke_messages_text;
@@ -437,7 +441,7 @@ spec("turbo langchain public api") {
     void *agent_remote_app_get_latest_run = (void *)turbo_agent_remote_app_get_latest_run;
     void *agent_remote_app_get_pending_run = (void *)turbo_agent_remote_app_get_pending_run;
     void *agent_remote_app_get_thread_state =
-        (void *)turbo_agent_remote_app_get_thread_state_bind;
+        (void *)turbo_agent_remote_app_get_thread_state_json_value;
     void *agent_remote_app_memory_list_records =
         (void *)turbo_agent_remote_app_memory_list_records;
     void *agent_remote_app_memory_delete_record =
@@ -457,15 +461,15 @@ spec("turbo langchain public api") {
     void *agent_remote_app_get_observability_index =
         (void *)turbo_agent_remote_app_get_observability_index;
     void *agent_remote_app_get_thread_timeline =
-        (void *)turbo_agent_remote_app_get_thread_timeline_bind;
+        (void *)turbo_agent_remote_app_get_thread_timeline_json_value;
     void *agent_remote_app_load_thread_history_events =
-        (void *)turbo_agent_remote_app_load_thread_history_events_bind;
+        (void *)turbo_agent_remote_app_load_thread_history_events_json_value;
     void *agent_remote_app_replay_thread_history =
-        (void *)turbo_agent_remote_app_replay_thread_history_bind;
+        (void *)turbo_agent_remote_app_replay_thread_history_json_value;
     void *agent_remote_app_observe_thread_history =
-        (void *)turbo_agent_remote_app_observe_thread_history_bind;
+        (void *)turbo_agent_remote_app_observe_thread_history_json_value;
     void *agent_remote_app_get_thread_trace_events =
-        (void *)turbo_agent_remote_app_get_thread_trace_events_bind;
+        (void *)turbo_agent_remote_app_get_thread_trace_events_json_value;
     void *agent_remote_app_get_branch_tree =
         (void *)turbo_agent_remote_app_get_branch_tree;
     void *agent_remote_app_list_thread_lineage =
@@ -486,15 +490,15 @@ spec("turbo langchain public api") {
     void *agent_remote_app_get_child_checkpoint_context =
         (void *)turbo_agent_remote_app_get_child_checkpoint_context;
     void *agent_remote_app_get_child_thread_timeline =
-        (void *)turbo_agent_remote_app_get_child_thread_timeline_bind;
+        (void *)turbo_agent_remote_app_get_child_thread_timeline_json_value;
     void *agent_remote_app_get_child_branch_tree =
         (void *)turbo_agent_remote_app_get_child_branch_tree;
     void *agent_remote_app_list_child_checkpoints =
         (void *)turbo_agent_remote_app_list_child_checkpoints;
     void *agent_remote_app_load_child_history_events =
-        (void *)turbo_agent_remote_app_load_child_history_events_bind;
+        (void *)turbo_agent_remote_app_load_child_history_events_json_value;
     void *agent_remote_app_get_child_trace_events =
-        (void *)turbo_agent_remote_app_get_child_trace_events_bind;
+        (void *)turbo_agent_remote_app_get_child_trace_events_json_value;
     void *agent_remote_app_get_child_inspect =
         (void *)turbo_agent_remote_app_get_child_inspect;
     void *agent_remote_app_get_child_orchestration_inspect =
@@ -502,9 +506,9 @@ spec("turbo langchain public api") {
     void *agent_remote_app_get_child_multi_agent_inspect =
         (void *)turbo_agent_remote_app_get_child_multi_agent_inspect;
     void *agent_remote_app_resume_thread_command =
-        (void *)turbo_agent_remote_app_resume_thread_command_bind;
+        (void *)turbo_agent_remote_app_resume_thread_command_json_value;
     void *agent_remote_app_fork_thread_command =
-        (void *)turbo_agent_remote_app_fork_thread_command_bind;
+        (void *)turbo_agent_remote_app_fork_thread_command_json_value;
     void *agent_runtime_remote_iris_create =
         (void *)turbo_agent_runtime_remote_iris_create;
     void *agent_runtime_remote_iris_destroy =
@@ -514,24 +518,24 @@ spec("turbo langchain public api") {
 #if 0
     void *agent_runtime_store_memory = (void *)turbo_agent_runtime_store_memory_create;
     void *agent_runtime_store_file = (void *)turbo_agent_runtime_store_file_create;
-    void *agent_runtime_start = (void *)turbo_agent_runtime_start_bind_graph;
-    void *agent_runtime_start_linked = (void *)turbo_agent_runtime_start_bind_graph_linked;
-    void *agent_runtime_start_stream = (void *)turbo_agent_runtime_start_bind_graph_stream;
-    void *agent_runtime_resume = (void *)turbo_agent_runtime_resume_bind_graph;
-    void *agent_runtime_resume_stream = (void *)turbo_agent_runtime_resume_bind_graph_stream;
-    void *agent_runtime_fork = (void *)turbo_agent_runtime_fork_bind_graph;
-    void *agent_runtime_fork_stream = (void *)turbo_agent_runtime_fork_bind_graph_stream;
-    void *agent_runtime_resume_thread = (void *)turbo_agent_runtime_resume_thread_bind_graph;
-    void *agent_runtime_fork_thread = (void *)turbo_agent_runtime_fork_thread_bind_graph;
+    void *agent_runtime_start = (void *)turbo_agent_runtime_start_json_value_graph;
+    void *agent_runtime_start_linked = (void *)turbo_agent_runtime_start_json_value_graph_linked;
+    void *agent_runtime_start_stream = (void *)turbo_agent_runtime_start_json_value_graph_stream;
+    void *agent_runtime_resume = (void *)turbo_agent_runtime_resume_json_value_graph;
+    void *agent_runtime_resume_stream = (void *)turbo_agent_runtime_resume_json_value_graph_stream;
+    void *agent_runtime_fork = (void *)turbo_agent_runtime_fork_json_value_graph;
+    void *agent_runtime_fork_stream = (void *)turbo_agent_runtime_fork_json_value_graph_stream;
+    void *agent_runtime_resume_thread = (void *)turbo_agent_runtime_resume_thread_json_value_graph;
+    void *agent_runtime_fork_thread = (void *)turbo_agent_runtime_fork_thread_json_value_graph;
     void *agent_runtime_resume_checkpoint =
-        (void *)turbo_agent_runtime_resume_checkpoint_bind_graph;
-    void *agent_runtime_fork_checkpoint = (void *)turbo_agent_runtime_fork_checkpoint_bind_graph;
+        (void *)turbo_agent_runtime_resume_checkpoint_json_value_graph;
+    void *agent_runtime_fork_checkpoint = (void *)turbo_agent_runtime_fork_checkpoint_json_value_graph;
     void *agent_runtime_get_thread = (void *)turbo_agent_runtime_get_thread;
     void *agent_runtime_get_run = (void *)turbo_agent_runtime_get_run;
     void *agent_runtime_get_latest_run = (void *)turbo_agent_runtime_get_latest_run;
     void *agent_runtime_get_pending_run = (void *)turbo_agent_runtime_get_pending_run;
     void *agent_runtime_get_thread_timeline =
-        (void *)turbo_agent_runtime_get_thread_timeline_bind;
+        (void *)turbo_agent_runtime_get_thread_timeline_json_value;
     void *agent_runtime_get_observability_index =
         (void *)turbo_agent_runtime_get_thread_observability_index;
     void *agent_runtime_list_observability_indexes =
@@ -543,67 +547,67 @@ spec("turbo langchain public api") {
     void *agent_runtime_get_latest_checkpoint = (void *)turbo_agent_runtime_get_latest_checkpoint;
     void *agent_runtime_get_checkpoint_context =
         (void *)turbo_agent_runtime_get_checkpoint_context;
-    void *agent_runtime_get_thread_state = (void *)turbo_agent_runtime_get_thread_state_bind;
+    void *agent_runtime_get_thread_state = (void *)turbo_agent_runtime_get_thread_state_json_value;
     void *agent_runtime_get_thread_head_state =
-        (void *)turbo_agent_runtime_get_thread_head_state_bind;
+        (void *)turbo_agent_runtime_get_thread_head_state_json_value;
     void *agent_runtime_get_thread_trace_events =
-        (void *)turbo_agent_runtime_get_thread_trace_events_bind;
+        (void *)turbo_agent_runtime_get_thread_trace_events_json_value;
     void *agent_runtime_get_thread_head_trace_events =
-        (void *)turbo_agent_runtime_get_thread_head_trace_events_bind;
-    void *agent_runtime_get_run_state = (void *)turbo_agent_runtime_get_run_state_bind;
+        (void *)turbo_agent_runtime_get_thread_head_trace_events_json_value;
+    void *agent_runtime_get_run_state = (void *)turbo_agent_runtime_get_run_state_json_value;
     void *agent_runtime_get_run_trace_events =
-        (void *)turbo_agent_runtime_get_run_trace_events_bind;
+        (void *)turbo_agent_runtime_get_run_trace_events_json_value;
     void *agent_runtime_get_checkpoint_state =
-        (void *)turbo_agent_runtime_get_checkpoint_state_bind;
+        (void *)turbo_agent_runtime_get_checkpoint_state_json_value;
     void *agent_runtime_prepare_checkpoint_state_override =
-        (void *)turbo_agent_runtime_prepare_checkpoint_state_override_bind;
+        (void *)turbo_agent_runtime_prepare_checkpoint_state_override_json_value;
     void *agent_runtime_update_checkpoint_state =
-        (void *)turbo_agent_runtime_update_checkpoint_state_bind;
+        (void *)turbo_agent_runtime_update_checkpoint_state_json_value;
     void *agent_runtime_prepare_thread_state_override =
-        (void *)turbo_agent_runtime_prepare_thread_state_override_bind;
+        (void *)turbo_agent_runtime_prepare_thread_state_override_json_value;
     void *agent_runtime_update_thread_state =
-        (void *)turbo_agent_runtime_update_thread_state_bind;
+        (void *)turbo_agent_runtime_update_thread_state_json_value;
     void *agent_runtime_get_checkpoint_trace_events =
-        (void *)turbo_agent_runtime_get_checkpoint_trace_events_bind;
+        (void *)turbo_agent_runtime_get_checkpoint_trace_events_json_value;
     void *agent_runtime_list_runs = (void *)turbo_agent_runtime_list_runs;
     void *agent_runtime_list_thread_lineage = (void *)turbo_agent_runtime_list_thread_lineage;
     void *agent_runtime_list_child_runs = (void *)turbo_agent_runtime_list_child_runs;
     void *agent_runtime_list_checkpoints = (void *)turbo_agent_runtime_list_checkpoints;
-    void *agent_runtime_history = (void *)turbo_agent_runtime_load_history_events_bind;
-    void *agent_runtime_thread_history = (void *)turbo_agent_runtime_load_thread_history_events_bind;
-    void *agent_runtime_replay_history = (void *)turbo_agent_runtime_replay_history_bind;
+    void *agent_runtime_history = (void *)turbo_agent_runtime_load_history_events_json_value;
+    void *agent_runtime_thread_history = (void *)turbo_agent_runtime_load_thread_history_events_json_value;
+    void *agent_runtime_replay_history = (void *)turbo_agent_runtime_replay_history_json_value;
     void *agent_runtime_replay_thread_history =
-        (void *)turbo_agent_runtime_replay_thread_history_bind;
-    void *agent_runtime_observe_history = (void *)turbo_agent_runtime_observe_history_bind;
+        (void *)turbo_agent_runtime_replay_thread_history_json_value;
+    void *agent_runtime_observe_history = (void *)turbo_agent_runtime_observe_history_json_value;
     void *agent_runtime_observe_thread_history =
-        (void *)turbo_agent_runtime_observe_thread_history_bind;
+        (void *)turbo_agent_runtime_observe_thread_history_json_value;
     void *agent_runtime_prepare_checkpoint_command_override =
-        (void *)turbo_agent_runtime_prepare_checkpoint_command_override_bind;
-    void *agent_runtime_apply_command = (void *)turbo_agent_runtime_apply_command_bind;
+        (void *)turbo_agent_runtime_prepare_checkpoint_command_override_json_value;
+    void *agent_runtime_apply_command = (void *)turbo_agent_runtime_apply_command_json_value;
     void *agent_runtime_apply_checkpoint_command =
-        (void *)turbo_agent_runtime_apply_checkpoint_command_bind;
+        (void *)turbo_agent_runtime_apply_checkpoint_command_json_value;
     void *agent_runtime_prepare_thread_command_override =
-        (void *)turbo_agent_runtime_prepare_thread_command_override_bind;
+        (void *)turbo_agent_runtime_prepare_thread_command_override_json_value;
     void *agent_runtime_apply_thread_command =
-        (void *)turbo_agent_runtime_apply_thread_command_bind;
-    void *agent_runtime_resume_command = (void *)turbo_agent_runtime_resume_command_bind;
+        (void *)turbo_agent_runtime_apply_thread_command_json_value;
+    void *agent_runtime_resume_command = (void *)turbo_agent_runtime_resume_command_json_value;
     void *agent_runtime_resume_checkpoint_command =
-        (void *)turbo_agent_runtime_resume_checkpoint_command_bind;
+        (void *)turbo_agent_runtime_resume_checkpoint_command_json_value;
     void *agent_runtime_resume_thread_command =
-        (void *)turbo_agent_runtime_resume_thread_command_bind;
-    void *agent_runtime_fork_command = (void *)turbo_agent_runtime_fork_command_bind;
+        (void *)turbo_agent_runtime_resume_thread_command_json_value;
+    void *agent_runtime_fork_command = (void *)turbo_agent_runtime_fork_command_json_value;
     void *agent_runtime_fork_checkpoint_command =
-        (void *)turbo_agent_runtime_fork_checkpoint_command_bind;
+        (void *)turbo_agent_runtime_fork_checkpoint_command_json_value;
     void *agent_runtime_fork_thread_command =
-        (void *)turbo_agent_runtime_fork_thread_command_bind;
+        (void *)turbo_agent_runtime_fork_thread_command_json_value;
     void *agent_runtime_resume_checkpoint_state =
-        (void *)turbo_agent_runtime_resume_checkpoint_state_bind_graph;
+        (void *)turbo_agent_runtime_resume_checkpoint_state_json_value_graph;
     void *agent_runtime_resume_thread_state =
-        (void *)turbo_agent_runtime_resume_thread_state_bind_graph;
+        (void *)turbo_agent_runtime_resume_thread_state_json_value_graph;
     void *agent_runtime_fork_checkpoint_state =
-        (void *)turbo_agent_runtime_fork_checkpoint_state_bind_graph;
+        (void *)turbo_agent_runtime_fork_checkpoint_state_json_value_graph;
     void *agent_runtime_fork_thread_state =
-        (void *)turbo_agent_runtime_fork_thread_state_bind_graph;
+        (void *)turbo_agent_runtime_fork_thread_state_json_value_graph;
     void *agent_memory_store_memory = (void *)turbo_agent_memory_store_memory_create;
     void *agent_memory_store_file = (void *)turbo_agent_memory_store_file_create;
     void *agent_memory_store_destroy = (void *)turbo_agent_memory_store_destroy;
@@ -634,38 +638,38 @@ spec("turbo langchain public api") {
     void *agent_app_get_tool_schemas = (void *)turbo_agent_app_get_tool_schemas;
     void *agent_app_get_startup_diagnostics =
         (void *)turbo_agent_app_get_startup_diagnostics;
-    void *agent_app_add_trace_bind_sink = (void *)turbo_agent_app_add_trace_bind_sink;
-    void *agent_app_add_observer_bind_sink = (void *)turbo_agent_app_add_observer_bind_sink;
+    void *agent_app_add_trace_json_value_sink = (void *)turbo_agent_app_add_trace_json_value_sink;
+    void *agent_app_add_observer_json_value_sink = (void *)turbo_agent_app_add_observer_json_value_sink;
     void *agent_app_set_trace_history_enabled = (void *)turbo_agent_app_set_trace_history_enabled;
     void *agent_app_get_thread = (void *)turbo_agent_app_get_thread;
     void *agent_app_get_run = (void *)turbo_agent_app_get_run;
     void *agent_app_get_latest_run = (void *)turbo_agent_app_get_latest_run;
     void *agent_app_get_pending_run = (void *)turbo_agent_app_get_pending_run;
-    void *agent_app_get_thread_timeline = (void *)turbo_agent_app_get_thread_timeline_bind;
+    void *agent_app_get_thread_timeline = (void *)turbo_agent_app_get_thread_timeline_json_value;
     void *agent_app_get_observability_index =
         (void *)turbo_agent_app_get_observability_index;
     void *agent_app_get_branch_tree = (void *)turbo_agent_app_get_branch_tree;
     void *agent_app_get_checkpoint = (void *)turbo_agent_app_get_checkpoint;
     void *agent_app_get_latest_checkpoint = (void *)turbo_agent_app_get_latest_checkpoint;
     void *agent_app_get_checkpoint_context = (void *)turbo_agent_app_get_checkpoint_context;
-    void *agent_app_get_thread_state = (void *)turbo_agent_app_get_thread_state_bind;
+    void *agent_app_get_thread_state = (void *)turbo_agent_app_get_thread_state_json_value;
     void *agent_app_get_thread_head_state =
-        (void *)turbo_agent_app_get_thread_head_state_bind;
+        (void *)turbo_agent_app_get_thread_head_state_json_value;
     void *agent_app_get_thread_trace_events =
-        (void *)turbo_agent_app_get_thread_trace_events_bind;
+        (void *)turbo_agent_app_get_thread_trace_events_json_value;
     void *agent_app_get_thread_head_trace_events =
-        (void *)turbo_agent_app_get_thread_head_trace_events_bind;
-    void *agent_app_get_run_state = (void *)turbo_agent_app_get_run_state_bind;
+        (void *)turbo_agent_app_get_thread_head_trace_events_json_value;
+    void *agent_app_get_run_state = (void *)turbo_agent_app_get_run_state_json_value;
     void *agent_app_get_run_trace_events =
-        (void *)turbo_agent_app_get_run_trace_events_bind;
-    void *agent_app_get_checkpoint_state = (void *)turbo_agent_app_get_checkpoint_state_bind;
+        (void *)turbo_agent_app_get_run_trace_events_json_value;
+    void *agent_app_get_checkpoint_state = (void *)turbo_agent_app_get_checkpoint_state_json_value;
     void *agent_app_prepare_checkpoint_state_override =
-        (void *)turbo_agent_app_prepare_checkpoint_state_override_bind;
+        (void *)turbo_agent_app_prepare_checkpoint_state_override_json_value;
     void *agent_app_update_checkpoint_state =
-        (void *)turbo_agent_app_update_checkpoint_state_bind;
+        (void *)turbo_agent_app_update_checkpoint_state_json_value;
     void *agent_app_prepare_thread_state_override =
-        (void *)turbo_agent_app_prepare_thread_state_override_bind;
-    void *agent_app_update_thread_state = (void *)turbo_agent_app_update_thread_state_bind;
+        (void *)turbo_agent_app_prepare_thread_state_override_json_value;
+    void *agent_app_update_thread_state = (void *)turbo_agent_app_update_thread_state_json_value;
     void *agent_app_get_supervisor_inbox = (void *)turbo_agent_app_get_supervisor_inbox;
     void *agent_app_get_supervisor_handoff_history =
         (void *)turbo_agent_app_get_supervisor_handoff_history;
@@ -673,15 +677,15 @@ spec("turbo langchain public api") {
     void *agent_app_get_orchestration_inspect =
         (void *)turbo_agent_app_get_orchestration_inspect;
     void *agent_app_append_supervisor_inbox_message =
-        (void *)turbo_agent_app_append_supervisor_inbox_message_bind;
+        (void *)turbo_agent_app_append_supervisor_inbox_message_json_value;
     void *agent_app_get_checkpoint_trace_events =
-        (void *)turbo_agent_app_get_checkpoint_trace_events_bind;
+        (void *)turbo_agent_app_get_checkpoint_trace_events_json_value;
     void *agent_app_get_child_run = (void *)turbo_agent_app_get_child_run;
     void *agent_app_get_child_checkpoint = (void *)turbo_agent_app_get_child_checkpoint;
     void *agent_app_get_child_checkpoint_context =
         (void *)turbo_agent_app_get_child_checkpoint_context;
     void *agent_app_get_child_thread_timeline =
-        (void *)turbo_agent_app_get_child_thread_timeline_bind;
+        (void *)turbo_agent_app_get_child_thread_timeline_json_value;
     void *agent_app_get_child_branch_tree =
         (void *)turbo_agent_app_get_child_branch_tree;
     void *agent_app_get_child_inspect = (void *)turbo_agent_app_get_child_inspect;
@@ -694,55 +698,55 @@ spec("turbo langchain public api") {
     void *agent_app_list_child_runs = (void *)turbo_agent_app_list_child_runs;
     void *agent_app_list_child_checkpoints = (void *)turbo_agent_app_list_child_checkpoints;
     void *agent_app_list_checkpoints = (void *)turbo_agent_app_list_checkpoints;
-    void *agent_app_history = (void *)turbo_agent_app_load_history_events_bind;
-    void *agent_app_thread_history = (void *)turbo_agent_app_load_thread_history_events_bind;
-    void *agent_app_replay_history = (void *)turbo_agent_app_replay_history_bind;
+    void *agent_app_history = (void *)turbo_agent_app_load_history_events_json_value;
+    void *agent_app_thread_history = (void *)turbo_agent_app_load_thread_history_events_json_value;
+    void *agent_app_replay_history = (void *)turbo_agent_app_replay_history_json_value;
     void *agent_app_replay_thread_history =
-        (void *)turbo_agent_app_replay_thread_history_bind;
-    void *agent_app_observe_history = (void *)turbo_agent_app_observe_history_bind;
+        (void *)turbo_agent_app_replay_thread_history_json_value;
+    void *agent_app_observe_history = (void *)turbo_agent_app_observe_history_json_value;
     void *agent_app_observe_thread_history =
-        (void *)turbo_agent_app_observe_thread_history_bind;
-    void *agent_app_start_stream = (void *)turbo_agent_app_start_bind_graph_stream;
-    void *agent_app_resume_stream = (void *)turbo_agent_app_resume_bind_graph_stream;
-    void *agent_app_fork_stream = (void *)turbo_agent_app_fork_bind_graph_stream;
-    void *agent_app_child_history = (void *)turbo_agent_app_load_child_history_events_bind;
-    void *agent_app_child_trace_events = (void *)turbo_agent_app_get_child_trace_events_bind;
+        (void *)turbo_agent_app_observe_thread_history_json_value;
+    void *agent_app_start_stream = (void *)turbo_agent_app_start_json_value_graph_stream;
+    void *agent_app_resume_stream = (void *)turbo_agent_app_resume_json_value_graph_stream;
+    void *agent_app_fork_stream = (void *)turbo_agent_app_fork_json_value_graph_stream;
+    void *agent_app_child_history = (void *)turbo_agent_app_load_child_history_events_json_value;
+    void *agent_app_child_trace_events = (void *)turbo_agent_app_get_child_trace_events_json_value;
     void *agent_app_prepare_checkpoint_command_override =
-        (void *)turbo_agent_app_prepare_checkpoint_command_override_bind;
-    void *agent_app_apply_command = (void *)turbo_agent_app_apply_command_bind;
+        (void *)turbo_agent_app_prepare_checkpoint_command_override_json_value;
+    void *agent_app_apply_command = (void *)turbo_agent_app_apply_command_json_value;
     void *agent_app_apply_checkpoint_command =
-        (void *)turbo_agent_app_apply_checkpoint_command_bind;
+        (void *)turbo_agent_app_apply_checkpoint_command_json_value;
     void *agent_app_prepare_thread_command_override =
-        (void *)turbo_agent_app_prepare_thread_command_override_bind;
-    void *agent_app_apply_thread_command = (void *)turbo_agent_app_apply_thread_command_bind;
-    void *agent_app_resume_command = (void *)turbo_agent_app_resume_command_bind;
+        (void *)turbo_agent_app_prepare_thread_command_override_json_value;
+    void *agent_app_apply_thread_command = (void *)turbo_agent_app_apply_thread_command_json_value;
+    void *agent_app_resume_command = (void *)turbo_agent_app_resume_command_json_value;
     void *agent_app_resume_checkpoint_command =
-        (void *)turbo_agent_app_resume_checkpoint_command_bind;
-    void *agent_app_resume_thread_command = (void *)turbo_agent_app_resume_thread_command_bind;
-    void *agent_app_fork_command = (void *)turbo_agent_app_fork_command_bind;
+        (void *)turbo_agent_app_resume_checkpoint_command_json_value;
+    void *agent_app_resume_thread_command = (void *)turbo_agent_app_resume_thread_command_json_value;
+    void *agent_app_fork_command = (void *)turbo_agent_app_fork_command_json_value;
     void *agent_app_fork_checkpoint_command =
-        (void *)turbo_agent_app_fork_checkpoint_command_bind;
-    void *agent_app_fork_thread_command = (void *)turbo_agent_app_fork_thread_command_bind;
-    void *agent_app_resume_thread = (void *)turbo_agent_app_resume_thread_bind_graph;
-    void *agent_app_fork_thread = (void *)turbo_agent_app_fork_thread_bind_graph;
-    void *agent_app_resume_checkpoint = (void *)turbo_agent_app_resume_checkpoint_bind_graph;
-    void *agent_app_fork_checkpoint = (void *)turbo_agent_app_fork_checkpoint_bind_graph;
+        (void *)turbo_agent_app_fork_checkpoint_command_json_value;
+    void *agent_app_fork_thread_command = (void *)turbo_agent_app_fork_thread_command_json_value;
+    void *agent_app_resume_thread = (void *)turbo_agent_app_resume_thread_json_value_graph;
+    void *agent_app_fork_thread = (void *)turbo_agent_app_fork_thread_json_value_graph;
+    void *agent_app_resume_checkpoint = (void *)turbo_agent_app_resume_checkpoint_json_value_graph;
+    void *agent_app_fork_checkpoint = (void *)turbo_agent_app_fork_checkpoint_json_value_graph;
     void *agent_app_resume_checkpoint_state =
-        (void *)turbo_agent_app_resume_checkpoint_state_bind_graph;
+        (void *)turbo_agent_app_resume_checkpoint_state_json_value_graph;
     void *agent_app_resume_thread_state =
-        (void *)turbo_agent_app_resume_thread_state_bind_graph;
+        (void *)turbo_agent_app_resume_thread_state_json_value_graph;
     void *agent_app_fork_checkpoint_state =
-        (void *)turbo_agent_app_fork_checkpoint_state_bind_graph;
+        (void *)turbo_agent_app_fork_checkpoint_state_json_value_graph;
     void *agent_app_fork_thread_state =
-        (void *)turbo_agent_app_fork_thread_state_bind_graph;
-    void *agent_app_resume_preset = (void *)turbo_agent_app_resume_preset_bind_graph;
-    void *agent_app_fork_preset = (void *)turbo_agent_app_fork_preset_bind_graph;
-    void *agent_app_resume_preset_command = (void *)turbo_agent_app_resume_preset_command_bind;
+        (void *)turbo_agent_app_fork_thread_state_json_value_graph;
+    void *agent_app_resume_preset = (void *)turbo_agent_app_resume_preset_json_value_graph;
+    void *agent_app_fork_preset = (void *)turbo_agent_app_fork_preset_json_value_graph;
+    void *agent_app_resume_preset_command = (void *)turbo_agent_app_resume_preset_command_json_value;
     void *agent_app_resume_thread_preset_command =
-        (void *)turbo_agent_app_resume_thread_preset_command_bind;
-    void *agent_app_fork_preset_command = (void *)turbo_agent_app_fork_preset_command_bind;
+        (void *)turbo_agent_app_resume_thread_preset_command_json_value;
+    void *agent_app_fork_preset_command = (void *)turbo_agent_app_fork_preset_command_json_value;
     void *agent_app_fork_thread_preset_command =
-        (void *)turbo_agent_app_fork_thread_preset_command_bind;
+        (void *)turbo_agent_app_fork_thread_preset_command_json_value;
     void *agent_app_start_text = (void *)turbo_agent_app_start_text;
     void *agent_app_start_text_stream = (void *)turbo_agent_app_start_text_stream;
     void *agent_app_start_messages = (void *)turbo_agent_app_start_messages;
@@ -783,10 +787,10 @@ spec("turbo langchain public api") {
         (void *)turbo_agent_session_get_startup_diagnostics;
     void *agent_session_workflow_kind = (void *)turbo_agent_session_workflow_kind;
     void *agent_session_memory_namespace = (void *)turbo_agent_session_memory_namespace;
-    void *agent_session_add_trace_bind_sink =
-        (void *)turbo_agent_session_add_trace_bind_sink;
-    void *agent_session_add_observer_bind_sink =
-        (void *)turbo_agent_session_add_observer_bind_sink;
+    void *agent_session_add_trace_json_value_sink =
+        (void *)turbo_agent_session_add_trace_json_value_sink;
+    void *agent_session_add_observer_json_value_sink =
+        (void *)turbo_agent_session_add_observer_json_value_sink;
     void *agent_session_set_trace_history_enabled =
         (void *)turbo_agent_session_set_trace_history_enabled;
     void *agent_session_get_thread = (void *)turbo_agent_session_get_thread;
@@ -794,7 +798,7 @@ spec("turbo langchain public api") {
     void *agent_session_get_latest_run = (void *)turbo_agent_session_get_latest_run;
     void *agent_session_get_pending_run = (void *)turbo_agent_session_get_pending_run;
     void *agent_session_get_thread_timeline =
-        (void *)turbo_agent_session_get_thread_timeline_bind;
+        (void *)turbo_agent_session_get_thread_timeline_json_value;
     void *agent_session_get_observability_index =
         (void *)turbo_agent_session_get_observability_index;
     void *agent_session_get_branch_tree = (void *)turbo_agent_session_get_branch_tree;
@@ -803,26 +807,26 @@ spec("turbo langchain public api") {
         (void *)turbo_agent_session_get_latest_checkpoint;
     void *agent_session_get_checkpoint_context =
         (void *)turbo_agent_session_get_checkpoint_context;
-    void *agent_session_get_thread_state = (void *)turbo_agent_session_get_thread_state_bind;
+    void *agent_session_get_thread_state = (void *)turbo_agent_session_get_thread_state_json_value;
     void *agent_session_get_thread_head_state =
-        (void *)turbo_agent_session_get_thread_head_state_bind;
+        (void *)turbo_agent_session_get_thread_head_state_json_value;
     void *agent_session_get_thread_trace_events =
-        (void *)turbo_agent_session_get_thread_trace_events_bind;
+        (void *)turbo_agent_session_get_thread_trace_events_json_value;
     void *agent_session_get_thread_head_trace_events =
-        (void *)turbo_agent_session_get_thread_head_trace_events_bind;
-    void *agent_session_get_run_state = (void *)turbo_agent_session_get_run_state_bind;
+        (void *)turbo_agent_session_get_thread_head_trace_events_json_value;
+    void *agent_session_get_run_state = (void *)turbo_agent_session_get_run_state_json_value;
     void *agent_session_get_run_trace_events =
-        (void *)turbo_agent_session_get_run_trace_events_bind;
+        (void *)turbo_agent_session_get_run_trace_events_json_value;
     void *agent_session_get_checkpoint_state =
-        (void *)turbo_agent_session_get_checkpoint_state_bind;
+        (void *)turbo_agent_session_get_checkpoint_state_json_value;
     void *agent_session_prepare_checkpoint_state_override =
-        (void *)turbo_agent_session_prepare_checkpoint_state_override_bind;
+        (void *)turbo_agent_session_prepare_checkpoint_state_override_json_value;
     void *agent_session_update_checkpoint_state =
-        (void *)turbo_agent_session_update_checkpoint_state_bind;
+        (void *)turbo_agent_session_update_checkpoint_state_json_value;
     void *agent_session_prepare_thread_state_override =
-        (void *)turbo_agent_session_prepare_thread_state_override_bind;
+        (void *)turbo_agent_session_prepare_thread_state_override_json_value;
     void *agent_session_update_thread_state =
-        (void *)turbo_agent_session_update_thread_state_bind;
+        (void *)turbo_agent_session_update_thread_state_json_value;
     void *agent_session_get_supervisor_inbox =
         (void *)turbo_agent_session_get_supervisor_inbox;
     void *agent_session_get_supervisor_handoff_history =
@@ -832,16 +836,16 @@ spec("turbo langchain public api") {
     void *agent_session_get_orchestration_inspect =
         (void *)turbo_agent_session_get_orchestration_inspect;
     void *agent_session_append_supervisor_inbox_message =
-        (void *)turbo_agent_session_append_supervisor_inbox_message_bind;
+        (void *)turbo_agent_session_append_supervisor_inbox_message_json_value;
     void *agent_session_get_checkpoint_trace_events =
-        (void *)turbo_agent_session_get_checkpoint_trace_events_bind;
+        (void *)turbo_agent_session_get_checkpoint_trace_events_json_value;
     void *agent_session_get_child_run = (void *)turbo_agent_session_get_child_run;
     void *agent_session_get_child_checkpoint =
         (void *)turbo_agent_session_get_child_checkpoint;
     void *agent_session_get_child_checkpoint_context =
         (void *)turbo_agent_session_get_child_checkpoint_context;
     void *agent_session_get_child_thread_timeline =
-        (void *)turbo_agent_session_get_child_thread_timeline_bind;
+        (void *)turbo_agent_session_get_child_thread_timeline_json_value;
     void *agent_session_get_child_branch_tree =
         (void *)turbo_agent_session_get_child_branch_tree;
     void *agent_session_get_child_inspect = (void *)turbo_agent_session_get_child_inspect;
@@ -855,66 +859,66 @@ spec("turbo langchain public api") {
     void *agent_session_list_child_checkpoints =
         (void *)turbo_agent_session_list_child_checkpoints;
     void *agent_session_list_checkpoints = (void *)turbo_agent_session_list_checkpoints;
-    void *agent_session_history = (void *)turbo_agent_session_load_history_events_bind;
+    void *agent_session_history = (void *)turbo_agent_session_load_history_events_json_value;
     void *agent_session_thread_history =
-        (void *)turbo_agent_session_load_thread_history_events_bind;
-    void *agent_session_replay_history = (void *)turbo_agent_session_replay_history_bind;
+        (void *)turbo_agent_session_load_thread_history_events_json_value;
+    void *agent_session_replay_history = (void *)turbo_agent_session_replay_history_json_value;
     void *agent_session_replay_thread_history =
-        (void *)turbo_agent_session_replay_thread_history_bind;
+        (void *)turbo_agent_session_replay_thread_history_json_value;
     void *agent_session_observe_history =
-        (void *)turbo_agent_session_observe_history_bind;
+        (void *)turbo_agent_session_observe_history_json_value;
     void *agent_session_observe_thread_history =
-        (void *)turbo_agent_session_observe_thread_history_bind;
-    void *agent_session_start_stream = (void *)turbo_agent_session_start_bind_graph_stream;
-    void *agent_session_resume_stream = (void *)turbo_agent_session_resume_bind_graph_stream;
-    void *agent_session_fork_stream = (void *)turbo_agent_session_fork_bind_graph_stream;
+        (void *)turbo_agent_session_observe_thread_history_json_value;
+    void *agent_session_start_stream = (void *)turbo_agent_session_start_json_value_graph_stream;
+    void *agent_session_resume_stream = (void *)turbo_agent_session_resume_json_value_graph_stream;
+    void *agent_session_fork_stream = (void *)turbo_agent_session_fork_json_value_graph_stream;
     void *agent_session_child_history =
-        (void *)turbo_agent_session_load_child_history_events_bind;
+        (void *)turbo_agent_session_load_child_history_events_json_value;
     void *agent_session_child_trace_events =
-        (void *)turbo_agent_session_get_child_trace_events_bind;
+        (void *)turbo_agent_session_get_child_trace_events_json_value;
     void *agent_session_prepare_checkpoint_command_override =
-        (void *)turbo_agent_session_prepare_checkpoint_command_override_bind;
-    void *agent_session_apply_command = (void *)turbo_agent_session_apply_command_bind;
+        (void *)turbo_agent_session_prepare_checkpoint_command_override_json_value;
+    void *agent_session_apply_command = (void *)turbo_agent_session_apply_command_json_value;
     void *agent_session_apply_checkpoint_command =
-        (void *)turbo_agent_session_apply_checkpoint_command_bind;
+        (void *)turbo_agent_session_apply_checkpoint_command_json_value;
     void *agent_session_prepare_thread_command_override =
-        (void *)turbo_agent_session_prepare_thread_command_override_bind;
+        (void *)turbo_agent_session_prepare_thread_command_override_json_value;
     void *agent_session_apply_thread_command =
-        (void *)turbo_agent_session_apply_thread_command_bind;
-    void *agent_session_resume_command = (void *)turbo_agent_session_resume_command_bind;
+        (void *)turbo_agent_session_apply_thread_command_json_value;
+    void *agent_session_resume_command = (void *)turbo_agent_session_resume_command_json_value;
     void *agent_session_resume_checkpoint_command =
-        (void *)turbo_agent_session_resume_checkpoint_command_bind;
+        (void *)turbo_agent_session_resume_checkpoint_command_json_value;
     void *agent_session_resume_thread_command =
-        (void *)turbo_agent_session_resume_thread_command_bind;
-    void *agent_session_fork_command = (void *)turbo_agent_session_fork_command_bind;
+        (void *)turbo_agent_session_resume_thread_command_json_value;
+    void *agent_session_fork_command = (void *)turbo_agent_session_fork_command_json_value;
     void *agent_session_fork_checkpoint_command =
-        (void *)turbo_agent_session_fork_checkpoint_command_bind;
+        (void *)turbo_agent_session_fork_checkpoint_command_json_value;
     void *agent_session_fork_thread_command =
-        (void *)turbo_agent_session_fork_thread_command_bind;
+        (void *)turbo_agent_session_fork_thread_command_json_value;
     void *agent_session_resume_preset_command =
-        (void *)turbo_agent_session_resume_preset_command_bind;
+        (void *)turbo_agent_session_resume_preset_command_json_value;
     void *agent_session_resume_thread_preset_command =
-        (void *)turbo_agent_session_resume_thread_preset_command_bind;
+        (void *)turbo_agent_session_resume_thread_preset_command_json_value;
     void *agent_session_fork_preset_command =
-        (void *)turbo_agent_session_fork_preset_command_bind;
+        (void *)turbo_agent_session_fork_preset_command_json_value;
     void *agent_session_fork_thread_preset_command =
-        (void *)turbo_agent_session_fork_thread_preset_command_bind;
-    void *agent_session_start = (void *)turbo_agent_session_start_bind_graph;
-    void *agent_session_resume = (void *)turbo_agent_session_resume_bind_graph;
-    void *agent_session_fork = (void *)turbo_agent_session_fork_bind_graph;
-    void *agent_session_resume_thread = (void *)turbo_agent_session_resume_thread_bind_graph;
-    void *agent_session_fork_thread = (void *)turbo_agent_session_fork_thread_bind_graph;
+        (void *)turbo_agent_session_fork_thread_preset_command_json_value;
+    void *agent_session_start = (void *)turbo_agent_session_start_json_value_graph;
+    void *agent_session_resume = (void *)turbo_agent_session_resume_json_value_graph;
+    void *agent_session_fork = (void *)turbo_agent_session_fork_json_value_graph;
+    void *agent_session_resume_thread = (void *)turbo_agent_session_resume_thread_json_value_graph;
+    void *agent_session_fork_thread = (void *)turbo_agent_session_fork_thread_json_value_graph;
     void *agent_session_resume_checkpoint =
-        (void *)turbo_agent_session_resume_checkpoint_bind_graph;
-    void *agent_session_fork_checkpoint = (void *)turbo_agent_session_fork_checkpoint_bind_graph;
+        (void *)turbo_agent_session_resume_checkpoint_json_value_graph;
+    void *agent_session_fork_checkpoint = (void *)turbo_agent_session_fork_checkpoint_json_value_graph;
     void *agent_session_resume_checkpoint_state =
-        (void *)turbo_agent_session_resume_checkpoint_state_bind_graph;
+        (void *)turbo_agent_session_resume_checkpoint_state_json_value_graph;
     void *agent_session_resume_thread_state =
-        (void *)turbo_agent_session_resume_thread_state_bind_graph;
+        (void *)turbo_agent_session_resume_thread_state_json_value_graph;
     void *agent_session_fork_checkpoint_state =
-        (void *)turbo_agent_session_fork_checkpoint_state_bind_graph;
+        (void *)turbo_agent_session_fork_checkpoint_state_json_value_graph;
     void *agent_session_fork_thread_state =
-        (void *)turbo_agent_session_fork_thread_state_bind_graph;
+        (void *)turbo_agent_session_fork_thread_state_json_value_graph;
     void *agent_session_loop_graph = (void *)turbo_agent_session_create_loop_graph;
     void *agent_session_review_graph = (void *)turbo_agent_session_create_review_graph;
     void *agent_session_engineering_graph = (void *)turbo_agent_session_create_engineering_graph;
@@ -923,10 +927,10 @@ spec("turbo langchain public api") {
     void *agent_session_retriever_engineering_graph =
         (void *)turbo_agent_session_create_retriever_engineering_graph;
     void *agent_session_preset_graph = (void *)turbo_agent_session_create_preset_graph;
-    void *agent_session_input_state = (void *)turbo_agent_session_create_input_state_bind;
+    void *agent_session_input_state = (void *)turbo_agent_session_create_input_state_json_value;
     void *agent_session_input_messages_state =
-        (void *)turbo_agent_session_create_input_messages_state_bind;
-    void *agent_session_start_preset = (void *)turbo_agent_session_start_preset_bind_graph;
+        (void *)turbo_agent_session_create_input_messages_state_json_value;
+    void *agent_session_start_preset = (void *)turbo_agent_session_start_preset_json_value_graph;
     void *agent_session_start_preset_text = (void *)turbo_agent_session_start_preset_text;
     void *agent_session_start_preset_text_with_memory =
         (void *)turbo_agent_session_start_preset_text_with_memory;
@@ -971,23 +975,42 @@ spec("turbo langchain public api") {
         (void *)turbo_agent_session_memory_query_records_ex;
     void *agent_session_load_memory_context = (void *)turbo_agent_session_load_memory_context;
     void *agent_session_input_state_with_memory =
-        (void *)turbo_agent_session_create_input_state_with_memory_bind;
+        (void *)turbo_agent_session_create_input_state_with_memory_json_value;
     void *agent_session_input_messages_state_with_memory =
-        (void *)turbo_agent_session_create_input_messages_state_with_memory_bind;
-    void *agent_session_resume_preset = (void *)turbo_agent_session_resume_preset_bind_graph;
-    void *agent_session_fork_preset = (void *)turbo_agent_session_fork_preset_bind_graph;
+        (void *)turbo_agent_session_create_input_messages_state_with_memory_json_value;
+    void *agent_session_resume_preset = (void *)turbo_agent_session_resume_preset_json_value_graph;
+    void *agent_session_fork_preset = (void *)turbo_agent_session_fork_preset_json_value_graph;
 #endif
     void *agent_runtime_store_memory = (void *)turbo_agent_runtime_store_memory_create;
     void *agent_runtime_store_file = (void *)turbo_agent_runtime_store_file_create;
     void *agent_runtime_exec_start = (void *)turbo_agent_runtime_exec_start;
     void *agent_runtime_exec_resume = (void *)turbo_agent_runtime_exec_resume;
     void *agent_runtime_exec_fork = (void *)turbo_agent_runtime_exec_fork;
+    void *agent_runtime_exec_start_controlled =
+        (void *)turbo_agent_runtime_exec_start_controlled;
+    void *agent_runtime_exec_resume_controlled =
+        (void *)turbo_agent_runtime_exec_resume_controlled;
+    void *agent_runtime_exec_fork_controlled =
+        (void *)turbo_agent_runtime_exec_fork_controlled;
+    void *agent_execution_start = (void *)turbo_agent_execution_start;
+    void *agent_execution_resume = (void *)turbo_agent_execution_resume;
+    void *agent_execution_fork = (void *)turbo_agent_execution_fork;
+    void *agent_execution_retain = (void *)turbo_agent_execution_retain;
+    void *agent_execution_release = (void *)turbo_agent_execution_release;
+    void *agent_execution_id = (void *)turbo_agent_execution_id;
+    void *agent_execution_cancel = (void *)turbo_agent_execution_cancel;
+    void *agent_execution_wait = (void *)turbo_agent_execution_wait;
+    void *agent_execution_get_status = (void *)turbo_agent_execution_get_status;
+    void *agent_execution_result_code =
+        (void *)turbo_agent_execution_result_code;
+    void *agent_execution_take_result =
+        (void *)turbo_agent_execution_take_result;
     void *agent_runtime_get_thread = (void *)turbo_agent_runtime_get_thread;
     void *agent_runtime_get_run = (void *)turbo_agent_runtime_get_run;
     void *agent_runtime_get_latest_run = (void *)turbo_agent_runtime_get_latest_run;
     void *agent_runtime_get_pending_run = (void *)turbo_agent_runtime_get_pending_run;
     void *agent_runtime_get_thread_timeline =
-        (void *)turbo_agent_runtime_get_thread_timeline_bind;
+        (void *)turbo_agent_runtime_get_thread_timeline_json_value;
     void *agent_runtime_get_observability_index =
         (void *)turbo_agent_runtime_get_thread_observability_index;
     void *agent_runtime_list_observability_indexes =
@@ -999,36 +1022,36 @@ spec("turbo langchain public api") {
     void *agent_runtime_get_latest_checkpoint = (void *)turbo_agent_runtime_get_latest_checkpoint;
     void *agent_runtime_get_checkpoint_context =
         (void *)turbo_agent_runtime_get_checkpoint_context;
-    void *agent_runtime_get_thread_state = (void *)turbo_agent_runtime_get_thread_state_bind;
+    void *agent_runtime_get_thread_state = (void *)turbo_agent_runtime_get_thread_state_json_value;
     void *agent_runtime_get_thread_head_state =
-        (void *)turbo_agent_runtime_get_thread_head_state_bind;
+        (void *)turbo_agent_runtime_get_thread_head_state_json_value;
     void *agent_runtime_get_thread_trace_events =
-        (void *)turbo_agent_runtime_get_thread_trace_events_bind;
+        (void *)turbo_agent_runtime_get_thread_trace_events_json_value;
     void *agent_runtime_get_thread_head_trace_events =
-        (void *)turbo_agent_runtime_get_thread_head_trace_events_bind;
-    void *agent_runtime_get_run_state = (void *)turbo_agent_runtime_get_run_state_bind;
+        (void *)turbo_agent_runtime_get_thread_head_trace_events_json_value;
+    void *agent_runtime_get_run_state = (void *)turbo_agent_runtime_get_run_state_json_value;
     void *agent_runtime_get_run_trace_events =
-        (void *)turbo_agent_runtime_get_run_trace_events_bind;
+        (void *)turbo_agent_runtime_get_run_trace_events_json_value;
     void *agent_runtime_get_checkpoint_state =
-        (void *)turbo_agent_runtime_get_checkpoint_state_bind;
+        (void *)turbo_agent_runtime_get_checkpoint_state_json_value;
     void *agent_runtime_prepare_checkpoint_state_override =
-        (void *)turbo_agent_runtime_prepare_checkpoint_state_override_bind;
+        (void *)turbo_agent_runtime_prepare_checkpoint_state_override_json_value;
     void *agent_runtime_prepare_thread_state_override =
-        (void *)turbo_agent_runtime_prepare_thread_state_override_bind;
+        (void *)turbo_agent_runtime_prepare_thread_state_override_json_value;
     void *agent_runtime_get_checkpoint_trace_events =
-        (void *)turbo_agent_runtime_get_checkpoint_trace_events_bind;
+        (void *)turbo_agent_runtime_get_checkpoint_trace_events_json_value;
     void *agent_runtime_list_runs = (void *)turbo_agent_runtime_list_runs;
     void *agent_runtime_list_thread_lineage = (void *)turbo_agent_runtime_list_thread_lineage;
     void *agent_runtime_list_child_runs = (void *)turbo_agent_runtime_list_child_runs;
     void *agent_runtime_list_checkpoints = (void *)turbo_agent_runtime_list_checkpoints;
-    void *agent_runtime_history = (void *)turbo_agent_runtime_load_history_events_bind;
-    void *agent_runtime_thread_history = (void *)turbo_agent_runtime_load_thread_history_events_bind;
-    void *agent_runtime_replay_history = (void *)turbo_agent_runtime_replay_history_bind;
+    void *agent_runtime_history = (void *)turbo_agent_runtime_load_history_events_json_value;
+    void *agent_runtime_thread_history = (void *)turbo_agent_runtime_load_thread_history_events_json_value;
+    void *agent_runtime_replay_history = (void *)turbo_agent_runtime_replay_history_json_value;
     void *agent_runtime_replay_thread_history =
-        (void *)turbo_agent_runtime_replay_thread_history_bind;
-    void *agent_runtime_observe_history = (void *)turbo_agent_runtime_observe_history_bind;
+        (void *)turbo_agent_runtime_replay_thread_history_json_value;
+    void *agent_runtime_observe_history = (void *)turbo_agent_runtime_observe_history_json_value;
     void *agent_runtime_observe_thread_history =
-        (void *)turbo_agent_runtime_observe_thread_history_bind;
+        (void *)turbo_agent_runtime_observe_thread_history_json_value;
     void *agent_tool_registry = (void *)turbo_agent_tool_registry;
     void *agent_tool_count = (void *)turbo_agent_tool_count;
     void *agent_app_create = (void *)turbo_agent_app_create;
@@ -1046,11 +1069,11 @@ spec("turbo langchain public api") {
     void *agent_app_get_tool_schemas = (void *)turbo_agent_app_get_tool_schemas;
     void *agent_app_get_startup_diagnostics =
         (void *)turbo_agent_app_get_startup_diagnostics;
-    void *agent_app_add_trace_bind_sink = (void *)turbo_agent_app_add_trace_bind_sink;
-    void *agent_app_add_observer_bind_sink = (void *)turbo_agent_app_add_observer_bind_sink;
+    void *agent_app_add_trace_json_value_sink = (void *)turbo_agent_app_add_trace_json_value_sink;
+    void *agent_app_add_observer_json_value_sink = (void *)turbo_agent_app_add_observer_json_value_sink;
     void *agent_app_set_trace_history_enabled = (void *)turbo_agent_app_set_trace_history_enabled;
     void *agent_app_apply_thread_state_patch =
-        (void *)turbo_agent_app_apply_thread_state_patch_bind;
+        (void *)turbo_agent_app_apply_thread_state_patch_json_value;
     void *agent_app_get_observability_index =
         (void *)turbo_agent_app_get_observability_index;
     void *agent_app_exec_start = (void *)turbo_agent_app_exec_start;
@@ -1100,14 +1123,14 @@ spec("turbo langchain public api") {
         (void *)turbo_agent_session_get_startup_diagnostics;
     void *agent_session_workflow_kind = (void *)turbo_agent_session_workflow_kind;
     void *agent_session_memory_namespace = (void *)turbo_agent_session_memory_namespace;
-    void *agent_session_add_trace_bind_sink =
-        (void *)turbo_agent_session_add_trace_bind_sink;
-    void *agent_session_add_observer_bind_sink =
-        (void *)turbo_agent_session_add_observer_bind_sink;
+    void *agent_session_add_trace_json_value_sink =
+        (void *)turbo_agent_session_add_trace_json_value_sink;
+    void *agent_session_add_observer_json_value_sink =
+        (void *)turbo_agent_session_add_observer_json_value_sink;
     void *agent_session_set_trace_history_enabled =
         (void *)turbo_agent_session_set_trace_history_enabled;
     void *agent_session_apply_thread_state_patch =
-        (void *)turbo_agent_session_apply_thread_state_patch_bind;
+        (void *)turbo_agent_session_apply_thread_state_patch_json_value;
     void *agent_session_get_observability_index =
         (void *)turbo_agent_session_get_observability_index;
     void *agent_session_start_graph = (void *)turbo_agent_session_start_graph;
@@ -1144,36 +1167,36 @@ spec("turbo langchain public api") {
     void *agent_session_memory_query_records_ex =
         (void *)turbo_agent_session_memory_query_records_ex;
     void *agent_session_load_memory_context = (void *)turbo_agent_session_load_memory_context;
-    void *agent_session_input_state = (void *)turbo_agent_session_create_input_state_bind;
+    void *agent_session_input_state = (void *)turbo_agent_session_create_input_state_json_value;
     void *agent_session_input_messages_state =
-        (void *)turbo_agent_session_create_input_messages_state_bind;
+        (void *)turbo_agent_session_create_input_messages_state_json_value;
     void *agent_session_input_state_with_memory =
-        (void *)turbo_agent_session_create_input_state_with_memory_bind;
+        (void *)turbo_agent_session_create_input_state_with_memory_json_value;
     void *agent_session_input_messages_state_with_memory =
-        (void *)turbo_agent_session_create_input_messages_state_with_memory_bind;
+        (void *)turbo_agent_session_create_input_messages_state_with_memory_json_value;
     void *agent_subagent_add_runtime = (void *)turbo_agent_subagent_add_tool_runtime;
     void *agent_subagent_add_registry = (void *)turbo_agent_subagent_add_tool_registry;
     void *agent_subgraph_node = (void *)turbo_agent_subgraph_node;
     void *agent_install_subgraph_node = (void *)turbo_agent_install_subgraph_node;
     void *agent_install_supervisor_loop = (void *)turbo_agent_install_supervisor_loop;
-    void *agent_state_trace_events_bind = (void *)turbo_agent_state_trace_events_bind;
-    void *agent_state_add_trace_event_bind = (void *)turbo_agent_state_add_trace_event_bind;
-    void *agent_state_capture_trace_event_bind =
-        (void *)turbo_agent_state_capture_trace_event_bind;
-    void *agent_state_planner_event_version_bind =
-        (void *)turbo_agent_state_planner_event_version_bind;
-    void *agent_state_executor_event_version_bind =
-        (void *)turbo_agent_state_executor_event_version_bind;
-    void *agent_state_latest_planner_event_version_bind =
-        (void *)turbo_agent_state_latest_planner_event_version_bind;
-    void *agent_state_latest_executor_event_version_bind =
-        (void *)turbo_agent_state_latest_executor_event_version_bind;
-    void *agent_state_completed_steps_bind =
-        (void *)turbo_agent_state_completed_steps_bind;
-    void *agent_state_completed_step_bind =
-        (void *)turbo_agent_state_completed_step_bind;
-    void *agent_state_latest_completed_step_bind =
-        (void *)turbo_agent_state_latest_completed_step_bind;
+    void *agent_state_trace_events_json_value = (void *)turbo_agent_state_trace_events_json_value;
+    void *agent_state_add_trace_event_json_value = (void *)turbo_agent_state_add_trace_event_json_value;
+    void *agent_state_capture_trace_event_json_value =
+        (void *)turbo_agent_state_capture_trace_event_json_value;
+    void *agent_state_planner_event_version_json_value =
+        (void *)turbo_agent_state_planner_event_version_json_value;
+    void *agent_state_executor_event_version_json_value =
+        (void *)turbo_agent_state_executor_event_version_json_value;
+    void *agent_state_latest_planner_event_version_json_value =
+        (void *)turbo_agent_state_latest_planner_event_version_json_value;
+    void *agent_state_latest_executor_event_version_json_value =
+        (void *)turbo_agent_state_latest_executor_event_version_json_value;
+    void *agent_state_completed_steps_json_value =
+        (void *)turbo_agent_state_completed_steps_json_value;
+    void *agent_state_completed_step_json_value =
+        (void *)turbo_agent_state_completed_step_json_value;
+    void *agent_state_latest_completed_step_json_value =
+        (void *)turbo_agent_state_latest_completed_step_json_value;
     void *agent_state_latest_tool_results_event =
         (void *)turbo_agent_state_latest_tool_results_event;
     void *agent_state_tool_results_outputs =
@@ -1221,8 +1244,8 @@ spec("turbo langchain public api") {
     void *agent_state_handoff_event_reason = (void *)turbo_agent_state_handoff_event_reason;
     void *agent_state_handoff_event_active_agent =
         (void *)turbo_agent_state_handoff_event_active_agent;
-    void *tool_execute_bind = (void *)turbo_tool_registry_execute_bind;
-    void *tool_runtime_invoke_bind = (void *)turbo_tool_runtime_invoke_bind;
+    void *tool_execute_json_value = (void *)turbo_tool_registry_execute_json_value;
+    void *tool_runtime_invoke_json_value = (void *)turbo_tool_runtime_invoke_json_value;
     turbo_tool_registry_t *tool_registry = turbo_tool_registry_create();
     turbo_tool_runtime_t *tool_runtime = turbo_tool_runtime_native_create();
     turbo_action_tool_registry_t *action_registry = turbo_action_tool_registry_create();
@@ -1238,7 +1261,7 @@ spec("turbo langchain public api") {
     const turbo_model_provider_t *provider = turbo_model_provider_by_name("openai");
 
     if (runtime_value) {
-      turbo_graph_checkpoint_create_bind("entry", 0, runtime_value, &checkpoint);
+      turbo_graph_checkpoint_create_json_value("entry", 0, runtime_value, &checkpoint);
     }
     app_session_config.runtime_store = turbo_agent_runtime_store_memory_create();
     app_config.session_config = &app_session_config;
@@ -1250,18 +1273,20 @@ spec("turbo langchain public api") {
     check_not_null(chain);
     check_not_null(runtime_value);
     check_not_null(chain_state);
-    check_not_null(chain_run_bind_stream);
-    check_not_null(graph_run_bind_stream);
-    check_not_null(graph_run_checkpoint_bind);
-    check_not_null(graph_run_checkpoint_bind_stream);
+    check_not_null(chain_run_json_value_stream);
+    check_not_null(graph_run_json_value_stream);
+    check_not_null(graph_run_json_value_stream_controlled);
+    check_not_null(graph_run_checkpoint_json_value);
+    check_not_null(graph_run_checkpoint_json_value_stream);
+    check_not_null(graph_run_checkpoint_json_value_stream_controlled);
     check_not_null(graph_run_log_create);
-    check_not_null(graph_run_bind_log);
+    check_not_null(graph_run_json_value_log);
     check_not_null(graph_checkpoint_clone);
     check_not_null(state_graph_create);
     check_not_null(state_graph_add_channel);
-    check_not_null(state_graph_add_bind_node);
+    check_not_null(state_graph_add_json_value_node);
     check_not_null(state_graph_add_subgraph_node);
-    check_not_null(state_graph_add_bind_edge);
+    check_not_null(state_graph_add_json_value_edge);
     check_not_null(state_graph_snapshot_schema_version);
     check_not_null(state_graph_serialize_snapshot);
     check_not_null(state_graph_load_snapshot);
@@ -1311,7 +1336,7 @@ spec("turbo langchain public api") {
     check_not_null(state_graph_store_load_latest_snapshot_for_checkpoint);
     check_not_null(state_graph_store_save_snapshot);
     check_not_null(state_graph_store_load_snapshot);
-    check_not_null(prompt_bind);
+    check_not_null(prompt_json_value);
     check_not_null(prompt_message_schema);
     check_not_null(prompt_openai_codec);
     check_not_null(prompt_responses_codec);
@@ -1319,38 +1344,38 @@ spec("turbo langchain public api") {
     check_not_null(provider_wire_codec);
     check_not_null(provider_event_codec);
     check_not_null(provider_sse_event_codec);
-    check_not_null(provider_event_bind_codec);
-    check_not_null(provider_event_emit_bind);
-    check_not_null(provider_sse_event_bind_codec);
-    check_not_null(provider_sse_emit_bind);
-    check_not_null(event_kind_bind);
-    check_not_null(event_stream_mode_accepts_bind);
-    check_not_null(event_stream_filter_sink_bind);
-    check_not_null(event_validate_any_bind);
-    check_not_null(event_schema_bind);
+    check_not_null(provider_event_json_value_codec);
+    check_not_null(provider_event_emit_json_value);
+    check_not_null(provider_sse_event_json_value_codec);
+    check_not_null(provider_sse_emit_json_value);
+    check_not_null(event_kind_json_value);
+    check_not_null(event_stream_mode_accepts_json_value);
+    check_not_null(event_stream_filter_sink_json_value);
+    check_not_null(event_validate_any_json_value);
+    check_not_null(event_schema_json_value);
     check_not_null(event_log_create);
     check_not_null(event_log_capture);
     check_not_null(event_log_events);
     check_not_null(event_log_reset);
     check_not_null(event_log_load_events);
-    check_not_null(trace_event_schema_bind);
-    check_not_null(tool_result_event_schema_bind);
-    check_not_null(handoff_event_schema_bind);
-    check_not_null(trace_event_validate_bind);
-    check_not_null(trace_event_create_bind);
-    check_not_null(event_validate_bind);
-    check_not_null(event_create_bind);
-    check_not_null(tool_result_event_validate_bind);
-    check_not_null(tool_result_event_create_bind);
-    check_not_null(handoff_event_validate_bind);
-    check_not_null(handoff_event_create_bind);
+    check_not_null(trace_event_schema_json_value);
+    check_not_null(tool_result_event_schema_json_value);
+    check_not_null(handoff_event_schema_json_value);
+    check_not_null(trace_event_validate_json_value);
+    check_not_null(trace_event_create_json_value);
+    check_not_null(event_validate_json_value);
+    check_not_null(event_create_json_value);
+    check_not_null(tool_result_event_validate_json_value);
+    check_not_null(tool_result_event_create_json_value);
+    check_not_null(handoff_event_validate_json_value);
+    check_not_null(handoff_event_create_json_value);
     check_not_null(runnable_create);
-    check_not_null(runnable_invoke_bind);
-    check_not_null(runnable_invoke_bind_stream);
-    check_not_null(runnable_invoke_bind_log);
-    check_not_null(runnable_batch_bind);
+    check_not_null(runnable_invoke_json_value);
+    check_not_null(runnable_invoke_json_value_stream);
+    check_not_null(runnable_invoke_json_value_log);
+    check_not_null(runnable_batch_json_value);
     check_not_null(runnable_pipe);
-    check_not_null(runnable_wrap_bind);
+    check_not_null(runnable_wrap_json_value);
     check_not_null(runnable_from_state_graph);
     check_not_null(runnable_from_agent_session);
     check_not_null(runnable_from_agent_app);
@@ -1358,7 +1383,7 @@ spec("turbo langchain public api") {
     check_not_null(langchain_runnable_wrap);
     check_not_null(langchain_runnable_from_session);
     check_not_null(langchain_runnable_from_agent);
-    check_not_null(chain_run_bind_log);
+    check_not_null(chain_run_json_value_log);
     check_not_null(agent_policy_default);
     check_not_null(agent_policy_validate_path);
     check_not_null(agent_policy_is_dangerous_command);
@@ -1417,7 +1442,7 @@ spec("turbo langchain public api") {
     check_not_null(vector_store_add_indexing_action_tools);
     check_not_null(text_splitter_split_text);
     check_not_null(document_loader_load_text_file);
-    check_not_null(agent_trace_bind_sink);
+    check_not_null(agent_trace_json_value_sink);
     check_not_null(agent_runtime_create);
     check_not_null(agent_runtime_destroy);
     check_not_null(agent_runtime_remote_create);
@@ -1655,8 +1680,8 @@ spec("turbo langchain public api") {
     check_not_null(agent_app_get_capabilities);
     check_not_null(agent_app_get_tool_schemas);
     check_not_null(agent_app_get_startup_diagnostics);
-    check_not_null(agent_app_add_trace_bind_sink);
-    check_not_null(agent_app_add_observer_bind_sink);
+    check_not_null(agent_app_add_trace_json_value_sink);
+    check_not_null(agent_app_add_observer_json_value_sink);
     check_not_null(agent_app_set_trace_history_enabled);
     check_not_null(agent_app_get_thread);
     check_not_null(agent_app_get_run);
@@ -1761,8 +1786,8 @@ spec("turbo langchain public api") {
     check_not_null(agent_session_get_startup_diagnostics);
     check_not_null(agent_session_workflow_kind);
     check_not_null(agent_session_memory_namespace);
-    check_not_null(agent_session_add_trace_bind_sink);
-    check_not_null(agent_session_add_observer_bind_sink);
+    check_not_null(agent_session_add_trace_json_value_sink);
+    check_not_null(agent_session_add_observer_json_value_sink);
     check_not_null(agent_session_set_trace_history_enabled);
     check_not_null(agent_session_get_thread);
     check_not_null(agent_session_get_run);
@@ -1882,6 +1907,20 @@ spec("turbo langchain public api") {
     check_not_null(agent_runtime_exec_start);
     check_not_null(agent_runtime_exec_resume);
     check_not_null(agent_runtime_exec_fork);
+    check_not_null(agent_runtime_exec_start_controlled);
+    check_not_null(agent_runtime_exec_resume_controlled);
+    check_not_null(agent_runtime_exec_fork_controlled);
+    check_not_null(agent_execution_start);
+    check_not_null(agent_execution_resume);
+    check_not_null(agent_execution_fork);
+    check_not_null(agent_execution_retain);
+    check_not_null(agent_execution_release);
+    check_not_null(agent_execution_id);
+    check_not_null(agent_execution_cancel);
+    check_not_null(agent_execution_wait);
+    check_not_null(agent_execution_get_status);
+    check_not_null(agent_execution_result_code);
+    check_not_null(agent_execution_take_result);
     check_not_null(agent_runtime_get_thread);
     check_not_null(agent_runtime_get_run);
     check_not_null(agent_runtime_get_latest_run);
@@ -1930,8 +1969,8 @@ spec("turbo langchain public api") {
     check_not_null(agent_app_get_capabilities);
     check_not_null(agent_app_get_tool_schemas);
     check_not_null(agent_app_get_startup_diagnostics);
-    check_not_null(agent_app_add_trace_bind_sink);
-    check_not_null(agent_app_add_observer_bind_sink);
+    check_not_null(agent_app_add_trace_json_value_sink);
+    check_not_null(agent_app_add_observer_json_value_sink);
     check_not_null(agent_app_set_trace_history_enabled);
     check_not_null(agent_app_apply_thread_state_patch);
     check_not_null(agent_app_get_observability_index);
@@ -1978,8 +2017,8 @@ spec("turbo langchain public api") {
     check_not_null(agent_session_get_startup_diagnostics);
     check_not_null(agent_session_workflow_kind);
     check_not_null(agent_session_memory_namespace);
-    check_not_null(agent_session_add_trace_bind_sink);
-    check_not_null(agent_session_add_observer_bind_sink);
+    check_not_null(agent_session_add_trace_json_value_sink);
+    check_not_null(agent_session_add_observer_json_value_sink);
     check_not_null(agent_session_set_trace_history_enabled);
     check_not_null(agent_session_apply_thread_state_patch);
     check_not_null(agent_session_get_observability_index);
@@ -2020,16 +2059,16 @@ spec("turbo langchain public api") {
     check_not_null(agent_subgraph_node);
     check_not_null(agent_install_subgraph_node);
     check_not_null(agent_install_supervisor_loop);
-    check_not_null(agent_state_trace_events_bind);
-    check_not_null(agent_state_add_trace_event_bind);
-    check_not_null(agent_state_capture_trace_event_bind);
-    check_not_null(agent_state_planner_event_version_bind);
-    check_not_null(agent_state_executor_event_version_bind);
-    check_not_null(agent_state_latest_planner_event_version_bind);
-    check_not_null(agent_state_latest_executor_event_version_bind);
-    check_not_null(agent_state_completed_steps_bind);
-    check_not_null(agent_state_completed_step_bind);
-    check_not_null(agent_state_latest_completed_step_bind);
+    check_not_null(agent_state_trace_events_json_value);
+    check_not_null(agent_state_add_trace_event_json_value);
+    check_not_null(agent_state_capture_trace_event_json_value);
+    check_not_null(agent_state_planner_event_version_json_value);
+    check_not_null(agent_state_executor_event_version_json_value);
+    check_not_null(agent_state_latest_planner_event_version_json_value);
+    check_not_null(agent_state_latest_executor_event_version_json_value);
+    check_not_null(agent_state_completed_steps_json_value);
+    check_not_null(agent_state_completed_step_json_value);
+    check_not_null(agent_state_latest_completed_step_json_value);
     check_not_null(agent_state_latest_tool_results_event);
     check_not_null(agent_state_tool_results_outputs);
     check_not_null(agent_tool_result_output_item_create);
@@ -2059,8 +2098,8 @@ spec("turbo langchain public api") {
     check_not_null(agent_state_handoff_event_target_agent);
     check_not_null(agent_state_handoff_event_reason);
     check_not_null(agent_state_handoff_event_active_agent);
-    check_not_null(tool_execute_bind);
-    check_not_null(tool_runtime_invoke_bind);
+    check_not_null(tool_execute_json_value);
+    check_not_null(tool_runtime_invoke_json_value);
     check_not_null(tool_registry);
     check_not_null(tool_runtime);
     check_not_null(action_registry);
@@ -2077,8 +2116,8 @@ spec("turbo langchain public api") {
     turbo_agent_session_destroy(session);
     turbo_agent_memory_store_destroy(&memory_store);
     turbo_graph_checkpoint_destroy(checkpoint);
-    turbo_runtime_data_bind_value_destroy(chain_state);
-    turbo_runtime_data_bind_value_destroy(runtime_value);
+    turbo_runtime_json_destroy(chain_state);
+    turbo_runtime_json_destroy(runtime_value);
     turbo_free_json(&agent_state);
     turbo_free_json(&messages);
     turbo_action_tool_registry_destroy(action_registry);

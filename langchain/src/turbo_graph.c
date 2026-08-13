@@ -1,4 +1,5 @@
 #include "turbo_graph.h"
+#include "turbo_runtime_control.h"
 #include "turbo_agent_util_internal.h"
 #include <fmt.h>
 
@@ -11,7 +12,7 @@ typedef struct {
   tstr_t name;
   tstr_t semantic_id;
   turbo_graph_node_fn json_fn;
-  turbo_graph_bind_node_fn bind_fn;
+  turbo_graph_json_value_node_fn json_value_fn;
   void *user_data;
 } turbo_graph_node_entry_t;
 
@@ -20,7 +21,7 @@ typedef struct {
   size_t to_index;
   tstr_t semantic_id;
   turbo_graph_edge_predicate_fn json_predicate;
-  turbo_graph_bind_edge_predicate_fn bind_predicate;
+  turbo_graph_json_value_edge_predicate_fn json_value_predicate;
   void *user_data;
 } turbo_graph_edge_entry_t;
 
@@ -54,7 +55,7 @@ static const char *turbo_graph_node_kind_text(const turbo_graph_node_entry_t *no
     return "unknown";
   }
 
-  return node->bind_fn ? "bind" : "json";
+  return node->json_value_fn ? "bind" : "json";
 }
 
 static const char *turbo_graph_edge_predicate_kind_text(const turbo_graph_edge_entry_t *edge) {
@@ -62,8 +63,8 @@ static const char *turbo_graph_edge_predicate_kind_text(const turbo_graph_edge_e
     return "unknown";
   }
 
-  if (edge->bind_predicate) {
-    return "bind_predicate";
+  if (edge->json_value_predicate) {
+    return "json_value_predicate";
   }
   if (edge->json_predicate) {
     return "json_predicate";
@@ -309,19 +310,19 @@ static void turbo_graph_result_init(turbo_graph_run_result_t *result,
 static turbo_graph_exec_status_t turbo_graph_emit_trace_event(
     const turbo_graph_exec_ctx_t *ctx, const char *name, const char *detail, const char *payload,
     int64_t status) {
-  turbo_runtime_data_bind_value_t *event;
+  json_value_t *event;
 
   if (!ctx || !ctx->event_sink) {
     return TURBO_GRAPH_EXEC_OK;
   }
 
-  event = turbo_event_trace_create_bind(name, detail, payload, status);
+  event = turbo_event_trace_create_json_value(name, detail, payload, status);
   if (!event) {
     return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
   }
 
   ctx->event_sink(event, ctx->event_sink_user_data);
-  turbo_runtime_data_bind_value_destroy(event);
+  turbo_runtime_json_destroy(event);
   return TURBO_GRAPH_EXEC_OK;
 }
 
@@ -382,17 +383,17 @@ static turbo_graph_exec_status_t turbo_graph_reserve_edges(turbo_graph_t *graph)
 }
 
 static turbo_graph_exec_status_t
-turbo_graph_clone_bind_state(const turbo_runtime_data_bind_value_t *state,
-                             turbo_runtime_data_bind_value_t **out_state) {
+turbo_graph_clone_json_value_state(const json_value_t *state,
+                             json_value_t **out_state) {
   if (!out_state) {
     return TURBO_GRAPH_EXEC_INVALID_ARGUMENT;
   }
 
   *out_state = NULL;
   if (!state) {
-    *out_state = turbo_runtime_data_bind_value_create_null();
+    *out_state = turbo_json_create_null();
   } else {
-    *out_state = turbo_runtime_data_bind_value_clone(state);
+    *out_state = turbo_json_clone(state);
   }
 
   return *out_state ? TURBO_GRAPH_EXEC_OK : TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
@@ -414,8 +415,8 @@ static turbo_graph_exec_status_t turbo_graph_clone_json(const json_value_t *stat
   return *out_state ? TURBO_GRAPH_EXEC_OK : TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
 }
 
-static turbo_graph_exec_status_t turbo_graph_bind_state_to_json(
-    const turbo_runtime_data_bind_value_t *state, json_value_t **out_state) {
+static turbo_graph_exec_status_t turbo_graph_json_value_state_to_json(
+    const json_value_t *state, json_value_t **out_state) {
   if (!out_state) {
     return TURBO_GRAPH_EXEC_INVALID_ARGUMENT;
   }
@@ -426,7 +427,7 @@ static turbo_graph_exec_status_t turbo_graph_bind_state_to_json(
     return *out_state ? TURBO_GRAPH_EXEC_OK : TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
   }
 
-  *out_state = turbo_runtime_data_bind_value_to_json(state);
+  *out_state = turbo_json_clone(state);
   if (!*out_state) {
     return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
   }
@@ -509,10 +510,10 @@ turbo_graph_emit_checkpoint_json(const turbo_graph_t *graph,
 }
 
 static turbo_graph_exec_status_t
-turbo_graph_emit_checkpoint_bind(const turbo_graph_t *graph,
+turbo_graph_emit_checkpoint_json_value(const turbo_graph_t *graph,
                                  const turbo_graph_run_options_t *options,
                                  const char *next_node, size_t steps,
-                                 const turbo_runtime_data_bind_value_t *state) {
+                                 const json_value_t *state) {
   turbo_graph_checkpoint_t *checkpoint = NULL;
   json_value_t *json_state = NULL;
   turbo_graph_exec_status_t status;
@@ -521,7 +522,7 @@ turbo_graph_emit_checkpoint_bind(const turbo_graph_t *graph,
     return TURBO_GRAPH_EXEC_OK;
   }
 
-  status = turbo_graph_bind_state_to_json(state, &json_state);
+  status = turbo_graph_json_value_state_to_json(state, &json_state);
   if (status != TURBO_GRAPH_EXEC_OK) {
     return status;
   }
@@ -560,6 +561,24 @@ static int turbo_graph_should_interrupt_before(const turbo_graph_run_options_t *
   }
 
   return 0;
+}
+
+static turbo_graph_exec_status_t
+turbo_graph_cancel_status(const turbo_cancel_token_t *cancel_token) {
+  int status;
+
+  if (!cancel_token) {
+    return TURBO_GRAPH_EXEC_OK;
+  }
+  status = turbo_cancel_token_check(cancel_token);
+  if (status == TURBO_OK) {
+    return TURBO_GRAPH_EXEC_OK;
+  }
+  if (status == TURBO_ETIMEDOUT) {
+    return TURBO_GRAPH_EXEC_DEADLINE;
+  }
+  return status == TURBO_ECANCELED ? TURBO_GRAPH_EXEC_CANCELLED
+                                   : TURBO_GRAPH_EXEC_ERROR;
 }
 
 static turbo_graph_exec_status_t
@@ -741,13 +760,14 @@ turbo_graph_run_internal(turbo_graph_t *graph, json_value_t *state, const char *
 }
 
 static turbo_graph_exec_status_t
-turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_value_t **state_ptr,
+turbo_graph_run_internal_json_value(turbo_graph_t *graph, json_value_t **state_ptr,
                               const char *start_node, size_t initial_steps,
                               const turbo_graph_run_options_t *options,
-                              turbo_event_sink_bind_fn event_sink,
+                              const turbo_cancel_token_t *cancel_token,
+                              turbo_event_sink_json_value_fn event_sink,
                               void *event_sink_user_data,
                               turbo_graph_run_result_t *out_result) {
-  turbo_runtime_data_bind_value_t *state;
+  json_value_t *state;
   const char *current_node;
   const char *last_node = NULL;
   size_t steps = initial_steps;
@@ -777,6 +797,22 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
     size_t outgoing_count = 0;
     int node_status;
 
+    checkpoint_status = turbo_graph_cancel_status(cancel_token);
+    if (checkpoint_status != TURBO_GRAPH_EXEC_OK) {
+      turbo_graph_exec_status_t cancel_status = checkpoint_status;
+
+      checkpoint_status = turbo_graph_emit_checkpoint_json_value(
+          graph, options, current_node, steps, state);
+      if (checkpoint_status != TURBO_GRAPH_EXEC_OK) {
+        turbo_graph_result_init(out_result, checkpoint_status, last_node,
+                                current_node, steps);
+        return checkpoint_status;
+      }
+      turbo_graph_result_init(out_result, cancel_status, last_node, current_node,
+                              steps);
+      return cancel_status;
+    }
+
     if (max_steps > 0 && steps >= max_steps) {
       turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_STEP_LIMIT, last_node, current_node,
                               steps);
@@ -785,7 +821,7 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
 
     if (!skip_initial_interrupt && turbo_graph_should_interrupt_before(options, current_node)) {
       checkpoint_status =
-          turbo_graph_emit_checkpoint_bind(graph, options, current_node, steps, state);
+          turbo_graph_emit_checkpoint_json_value(graph, options, current_node, steps, state);
       if (checkpoint_status != TURBO_GRAPH_EXEC_OK) {
         turbo_graph_result_init(out_result, checkpoint_status, last_node, current_node, steps);
         return checkpoint_status;
@@ -806,7 +842,7 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.graph = graph;
-    ctx.bind_state = state;
+    ctx.json_value_state = state;
     ctx.current_node = graph->nodes[current_index].name;
     ctx.step = steps;
     ctx.event_sink = event_sink;
@@ -819,11 +855,11 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
       return checkpoint_status;
     }
 
-    if (graph->nodes[current_index].bind_fn) {
-      node_status = graph->nodes[current_index].bind_fn(&ctx, graph->nodes[current_index].user_data);
+    if (graph->nodes[current_index].json_value_fn) {
+      node_status = graph->nodes[current_index].json_value_fn(&ctx, graph->nodes[current_index].user_data);
     } else if (graph->nodes[current_index].json_fn) {
-      json_value_t *json_state = turbo_runtime_data_bind_value_to_json(state);
-      turbo_runtime_data_bind_value_t *updated_state;
+      json_value_t *json_state = turbo_json_clone(state);
+      json_value_t *updated_state;
 
       if (!json_state) {
         turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_OUT_OF_MEMORY, last_node, current_node,
@@ -843,17 +879,17 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
         }
         ctx.next_node = graph->nodes[next_index].name;
       }
-      updated_state = turbo_runtime_data_bind_value_from_json(json_state);
+      updated_state = turbo_json_clone(json_state);
       turbo_free_json(&json_state);
       if (!updated_state) {
         turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_OUT_OF_MEMORY, last_node, current_node,
                                 steps);
         return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
       }
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(state);
       state = updated_state;
       *state_ptr = state;
-      ctx.bind_state = state;
+      ctx.json_value_state = state;
       ctx.state = NULL;
     } else {
       turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_INVALID_ARGUMENT, last_node, current_node,
@@ -885,7 +921,7 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
         }
         resolved_next = graph->nodes[next_index].name;
         checkpoint_status =
-            turbo_graph_emit_checkpoint_bind(graph, options, resolved_next, steps, state);
+            turbo_graph_emit_checkpoint_json_value(graph, options, resolved_next, steps, state);
         if (checkpoint_status != TURBO_GRAPH_EXEC_OK) {
           turbo_graph_result_init(out_result, checkpoint_status, last_node, resolved_next, steps);
           return checkpoint_status;
@@ -921,15 +957,15 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
         }
 
         outgoing_count++;
-        if (!graph->edges[i].bind_predicate && !graph->edges[i].json_predicate) {
+        if (!graph->edges[i].json_value_predicate && !graph->edges[i].json_predicate) {
           resolved_next = graph->nodes[graph->edges[i].to_index].name;
           break;
         }
 
-        if (graph->edges[i].bind_predicate) {
-          predicate_status = graph->edges[i].bind_predicate(&ctx, graph->edges[i].user_data);
+        if (graph->edges[i].json_value_predicate) {
+          predicate_status = graph->edges[i].json_value_predicate(&ctx, graph->edges[i].user_data);
         } else {
-          json_value_t *json_state = turbo_runtime_data_bind_value_to_json(state);
+          json_value_t *json_state = turbo_json_clone(state);
 
           if (!json_state) {
             turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_OUT_OF_MEMORY, last_node, NULL,
@@ -979,7 +1015,7 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
 
     if (turbo_graph_should_interrupt_before(options, resolved_next)) {
       checkpoint_status =
-          turbo_graph_emit_checkpoint_bind(graph, options, resolved_next, steps, state);
+          turbo_graph_emit_checkpoint_json_value(graph, options, resolved_next, steps, state);
       if (checkpoint_status != TURBO_GRAPH_EXEC_OK) {
         turbo_graph_result_init(out_result, checkpoint_status, last_node, resolved_next, steps);
         return checkpoint_status;
@@ -991,9 +1027,16 @@ turbo_graph_run_internal_bind(turbo_graph_t *graph, turbo_runtime_data_bind_valu
     }
 
     checkpoint_status =
-        turbo_graph_emit_checkpoint_bind(graph, options, resolved_next, steps, state);
+        turbo_graph_emit_checkpoint_json_value(graph, options, resolved_next, steps, state);
     if (checkpoint_status != TURBO_GRAPH_EXEC_OK) {
       turbo_graph_result_init(out_result, checkpoint_status, last_node, resolved_next, steps);
+      return checkpoint_status;
+    }
+
+    checkpoint_status = turbo_graph_cancel_status(cancel_token);
+    if (checkpoint_status != TURBO_GRAPH_EXEC_OK) {
+      turbo_graph_result_init(out_result, checkpoint_status, last_node,
+                              resolved_next, steps);
       return checkpoint_status;
     }
 
@@ -1085,7 +1128,7 @@ turbo_graph_exec_status_t turbo_graph_add_node_ex(turbo_graph_t *graph, const ch
   graph->nodes[graph->node_count].name = name_copy;
   graph->nodes[graph->node_count].semantic_id = semantic_id_copy;
   graph->nodes[graph->node_count].json_fn = fn;
-  graph->nodes[graph->node_count].bind_fn = NULL;
+  graph->nodes[graph->node_count].json_value_fn = NULL;
   graph->nodes[graph->node_count].user_data = user_data;
   graph->node_count++;
   turbo_graph_invalidate_topology_id(graph);
@@ -1093,14 +1136,14 @@ turbo_graph_exec_status_t turbo_graph_add_node_ex(turbo_graph_t *graph, const ch
 }
 
 turbo_graph_exec_status_t
-turbo_graph_add_bind_node(turbo_graph_t *graph, const char *name, turbo_graph_bind_node_fn fn,
+turbo_graph_add_json_value_node(turbo_graph_t *graph, const char *name, turbo_graph_json_value_node_fn fn,
                           void *user_data) {
-  return turbo_graph_add_bind_node_ex(graph, name, NULL, fn, user_data);
+  return turbo_graph_add_json_value_node_ex(graph, name, NULL, fn, user_data);
 }
 
-turbo_graph_exec_status_t turbo_graph_add_bind_node_ex(turbo_graph_t *graph, const char *name,
+turbo_graph_exec_status_t turbo_graph_add_json_value_node_ex(turbo_graph_t *graph, const char *name,
                                                        const char *semantic_id,
-                                                       turbo_graph_bind_node_fn fn,
+                                                       turbo_graph_json_value_node_fn fn,
                                                        void *user_data) {
   char *name_copy;
   char *semantic_id_copy;
@@ -1131,7 +1174,7 @@ turbo_graph_exec_status_t turbo_graph_add_bind_node_ex(turbo_graph_t *graph, con
   graph->nodes[graph->node_count].name = name_copy;
   graph->nodes[graph->node_count].semantic_id = semantic_id_copy;
   graph->nodes[graph->node_count].json_fn = NULL;
-  graph->nodes[graph->node_count].bind_fn = fn;
+  graph->nodes[graph->node_count].json_value_fn = fn;
   graph->nodes[graph->node_count].user_data = user_data;
   graph->node_count++;
   turbo_graph_invalidate_topology_id(graph);
@@ -1181,7 +1224,7 @@ turbo_graph_exec_status_t turbo_graph_add_edge_ex(turbo_graph_t *graph, const ch
   graph->edges[graph->edge_count].to_index = to_index;
   graph->edges[graph->edge_count].semantic_id = semantic_id_copy;
   graph->edges[graph->edge_count].json_predicate = predicate;
-  graph->edges[graph->edge_count].bind_predicate = NULL;
+  graph->edges[graph->edge_count].json_value_predicate = NULL;
   graph->edges[graph->edge_count].user_data = user_data;
   graph->edge_count++;
   turbo_graph_invalidate_topology_id(graph);
@@ -1189,15 +1232,15 @@ turbo_graph_exec_status_t turbo_graph_add_edge_ex(turbo_graph_t *graph, const ch
 }
 
 turbo_graph_exec_status_t
-turbo_graph_add_bind_edge(turbo_graph_t *graph, const char *from, const char *to,
-                          turbo_graph_bind_edge_predicate_fn predicate, void *user_data) {
-  return turbo_graph_add_bind_edge_ex(graph, from, to, NULL, predicate, user_data);
+turbo_graph_add_json_value_edge(turbo_graph_t *graph, const char *from, const char *to,
+                          turbo_graph_json_value_edge_predicate_fn predicate, void *user_data) {
+  return turbo_graph_add_json_value_edge_ex(graph, from, to, NULL, predicate, user_data);
 }
 
 turbo_graph_exec_status_t
-turbo_graph_add_bind_edge_ex(turbo_graph_t *graph, const char *from, const char *to,
+turbo_graph_add_json_value_edge_ex(turbo_graph_t *graph, const char *from, const char *to,
                              const char *semantic_id,
-                             turbo_graph_bind_edge_predicate_fn predicate, void *user_data) {
+                             turbo_graph_json_value_edge_predicate_fn predicate, void *user_data) {
   size_t from_index;
   size_t to_index;
   char *semantic_id_copy;
@@ -1229,7 +1272,7 @@ turbo_graph_add_bind_edge_ex(turbo_graph_t *graph, const char *from, const char 
   graph->edges[graph->edge_count].to_index = to_index;
   graph->edges[graph->edge_count].semantic_id = semantic_id_copy;
   graph->edges[graph->edge_count].json_predicate = NULL;
-  graph->edges[graph->edge_count].bind_predicate = predicate;
+  graph->edges[graph->edge_count].json_value_predicate = predicate;
   graph->edges[graph->edge_count].user_data = user_data;
   graph->edge_count++;
   turbo_graph_invalidate_topology_id(graph);
@@ -1322,19 +1365,30 @@ turbo_graph_run(turbo_graph_t *graph, json_value_t *state,
 }
 
 turbo_graph_exec_status_t
-turbo_graph_run_bind(turbo_graph_t *graph, const turbo_runtime_data_bind_value_t *state,
+turbo_graph_run_json_value(turbo_graph_t *graph, const json_value_t *state,
                      const turbo_graph_run_options_t *options,
                      turbo_graph_run_result_t *out_result,
-                     turbo_runtime_data_bind_value_t **out_state) {
-  return turbo_graph_run_bind_stream(graph, state, options, NULL, NULL, out_result, out_state);
+                     json_value_t **out_state) {
+  return turbo_graph_run_json_value_stream(graph, state, options, NULL, NULL, out_result, out_state);
 }
 
-turbo_graph_exec_status_t turbo_graph_run_bind_stream(
-    turbo_graph_t *graph, const turbo_runtime_data_bind_value_t *state,
-    const turbo_graph_run_options_t *options, turbo_event_sink_bind_fn event_sink,
+turbo_graph_exec_status_t turbo_graph_run_json_value_stream(
+    turbo_graph_t *graph, const json_value_t *state,
+    const turbo_graph_run_options_t *options, turbo_event_sink_json_value_fn event_sink,
     void *event_sink_user_data, turbo_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state) {
-  turbo_runtime_data_bind_value_t *bound_state = NULL;
+    json_value_t **out_state) {
+  return turbo_graph_run_json_value_stream_controlled(
+      graph, state, options, NULL, event_sink, event_sink_user_data, out_result,
+      out_state);
+}
+
+turbo_graph_exec_status_t turbo_graph_run_json_value_stream_controlled(
+    turbo_graph_t *graph, const json_value_t *state,
+    const turbo_graph_run_options_t *options,
+    const turbo_cancel_token_t *cancel_token,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    turbo_graph_run_result_t *out_result, json_value_t **out_state) {
+  json_value_t *bound_state = NULL;
   turbo_graph_exec_status_t status;
 
   if (!out_state) {
@@ -1343,18 +1397,22 @@ turbo_graph_exec_status_t turbo_graph_run_bind_stream(
 
   *out_state = NULL;
 
-  status = turbo_graph_clone_bind_state(state, &bound_state);
+  status = turbo_graph_clone_json_value_state(state, &bound_state);
   if (status != TURBO_GRAPH_EXEC_OK) {
     return status;
   }
 
-  status = turbo_graph_run_internal_bind(graph, &bound_state,
+  status = turbo_graph_run_internal_json_value(graph, &bound_state,
                                          options && options->start_node ? options->start_node
                                                                          : turbo_graph_get_entry(graph),
-                                         0, options, event_sink, event_sink_user_data, out_result);
+                                         0, options, cancel_token, event_sink,
+                                         event_sink_user_data, out_result);
   if (status != TURBO_GRAPH_EXEC_OK && status != TURBO_GRAPH_EXEC_STOP &&
-      status != TURBO_GRAPH_EXEC_INTERRUPTED && status != TURBO_GRAPH_EXEC_ERROR) {
-    turbo_runtime_data_bind_value_destroy(bound_state);
+      status != TURBO_GRAPH_EXEC_INTERRUPTED &&
+      status != TURBO_GRAPH_EXEC_CANCELLED &&
+      status != TURBO_GRAPH_EXEC_DEADLINE &&
+      status != TURBO_GRAPH_EXEC_ERROR) {
+    turbo_runtime_json_destroy(bound_state);
     return status;
   }
 
@@ -1389,20 +1447,32 @@ turbo_graph_run_checkpoint(turbo_graph_t *graph, turbo_graph_checkpoint_t *check
 }
 
 turbo_graph_exec_status_t
-turbo_graph_run_checkpoint_bind(turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
+turbo_graph_run_checkpoint_json_value(turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
                                 const turbo_graph_run_options_t *options,
                                 turbo_graph_run_result_t *out_result,
-                                turbo_runtime_data_bind_value_t **out_state) {
-  return turbo_graph_run_checkpoint_bind_stream(graph, checkpoint, options, NULL, NULL, out_result,
+                                json_value_t **out_state) {
+  return turbo_graph_run_checkpoint_json_value_stream(graph, checkpoint, options, NULL, NULL, out_result,
                                                 out_state);
 }
 
-turbo_graph_exec_status_t turbo_graph_run_checkpoint_bind_stream(
+turbo_graph_exec_status_t turbo_graph_run_checkpoint_json_value_stream(
     turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
-    const turbo_graph_run_options_t *options, turbo_event_sink_bind_fn event_sink,
+    const turbo_graph_run_options_t *options, turbo_event_sink_json_value_fn event_sink,
     void *event_sink_user_data, turbo_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state) {
-  turbo_runtime_data_bind_value_t *bound_state = NULL;
+    json_value_t **out_state) {
+  return turbo_graph_run_checkpoint_json_value_stream_controlled(
+      graph, checkpoint, options, NULL, event_sink, event_sink_user_data,
+      out_result, out_state);
+}
+
+turbo_graph_exec_status_t
+turbo_graph_run_checkpoint_json_value_stream_controlled(
+    turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
+    const turbo_graph_run_options_t *options,
+    const turbo_cancel_token_t *cancel_token,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    turbo_graph_run_result_t *out_result, json_value_t **out_state) {
+  json_value_t *bound_state = NULL;
   turbo_graph_exec_status_t status;
   int matches;
 
@@ -1423,19 +1493,22 @@ turbo_graph_exec_status_t turbo_graph_run_checkpoint_bind_stream(
   }
 
   *out_state = NULL;
-  bound_state = turbo_runtime_data_bind_value_from_json(checkpoint->state);
+  bound_state = turbo_json_clone(checkpoint->state);
   if (!bound_state) {
     turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_OUT_OF_MEMORY, NULL, checkpoint->next_node,
                             checkpoint->steps);
     return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
   }
 
-  status = turbo_graph_run_internal_bind(graph, &bound_state, checkpoint->next_node,
-                                         checkpoint->steps, options, event_sink,
+  status = turbo_graph_run_internal_json_value(graph, &bound_state, checkpoint->next_node,
+                                         checkpoint->steps, options, cancel_token, event_sink,
                                          event_sink_user_data, out_result);
   if (status != TURBO_GRAPH_EXEC_OK && status != TURBO_GRAPH_EXEC_STOP &&
-      status != TURBO_GRAPH_EXEC_INTERRUPTED && status != TURBO_GRAPH_EXEC_ERROR) {
-    turbo_runtime_data_bind_value_destroy(bound_state);
+      status != TURBO_GRAPH_EXEC_INTERRUPTED &&
+      status != TURBO_GRAPH_EXEC_CANCELLED &&
+      status != TURBO_GRAPH_EXEC_DEADLINE &&
+      status != TURBO_GRAPH_EXEC_ERROR) {
+    turbo_runtime_json_destroy(bound_state);
     return status;
   }
 
@@ -1477,13 +1550,13 @@ turbo_graph_checkpoint_create(const char *next_node, size_t steps, const json_va
 }
 
 turbo_graph_exec_status_t
-turbo_graph_checkpoint_create_bind(const char *next_node, size_t steps,
-                                   const turbo_runtime_data_bind_value_t *state,
+turbo_graph_checkpoint_create_json_value(const char *next_node, size_t steps,
+                                   const json_value_t *state,
                                    turbo_graph_checkpoint_t **out_checkpoint) {
   json_value_t *json_state = NULL;
   turbo_graph_exec_status_t status;
 
-  status = turbo_graph_bind_state_to_json(state, &json_state);
+  status = turbo_graph_json_value_state_to_json(state, &json_state);
   if (status != TURBO_GRAPH_EXEC_OK) {
     return status;
   }
@@ -1636,11 +1709,11 @@ json_value_t *turbo_graph_checkpoint_state(turbo_graph_checkpoint_t *checkpoint)
   return checkpoint ? checkpoint->state : NULL;
 }
 
-turbo_runtime_data_bind_value_t *
-turbo_graph_checkpoint_state_bind(const turbo_graph_checkpoint_t *checkpoint) {
+json_value_t *
+turbo_graph_checkpoint_state_json_value(const turbo_graph_checkpoint_t *checkpoint) {
   if (!checkpoint) {
     return NULL;
   }
 
-  return turbo_runtime_data_bind_value_from_json(checkpoint->state);
+  return turbo_json_clone(checkpoint->state);
 }

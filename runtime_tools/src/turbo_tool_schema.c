@@ -3,21 +3,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-static turbo_runtime_data_bind_value_t *
-turbo_tool_schema_clone_bind_value(const turbo_runtime_data_bind_value_t *value) {
+static json_value_t *
+turbo_tool_schema_clone_json_value(const json_value_t *value) {
   json_value_t *json_value;
-  turbo_runtime_data_bind_value_t *clone;
+  json_value_t *clone;
 
   if (!value) {
     return NULL;
   }
 
-  json_value = turbo_runtime_data_bind_value_to_json(value);
+  json_value = turbo_json_clone(value);
   if (!json_value) {
     return NULL;
   }
 
-  clone = turbo_runtime_data_bind_value_from_json(json_value);
+  clone = turbo_json_clone(json_value);
   turbo_free_json(&json_value);
   return clone;
 }
@@ -43,16 +43,16 @@ static json_value_t *turbo_tool_schema_parse_parameters_json(const char *paramet
   return parameters;
 }
 
-turbo_runtime_data_bind_value_t *
-turbo_tool_schema_parse_parameters_bind(const char *parameters_json, int strict) {
+json_value_t *
+turbo_tool_schema_parse_parameters_json_value(const char *parameters_json, int strict) {
   json_value_t *parameters = turbo_tool_schema_parse_parameters_json(parameters_json, strict);
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   if (!parameters) {
     return NULL;
   }
 
-  bound = turbo_runtime_data_bind_value_from_json(parameters);
+  bound = turbo_json_clone(parameters);
   turbo_free_json(&parameters);
   return bound;
 }
@@ -63,7 +63,7 @@ static json_value_t *turbo_tool_schema_parse_parameters(const turbo_tool_definit
   }
 
   if (definition->parameters_schema) {
-    return turbo_runtime_data_bind_value_to_json(definition->parameters_schema);
+    return turbo_json_clone(definition->parameters_schema);
   }
   if (!definition->parameters_json) {
     return NULL;
@@ -243,94 +243,94 @@ json_value_t *turbo_tool_schema_build_openai_tools(const turbo_tool_registry_t *
   return tools;
 }
 
-turbo_runtime_data_bind_value_t *
-turbo_tool_schema_build_registry_bind(const turbo_tool_registry_t *registry) {
-  turbo_runtime_data_bind_value_t *tools;
+json_value_t *
+turbo_tool_schema_build_registry_json_value(const turbo_tool_registry_t *registry) {
+  json_value_t *tools;
   size_t i;
   size_t count = turbo_tool_registry_count(registry);
 
-  tools = turbo_runtime_data_bind_value_create_array();
+  tools = turbo_json_create_array();
   if (!tools) {
     return NULL;
   }
 
   for (i = 0; i < count; ++i) {
     turbo_tool_definition_t definition = {0};
-    turbo_runtime_data_bind_value_t *tool = NULL;
-    turbo_runtime_data_bind_value_t *name = NULL;
-    turbo_runtime_data_bind_value_t *description = NULL;
-    turbo_runtime_data_bind_value_t *strict = NULL;
-    turbo_runtime_data_bind_value_t *parameters = NULL;
+    json_value_t *tool = NULL;
+    json_value_t *name = NULL;
+    json_value_t *description = NULL;
+    json_value_t *strict = NULL;
+    json_value_t *parameters = NULL;
 
     if (turbo_tool_registry_get_definition(registry, i, &definition) != TURBO_TOOL_OK) {
-      turbo_runtime_data_bind_value_destroy(tools);
+      turbo_runtime_json_destroy(tools);
       return NULL;
     }
 
-    tool = turbo_runtime_data_bind_value_create_object();
-    name = turbo_runtime_data_bind_value_create_string(definition.name);
-    description = turbo_runtime_data_bind_value_create_string(definition.description);
-    strict = turbo_runtime_data_bind_value_create_bool(definition.strict ? 1 : 0);
+    tool = turbo_json_create_object();
+    name = turbo_json_create_string(definition.name);
+    description = turbo_json_create_string(definition.description);
+    strict = turbo_json_create_bool(definition.strict ? 1 : 0);
     if (definition.parameters_schema) {
-      parameters = turbo_tool_schema_clone_bind_value(definition.parameters_schema);
+      parameters = turbo_tool_schema_clone_json_value(definition.parameters_schema);
     } else {
       parameters =
-          turbo_tool_schema_parse_parameters_bind(definition.parameters_json, definition.strict);
+          turbo_tool_schema_parse_parameters_json_value(definition.parameters_json, definition.strict);
     }
     if (!tool || !name || !description || !strict || !parameters) {
-      turbo_runtime_data_bind_value_destroy(name);
-      turbo_runtime_data_bind_value_destroy(description);
-      turbo_runtime_data_bind_value_destroy(strict);
-      turbo_runtime_data_bind_value_destroy(parameters);
-      turbo_runtime_data_bind_value_destroy(tool);
-      turbo_runtime_data_bind_value_destroy(tools);
+      turbo_runtime_json_destroy(name);
+      turbo_runtime_json_destroy(description);
+      turbo_runtime_json_destroy(strict);
+      turbo_runtime_json_destroy(parameters);
+      turbo_runtime_json_destroy(tool);
+      turbo_runtime_json_destroy(tools);
       return NULL;
     }
 
-    if (turbo_runtime_data_bind_object_set(tool, "name", name) != TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(name);
-      turbo_runtime_data_bind_value_destroy(description);
-      turbo_runtime_data_bind_value_destroy(strict);
-      turbo_runtime_data_bind_value_destroy(parameters);
-      turbo_runtime_data_bind_value_destroy(tool);
-      turbo_runtime_data_bind_value_destroy(tools);
+    if (turbo_runtime_json_object_set(tool, "name", name) != TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(name);
+      turbo_runtime_json_destroy(description);
+      turbo_runtime_json_destroy(strict);
+      turbo_runtime_json_destroy(parameters);
+      turbo_runtime_json_destroy(tool);
+      turbo_runtime_json_destroy(tools);
       return NULL;
     }
     name = NULL;
 
-    if (turbo_runtime_data_bind_object_set(tool, "description", description) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(description);
-      turbo_runtime_data_bind_value_destroy(strict);
-      turbo_runtime_data_bind_value_destroy(parameters);
-      turbo_runtime_data_bind_value_destroy(tool);
-      turbo_runtime_data_bind_value_destroy(tools);
+    if (turbo_runtime_json_object_set(tool, "description", description) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(description);
+      turbo_runtime_json_destroy(strict);
+      turbo_runtime_json_destroy(parameters);
+      turbo_runtime_json_destroy(tool);
+      turbo_runtime_json_destroy(tools);
       return NULL;
     }
     description = NULL;
 
-    if (turbo_runtime_data_bind_object_set(tool, "strict", strict) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(strict);
-      turbo_runtime_data_bind_value_destroy(parameters);
-      turbo_runtime_data_bind_value_destroy(tool);
-      turbo_runtime_data_bind_value_destroy(tools);
+    if (turbo_runtime_json_object_set(tool, "strict", strict) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(strict);
+      turbo_runtime_json_destroy(parameters);
+      turbo_runtime_json_destroy(tool);
+      turbo_runtime_json_destroy(tools);
       return NULL;
     }
     strict = NULL;
 
-    if (turbo_runtime_data_bind_object_set(tool, "parameters", parameters) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(parameters);
-      turbo_runtime_data_bind_value_destroy(tool);
-      turbo_runtime_data_bind_value_destroy(tools);
+    if (turbo_runtime_json_object_set(tool, "parameters", parameters) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(parameters);
+      turbo_runtime_json_destroy(tool);
+      turbo_runtime_json_destroy(tools);
       return NULL;
     }
     parameters = NULL;
 
-    if (turbo_runtime_data_bind_array_append(tools, tool) != TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(tool);
-      turbo_runtime_data_bind_value_destroy(tools);
+    if (turbo_runtime_json_array_append(tools, tool) != TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(tool);
+      turbo_runtime_json_destroy(tools);
       return NULL;
     }
     tool = NULL;

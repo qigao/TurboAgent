@@ -1,13 +1,15 @@
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
+#include "turbo_agent_event_internal.h"
+#include "turbo_agent_request_common_internal.h"
+#include "turbo_agent_request_messages_internal.h"
+#include "turbo_agent_request_text_internal.h"
+#include "turbo_agent_runtime_internal.h"
 #include "turbo_agent_state_core_internal.h"
 #include "turbo_agent_state_memory_internal.h"
-#include "turbo_agent_request_common_internal.h"
-#include "turbo_agent_request_text_internal.h"
-#include "turbo_agent_request_messages_internal.h"
-#include "turbo_agent_event_internal.h"
-#include "turbo_agent_runtime_internal.h"
 
 #include "turbo_prompt.h"
+
+#include <turbo_str.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -175,7 +177,7 @@ static int turbo_agent_request_append_chat_tool_results_messages(json_value_t *m
 }
 
 static int turbo_agent_request_replay_message_events(
-    const json_value_t *events, json_value_t *messages,
+    const json_value_t *events, size_t start, json_value_t *messages,
     turbo_agent_request_message_event_append_fn append_model_event,
     turbo_agent_request_message_event_append_fn append_tool_results_event) {
   size_t i;
@@ -188,7 +190,11 @@ static int turbo_agent_request_replay_message_events(
     return 0;
   }
 
-  for (i = 0; i < turbo_json_array_size(events); ++i) {
+  if (start > turbo_json_array_size(events)) {
+    return -1;
+  }
+
+  for (i = start; i < turbo_json_array_size(events); ++i) {
     const json_value_t *event = turbo_json_array_get(events, i);
     if (turbo_agent_event_kind_is(event, "model")) {
       if (!append_model_event || append_model_event(messages, event) != 0) {
@@ -204,8 +210,8 @@ static int turbo_agent_request_replay_message_events(
   return 0;
 }
 
-CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages(
-    const turbo_agent_t *agent, const json_value_t *state) {
+CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages_with_options(
+    const turbo_agent_t *agent, const json_value_t *state, int include_instructions) {
   const json_value_t *input;
   const json_value_t *events;
   json_value_t *messages;
@@ -221,11 +227,14 @@ CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages(
     return NULL;
   }
 
-  effective_instructions = turbo_agent_build_effective_instructions(agent, state);
-  if ((agent->instructions || turbo_agent_state_memory_layer_count(state) > 0) &&
-      !effective_instructions) {
-    turbo_free_json(&messages);
-    return NULL;
+  effective_instructions = NULL;
+  if (include_instructions) {
+    effective_instructions = turbo_agent_build_effective_instructions(agent, state);
+    if ((agent->instructions || turbo_agent_state_memory_layer_count(state) > 0) &&
+        !effective_instructions) {
+      turbo_free_json(&messages);
+      return NULL;
+    }
   }
 
   if (effective_instructions && effective_instructions[0] != '\0') {
@@ -238,6 +247,36 @@ CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages(
     turbo_json_array_add(messages, system_message);
   }
   free(effective_instructions);
+
+  if (agent->context_projection_active) {
+    char *summary_json;
+    tstr_t summary_text;
+    json_value_t *summary_message;
+
+    if (!agent->context_summary) {
+      turbo_free_json(&messages);
+      return NULL;
+    }
+    summary_json = turbo_json_serialize(agent->context_summary, NULL);
+    if (!summary_json) {
+      turbo_free_json(&messages);
+      return NULL;
+    }
+    summary_text = tstr_dup("Committed conversation summary:\n");
+    if (summary_text) summary_text = tstr_cat(summary_text, summary_json);
+    turbo_json_serialize_free(summary_json);
+    if (!summary_text) {
+      turbo_free_json(&messages);
+      return NULL;
+    }
+    summary_message = turbo_prompt_message_create("system", summary_text);
+    tstr_free(summary_text);
+    if (!summary_message) {
+      turbo_free_json(&messages);
+      return NULL;
+    }
+    turbo_json_array_add(messages, summary_message);
+  }
 
   input = turbo_agent_state_get_array_const(state, "input");
   if (!input) {
@@ -254,13 +293,18 @@ CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages(
   }
 
   events = turbo_agent_state_get_array_const(state, "events");
-  if (turbo_agent_request_replay_message_events(events, messages,
-                                                turbo_agent_request_append_chat_model_event_message,
-                                                turbo_agent_request_append_chat_tool_results_messages) !=
-      0) {
+  if (turbo_agent_request_replay_message_events(
+          events, agent->context_projection_active ? agent->context_event_start : 0, messages,
+          turbo_agent_request_append_chat_model_event_message,
+          turbo_agent_request_append_chat_tool_results_messages) != 0) {
     turbo_free_json(&messages);
     return NULL;
   }
 
   return messages;
+}
+
+CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages(const turbo_agent_t *agent,
+                                                                     const json_value_t *state) {
+  return turbo_agent_request_build_canonical_messages_with_options(agent, state, 1);
 }

@@ -13,6 +13,9 @@
 #include "turbo_agent.h"
 #include "turbo_agent_app.h"
 #include "turbo_agent_extensions.h"
+#include "turbo_agent_execution.h"
+#include "turbo_agent_context.h"
+#include "turbo_agent_inbox.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_agent_memory_store.h"
 #include "turbo_agent_remote_app.h"
@@ -24,6 +27,7 @@
 #include "turbo_agent_session.h"
 #include "turbo_agent_subagent.h"
 #include "turbo_agent_subgraph.h"
+#include "turbo_agent_workspace.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_graph.h"
 #include "turbo_agent_workflow.h"
@@ -38,7 +42,7 @@
 #include "turbo_state_graph_runtime.h"
 #include "turbo_state_graph_store.h"
 #include "turbo_text_splitter.h"
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 #include "turbo_tool.h"
 #include "turbo_tool_runtime.h"
 #include "turbo_tool_registry.h"
@@ -59,12 +63,12 @@ typedef turbo_state_graph_t turbo_langchain_state_graph_t;
 typedef turbo_tool_registry_t turbo_langchain_tool_registry_t;
 
 /* Prompt */
-CXX_C_API turbo_runtime_data_bind_value_t *turbo_langchain_messages_create(void);
+CXX_C_API json_value_t *turbo_langchain_messages_create(void);
 CXX_C_API turbo_prompt_status_t
-turbo_langchain_messages_append(turbo_runtime_data_bind_value_t *messages,
+turbo_langchain_messages_append(json_value_t *messages,
                                 const char *role, const char *content);
-CXX_C_API char *turbo_langchain_prompt_render_bind(
-    const char *template_text, const turbo_runtime_data_bind_value_t *input);
+CXX_C_API char *turbo_langchain_prompt_render_json_value(
+    const char *template_text, const json_value_t *input);
 
 /* Runnable */
 CXX_C_API turbo_langchain_runnable_t *
@@ -72,21 +76,21 @@ turbo_langchain_runnable_create(const turbo_runnable_config_t *config);
 CXX_C_API void turbo_langchain_runnable_destroy(turbo_langchain_runnable_t *runnable);
 CXX_C_API int turbo_langchain_runnable_invoke(
     const turbo_langchain_runnable_t *runnable,
-    const turbo_runtime_data_bind_value_t *input,
-    turbo_runtime_data_bind_value_t **out_output);
+    const json_value_t *input,
+    json_value_t **out_output);
 CXX_C_API int turbo_langchain_runnable_stream(
     const turbo_langchain_runnable_t *runnable,
-    const turbo_runtime_data_bind_value_t *input,
-    turbo_event_sink_bind_fn event_sink, void *event_sink_user_data,
-    turbo_runtime_data_bind_value_t **out_output);
+    const json_value_t *input,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    json_value_t **out_output);
 CXX_C_API int turbo_langchain_runnable_log(
     const turbo_langchain_runnable_t *runnable,
-    const turbo_runtime_data_bind_value_t *input, turbo_langchain_event_log_t *log,
-    turbo_runtime_data_bind_value_t **out_output);
+    const json_value_t *input, turbo_langchain_event_log_t *log,
+    json_value_t **out_output);
 CXX_C_API int turbo_langchain_runnable_batch(
     const turbo_langchain_runnable_t *runnable,
-    const turbo_runtime_data_bind_value_t *inputs,
-    turbo_runtime_data_bind_value_t **out_outputs);
+    const json_value_t *inputs,
+    json_value_t **out_outputs);
 CXX_C_API turbo_langchain_runnable_t *turbo_langchain_pipe(
     const turbo_langchain_runnable_t *first,
     const turbo_langchain_runnable_t *second);
@@ -120,16 +124,16 @@ CXX_C_API turbo_chain_status_t turbo_langchain_chain_add_tools(
     turbo_langchain_chain_t *chain, const char *name,
     const turbo_langchain_tool_registry_t *tools);
 CXX_C_API turbo_chain_status_t turbo_langchain_chain_run(
-    turbo_langchain_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-    turbo_runtime_data_bind_value_t **out_state);
+    turbo_langchain_chain_t *chain, const json_value_t *state,
+    json_value_t **out_state);
 CXX_C_API turbo_chain_status_t turbo_langchain_chain_stream(
-    turbo_langchain_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-    turbo_event_sink_bind_fn event_sink, void *event_sink_user_data,
-    turbo_runtime_data_bind_value_t **out_state);
+    turbo_langchain_chain_t *chain, const json_value_t *state,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    json_value_t **out_state);
 CXX_C_API turbo_chain_status_t turbo_langchain_chain_log(
-    turbo_langchain_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-    turbo_langchain_event_log_t *log, turbo_runtime_data_bind_value_t **out_state);
-CXX_C_API turbo_runtime_data_bind_value_t *turbo_langchain_chain_state_create(void);
+    turbo_langchain_chain_t *chain, const json_value_t *state,
+    turbo_langchain_event_log_t *log, json_value_t **out_state);
+CXX_C_API json_value_t *turbo_langchain_chain_state_create(void);
 
 /* Tools */
 CXX_C_API turbo_langchain_tool_registry_t *turbo_langchain_tools_create(void);
@@ -139,10 +143,10 @@ CXX_C_API turbo_tool_status_t turbo_langchain_tools_add(
 CXX_C_API turbo_tool_status_t turbo_langchain_tool_invoke(
     const turbo_langchain_tool_registry_t *tools, const char *name,
     const char *arguments_json, char **out_output);
-CXX_C_API turbo_tool_status_t turbo_langchain_tool_invoke_bind(
+CXX_C_API turbo_tool_status_t turbo_langchain_tool_invoke_json_value(
     const turbo_langchain_tool_registry_t *tools, const char *name,
-    const turbo_runtime_data_bind_value_t *arguments,
-    turbo_runtime_data_bind_value_t **out_result);
+    const json_value_t *arguments,
+    json_value_t **out_result);
 
 /* Agent/session */
 CXX_C_API turbo_langchain_agent_t *
@@ -159,7 +163,7 @@ CXX_C_API int turbo_langchain_agent_invoke_json(
 CXX_C_API int turbo_langchain_agent_start_text(
     turbo_langchain_agent_t *agent, const char *user_text,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 CXX_C_API int turbo_langchain_agent_memory_put_context(
     const turbo_langchain_agent_t *agent, const char *memory_namespace,
     const char *key, const char *scope, const char *path, const char *text);

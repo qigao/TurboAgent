@@ -25,7 +25,7 @@ typedef struct turbo_agent_subagent_tool_config_s {
   const char *name;
   const char *description;
   const char *parameters_json;
-  const turbo_runtime_data_bind_value_t *parameters_schema;
+  const json_value_t *parameters_schema;
   int strict;
   turbo_agent_subagent_mode_t mode;
   turbo_agent_subagent_result_kind_t result_kind;

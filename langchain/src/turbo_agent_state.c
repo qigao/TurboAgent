@@ -1,6 +1,6 @@
 #include "turbo_agent_state_core_internal.h"
 #include "turbo_agent_state_flow_domain_internal.h"
-#include "turbo_agent_state_bind_internal.h"
+#include "turbo_agent_state_json_value_internal.h"
 #include "turbo_agent_state_memory_internal.h"
 #include "turbo_agent_state_output_internal.h"
 #include "turbo_agent_state_snapshot_internal.h"
@@ -29,7 +29,7 @@
 
 TURBO_AGENT_STATE_FORWARD0(size_t, turbo_agent_state_schema_version)
 TURBO_AGENT_STATE_FORWARD0(json_value_t *, turbo_agent_state_create)
-TURBO_AGENT_STATE_FORWARD0(turbo_runtime_data_bind_value_t *, turbo_agent_state_create_bind)
+TURBO_AGENT_STATE_FORWARD0(json_value_t *, turbo_agent_state_create_json_value)
 TURBO_AGENT_STATE_FORWARD1(size_t, turbo_agent_state_version, const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD1(int, turbo_agent_state_version_supported, const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD2(int, turbo_agent_state_add_user_message, json_value_t *, state,
@@ -44,14 +44,14 @@ TURBO_AGENT_STATE_FORWARD1(const json_value_t *, turbo_agent_state_trace_events,
 TURBO_AGENT_STATE_FORWARD1(size_t, turbo_agent_state_trace_event_count, const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD2(const json_value_t *, turbo_agent_state_trace_event_at,
                            const json_value_t *, state, size_t, index)
-TURBO_AGENT_STATE_FORWARD1(turbo_runtime_data_bind_value_t *, turbo_agent_state_trace_events_bind,
-                           const turbo_runtime_data_bind_value_t *, state)
-TURBO_AGENT_STATE_FORWARD2(int, turbo_agent_state_add_trace_event_bind,
-                           turbo_runtime_data_bind_value_t *, state,
-                           const turbo_runtime_data_bind_value_t *, event)
-void turbo_agent_state_capture_trace_event_bind(const turbo_runtime_data_bind_value_t *event,
+TURBO_AGENT_STATE_FORWARD1(json_value_t *, turbo_agent_state_trace_events_json_value,
+                           const json_value_t *, state)
+TURBO_AGENT_STATE_FORWARD2(int, turbo_agent_state_add_trace_event_json_value,
+                           json_value_t *, state,
+                           const json_value_t *, event)
+void turbo_agent_state_capture_trace_event_json_value(const json_value_t *event,
                                                 void *user_data) {
-  turbo_agent_state_capture_trace_event_bind_impl(event, user_data);
+  turbo_agent_state_capture_trace_event_json_value_impl(event, user_data);
 }
 TURBO_AGENT_STATE_FORWARD3(int, turbo_agent_state_set_memory_json, json_value_t *, state,
                            const char *, key, const char *, value_json)
@@ -105,12 +105,12 @@ TURBO_AGENT_STATE_FORWARD1(const char *, turbo_agent_state_failure_reason, const
                            state)
 TURBO_AGENT_STATE_FORWARD1(json_value_t *, turbo_agent_state_control_snapshot,
                            const json_value_t *, state)
-TURBO_AGENT_STATE_FORWARD1(turbo_runtime_data_bind_value_t *, turbo_agent_state_control_snapshot_bind,
-                           const turbo_runtime_data_bind_value_t *, state)
+TURBO_AGENT_STATE_FORWARD1(json_value_t *, turbo_agent_state_control_snapshot_json_value,
+                           const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD1(json_value_t *, turbo_agent_state_workflow_snapshot,
                            const json_value_t *, state)
-TURBO_AGENT_STATE_FORWARD1(turbo_runtime_data_bind_value_t *, turbo_agent_state_workflow_snapshot_bind,
-                           const turbo_runtime_data_bind_value_t *, state)
+TURBO_AGENT_STATE_FORWARD1(json_value_t *, turbo_agent_state_workflow_snapshot_json_value,
+                           const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD2(int, turbo_agent_state_set_final_answer, json_value_t *, state,
                            const char *, text)
 TURBO_AGENT_STATE_FORWARD2(int, turbo_agent_state_request_review, json_value_t *, state,
@@ -164,35 +164,35 @@ TURBO_AGENT_STATE_FORWARD1(size_t, turbo_agent_state_planner_event_version_count
                            const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD2(const json_value_t *, turbo_agent_state_planner_event_version_at,
                            const json_value_t *, state, size_t, index)
-TURBO_AGENT_STATE_FORWARD2(turbo_runtime_data_bind_value_t *, turbo_agent_state_planner_event_version_bind,
-                           const turbo_runtime_data_bind_value_t *, state, size_t, index)
-TURBO_AGENT_STATE_FORWARD1(turbo_runtime_data_bind_value_t *,
-                           turbo_agent_state_latest_planner_event_version_bind,
-                           const turbo_runtime_data_bind_value_t *, state)
+TURBO_AGENT_STATE_FORWARD2(json_value_t *, turbo_agent_state_planner_event_version_json_value,
+                           const json_value_t *, state, size_t, index)
+TURBO_AGENT_STATE_FORWARD1(json_value_t *,
+                           turbo_agent_state_latest_planner_event_version_json_value,
+                           const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD1(const json_value_t *, turbo_agent_state_executor_event_versions,
                            const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD1(size_t, turbo_agent_state_executor_event_version_count,
                            const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD2(const json_value_t *, turbo_agent_state_executor_event_version_at,
                            const json_value_t *, state, size_t, index)
-TURBO_AGENT_STATE_FORWARD2(turbo_runtime_data_bind_value_t *, turbo_agent_state_executor_event_version_bind,
-                           const turbo_runtime_data_bind_value_t *, state, size_t, index)
-TURBO_AGENT_STATE_FORWARD1(turbo_runtime_data_bind_value_t *,
-                           turbo_agent_state_latest_executor_event_version_bind,
-                           const turbo_runtime_data_bind_value_t *, state)
+TURBO_AGENT_STATE_FORWARD2(json_value_t *, turbo_agent_state_executor_event_version_json_value,
+                           const json_value_t *, state, size_t, index)
+TURBO_AGENT_STATE_FORWARD1(json_value_t *,
+                           turbo_agent_state_latest_executor_event_version_json_value,
+                           const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD1(const json_value_t *, turbo_agent_state_completed_steps,
                            const json_value_t *, state)
-TURBO_AGENT_STATE_FORWARD1(turbo_runtime_data_bind_value_t *, turbo_agent_state_completed_steps_bind,
-                           const turbo_runtime_data_bind_value_t *, state)
+TURBO_AGENT_STATE_FORWARD1(json_value_t *, turbo_agent_state_completed_steps_json_value,
+                           const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD1(size_t, turbo_agent_state_completed_step_count,
                            const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD2(const json_value_t *, turbo_agent_state_completed_step_at,
                            const json_value_t *, state, size_t, index)
-TURBO_AGENT_STATE_FORWARD2(turbo_runtime_data_bind_value_t *, turbo_agent_state_completed_step_bind,
-                           const turbo_runtime_data_bind_value_t *, state, size_t, index)
-TURBO_AGENT_STATE_FORWARD1(turbo_runtime_data_bind_value_t *,
-                           turbo_agent_state_latest_completed_step_bind,
-                           const turbo_runtime_data_bind_value_t *, state)
+TURBO_AGENT_STATE_FORWARD2(json_value_t *, turbo_agent_state_completed_step_json_value,
+                           const json_value_t *, state, size_t, index)
+TURBO_AGENT_STATE_FORWARD1(json_value_t *,
+                           turbo_agent_state_latest_completed_step_json_value,
+                           const json_value_t *, state)
 TURBO_AGENT_STATE_FORWARD3(int, turbo_agent_state_set_model_error, json_value_t *, state,
                            const char *, phase, const char *, detail)
 TURBO_AGENT_STATE_FORWARD1(const char *, turbo_agent_state_model_error_phase,

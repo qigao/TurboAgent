@@ -8,7 +8,13 @@ extern "C" {
 #endif
 
 typedef void (*turbo_agent_owned_resource_free_fn)(void *resource);
+typedef int (*turbo_agent_before_turn_fn)(turbo_agent_t *agent, json_value_t *state,
+                                          void *user_data);
+typedef int (*turbo_agent_context_overflow_fn)(turbo_agent_t *agent, json_value_t *state,
+                                               int transport_status, const char *response_json,
+                                               void *user_data);
 typedef struct coro_context_s coro_context_t;
+typedef struct turbo_agent_tool_executor_s turbo_agent_tool_executor_t;
 
 struct turbo_agent_s {
   char *api_key;
@@ -29,10 +35,23 @@ struct turbo_agent_s {
   http_client_t *http_client;
   coro_context_t *http_context;
   turbo_tool_registry_t *tool_registry;
+  turbo_agent_tool_executor_t *tool_executor;
   turbo_agent_transport_fn transport_fn;
   void *transport_user_data;
+  turbo_agent_transport_v2_fn transport_v2;
+  void *transport_v2_user_data;
+  turbo_agent_transport_v2_user_data_free_fn transport_v2_user_data_free;
+  turbo_agent_retry_policy_t retry_policy;
+  char *last_provider_request_id;
   void *owned_resource;
   turbo_agent_owned_resource_free_fn owned_resource_free;
+  turbo_agent_before_turn_fn before_turn;
+  void *before_turn_user_data;
+  turbo_agent_context_overflow_fn context_overflow;
+  void *context_overflow_user_data;
+  json_value_t *context_summary;
+  size_t context_event_start;
+  int context_projection_active;
   const turbo_model_provider_t *provider;
   turbo_agent_middleware_t *middlewares;
   size_t middleware_count;
@@ -43,9 +62,9 @@ struct turbo_agent_s {
   turbo_agent_trace_sink_t *trace_sinks;
   size_t trace_sink_count;
   size_t trace_sink_capacity;
-  turbo_agent_trace_bind_sink_t *trace_bind_sinks;
-  size_t trace_bind_sink_count;
-  size_t trace_bind_sink_capacity;
+  turbo_agent_trace_json_value_sink_t *trace_json_value_sinks;
+  size_t trace_json_value_sink_count;
+  size_t trace_json_value_sink_capacity;
   int capture_trace_history;
   char *last_stream_sse;
   size_t last_stream_sse_len;

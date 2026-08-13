@@ -60,7 +60,7 @@ Or use the aggregate include:
 It exists to remove host repetition, not to invent new runtime semantics.
 
 The underlying runtime surface will also expose
-`turbo_agent_runtime_get_thread_timeline_bind(...)` and
+`turbo_agent_runtime_get_thread_timeline_json_value(...)` and
 `turbo_agent_runtime_list_thread_lineage(...)`; the session and app wrappers
 keep the same timeline shape and lineage shape, only with their own remembered
 thread context.
@@ -152,31 +152,31 @@ the memory-context layer scope added to planner input.
 - `turbo_agent_session_get_thread(...)`
 - `turbo_agent_session_get_run(...)`
 - `turbo_agent_session_get_checkpoint(...)`
-- `turbo_agent_session_get_thread_state_bind(...)`
-- `turbo_agent_session_get_run_state_bind(...)`
-- `turbo_agent_session_get_checkpoint_state_bind(...)`
+- `turbo_agent_session_get_thread_state_json_value(...)`
+- `turbo_agent_session_get_run_state_json_value(...)`
+- `turbo_agent_session_get_checkpoint_state_json_value(...)`
 - `turbo_agent_session_get_child_run(...)`
 - `turbo_agent_session_get_child_checkpoint(...)`
 - `turbo_agent_session_list_runs(...)`
 - `turbo_agent_session_list_child_runs(...)`
 - `turbo_agent_session_list_checkpoints(...)`
 - `turbo_agent_session_list_thread_lineage(...)`
-- `turbo_agent_session_get_thread_timeline_bind(...)`
-- `turbo_agent_session_load_history_events_bind(...)`
-- `turbo_agent_session_load_child_history_events_bind(...)`
-- `turbo_agent_session_apply_command_bind(...)`
-- `turbo_agent_session_resume_command_bind(...)`
-- `turbo_agent_session_fork_command_bind(...)`
-- `turbo_agent_session_start_bind_graph(...)`
-- `turbo_agent_session_resume_bind_graph(...)`
-- `turbo_agent_session_fork_bind_graph(...)`
+- `turbo_agent_session_get_thread_timeline_json_value(...)`
+- `turbo_agent_session_load_history_events_json_value(...)`
+- `turbo_agent_session_load_child_history_events_json_value(...)`
+- `turbo_agent_session_apply_command_json_value(...)`
+- `turbo_agent_session_resume_command_json_value(...)`
+- `turbo_agent_session_fork_command_json_value(...)`
+- `turbo_agent_session_start_json_value_graph(...)`
+- `turbo_agent_session_resume_json_value_graph(...)`
+- `turbo_agent_session_fork_json_value_graph(...)`
 - `turbo_agent_session_create_loop_graph(...)`
 - `turbo_agent_session_create_review_graph(...)`
 - `turbo_agent_session_create_engineering_graph(...)`
 - `turbo_agent_session_create_preset_graph(...)`
-- `turbo_agent_session_create_input_state_bind(...)`
-- `turbo_agent_session_create_input_messages_state_bind(...)`
-- `turbo_agent_session_start_preset_bind_graph(...)`
+- `turbo_agent_session_create_input_state_json_value(...)`
+- `turbo_agent_session_create_input_messages_state_json_value(...)`
+- `turbo_agent_session_start_preset_json_value_graph(...)`
 - `turbo_agent_session_start_preset_text(...)`
 - `turbo_agent_session_start_text(...)`
 - `turbo_agent_session_start_text_stream(...)`
@@ -205,11 +205,11 @@ the memory-context layer scope added to planner input.
 - `turbo_agent_session_memory_query_records(...)`
 - `turbo_agent_session_memory_query_records_ex(...)`
 - `turbo_agent_session_load_memory_context(...)`
-- `turbo_agent_session_create_input_state_with_memory_bind(...)`
-- `turbo_agent_session_create_input_messages_state_with_memory_bind(...)`
+- `turbo_agent_session_create_input_state_with_memory_json_value(...)`
+- `turbo_agent_session_create_input_messages_state_with_memory_json_value(...)`
 - `turbo_agent_session_start_preset_text_with_memory(...)`
-- `turbo_agent_session_resume_preset_bind_graph(...)`
-- `turbo_agent_session_fork_preset_bind_graph(...)`
+- `turbo_agent_session_resume_preset_json_value_graph(...)`
+- `turbo_agent_session_fork_preset_json_value_graph(...)`
 
 ### Session behavior
 
@@ -226,12 +226,12 @@ The same wrapper rule now exists for runtime inspection:
 
 - `get_run(NULL, ...)` resolves to the latest remembered run
 - `get_checkpoint(NULL, ...)` resolves to the latest remembered checkpoint
-- `get_run_state_bind(NULL, ...)` resolves to the latest remembered run
-- `get_checkpoint_state_bind(NULL, ...)` resolves to the latest remembered checkpoint
+- `get_run_state_json_value(NULL, ...)` resolves to the latest remembered run
+- `get_checkpoint_state_json_value(NULL, ...)` resolves to the latest remembered checkpoint
 - `list_checkpoints(NULL, ...)` resolves to checkpoints for the latest remembered run
-- `load_history_events_bind(NULL, NULL, ...)` resolves to the latest remembered
+- `load_history_events_json_value(NULL, NULL, ...)` resolves to the latest remembered
   run/checkpoint pair
-- `turbo_agent_session_get_thread_timeline_bind(...)` resolves the latest
+- `turbo_agent_session_get_thread_timeline_json_value(...)` resolves the latest
   remembered thread and returns one timeline bundle with `thread`,
   `resolved_current_run`, `resolved_current_checkpoint_id`,
   `resolved_current_checkpoint`, `latest_run`, `pending_run`, `runs`,
@@ -277,7 +277,7 @@ head checkpoint.
 browser-style inspection:
 
 - it returns lineage for one thread without changing state
-- it does not change `resume_bind_graph(...)` / `fork_bind_graph(...)`
+- it does not change `resume_json_value_graph(...)` / `fork_json_value_graph(...)`
   semantics
 - it is meant for host/UI lineage browsers, not for execution control
 - the payload includes:
@@ -296,21 +296,21 @@ browser-style inspection:
 
 The same defaulting rule also now applies to command application:
 
-- `apply_command_bind(NULL, command, ...)` resolves to the latest remembered
+- `apply_command_json_value(NULL, command, ...)` resolves to the latest remembered
   checkpoint before producing a fresh `state_override`
-- `resume_command_bind(NULL, command, ...)` resolves the latest remembered
+- `resume_command_json_value(NULL, command, ...)` resolves the latest remembered
   checkpoint, applies the command, then resumes in one call
-- `fork_command_bind(NULL, command, ...)` resolves the latest remembered
+- `fork_command_json_value(NULL, command, ...)` resolves the latest remembered
   checkpoint, applies the command, then forks in one call
 - the runtime also exposes thread-scoped command helpers, so hosts can start
   from one `thread_id` and let the runtime resolve the pending run and latest
   checkpoint internally before command application
-- `resume_checkpoint_bind_graph(...)` / `fork_checkpoint_bind_graph(...)`
+- `resume_checkpoint_json_value_graph(...)` / `fork_checkpoint_json_value_graph(...)`
   are the explicit checkpoint-scoped replay aliases; they continue or fork
   directly from one concrete historical checkpoint
-- `apply_checkpoint_command_bind(...)`,
-  `resume_checkpoint_command_bind(...)`, and
-  `fork_checkpoint_command_bind(...)` are the matching explicit
+- `apply_checkpoint_command_json_value(...)`,
+  `resume_checkpoint_command_json_value(...)`, and
+  `fork_checkpoint_command_json_value(...)` are the matching explicit
   checkpoint-scoped command aliases; they keep command application pinned to
   one concrete historical checkpoint
 - `turbo_agent_runtime_get_checkpoint_context(...)` /
@@ -319,15 +319,15 @@ The same defaulting rule also now applies to command application:
   checkpoint as a read-only aggregate bundle with `checkpoint_summary`,
   `state`, `run`, `thread`, and `history_events`; the result is a context
   inspect view, not a replacement for `get_checkpoint(...)`
-- `resume_thread_bind_graph(...)` / `fork_thread_bind_graph(...)` do the same
+- `resume_thread_json_value_graph(...)` / `fork_thread_json_value_graph(...)` do the same
   for replay: they resolve the thread's current checkpoint internally, then
   forward the caller's state override into the existing resume/fork path
-- `update_checkpoint_state_bind(...)` / `update_thread_state_bind(...)`
-  formalize the low-level state-edit surface: they merge one bind-native state
+- `update_checkpoint_state_json_value(...)` / `update_thread_state_json_value(...)`
+  formalize the low-level state-edit surface: they merge one TurboParser JSON-native state
   patch into the resolved checkpoint state and return one full
   `state_override`, without mutating persisted checkpoint records in place
-- `resume_checkpoint_state_bind_graph(...)` /
-  `fork_checkpoint_state_bind_graph(...)` and their thread-scoped variants
+- `resume_checkpoint_state_json_value_graph(...)` /
+  `fork_checkpoint_state_json_value_graph(...)` and their thread-scoped variants
   collapse state patch plus resume/fork into one host-facing time-travel call
 - completed-only threads have no current checkpoint, so the thread-scoped
   replay helpers fail explicitly instead of inventing one
@@ -337,17 +337,17 @@ The same defaulting rule also now applies to command application:
   thread
 - `get_latest_checkpoint(run_id)` resolves `run.latest_checkpoint_id` without
   forcing the host to read and unpack the run record itself
-- `turbo_agent_session_get_thread_timeline_bind(thread_id)` resolves the thread
+- `turbo_agent_session_get_thread_timeline_json_value(thread_id)` resolves the thread
   timeline with pending run first, otherwise latest run, so hosts do not need
   to make that choice themselves
-- `load_thread_history_events_bind(thread_id)` prefers the newest interrupted
+- `load_thread_history_events_json_value(thread_id)` prefers the newest interrupted
   run on the thread, then falls back to the newest run, and replays that run's
   durable history in one call
-- `replay_history_bind(...)` / `replay_thread_history_bind(...)` do not define
+- `replay_history_json_value(...)` / `replay_thread_history_json_value(...)` do not define
   a second observer event model; they replay the same durable history objects
-  through the existing `turbo_event_sink_bind_fn` callback boundary
-- `turbo_event_stream_mode_accepts_bind(...)` and
-  `turbo_event_stream_filter_sink_bind(...)` provide the core stream-mode
+  through the existing `turbo_event_sink_json_value_fn` callback boundary
+- `turbo_event_stream_mode_accepts_json_value(...)` and
+  `turbo_event_stream_filter_sink_json_value(...)` provide the core stream-mode
   adapter for that same event boundary. The modes are transport-agnostic:
   `all`, `messages`, `updates`, `tools`, and `debug`. HTTP/SSE surfaces should
   be thin adapters over this core stream contract, not the source of the
@@ -363,33 +363,33 @@ The same defaulting rule also now applies to command application:
   are the first default-workflow batch helpers. They execute user-text inputs
   sequentially through the same session/app state rules and return one JSON
   item per input.
-- `turbo_runnable_batch_bind(...)`,
+- `turbo_runnable_batch_json_value(...)`,
   `turbo_runnable_from_agent_session(...)`, and
   `turbo_runnable_from_agent_app(...)` expose the same default workflows as
-  bind-native runnables. They share the existing runnable `invoke` and `stream`
+  TurboParser JSON-native runnables. They share the existing runnable `invoke` and `stream`
   path, add sequential array batch fallback, and keep the result object shape
   as `summary`, `state`, and `output_text`.
-- `turbo_runnable_wrap_bind(...)` adds the first bind-native wrapper hook
+- `turbo_runnable_wrap_json_value(...)` adds the first TurboParser JSON-native wrapper hook
   surface. `before_invoke` may replace the input, `after_invoke` may replace
   the output, and the wrapper applies the same hooks for invoke, stream, and
   batch without taking ownership of the inner runnable.
-- `observe_history_bind(...)` / `observe_thread_history_bind(...)` are the
+- `observe_history_json_value(...)` / `observe_thread_history_json_value(...)` are the
   host-facing observer bridge for that same durable history. They reuse the
   existing history facts and narrow them into one observer family:
   `model_delta`, `tool_call_started`, `tool_result`, `state_updated`,
   `interrupted`, `completed`. Each emitted observer object carries
   `kind="observer"`, one narrowed `type`, and the original canonical event
   clone under `event`.
-- `turbo_agent_session_add_trace_bind_sink(...)` /
-  `turbo_agent_app_add_trace_bind_sink(...)` are the live-side bridge for the
+- `turbo_agent_session_add_trace_json_value_sink(...)` /
+  `turbo_agent_app_add_trace_json_value_sink(...)` are the live-side bridge for the
   same canonical trace event shape, and
   `*_set_trace_history_enabled(...)` lets hosts persist those trace events into
   run state for later checkpoint or thread inspection
-- `turbo_agent_session_add_observer_bind_sink(...)` /
-  `turbo_agent_app_add_observer_bind_sink(...)` are the live-side observer
+- `turbo_agent_session_add_observer_json_value_sink(...)` /
+  `turbo_agent_app_add_observer_json_value_sink(...)` are the live-side observer
   counterparts. They sit above the existing trace stream and do not create a
   second persisted observer log.
-- `get_*_trace_events_bind(...)` is the durable snapshot convenience layer for
+- `get_*_trace_events_json_value(...)` is the durable snapshot convenience layer for
   the same data. It is intentionally derived from persisted state, not a second
   observer log, and returns an empty array when no trace history exists yet.
 - `get_thread_observability_index(...)` and the session/app wrappers are the
@@ -421,14 +421,14 @@ The same defaulting rule also now applies to command application:
   local JSON-RPC 2.0 dispatcher over that same runtime surface. The current
   method set currently includes `runtime.start`, `runtime.resume`,
   `runtime.fork`, `runtime.applyCommand`,
-  `runtime.resumeThreadCommandBindGraph`,
-  `runtime.forkThreadCommandBindGraph`,
+  `runtime.resumeThreadCommandJsonValueGraph`,
+  `runtime.forkThreadCommandJsonValueGraph`,
   `runtime.getThreadState`, `runtime.updateThreadState`,
   `runtime.applyThreadStatePatch`,
-  `runtime.resumeThreadBindGraph`, `runtime.forkThreadBindGraph`,
+  `runtime.resumeThreadJsonValueGraph`, `runtime.forkThreadJsonValueGraph`,
   `runtime.getCheckpointContext`,
-  `runtime.resumeThreadStatePatchBindGraph`,
-  `runtime.forkThreadStatePatchBindGraph`,
+  `runtime.resumeThreadStatePatchJsonValueGraph`,
+  `runtime.forkThreadStatePatchJsonValueGraph`,
   `runtime.getThreadObservabilityIndex`, and
   `runtime.listObservabilityIndexesFiltered`. When the remote config borrows
   one optional `memory_store`, the same bridge also exposes
@@ -448,22 +448,22 @@ The same defaulting rule also now applies to command application:
   side bridge over `rpc_client`. It calls that same JSON-RPC contract, returns
   parsed `result` payloads, and normalizes error replies into one JSON object
   with `code`, `message`, `http_status`, and `transport_error`.
-- `turbo_agent_runtime_remote_client_start_bind_graph(...)`,
-  `resume_bind_graph(...)`, `fork_bind_graph(...)`,
-  `get_thread_state_bind(...)`, `get_checkpoint_context(...)`,
+- `turbo_agent_runtime_remote_client_start_json_value_graph(...)`,
+  `resume_json_value_graph(...)`, `fork_json_value_graph(...)`,
+  `get_thread_state_json_value(...)`, `get_checkpoint_context(...)`,
   `get_run(...)`, `get_checkpoint(...)`, `list_checkpoints(...)`,
-  `load_history_events_bind(...)`, `get_run_trace_events_bind(...)`,
-  `get_checkpoint_trace_events_bind(...)`,
+  `load_history_events_json_value(...)`, `get_run_trace_events_json_value(...)`,
+  `get_checkpoint_trace_events_json_value(...)`,
   `get_memory_record(...)`, `put_memory_record(...)`,
   `delete_memory_record(...)`, `query_memory_records_ex(...)`,
   `query_memory_records(...)`, and `list_memory_records(...)`,
-  `get_thread_timeline_bind(...)`, `get_branch_tree(...)`,
+  `get_thread_timeline_json_value(...)`, `get_branch_tree(...)`,
   `get_thread_observability_index(...)`,
   `list_observability_indexes(...)`,
   `list_observability_indexes_filtered(...)`,
   `list_child_runs(...)`,
   `get_supervisor_inspect(...)`, `get_orchestration_inspect(...)`,
-  `resume_thread_command_bind(...)`, and `fork_thread_command_bind(...)` are
+  `resume_thread_command_json_value(...)`, and `fork_thread_command_json_value(...)` are
   the first typed helpers above that generic call. They map back onto the
   existing runtime `summary/state/context/index` contract instead of
   introducing a second client-only result model.
@@ -683,12 +683,12 @@ also lock canonical request shapes, not only success envelopes. That keeps
 Graph-bound success responses are also golden-locked so the dispatcher keeps
 one stable `summary/state` envelope for resume/fork and thread-scoped replay
 methods.
-- `get_child_trace_events_bind(...)` is the child-lineage counterpart: it reads
+- `get_child_trace_events_json_value(...)` is the child-lineage counterpart: it reads
   trace history from the resolved child checkpoint when present, otherwise from
   the child run snapshot, without adding a new lineage factsource.
 - `get_child_checkpoint_context(...)` is the one-shot inspect counterpart when
   the parent output item already carries `child_checkpoint_id`.
-- `get_child_thread_timeline_bind(...)` is the one-shot child-thread timeline
+- `get_child_thread_timeline_json_value(...)` is the one-shot child-thread timeline
   counterpart when the parent output item already carries `child_thread_id`.
 - `get_child_branch_tree(...)` is the one-shot child-thread branch-tree
   counterpart when the parent output item already carries `child_thread_id`.
@@ -720,7 +720,7 @@ methods.
   it bundles `supervisor_inspect`, `thread_timeline`, `thread_lineage`,
   `branch_tree`, and `child_runs` in one read-only multi-agent inspect object
   without introducing a new runtime persistence layer.
-- `append_supervisor_inbox_message_bind(...)` is the matching write-side
+- `append_supervisor_inbox_message_json_value(...)` is the matching write-side
   mailbox helper: it returns one state override bind value that the host can
   feed into the existing replay/resume/fork surfaces.
 - interrupted summaries now expose `interrupt_reason`, `pending_node`,
@@ -764,27 +764,27 @@ the host begins from one user string or one canonical message array.
 - `turbo_agent_app_get_thread(...)`
 - `turbo_agent_app_get_run(...)`
 - `turbo_agent_app_get_checkpoint(...)`
-- `turbo_agent_app_get_thread_state_bind(...)`
-- `turbo_agent_app_get_run_state_bind(...)`
-- `turbo_agent_app_get_checkpoint_state_bind(...)`
+- `turbo_agent_app_get_thread_state_json_value(...)`
+- `turbo_agent_app_get_run_state_json_value(...)`
+- `turbo_agent_app_get_checkpoint_state_json_value(...)`
 - `turbo_agent_app_get_child_run(...)`
 - `turbo_agent_app_get_child_checkpoint(...)`
 - `turbo_agent_app_list_runs(...)`
 - `turbo_agent_app_list_child_runs(...)`
 - `turbo_agent_app_list_checkpoints(...)`
 - `turbo_agent_app_list_thread_lineage(...)`
-- `turbo_agent_app_get_thread_timeline_bind(...)`
-- `turbo_agent_app_load_history_events_bind(...)`
-- `turbo_agent_app_replay_history_bind(...)`
-- `turbo_agent_app_replay_thread_history_bind(...)`
-- `turbo_agent_app_load_child_history_events_bind(...)`
-- `turbo_agent_app_apply_command_bind(...)`
-- `turbo_agent_app_resume_command_bind(...)`
-- `turbo_agent_app_fork_command_bind(...)`
-- `turbo_agent_app_resume_preset_bind_graph(...)`
-- `turbo_agent_app_fork_preset_bind_graph(...)`
-- `turbo_agent_app_resume_preset_command_bind(...)`
-- `turbo_agent_app_fork_preset_command_bind(...)`
+- `turbo_agent_app_get_thread_timeline_json_value(...)`
+- `turbo_agent_app_load_history_events_json_value(...)`
+- `turbo_agent_app_replay_history_json_value(...)`
+- `turbo_agent_app_replay_thread_history_json_value(...)`
+- `turbo_agent_app_load_child_history_events_json_value(...)`
+- `turbo_agent_app_apply_command_json_value(...)`
+- `turbo_agent_app_resume_command_json_value(...)`
+- `turbo_agent_app_fork_command_json_value(...)`
+- `turbo_agent_app_resume_preset_json_value_graph(...)`
+- `turbo_agent_app_fork_preset_json_value_graph(...)`
+- `turbo_agent_app_resume_preset_command_json_value(...)`
+- `turbo_agent_app_fork_preset_command_json_value(...)`
 - `turbo_agent_app_start_text(...)`
 - `turbo_agent_app_start_text_stream(...)`
 - `turbo_agent_app_start_messages(...)`
@@ -804,7 +804,7 @@ This layer does not invent a second runtime. It removes one more host-side
 special case by packaging a configured session as a more direct
 `create_agent(...).invoke(...)`-style surface.
 
-The app-level `turbo_agent_app_get_thread_timeline_bind(...)` wrapper follows
+The app-level `turbo_agent_app_get_thread_timeline_json_value(...)` wrapper follows
 the same resolved-current-run rule as the session/runtime layer: pending run
 first, otherwise latest run.
 
@@ -949,11 +949,11 @@ runtime section describes.
 
 For review-style interrupts, the host now has two valid paths:
 
-- keep `apply_command_bind(...)` when it wants to inspect or persist the
+- keep `apply_command_json_value(...)` when it wants to inspect or persist the
   produced override state itself
-- use `resume_command_bind(...)` / `fork_command_bind(...)` when it only wants
+- use `resume_command_json_value(...)` / `fork_command_json_value(...)` when it only wants
   a one-shot "command then continue" path
-- use `resume_preset_command_bind(...)` / `fork_preset_command_bind(...)` when
+- use `resume_preset_command_json_value(...)` / `fork_preset_command_json_value(...)` when
   it wants that same one-shot path on the configured preset workflow surface
 
 `available_command_descriptors` is now the preferred host-facing contract. Each
@@ -1084,7 +1084,7 @@ graph/subagent call can carry a stable call-frame marker without adding a
 second persistence source.
 
 Those same fields are also echoed on the returned runtime `summary` when
-the run starts from `turbo_agent_runtime_start_bind_graph_linked(...)` or from
+the run starts from `turbo_agent_runtime_start_json_value_graph_linked(...)` or from
 one session/app configured with parent lineage defaults.
 
 When one subagent run starts inside an active parent tool call, and the child
@@ -1139,11 +1139,11 @@ run wrappers build the graph, run `start/resume/fork`, then destroy the graph
 before returning.
 
 For the most common one-shot path, `turbo_agent_session_start_preset_text(...)`
-also creates bind-native agent state from one user message before starting.
+also creates TurboParser JSON-native agent state from one user message before starting.
 
 For hosts that already keep canonical prompt messages, the parallel helpers:
 
-- `turbo_agent_session_create_input_messages_state_bind(...)`
+- `turbo_agent_session_create_input_messages_state_json_value(...)`
 - `turbo_agent_session_start_preset_messages(...)`
 - `turbo_agent_session_invoke_preset_messages_text(...)`
 - `turbo_agent_session_invoke_preset_messages_json(...)`
@@ -1167,8 +1167,8 @@ When the session owns one optional long-term memory store, hosts may also use:
 - `turbo_agent_session_memory_delete(...)`
 - `turbo_agent_session_memory_list(...)`
 - `turbo_agent_session_load_memory_context(...)`
-- `turbo_agent_session_create_input_state_with_memory_bind(...)`
-- `turbo_agent_session_create_input_messages_state_with_memory_bind(...)`
+- `turbo_agent_session_create_input_state_with_memory_json_value(...)`
+- `turbo_agent_session_create_input_messages_state_with_memory_json_value(...)`
 - `turbo_agent_session_invoke_preset_text_with_memory(...)`
 - `turbo_agent_session_invoke_preset_json_with_memory(...)`
 

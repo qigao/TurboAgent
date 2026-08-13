@@ -5,7 +5,7 @@
 
 #include "turbo_event.h"
 #include "turbo_graph.h"
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,15 +39,15 @@ typedef struct turbo_agent_runtime_parent_link_s {
   const char *call_frame_id;
 } turbo_agent_runtime_parent_link_t;
 
-typedef void (*turbo_agent_observer_bind_fn)(
-    const turbo_runtime_data_bind_value_t *event, void *user_data);
+typedef void (*turbo_agent_observer_json_value_fn)(
+    const json_value_t *event, void *user_data);
 typedef void (*turbo_agent_observer_user_data_free_fn)(void *user_data);
 
-typedef struct turbo_agent_observer_bind_sink_s {
-  turbo_agent_observer_bind_fn callback;
+typedef struct turbo_agent_observer_json_value_sink_s {
+  turbo_agent_observer_json_value_fn callback;
   void *user_data;
   turbo_agent_observer_user_data_free_fn user_data_free;
-} turbo_agent_observer_bind_sink_t;
+} turbo_agent_observer_json_value_sink_t;
  
 typedef enum turbo_agent_runtime_scope_e {
   TURBO_RUNTIME_SCOPE_CHECKPOINT = 0,
@@ -65,7 +65,7 @@ typedef struct turbo_agent_runtime_exec_options_s {
   turbo_agent_runtime_input_kind_t input_kind;
   const char *checkpoint_id;
   const char *thread_id;
-  turbo_event_sink_bind_fn event_sink;
+  turbo_event_sink_json_value_fn event_sink;
   void *event_sink_user_data;
   const turbo_agent_runtime_parent_link_t *parent_link;
 } turbo_agent_runtime_exec_options_t;
@@ -74,21 +74,50 @@ typedef struct turbo_agent_runtime_exec_options_s {
  
 CXX_C_API int turbo_agent_runtime_exec_start(
     turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
-    const turbo_runtime_data_bind_value_t *state, const turbo_graph_run_options_t *options,
+    const json_value_t *state, const turbo_graph_run_options_t *options,
     const turbo_agent_runtime_exec_options_t *exec_options,
-    json_value_t **out_summary_json, turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_summary_json, json_value_t **out_state);
  
 CXX_C_API int turbo_agent_runtime_exec_resume(
     turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
-    const turbo_runtime_data_bind_value_t *input, const turbo_graph_run_options_t *options,
+    const json_value_t *input, const turbo_graph_run_options_t *options,
     const turbo_agent_runtime_exec_options_t *exec_options,
-    json_value_t **out_summary_json, turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_summary_json, json_value_t **out_state);
  
 CXX_C_API int turbo_agent_runtime_exec_fork(
     turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
-    const turbo_runtime_data_bind_value_t *input, const turbo_graph_run_options_t *options,
+    const json_value_t *input, const turbo_graph_run_options_t *options,
     const turbo_agent_runtime_exec_options_t *exec_options,
-    json_value_t **out_summary_json, turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_summary_json, json_value_t **out_state);
+
+/**
+ * @brief Controlled variants of unified execution.
+ *
+ * The token is borrowed for the synchronous call. Existing exec_start/resume/
+ * fork APIs are equivalent to passing NULL. Cancellation and deadlines return
+ * success at the API layer with a terminal `cancelled`/`timed_out` summary and
+ * a resumable checkpoint when the graph reached a safe boundary.
+ */
+CXX_C_API int turbo_agent_runtime_exec_start_controlled(
+    turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
+    const json_value_t *state, const turbo_graph_run_options_t *options,
+    const turbo_agent_runtime_exec_options_t *exec_options,
+    const turbo_cancel_token_t *cancel_token,
+    json_value_t **out_summary_json, json_value_t **out_state);
+
+CXX_C_API int turbo_agent_runtime_exec_resume_controlled(
+    turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
+    const json_value_t *input, const turbo_graph_run_options_t *options,
+    const turbo_agent_runtime_exec_options_t *exec_options,
+    const turbo_cancel_token_t *cancel_token,
+    json_value_t **out_summary_json, json_value_t **out_state);
+
+CXX_C_API int turbo_agent_runtime_exec_fork_controlled(
+    turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
+    const json_value_t *input, const turbo_graph_run_options_t *options,
+    const turbo_agent_runtime_exec_options_t *exec_options,
+    const turbo_cancel_token_t *cancel_token,
+    json_value_t **out_summary_json, json_value_t **out_state);
 
 /**
  * @brief Return whether the currently executing tool call matched an approved review note.
@@ -213,97 +242,97 @@ CXX_C_API int turbo_agent_runtime_get_latest_checkpoint(turbo_agent_runtime_t *r
                                                         json_value_t **out_checkpoint_json);
 
 /**
- * @brief Load one checkpoint's serialized state as a bind-native object.
+ * @brief Load one checkpoint's serialized state as a TurboParser JSON-native object.
  * @param runtime Runtime handle.
  * @param checkpoint_id Checkpoint id.
- * @param out_state Output bind-native state owned by caller.
+ * @param out_state Output TurboParser JSON-native state owned by caller.
  * @return 0 on success, negative on error.
  */
-CXX_C_API int turbo_agent_runtime_get_checkpoint_state_bind(
+CXX_C_API int turbo_agent_runtime_get_checkpoint_state_json_value(
     turbo_agent_runtime_t *runtime, const char *checkpoint_id,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
-CXX_C_API int turbo_agent_runtime_get_checkpoint_trace_events_bind(
+CXX_C_API int turbo_agent_runtime_get_checkpoint_trace_events_json_value(
     turbo_agent_runtime_t *runtime, const char *checkpoint_id,
-    turbo_runtime_data_bind_value_t **out_events);
+    json_value_t **out_events);
 
 /**
- * @brief Load one run's latest persisted state as a bind-native object.
+ * @brief Load one run's latest persisted state as a TurboParser JSON-native object.
  *
  * Newer runtime records persist `state_snapshot` directly on the run record.
  * Older interrupted runs fall back to `latest_checkpoint_id`.
  *
  * @param runtime Runtime handle.
  * @param run_id Run id.
- * @param out_state Output bind-native state owned by caller.
+ * @param out_state Output TurboParser JSON-native state owned by caller.
  * @return 0 on success, negative on error.
  */
-CXX_C_API int turbo_agent_runtime_get_run_state_bind(
+CXX_C_API int turbo_agent_runtime_get_run_state_json_value(
     turbo_agent_runtime_t *runtime, const char *run_id,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
-CXX_C_API int turbo_agent_runtime_get_run_trace_events_bind(
+CXX_C_API int turbo_agent_runtime_get_run_trace_events_json_value(
     turbo_agent_runtime_t *runtime, const char *run_id,
-    turbo_runtime_data_bind_value_t **out_events);
+    json_value_t **out_events);
 
 /**
  * @brief Compatibility accessor for one thread's latest-run state snapshot.
  *
  * This legacy surface resolves the newest run on the thread by `updated_at`.
  * It does not prefer the thread head / pending checkpoint. New hosts that need
- * thread-head semantics should prefer `get_thread_head_state_bind(...)`.
+ * thread-head semantics should prefer `get_thread_head_state_json_value(...)`.
  *
  * @param runtime Runtime handle.
  * @param thread_id Thread id.
- * @param out_state Output bind-native state owned by caller.
+ * @param out_state Output TurboParser JSON-native state owned by caller.
  * @return 0 on success, negative on error.
  */
-CXX_C_API int turbo_agent_runtime_get_thread_state_bind(
+CXX_C_API int turbo_agent_runtime_get_thread_state_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
 /**
- * @brief Load one thread head state snapshot as a bind-native object.
+ * @brief Load one thread head state snapshot as a TurboParser JSON-native object.
  *
  * The runtime resolves the newest interrupted run first. When the thread has
  * no interrupted run, it falls back to the newest run by `updated_at`.
  *
  * @param runtime Runtime handle.
  * @param thread_id Thread id.
- * @param out_state Output bind-native state owned by caller.
+ * @param out_state Output TurboParser JSON-native state owned by caller.
  * @return 0 on success, negative on error.
  */
-CXX_C_API int turbo_agent_runtime_get_thread_head_state_bind(
+CXX_C_API int turbo_agent_runtime_get_thread_head_state_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
 /**
- * @brief Prepare one checkpoint-scoped state override from a bind-native patch.
+ * @brief Prepare one checkpoint-scoped state override from a TurboParser JSON-native patch.
  *
  * The runtime loads the checkpoint state, recursively merges object fields from
  * `state_patch`, and returns the resulting full state as `out_state_override`.
  * Arrays, scalars, and null replace the target value. This helper does not
  * persist the prepared override back into the runtime.
  */
-CXX_C_API int turbo_agent_runtime_prepare_checkpoint_state_override_bind(
+CXX_C_API int turbo_agent_runtime_prepare_checkpoint_state_override_json_value(
     turbo_agent_runtime_t *runtime, const char *checkpoint_id,
-    const turbo_runtime_data_bind_value_t *state_patch,
-    turbo_runtime_data_bind_value_t **out_state_override);
+    const json_value_t *state_patch,
+    json_value_t **out_state_override);
 
 
 
 /**
- * @brief Prepare one thread-head state override from a bind-native patch.
+ * @brief Prepare one thread-head state override from a TurboParser JSON-native patch.
  *
  * The runtime resolves the thread's newest interrupted run first. If no
  * interrupted run exists, it falls back to the newest run by `updated_at`,
  * then applies the patch to that run's latest checkpoint state. This helper
  * only prepares the full override value and does not persist it.
  */
-CXX_C_API int turbo_agent_runtime_prepare_thread_state_override_bind(
+CXX_C_API int turbo_agent_runtime_prepare_thread_state_override_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    const turbo_runtime_data_bind_value_t *state_patch,
-    turbo_runtime_data_bind_value_t **out_state_override);
+    const json_value_t *state_patch,
+    json_value_t **out_state_override);
 
 
 
@@ -312,21 +341,21 @@ CXX_C_API int turbo_agent_runtime_prepare_thread_state_override_bind(
  *
  * This legacy surface resolves the newest run on the thread by `updated_at`.
  * It does not prefer the thread head / pending checkpoint. New hosts that need
- * thread-head semantics should prefer `get_thread_head_trace_events_bind(...)`.
+ * thread-head semantics should prefer `get_thread_head_trace_events_json_value(...)`.
  */
-CXX_C_API int turbo_agent_runtime_get_thread_trace_events_bind(
+CXX_C_API int turbo_agent_runtime_get_thread_trace_events_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    turbo_runtime_data_bind_value_t **out_events);
+    json_value_t **out_events);
 
 /**
- * @brief Load one thread head trace-event snapshot as a bind-native array.
+ * @brief Load one thread head trace-event snapshot as a TurboParser JSON-native array.
  *
  * The runtime resolves the newest interrupted run first. When the thread has
  * no interrupted run, it falls back to the newest run by `updated_at`.
  */
-CXX_C_API int turbo_agent_runtime_get_thread_head_trace_events_bind(
+CXX_C_API int turbo_agent_runtime_get_thread_head_trace_events_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    turbo_runtime_data_bind_value_t **out_events);
+    json_value_t **out_events);
 
 /**
  * @brief List all run records for one thread.
@@ -457,7 +486,7 @@ CXX_C_API int turbo_agent_runtime_get_checkpoint_context(turbo_agent_runtime_t *
                                                          json_value_t **out_context_json);
 
 /**
- * @brief Load durable canonical event history as one bind-native array.
+ * @brief Load durable canonical event history as one TurboParser JSON-native array.
  *
  * Pass exactly one selector:
  * - `run_id` to load all checkpointed segments for that run
@@ -466,12 +495,12 @@ CXX_C_API int turbo_agent_runtime_get_checkpoint_context(turbo_agent_runtime_t *
  * @param runtime Runtime handle.
  * @param run_id Optional run id.
  * @param checkpoint_id Optional checkpoint id.
- * @param out_events Output bind-native array owned by caller.
+ * @param out_events Output TurboParser JSON-native array owned by caller.
  * @return 0 on success, negative on error.
  */
-CXX_C_API int turbo_agent_runtime_load_history_events_bind(
+CXX_C_API int turbo_agent_runtime_load_history_events_json_value(
     turbo_agent_runtime_t *runtime, const char *run_id, const char *checkpoint_id,
-    turbo_runtime_data_bind_value_t **out_events);
+    json_value_t **out_events);
 
 /**
  * @brief Load durable canonical event history for the current thread lineage.
@@ -481,26 +510,26 @@ CXX_C_API int turbo_agent_runtime_load_history_events_bind(
  *
  * @param runtime Runtime handle.
  * @param thread_id Thread id.
- * @param out_events Output bind-native array owned by caller.
+ * @param out_events Output TurboParser JSON-native array owned by caller.
  * @return 0 on success, negative on error.
  */
-CXX_C_API int turbo_agent_runtime_load_thread_history_events_bind(
+CXX_C_API int turbo_agent_runtime_load_thread_history_events_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    turbo_runtime_data_bind_value_t **out_events);
+    json_value_t **out_events);
 
 /**
- * @brief Replay durable history events into one bind-native sink callback.
+ * @brief Replay durable history events into one TurboParser JSON-native sink callback.
  *
  * Pass exactly one selector:
  * - `run_id` to replay all checkpointed segments for that run
  * - `checkpoint_id` to replay the ancestor chain ending at that checkpoint
  *
- * The sink receives the same bind-native history event objects returned by
- * `turbo_agent_runtime_load_history_events_bind(...)`, in replay order.
+ * The sink receives the same TurboParser JSON-native history event objects returned by
+ * `turbo_agent_runtime_load_history_events_json_value(...)`, in replay order.
  */
-CXX_C_API int turbo_agent_runtime_replay_history_bind(
+CXX_C_API int turbo_agent_runtime_replay_history_json_value(
     turbo_agent_runtime_t *runtime, const char *run_id, const char *checkpoint_id,
-    turbo_event_sink_bind_fn event_sink, void *event_sink_user_data);
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data);
 
 /**
  * @brief Replay the current thread lineage's durable history into one sink.
@@ -508,8 +537,8 @@ CXX_C_API int turbo_agent_runtime_replay_history_bind(
  * The runtime resolves the thread's newest interrupted run first. If no
  * interrupted run exists, it falls back to the newest run by `updated_at`.
  */
-CXX_C_API int turbo_agent_runtime_replay_thread_history_bind(
-    turbo_agent_runtime_t *runtime, const char *thread_id, turbo_event_sink_bind_fn event_sink,
+CXX_C_API int turbo_agent_runtime_replay_thread_history_json_value(
+    turbo_agent_runtime_t *runtime, const char *thread_id, turbo_event_sink_json_value_fn event_sink,
     void *event_sink_user_data);
 
 /**
@@ -519,7 +548,7 @@ CXX_C_API int turbo_agent_runtime_replay_thread_history_bind(
  * - `run_id` to observe all checkpointed segments for that run
  * - `checkpoint_id` to observe the ancestor chain ending at that checkpoint
  *
- * The observer sink receives one bind-native object per mapped event with:
+ * The observer sink receives one TurboParser JSON-native object per mapped event with:
  * - `kind = "observer"`
  * - `type` in `model_delta`, `tool_call_started`, `tool_result`,
  *   `state_updated`, `interrupted`, `completed`
@@ -528,9 +557,9 @@ CXX_C_API int turbo_agent_runtime_replay_thread_history_bind(
  * This is a host-facing bridge over the existing durable history facts; it
  * does not define or persist a second event log.
  */
-CXX_C_API int turbo_agent_runtime_observe_history_bind(
+CXX_C_API int turbo_agent_runtime_observe_history_json_value(
     turbo_agent_runtime_t *runtime, const char *run_id, const char *checkpoint_id,
-    const turbo_agent_observer_bind_sink_t *sink);
+    const turbo_agent_observer_json_value_sink_t *sink);
 
 /**
  * @brief Observe the current thread lineage through the host-facing observer bridge.
@@ -539,15 +568,15 @@ CXX_C_API int turbo_agent_runtime_observe_history_bind(
  * interrupted run exists, it falls back to the newest run by `updated_at`.
  *
  * The sink receives the same observer events that
- * `turbo_agent_runtime_observe_history_bind(...)` would emit for the resolved
+ * `turbo_agent_runtime_observe_history_json_value(...)` would emit for the resolved
  * run lineage.
  */
-CXX_C_API int turbo_agent_runtime_observe_thread_history_bind(
+CXX_C_API int turbo_agent_runtime_observe_thread_history_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    const turbo_agent_observer_bind_sink_t *sink);
+    const turbo_agent_observer_json_value_sink_t *sink);
 
 /**
- * @brief Load one host-facing thread timeline snapshot as a bind-native object.
+ * @brief Load one host-facing thread timeline snapshot as a TurboParser JSON-native object.
  *
  * The returned object aggregates the thread record, the newest run, the newest
  * interrupted run, the resolved current run, current-run checkpoints, and the
@@ -576,12 +605,12 @@ CXX_C_API int turbo_agent_runtime_observe_thread_history_bind(
  *
  * @param runtime Runtime handle.
  * @param thread_id Thread id.
- * @param out_timeline Output bind-native object owned by caller.
+ * @param out_timeline Output TurboParser JSON-native object owned by caller.
  * @return 0 on success, negative on error.
  */
-CXX_C_API int turbo_agent_runtime_get_thread_timeline_bind(
+CXX_C_API int turbo_agent_runtime_get_thread_timeline_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    turbo_runtime_data_bind_value_t **out_timeline);
+    json_value_t **out_timeline);
 
 /**
  * @brief Build one thread-scoped observability index bundle for host/UI inspection.
@@ -714,7 +743,7 @@ CXX_C_API int turbo_agent_runtime_list_observability_indexes_filtered(
 /**
  * @brief Apply one host-facing runtime command to a checkpoint state.
  *
- * The command must be a bind-native object with `kind`. The initial supported
+ * The command must be a TurboParser JSON-native object with `kind`. The initial supported
  * commands are:
  *
  * - `approve_review` with optional `approved` bool
@@ -725,19 +754,19 @@ CXX_C_API int turbo_agent_runtime_list_observability_indexes_filtered(
  * - `override_final_output` with `text` or `output_json`
  *
  * The returned `out_state_override` is suitable for
- * `resume_bind_graph(...)` or `fork_bind_graph(...)`. This helper does not
+ * `resume_json_value_graph(...)` or `fork_json_value_graph(...)`. This helper does not
  * persist the prepared override back into the runtime.
  *
  * @param runtime Runtime handle.
  * @param checkpoint_id Checkpoint id to read and modify.
  * @param command Command object.
- * @param out_state_override Output bind-native state owned by caller.
+ * @param out_state_override Output TurboParser JSON-native state owned by caller.
  * @return 0 on success, negative on error.
  */
-CXX_C_API int turbo_agent_runtime_prepare_checkpoint_command_override_bind(
+CXX_C_API int turbo_agent_runtime_prepare_checkpoint_command_override_json_value(
     turbo_agent_runtime_t *runtime, const char *checkpoint_id,
-    const turbo_runtime_data_bind_value_t *command,
-    turbo_runtime_data_bind_value_t **out_state_override);
+    const json_value_t *command,
+    json_value_t **out_state_override);
 
 /**
  * @brief Prepare one thread-head command-derived state override.
@@ -747,10 +776,10 @@ CXX_C_API int turbo_agent_runtime_prepare_checkpoint_command_override_bind(
  * that run's latest checkpoint. This helper only prepares the resulting
  * override and does not persist it.
  */
-CXX_C_API int turbo_agent_runtime_prepare_thread_command_override_bind(
+CXX_C_API int turbo_agent_runtime_prepare_thread_command_override_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id,
-    const turbo_runtime_data_bind_value_t *command,
-    turbo_runtime_data_bind_value_t **out_state_override);
+    const json_value_t *command,
+    json_value_t **out_state_override);
 
 #ifdef __cplusplus
 }

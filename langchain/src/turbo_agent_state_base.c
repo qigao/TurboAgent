@@ -8,14 +8,14 @@
 #define TURBO_AGENT_STATE_SCHEMA_VERSION_LOCAL 1
 
 static json_value_t *
-turbo_agent_state_bind_value_to_json_object_local(const turbo_runtime_data_bind_value_t *state) {
+turbo_agent_state_to_json_object_local(const json_value_t *state) {
   json_value_t *json_state;
 
   if (!state) {
     return NULL;
   }
 
-  json_state = turbo_runtime_data_bind_value_to_json(state);
+  json_state = turbo_json_clone(state);
   if (!json_state) {
     return NULL;
   }
@@ -157,15 +157,15 @@ json_value_t *turbo_agent_state_create_impl(void) {
   return state;
 }
 
-turbo_runtime_data_bind_value_t *turbo_agent_state_create_bind_impl(void) {
+json_value_t *turbo_agent_state_create_json_value_impl(void) {
   json_value_t *state = turbo_agent_state_create();
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   if (!state) {
     return NULL;
   }
 
-  bound = turbo_runtime_data_bind_value_from_json(state);
+  bound = turbo_json_clone(state);
   turbo_free_json(&state);
   return bound;
 }
@@ -239,11 +239,11 @@ const json_value_t *turbo_agent_state_trace_event_at_impl(const json_value_t *st
   return turbo_json_array_get(events, index);
 }
 
-turbo_runtime_data_bind_value_t *
-turbo_agent_state_trace_events_bind_impl(const turbo_runtime_data_bind_value_t *state) {
-  json_value_t *json_state = turbo_agent_state_bind_value_to_json_object_local(state);
+json_value_t *
+turbo_agent_state_trace_events_json_value_impl(const json_value_t *state) {
+  json_value_t *json_state = turbo_agent_state_to_json_object_local(state);
   const json_value_t *events;
-  turbo_runtime_data_bind_value_t *bound = NULL;
+  json_value_t *bound = NULL;
 
   if (!json_state) {
     return NULL;
@@ -251,64 +251,64 @@ turbo_agent_state_trace_events_bind_impl(const turbo_runtime_data_bind_value_t *
 
   events = turbo_agent_state_trace_events(json_state);
   if (events) {
-    bound = turbo_runtime_data_bind_value_from_json(events);
+    bound = turbo_json_clone(events);
   }
 
   turbo_free_json(&json_state);
   return bound;
 }
 
-int turbo_agent_state_add_trace_event_bind_impl(
-    turbo_runtime_data_bind_value_t *state, const turbo_runtime_data_bind_value_t *event) {
-  const turbo_runtime_data_bind_value_t *trace_events_const;
-  turbo_runtime_data_bind_value_t *trace_events;
-  turbo_runtime_data_bind_value_t *event_copy;
+int turbo_agent_state_add_trace_event_json_value_impl(
+    json_value_t *state, const json_value_t *event) {
+  const json_value_t *trace_events_const;
+  json_value_t *trace_events;
+  json_value_t *event_copy;
 
   if (!state || !event ||
-      turbo_runtime_data_bind_value_kind(state) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT ||
-      turbo_event_trace_validate_bind(event) != 0) {
+      turbo_json_type(state) != TURBO_JSON_OBJECT ||
+      turbo_event_trace_validate_json_value(event) != 0) {
     return -1;
   }
 
-  trace_events_const = turbo_runtime_data_bind_object_get(state, "trace_events");
+  trace_events_const = turbo_json_object_get(state, "trace_events");
   if (!trace_events_const) {
-    trace_events = turbo_runtime_data_bind_value_create_array();
+    trace_events = turbo_json_create_array();
     if (!trace_events ||
-        turbo_runtime_data_bind_object_set(state, "trace_events", trace_events) !=
-            TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(trace_events);
+        turbo_runtime_json_object_set(state, "trace_events", trace_events) !=
+            TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(trace_events);
       return -1;
     }
-    trace_events_const = turbo_runtime_data_bind_object_get(state, "trace_events");
+    trace_events_const = turbo_json_object_get(state, "trace_events");
   }
 
   if (!trace_events_const ||
-      turbo_runtime_data_bind_value_kind(trace_events_const) !=
-          TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+      turbo_json_type(trace_events_const) !=
+          TURBO_JSON_ARRAY) {
     return -1;
   }
 
-  event_copy = turbo_runtime_data_bind_value_clone(event);
+  event_copy = turbo_json_clone(event);
   if (!event_copy) {
     return -1;
   }
 
-  if (turbo_runtime_data_bind_array_append((turbo_runtime_data_bind_value_t *)trace_events_const,
-                                           event_copy) != TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(event_copy);
+  if (turbo_runtime_json_array_append((json_value_t *)trace_events_const,
+                                           event_copy) != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(event_copy);
     return -1;
   }
 
   return 0;
 }
 
-void turbo_agent_state_capture_trace_event_bind_impl(
-    const turbo_runtime_data_bind_value_t *event, void *user_data) {
-  turbo_runtime_data_bind_value_t *state = (turbo_runtime_data_bind_value_t *)user_data;
+void turbo_agent_state_capture_trace_event_json_value_impl(
+    const json_value_t *event, void *user_data) {
+  json_value_t *state = (json_value_t *)user_data;
 
   if (!state) {
     return;
   }
 
-  turbo_agent_state_add_trace_event_bind(state, event);
+  turbo_agent_state_add_trace_event_json_value(state, event);
 }

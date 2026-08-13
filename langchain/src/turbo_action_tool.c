@@ -127,9 +127,9 @@ static int turbo_action_tool_bridge_handler(const char *arguments_json, char **o
   return 0;
 }
 
-static int turbo_action_tool_bridge_bind_handler(
-    const turbo_runtime_data_bind_value_t *arguments,
-    turbo_runtime_data_bind_value_t **out_result, void *user_data) {
+static int turbo_action_tool_bridge_json_value_handler(
+    const json_value_t *arguments,
+    json_value_t **out_result, void *user_data) {
   turbo_action_tool_bridge_entry_t *bridge = (turbo_action_tool_bridge_entry_t *)user_data;
   json_value_t *args = NULL;
   json_value_t *result = NULL;
@@ -141,7 +141,7 @@ static int turbo_action_tool_bridge_bind_handler(
 
   *out_result = NULL;
   if (arguments) {
-    args = turbo_runtime_data_bind_value_to_json(arguments);
+    args = turbo_json_clone(arguments);
     if (!args) {
       return -1;
     }
@@ -162,7 +162,7 @@ static int turbo_action_tool_bridge_bind_handler(
     return -1;
   }
 
-  *out_result = turbo_runtime_data_bind_value_from_json(result);
+  *out_result = turbo_json_clone(result);
   turbo_free_json(&result);
   return *out_result ? 0 : -1;
 }
@@ -351,7 +351,7 @@ turbo_action_tool_registry_build_tool_registry_bridge(
     definition.parameters_json = registry->entries[i].definition.parameters_json;
     definition.strict = 1;
     definition.handler = turbo_action_tool_bridge_handler;
-    definition.bind_handler = turbo_action_tool_bridge_bind_handler;
+    definition.json_value_handler = turbo_action_tool_bridge_json_value_handler;
     definition.user_data = bridge;
     definition.user_data_free = turbo_action_tool_bridge_entry_free;
     if (turbo_tool_registry_add(tool_registry, &definition) != TURBO_TOOL_OK) {

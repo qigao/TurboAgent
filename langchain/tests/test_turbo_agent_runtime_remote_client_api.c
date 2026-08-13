@@ -89,16 +89,16 @@ static void remote_client_test_state_cleanup(remote_client_test_state_t *state) 
   state->graph = NULL;
 }
 
-static int remote_client_write_bool_bind_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+static int remote_client_write_bool_json_value_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   remote_client_bool_write_t *write = (remote_client_bool_write_t *)user_data;
-  turbo_runtime_data_bind_value_t *value;
+  json_value_t *value;
 
-  value = turbo_runtime_data_bind_value_create_bool(write->value);
+  value = turbo_json_create_bool(write->value);
   if (!value) {
     return -1;
   }
-  return turbo_runtime_data_bind_object_set(ctx->bind_state, write->key, value) ==
-                 TURBO_RUNTIME_DATA_BIND_OK
+  return turbo_runtime_json_object_set(ctx->json_value_state, write->key, value) ==
+                 TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
 }
@@ -119,24 +119,24 @@ static turbo_graph_t *create_remote_client_graph(void) {
 
   check_not_null(graph);
   check_int_eq(
-      turbo_graph_add_bind_node(graph, "start", remote_client_write_bool_bind_node, &start),
+      turbo_graph_add_json_value_node(graph, "start", remote_client_write_bool_json_value_node, &start),
       TURBO_GRAPH_EXEC_OK);
   check_int_eq(
-      turbo_graph_add_bind_node(graph, "end", remote_client_write_bool_bind_node, &end),
+      turbo_graph_add_json_value_node(graph, "end", remote_client_write_bool_json_value_node, &end),
       TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_bind_edge(graph, "start", "end", NULL, NULL),
+  check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
                TURBO_GRAPH_EXEC_OK);
   check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
   return graph;
 }
 
 static json_value_t *create_remote_client_state_json(void) {
-  turbo_runtime_data_bind_value_t *state = turbo_agent_state_create_bind();
+  json_value_t *state = turbo_agent_state_create_json_value();
   json_value_t *state_json;
 
   check_not_null(state);
-  state_json = turbo_runtime_data_bind_value_to_json(state);
-  turbo_runtime_data_bind_value_destroy(state);
+  state_json = turbo_json_clone(state);
+  turbo_runtime_json_destroy(state);
   return state_json;
 }
 
@@ -160,30 +160,30 @@ static json_value_t *create_remote_client_start_params_json(void) {
   return params_json;
 }
 
-static turbo_runtime_data_bind_value_t *create_remote_client_state_bind(void) {
-  turbo_runtime_data_bind_value_t *state = turbo_agent_state_create_bind();
+static json_value_t *create_remote_client_state_json_value(void) {
+  json_value_t *state = turbo_agent_state_create_json_value();
 
   check_not_null(state);
   return state;
 }
 
-static turbo_runtime_data_bind_value_t *create_remote_client_supervisor_state_bind(void) {
+static json_value_t *create_remote_client_supervisor_state_json_value(void) {
   json_value_t *state = turbo_agent_state_create();
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   check_not_null(state);
   check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
   check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
   check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
   check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
-  bound = turbo_runtime_data_bind_value_from_json(state);
+  bound = turbo_json_clone(state);
   turbo_free_json(&state);
   return bound;
 }
 
-static turbo_runtime_data_bind_value_t *create_remote_client_committed_supervisor_state_bind(void) {
+static json_value_t *create_remote_client_committed_supervisor_state_json_value(void) {
   json_value_t *state = turbo_agent_state_create();
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   check_not_null(state);
   check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
@@ -191,7 +191,7 @@ static turbo_runtime_data_bind_value_t *create_remote_client_committed_superviso
   check_int_eq(turbo_agent_state_commit_handoff(state), 0);
   check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
   check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
-  bound = turbo_runtime_data_bind_value_from_json(state);
+  bound = turbo_json_clone(state);
   turbo_free_json(&state);
   return bound;
 }
@@ -247,20 +247,20 @@ static int remote_client_check_orchestration_latest_handoff_event(
                                                   target_agent, reason, active_agent);
 }
 
-static turbo_runtime_data_bind_value_t *create_remote_client_command_bind(const char *kind,
+static json_value_t *create_remote_client_command_json_value(const char *kind,
                                                                           const char *text) {
-  turbo_runtime_data_bind_value_t *command = turbo_runtime_data_bind_value_create_object();
+  json_value_t *command = turbo_json_create_object();
 
   check_not_null(command);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(command, "kind",
-                                         turbo_runtime_data_bind_value_create_string(kind)),
-      TURBO_RUNTIME_DATA_BIND_OK);
+      turbo_runtime_json_object_set(command, "kind",
+                                         turbo_json_create_string(kind)),
+      TURBO_RUNTIME_JSON_OK);
   if (text) {
     check_int_eq(
-        turbo_runtime_data_bind_object_set(command, "text",
-                                           turbo_runtime_data_bind_value_create_string(text)),
-        TURBO_RUNTIME_DATA_BIND_OK);
+        turbo_runtime_json_object_set(command, "text",
+                                           turbo_json_create_string(text)),
+        TURBO_RUNTIME_JSON_OK);
   }
   return command;
 }
@@ -329,15 +329,15 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
   turbo_agent_runtime_remote_config_t remote_config = {0};
   turbo_agent_runtime_remote_iris_config_t bridge_config = {0};
   turbo_agent_runtime_remote_client_config_t client_config = {0};
-  turbo_runtime_data_bind_value_t *state_bind = NULL;
-  turbo_runtime_data_bind_value_t *thread_state = NULL;
-  turbo_runtime_data_bind_value_t *resumed_state = NULL;
-  turbo_runtime_data_bind_value_t *forked_state = NULL;
-  turbo_runtime_data_bind_value_t *timeline = NULL;
-  turbo_runtime_data_bind_value_t *history_events = NULL;
-  turbo_runtime_data_bind_value_t *run_trace_events = NULL;
-  turbo_runtime_data_bind_value_t *checkpoint_trace_events = NULL;
-  turbo_runtime_data_bind_value_t *command = NULL;
+  json_value_t *state_json_value = NULL;
+  json_value_t *thread_state = NULL;
+  json_value_t *resumed_state = NULL;
+  json_value_t *forked_state = NULL;
+  json_value_t *timeline = NULL;
+  json_value_t *history_events = NULL;
+  json_value_t *run_trace_events = NULL;
+  json_value_t *checkpoint_trace_events = NULL;
+  json_value_t *command = NULL;
   json_value_t *params_json = NULL;
   json_value_t *result_json = NULL;
   json_value_t *error_json = NULL;
@@ -437,8 +437,8 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
   options.interrupt_before_count = 1;
   interrupt_options.interrupt_before_nodes = interrupt_before_end;
   interrupt_options.interrupt_before_count = 1;
-  state_bind = create_remote_client_state_bind();
-  if (turbo_agent_runtime_remote_client_start_bind_graph(state->client, "remote-client", state_bind,
+  state_json_value = create_remote_client_state_json_value();
+  if (turbo_agent_runtime_remote_client_start_json_value_graph(state->client, "remote-client", state_json_value,
                                                          &options, "thr_remote_client_helper",
                                                          &summary_json, &resumed_state,
                                                          &error_json) == 0 &&
@@ -449,19 +449,19 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
     original_run_id = remote_client_strdup(turbo_json_get_string(summary_json, "run_id"));
     if (checkpoint_id && original_run_id &&
         strcmp(turbo_json_get_string(summary_json, "status"), "interrupted") == 0 &&
-        turbo_runtime_data_bind_value_as_bool(
-            turbo_runtime_data_bind_object_get(resumed_state, "visited_start"), 0) &&
-        !turbo_runtime_data_bind_value_as_bool(
-            turbo_runtime_data_bind_object_get(resumed_state, "visited_end"), 0) &&
-        turbo_agent_runtime_remote_client_resume_bind_graph(state->client, "remote-client",
+        turbo_runtime_json_value_as_bool(
+            turbo_json_object_get(resumed_state, "visited_start"), 0) &&
+        !turbo_runtime_json_value_as_bool(
+            turbo_json_object_get(resumed_state, "visited_end"), 0) &&
+        turbo_agent_runtime_remote_client_resume_json_value_graph(state->client, "remote-client",
                                                             checkpoint_id, NULL, NULL,
                                                             &resumed_summary, &thread_state,
                                                             &error_json) == 0 &&
         resumed_summary && thread_state &&
         strcmp(turbo_json_get_string(resumed_summary, "status"), "completed") == 0 &&
-        turbo_runtime_data_bind_value_as_bool(
-            turbo_runtime_data_bind_object_get(thread_state, "visited_end"), 0) &&
-        turbo_agent_runtime_remote_client_fork_bind_graph(state->client, "remote-client",
+        turbo_runtime_json_value_as_bool(
+            turbo_json_object_get(thread_state, "visited_end"), 0) &&
+        turbo_agent_runtime_remote_client_fork_json_value_graph(state->client, "remote-client",
                                                           checkpoint_id, NULL, NULL,
                                                           &forked_summary, &forked_state,
                                                           &error_json) == 0 &&
@@ -471,21 +471,21 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
       state->helper_run_ok = 1;
     }
 
-    turbo_runtime_data_bind_value_destroy(forked_state);
+    turbo_runtime_json_destroy(forked_state);
     forked_state = NULL;
     turbo_free_json(&forked_summary);
-    turbo_runtime_data_bind_value_destroy(thread_state);
+    turbo_runtime_json_destroy(thread_state);
     thread_state = NULL;
     turbo_free_json(&resumed_summary);
-    turbo_runtime_data_bind_value_destroy(resumed_state);
+    turbo_runtime_json_destroy(resumed_state);
     resumed_state = NULL;
 
     if (checkpoint_id &&
-        turbo_agent_runtime_remote_client_get_thread_state_bind(
+        turbo_agent_runtime_remote_client_get_thread_state_json_value(
             state->client, "thr_remote_client_helper", &thread_state, &error_json) == 0 &&
         thread_state &&
-        turbo_runtime_data_bind_value_as_bool(
-            turbo_runtime_data_bind_object_get(thread_state, "visited_end"), 0) &&
+        turbo_runtime_json_value_as_bool(
+            turbo_json_object_get(thread_state, "visited_end"), 0) &&
         turbo_agent_runtime_remote_client_get_checkpoint_context(state->client, checkpoint_id,
                                                                  &context_json, &error_json) == 0 &&
         context_json &&
@@ -512,39 +512,39 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
         turbo_json_array_size(checkpoints_json) == 1 &&
         strcmp(turbo_json_get_string(turbo_json_array_get(checkpoints_json, 0), "id"),
                checkpoint_id) == 0 &&
-        turbo_agent_runtime_remote_client_load_history_events_bind(
+        turbo_agent_runtime_remote_client_load_history_events_json_value(
             state->client, NULL, checkpoint_id, &history_events, &error_json) == 0 &&
         history_events &&
-        turbo_runtime_data_bind_value_kind(history_events) == TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY &&
-        turbo_runtime_data_bind_array_get(history_events, 0) != NULL &&
-        turbo_agent_runtime_remote_client_get_run_trace_events_bind(
+        turbo_json_type(history_events) == TURBO_JSON_ARRAY &&
+        turbo_json_array_get(history_events, 0) != NULL &&
+        turbo_agent_runtime_remote_client_get_run_trace_events_json_value(
             state->client, original_run_id, &run_trace_events, &error_json) == 0 &&
         run_trace_events &&
-        turbo_runtime_data_bind_value_kind(run_trace_events) ==
-            TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY &&
-        turbo_runtime_data_bind_array_get(run_trace_events, 0) == NULL &&
-        turbo_agent_runtime_remote_client_get_checkpoint_trace_events_bind(
+        turbo_json_type(run_trace_events) ==
+            TURBO_JSON_ARRAY &&
+        turbo_json_array_get(run_trace_events, 0) == NULL &&
+        turbo_agent_runtime_remote_client_get_checkpoint_trace_events_json_value(
             state->client, checkpoint_id, &checkpoint_trace_events, &error_json) == 0 &&
         checkpoint_trace_events &&
-        turbo_runtime_data_bind_value_kind(checkpoint_trace_events) ==
-            TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY &&
-        turbo_runtime_data_bind_array_get(checkpoint_trace_events, 0) == NULL) {
+        turbo_json_type(checkpoint_trace_events) ==
+            TURBO_JSON_ARRAY &&
+        turbo_json_array_get(checkpoint_trace_events, 0) == NULL) {
       state->record_helpers_ok = 1;
     }
   }
-  turbo_runtime_data_bind_value_destroy(state_bind);
-  state_bind = NULL;
-  turbo_runtime_data_bind_value_destroy(thread_state);
+  turbo_runtime_json_destroy(state_json_value);
+  state_json_value = NULL;
+  turbo_runtime_json_destroy(thread_state);
   thread_state = NULL;
-  turbo_runtime_data_bind_value_destroy(history_events);
+  turbo_runtime_json_destroy(history_events);
   history_events = NULL;
-  turbo_runtime_data_bind_value_destroy(run_trace_events);
+  turbo_runtime_json_destroy(run_trace_events);
   run_trace_events = NULL;
-  turbo_runtime_data_bind_value_destroy(checkpoint_trace_events);
+  turbo_runtime_json_destroy(checkpoint_trace_events);
   checkpoint_trace_events = NULL;
-  turbo_runtime_data_bind_value_destroy(resumed_state);
+  turbo_runtime_json_destroy(resumed_state);
   resumed_state = NULL;
-  turbo_runtime_data_bind_value_destroy(forked_state);
+  turbo_runtime_json_destroy(forked_state);
   forked_state = NULL;
   turbo_free_json(&summary_json);
   turbo_free_json(&resumed_summary);
@@ -684,9 +684,9 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
   turbo_free_json(&memory_record_fixture);
   turbo_free_json(&error_json);
 
-  state_bind = create_remote_client_state_bind();
-  if (turbo_agent_runtime_remote_client_start_bind_graph(
-          state->client, "remote-client", state_bind, &interrupt_options,
+  state_json_value = create_remote_client_state_json_value();
+  if (turbo_agent_runtime_remote_client_start_json_value_graph(
+          state->client, "remote-client", state_json_value, &interrupt_options,
           "thr_remote_client_observability", &summary_json, &resumed_state, &error_json) == 0 &&
       summary_json && resumed_state && !error_json) {
     free(original_run_id);
@@ -707,31 +707,31 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
       state->observability_ok = 1;
     }
   }
-  turbo_runtime_data_bind_value_destroy(state_bind);
-  state_bind = NULL;
-  turbo_runtime_data_bind_value_destroy(resumed_state);
+  turbo_runtime_json_destroy(state_json_value);
+  state_json_value = NULL;
+  turbo_runtime_json_destroy(resumed_state);
   resumed_state = NULL;
   turbo_free_json(&summary_json);
   turbo_free_json(&index_json);
   turbo_free_json(&error_json);
 
-  if (turbo_agent_runtime_remote_client_get_thread_timeline_bind(
+  if (turbo_agent_runtime_remote_client_get_thread_timeline_json_value(
           state->client, "thr_remote_client_observability", &timeline, &error_json) == 0 &&
       timeline &&
-      turbo_runtime_data_bind_value_kind(timeline) == TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT &&
-      strcmp(turbo_runtime_data_bind_value_as_string(
-                 turbo_runtime_data_bind_object_get(
-                     turbo_runtime_data_bind_object_get(timeline, "thread"), "id")),
+      turbo_json_type(timeline) == TURBO_JSON_OBJECT &&
+      strcmp(turbo_runtime_json_value_as_string(
+                 turbo_json_object_get(
+                     turbo_json_object_get(timeline, "thread"), "id")),
              "thr_remote_client_observability") == 0 &&
-      turbo_runtime_data_bind_value_kind(
-          turbo_runtime_data_bind_object_get(timeline, "runs")) ==
-          TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY &&
-      turbo_runtime_data_bind_value_kind(
-          turbo_runtime_data_bind_object_get(timeline, "history_events")) ==
-          TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+      turbo_json_type(
+          turbo_json_object_get(timeline, "runs")) ==
+          TURBO_JSON_ARRAY &&
+      turbo_json_type(
+          turbo_json_object_get(timeline, "history_events")) ==
+          TURBO_JSON_ARRAY) {
     state->timeline_ok = 1;
   }
-  turbo_runtime_data_bind_value_destroy(timeline);
+  turbo_runtime_json_destroy(timeline);
   timeline = NULL;
   turbo_free_json(&error_json);
 
@@ -849,9 +849,9 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
     turbo_free_json(&child_output_item);
   }
 
-  state_bind = create_remote_client_supervisor_state_bind();
-  if (turbo_agent_runtime_remote_client_start_bind_graph(
-          state->client, "remote-client", state_bind, &interrupt_options,
+  state_json_value = create_remote_client_supervisor_state_json_value();
+  if (turbo_agent_runtime_remote_client_start_json_value_graph(
+          state->client, "remote-client", state_json_value, &interrupt_options,
           "thr_remote_client_multi_agent", &summary_json, &resumed_state, &error_json) == 0 &&
       summary_json && resumed_state && !error_json) {
     const char *supervisor_run_id = turbo_json_get_string(summary_json, "run_id");
@@ -925,9 +925,9 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
     }
     turbo_free_json(&child_output_item);
   }
-  turbo_runtime_data_bind_value_destroy(state_bind);
-  state_bind = NULL;
-  turbo_runtime_data_bind_value_destroy(resumed_state);
+  turbo_runtime_json_destroy(state_json_value);
+  state_json_value = NULL;
+  turbo_runtime_json_destroy(resumed_state);
   resumed_state = NULL;
   turbo_free_json(&summary_json);
   turbo_free_json(&supervisor_inspect_json);
@@ -935,9 +935,9 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
   turbo_free_json(&child_multi_agent_inspect_json);
   turbo_free_json(&error_json);
 
-  state_bind = create_remote_client_committed_supervisor_state_bind();
-  if (turbo_agent_runtime_remote_client_start_bind_graph(
-          state->client, "remote-client", state_bind, &interrupt_options,
+  state_json_value = create_remote_client_committed_supervisor_state_json_value();
+  if (turbo_agent_runtime_remote_client_start_json_value_graph(
+          state->client, "remote-client", state_json_value, &interrupt_options,
           "thr_remote_client_multi_agent_committed", &summary_json, &resumed_state, &error_json) == 0 &&
       summary_json && resumed_state && !error_json) {
     const char *committed_run_id = turbo_json_get_string(summary_json, "run_id");
@@ -965,72 +965,72 @@ static void remote_runtime_remote_client_test_coro(coro_t *co, void *arg) {
               "delegate execution", "executor");
     }
   }
-  turbo_runtime_data_bind_value_destroy(state_bind);
-  state_bind = NULL;
-  turbo_runtime_data_bind_value_destroy(resumed_state);
+  turbo_runtime_json_destroy(state_json_value);
+  state_json_value = NULL;
+  turbo_runtime_json_destroy(resumed_state);
   resumed_state = NULL;
   turbo_free_json(&summary_json);
   turbo_free_json(&supervisor_inspect_json);
   turbo_free_json(&orchestration_inspect_json);
   turbo_free_json(&error_json);
 
-  state_bind = create_remote_client_state_bind();
-  if (turbo_agent_runtime_remote_client_start_bind_graph(
-          state->client, "remote-client", state_bind, &interrupt_options,
+  state_json_value = create_remote_client_state_json_value();
+  if (turbo_agent_runtime_remote_client_start_json_value_graph(
+          state->client, "remote-client", state_json_value, &interrupt_options,
           "thr_remote_client_thread_command_resume", &summary_json, &resumed_state, &error_json) == 0 &&
       summary_json && resumed_state && !error_json) {
     thread_command_run_id = turbo_json_get_string(summary_json, "run_id");
-    command = create_remote_client_command_bind("append_user_message", "resume from thread command");
+    command = create_remote_client_command_json_value("append_user_message", "resume from thread command");
     if (thread_command_run_id &&
-        turbo_agent_runtime_remote_client_resume_thread_command_bind(
+        turbo_agent_runtime_remote_client_resume_thread_command_json_value(
             state->client, "remote-client", "thr_remote_client_thread_command_resume", command,
             NULL, &resumed_summary, &thread_state, &error_json) == 0 &&
         resumed_summary && thread_state &&
         strcmp(turbo_json_get_string(resumed_summary, "status"), "completed") == 0 &&
         strcmp(turbo_json_get_string(resumed_summary, "run_id"), thread_command_run_id) == 0 &&
-        turbo_runtime_data_bind_value_as_bool(
-            turbo_runtime_data_bind_object_get(thread_state, "visited_end"), 0)) {
+        turbo_runtime_json_value_as_bool(
+            turbo_json_object_get(thread_state, "visited_end"), 0)) {
       state->thread_command_resume_ok = 1;
     }
   }
-  turbo_runtime_data_bind_value_destroy(command);
+  turbo_runtime_json_destroy(command);
   command = NULL;
-  turbo_runtime_data_bind_value_destroy(state_bind);
-  state_bind = NULL;
-  turbo_runtime_data_bind_value_destroy(thread_state);
+  turbo_runtime_json_destroy(state_json_value);
+  state_json_value = NULL;
+  turbo_runtime_json_destroy(thread_state);
   thread_state = NULL;
-  turbo_runtime_data_bind_value_destroy(resumed_state);
+  turbo_runtime_json_destroy(resumed_state);
   resumed_state = NULL;
   turbo_free_json(&summary_json);
   turbo_free_json(&resumed_summary);
   turbo_free_json(&error_json);
 
-  state_bind = create_remote_client_state_bind();
-  if (turbo_agent_runtime_remote_client_start_bind_graph(
-          state->client, "remote-client", state_bind, &interrupt_options,
+  state_json_value = create_remote_client_state_json_value();
+  if (turbo_agent_runtime_remote_client_start_json_value_graph(
+          state->client, "remote-client", state_json_value, &interrupt_options,
           "thr_remote_client_thread_command_fork", &summary_json, &resumed_state, &error_json) == 0 &&
       summary_json && resumed_state && !error_json) {
     thread_command_fork_run_id = turbo_json_get_string(summary_json, "run_id");
-    command = create_remote_client_command_bind("append_user_message", "fork from thread command");
+    command = create_remote_client_command_json_value("append_user_message", "fork from thread command");
     if (thread_command_fork_run_id &&
-        turbo_agent_runtime_remote_client_fork_thread_command_bind(
+        turbo_agent_runtime_remote_client_fork_thread_command_json_value(
             state->client, "remote-client", "thr_remote_client_thread_command_fork", command,
             NULL, &forked_summary, &forked_state, &error_json) == 0 &&
         forked_summary && forked_state &&
         strcmp(turbo_json_get_string(forked_summary, "status"), "completed") == 0 &&
         strcmp(turbo_json_get_string(forked_summary, "run_id"), thread_command_fork_run_id) != 0 &&
-        turbo_runtime_data_bind_value_as_bool(
-            turbo_runtime_data_bind_object_get(forked_state, "visited_end"), 0)) {
+        turbo_runtime_json_value_as_bool(
+            turbo_json_object_get(forked_state, "visited_end"), 0)) {
       state->thread_command_fork_ok = 1;
     }
   }
-  turbo_runtime_data_bind_value_destroy(command);
+  turbo_runtime_json_destroy(command);
   command = NULL;
-  turbo_runtime_data_bind_value_destroy(state_bind);
-  state_bind = NULL;
-  turbo_runtime_data_bind_value_destroy(forked_state);
+  turbo_runtime_json_destroy(state_json_value);
+  state_json_value = NULL;
+  turbo_runtime_json_destroy(forked_state);
   forked_state = NULL;
-  turbo_runtime_data_bind_value_destroy(resumed_state);
+  turbo_runtime_json_destroy(resumed_state);
   resumed_state = NULL;
   turbo_free_json(&summary_json);
   turbo_free_json(&forked_summary);

@@ -276,8 +276,8 @@ spec("turbo retriever api") {
                      "replan_prepare", "plan_advance", "end", 1),
                  TURBO_GRAPH_EXEC_OK);
     check_str_eq(turbo_graph_get_entry(graph), "retriever");
-    check_size_eq(turbo_graph_node_count(graph), 12);
-    check_size_eq(turbo_graph_edge_count(graph), 15);
+    check_size_eq(turbo_graph_node_count(graph), 13);
+    check_size_eq(turbo_graph_edge_count(graph), 17);
     check_not_null(turbo_graph_topology_id(graph));
 
     turbo_retriever_destroy(retriever);

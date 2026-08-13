@@ -9,7 +9,7 @@ extern "C" {
 
 CXX_C_API size_t turbo_agent_state_schema_version_impl(void);
 CXX_C_API json_value_t *turbo_agent_state_create_impl(void);
-CXX_C_API turbo_runtime_data_bind_value_t *turbo_agent_state_create_bind_impl(void);
+CXX_C_API json_value_t *turbo_agent_state_create_json_value_impl(void);
 CXX_C_API size_t turbo_agent_state_version_impl(const json_value_t *state);
 CXX_C_API int turbo_agent_state_version_supported_impl(const json_value_t *state);
 CXX_C_API int turbo_agent_state_add_user_message_impl(json_value_t *state, const char *text);
@@ -21,12 +21,12 @@ CXX_C_API const json_value_t *turbo_agent_state_trace_events_impl(const json_val
 CXX_C_API size_t turbo_agent_state_trace_event_count_impl(const json_value_t *state);
 CXX_C_API const json_value_t *turbo_agent_state_trace_event_at_impl(
     const json_value_t *state, size_t index);
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_trace_events_bind_impl(const turbo_runtime_data_bind_value_t *state);
-CXX_C_API int turbo_agent_state_add_trace_event_bind_impl(
-    turbo_runtime_data_bind_value_t *state, const turbo_runtime_data_bind_value_t *event);
-CXX_C_API void turbo_agent_state_capture_trace_event_bind_impl(
-    const turbo_runtime_data_bind_value_t *event, void *user_data);
+CXX_C_API json_value_t *
+turbo_agent_state_trace_events_json_value_impl(const json_value_t *state);
+CXX_C_API int turbo_agent_state_add_trace_event_json_value_impl(
+    json_value_t *state, const json_value_t *event);
+CXX_C_API void turbo_agent_state_capture_trace_event_json_value_impl(
+    const json_value_t *event, void *user_data);
 CXX_C_API const json_value_t *turbo_agent_state_last_event_of_kind_impl(
     const json_value_t *state, const char *kind);
 CXX_C_API const json_value_t *turbo_agent_state_last_event_impl(
@@ -86,7 +86,7 @@ CXX_C_API int turbo_agent_state_append_replan_version(json_value_t *state, int r
 #ifdef TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP
 #define turbo_agent_state_schema_version turbo_agent_state_schema_version_impl
 #define turbo_agent_state_create turbo_agent_state_create_impl
-#define turbo_agent_state_create_bind turbo_agent_state_create_bind_impl
+#define turbo_agent_state_create_json_value turbo_agent_state_create_json_value_impl
 #define turbo_agent_state_version turbo_agent_state_version_impl
 #define turbo_agent_state_version_supported turbo_agent_state_version_supported_impl
 #define turbo_agent_state_add_user_message turbo_agent_state_add_user_message_impl
@@ -96,9 +96,9 @@ CXX_C_API int turbo_agent_state_append_replan_version(json_value_t *state, int r
 #define turbo_agent_state_trace_events turbo_agent_state_trace_events_impl
 #define turbo_agent_state_trace_event_count turbo_agent_state_trace_event_count_impl
 #define turbo_agent_state_trace_event_at turbo_agent_state_trace_event_at_impl
-#define turbo_agent_state_trace_events_bind turbo_agent_state_trace_events_bind_impl
-#define turbo_agent_state_add_trace_event_bind turbo_agent_state_add_trace_event_bind_impl
-#define turbo_agent_state_capture_trace_event_bind turbo_agent_state_capture_trace_event_bind_impl
+#define turbo_agent_state_trace_events_json_value turbo_agent_state_trace_events_json_value_impl
+#define turbo_agent_state_add_trace_event_json_value turbo_agent_state_add_trace_event_json_value_impl
+#define turbo_agent_state_capture_trace_event_json_value turbo_agent_state_capture_trace_event_json_value_impl
 #define turbo_agent_state_last_event_of_kind turbo_agent_state_last_event_of_kind_impl
 #define turbo_agent_state_last_event turbo_agent_state_last_event_impl
 #define turbo_agent_state_latest_handoff_event turbo_agent_state_latest_handoff_event_impl

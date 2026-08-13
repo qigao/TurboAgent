@@ -13,7 +13,6 @@ extern "C" {
 
 typedef struct turbo_agent_s turbo_agent_t;
 typedef struct turbo_model_provider_s turbo_model_provider_t;
-typedef struct turbo_runtime_data_bind_value_s turbo_runtime_data_bind_value_t;
 
 typedef int (*turbo_model_provider_build_request_fn)(const turbo_agent_t *agent,
                                                      json_value_t *state, char **out_request_json);
@@ -112,14 +111,14 @@ CXX_C_API const char *turbo_model_provider_select_endpoint_path(
     const turbo_model_provider_t *provider, const char *endpoint_path_override);
 
 /**
- * @brief Convert canonical bind-native messages into provider-specific wire JSON.
+ * @brief Convert canonical TurboParser JSON-native messages into provider-specific wire JSON.
  * @param provider Provider singleton.
  * @param messages Canonical message array.
  * @param out_system Optional provider-side system text owned by caller when needed.
  * @return JSON array owned by caller, or NULL on validation/allocation failure.
  */
 CXX_C_API json_value_t *turbo_model_provider_messages_to_wire_json(
-    const turbo_model_provider_t *provider, const turbo_runtime_data_bind_value_t *messages,
+    const turbo_model_provider_t *provider, const json_value_t *messages,
     char **out_system);
 
 /**
@@ -142,31 +141,31 @@ CXX_C_API json_value_t *turbo_model_provider_sse_to_event_json(
     const turbo_model_provider_t *provider, const char *sse_data, size_t sse_len);
 
 /**
- * @brief Convert one provider wire response into a canonical bind-native model event.
+ * @brief Convert one provider wire response into a canonical TurboParser JSON-native model event.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *turbo_model_provider_response_to_event_bind(
+CXX_C_API json_value_t *turbo_model_provider_response_to_event_json_value(
     const turbo_model_provider_t *provider, const json_value_t *response);
 
 /**
- * @brief Emit canonical bind-native model events derived from one provider response.
+ * @brief Emit canonical TurboParser JSON-native model events derived from one provider response.
  */
-CXX_C_API int turbo_model_provider_response_emit_bind(const turbo_model_provider_t *provider,
+CXX_C_API int turbo_model_provider_response_emit_json_value(const turbo_model_provider_t *provider,
                                                       const json_value_t *response,
-                                                      turbo_event_sink_bind_fn event_sink,
+                                                      turbo_event_sink_json_value_fn event_sink,
                                                       void *event_sink_user_data);
 
 /**
- * @brief Convert provider SSE payload into one canonical bind-native model event.
+ * @brief Convert provider SSE payload into one canonical TurboParser JSON-native model event.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *turbo_model_provider_sse_to_event_bind(
+CXX_C_API json_value_t *turbo_model_provider_sse_to_event_json_value(
     const turbo_model_provider_t *provider, const char *sse_data, size_t sse_len);
 
 /**
- * @brief Emit canonical bind-native model events derived from one SSE payload.
+ * @brief Emit canonical TurboParser JSON-native model events derived from one SSE payload.
  */
-CXX_C_API int turbo_model_provider_sse_emit_bind(const turbo_model_provider_t *provider,
+CXX_C_API int turbo_model_provider_sse_emit_json_value(const turbo_model_provider_t *provider,
                                                  const char *sse_data, size_t sse_len,
-                                                 turbo_event_sink_bind_fn event_sink,
+                                                 turbo_event_sink_json_value_fn event_sink,
                                                  void *event_sink_user_data);
 
 #ifdef __cplusplus

@@ -1,4 +1,43 @@
 #include "turbo_agent_workflow_graph_internal.h"
+#define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
+#include "turbo_agent_state_core_internal.h"
+
+#include <turbo_str.h>
+
+static const char turbo_agent_planner_tool_node_suffix[] = ".tools";
+
+static int turbo_agent_nested_has_pending_tool_calls(const turbo_graph_exec_ctx_t *ctx,
+                                                     void *user_data) {
+  const char *state_versions_key = (const char *)user_data;
+  const json_value_t *nested_state;
+
+  if (!ctx || !ctx->state || !state_versions_key) {
+    return 0;
+  }
+
+  nested_state =
+      turbo_agent_state_get_current_object_version_const(ctx->state, state_versions_key);
+  return turbo_agent_state_pending_tool_calls(nested_state ? nested_state : ctx->state) > 0;
+}
+
+static tstr_t turbo_agent_planner_tool_node_name_create(const char *planner_node_name) {
+  tstr_t name;
+  tstr_t expanded;
+
+  if (!planner_node_name) {
+    return NULL;
+  }
+  name = tstr_dup(planner_node_name);
+  if (!name) {
+    return NULL;
+  }
+  expanded = tstr_cat(name, turbo_agent_planner_tool_node_suffix);
+  if (!expanded) {
+    tstr_free(name);
+    return NULL;
+  }
+  return expanded;
+}
 
 int turbo_agent_workflow_plan_complete_predicate(const turbo_graph_exec_ctx_t *ctx,
                                                  void *user_data) {
@@ -45,9 +84,23 @@ turbo_graph_exec_status_t turbo_agent_workflow_add_planner_core(
     turbo_graph_t *graph, const char *planner_node_name, turbo_agent_t *planner_agent,
     const char *plan_commit_node_name, const char *plan_step_node_name) {
   turbo_graph_exec_status_t status;
+  tstr_t planner_tool_node_name;
+
+  planner_tool_node_name = turbo_agent_planner_tool_node_name_create(planner_node_name);
+  if (!planner_tool_node_name) {
+    return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
+  }
 
   status = turbo_agent_workflow_add_node(graph, planner_node_name,
                                          turbo_agent_planner_model_node, planner_agent);
+  if (status != TURBO_GRAPH_EXEC_OK) {
+    tstr_free(planner_tool_node_name);
+    return status;
+  }
+
+  status = turbo_agent_workflow_add_node(graph, planner_tool_node_name,
+                                         turbo_agent_planner_tool_node, planner_agent);
+  tstr_free(planner_tool_node_name);
   if (status != TURBO_GRAPH_EXEC_OK) {
     return status;
   }
@@ -127,7 +180,8 @@ turbo_graph_exec_status_t turbo_agent_workflow_connect_executor_cycle(
   turbo_graph_exec_status_t status;
 
   status = turbo_agent_workflow_add_edge(graph, executor_node_name, tool_node_name,
-                                         turbo_agent_has_pending_tool_calls, NULL);
+                                         turbo_agent_nested_has_pending_tool_calls,
+                                         (void *)"executor_state_versions");
   if (status != TURBO_GRAPH_EXEC_OK) {
     return status;
   }
@@ -146,7 +200,8 @@ turbo_graph_exec_status_t turbo_agent_workflow_connect_executor_replan_cycle(
   turbo_graph_exec_status_t status;
 
   status = turbo_agent_workflow_add_edge(graph, executor_node_name, tool_node_name,
-                                         turbo_agent_has_pending_tool_calls, NULL);
+                                         turbo_agent_nested_has_pending_tool_calls,
+                                         (void *)"executor_state_versions");
   if (status != TURBO_GRAPH_EXEC_OK) {
     return status;
   }
@@ -197,6 +252,27 @@ turbo_graph_exec_status_t turbo_agent_workflow_connect_planner_path(
     const char *plan_commit_node_name, const char *plan_step_node_name,
     const char *next_node_name) {
   turbo_graph_exec_status_t status;
+  tstr_t planner_tool_node_name;
+
+  planner_tool_node_name = turbo_agent_planner_tool_node_name_create(planner_node_name);
+  if (!planner_tool_node_name) {
+    return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
+  }
+
+  status = turbo_agent_workflow_add_edge(graph, planner_node_name, planner_tool_node_name,
+                                         turbo_agent_nested_has_pending_tool_calls,
+                                         (void *)"planner_state_versions");
+  if (status != TURBO_GRAPH_EXEC_OK) {
+    tstr_free(planner_tool_node_name);
+    return status;
+  }
+
+  status = turbo_agent_workflow_add_edge(graph, planner_tool_node_name, planner_node_name, NULL,
+                                         NULL);
+  tstr_free(planner_tool_node_name);
+  if (status != TURBO_GRAPH_EXEC_OK) {
+    return status;
+  }
 
   status = turbo_agent_workflow_add_edge(graph, planner_node_name, plan_commit_node_name, NULL,
                                          NULL);

@@ -68,36 +68,36 @@ CXX_C_API int turbo_agent_runtime_remote_client_get_startup_diagnostics(
 /**
  * @brief Start one remote graph run through `runtime.start`.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_start_bind_graph(
+CXX_C_API int turbo_agent_runtime_remote_client_start_json_value_graph(
     turbo_agent_runtime_remote_client_t *client, const char *graph_name,
-    const turbo_runtime_data_bind_value_t *state, const turbo_graph_run_options_t *options,
+    const json_value_t *state, const turbo_graph_run_options_t *options,
     const char *thread_id, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state, json_value_t **out_error_json);
+    json_value_t **out_state, json_value_t **out_error_json);
 
 /**
  * @brief Resume one remote checkpoint through `runtime.resume`.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_resume_bind_graph(
+CXX_C_API int turbo_agent_runtime_remote_client_resume_json_value_graph(
     turbo_agent_runtime_remote_client_t *client, const char *graph_name,
-    const char *checkpoint_id, const turbo_runtime_data_bind_value_t *state_override,
+    const char *checkpoint_id, const json_value_t *state_override,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state, json_value_t **out_error_json);
+    json_value_t **out_state, json_value_t **out_error_json);
 
 /**
  * @brief Fork one new remote run from one checkpoint through `runtime.fork`.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_fork_bind_graph(
+CXX_C_API int turbo_agent_runtime_remote_client_fork_json_value_graph(
     turbo_agent_runtime_remote_client_t *client, const char *graph_name,
-    const char *checkpoint_id, const turbo_runtime_data_bind_value_t *state_override,
+    const char *checkpoint_id, const json_value_t *state_override,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state, json_value_t **out_error_json);
+    json_value_t **out_state, json_value_t **out_error_json);
 
 /**
  * @brief Load one remote thread head state through `runtime.getThreadState`.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_get_thread_state_bind(
+CXX_C_API int turbo_agent_runtime_remote_client_get_thread_state_json_value(
     turbo_agent_runtime_remote_client_t *client, const char *thread_id,
-    turbo_runtime_data_bind_value_t **out_state, json_value_t **out_error_json);
+    json_value_t **out_state, json_value_t **out_error_json);
 
 /**
  * @brief Load one remote checkpoint inspect context through `runtime.getCheckpointContext`.
@@ -132,23 +132,23 @@ CXX_C_API int turbo_agent_runtime_remote_client_list_checkpoints(
  *
  * At least one of `run_id` or `checkpoint_id` must be non-empty.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_load_history_events_bind(
+CXX_C_API int turbo_agent_runtime_remote_client_load_history_events_json_value(
     turbo_agent_runtime_remote_client_t *client, const char *run_id, const char *checkpoint_id,
-    turbo_runtime_data_bind_value_t **out_events, json_value_t **out_error_json);
+    json_value_t **out_events, json_value_t **out_error_json);
 
 /**
  * @brief Load remote run trace events through `runtime.getRunTraceEvents`.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_get_run_trace_events_bind(
+CXX_C_API int turbo_agent_runtime_remote_client_get_run_trace_events_json_value(
     turbo_agent_runtime_remote_client_t *client, const char *run_id,
-    turbo_runtime_data_bind_value_t **out_events, json_value_t **out_error_json);
+    json_value_t **out_events, json_value_t **out_error_json);
 
 /**
  * @brief Load remote checkpoint trace events through `runtime.getCheckpointTraceEvents`.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_get_checkpoint_trace_events_bind(
+CXX_C_API int turbo_agent_runtime_remote_client_get_checkpoint_trace_events_json_value(
     turbo_agent_runtime_remote_client_t *client, const char *checkpoint_id,
-    turbo_runtime_data_bind_value_t **out_events, json_value_t **out_error_json);
+    json_value_t **out_events, json_value_t **out_error_json);
 
 /**
  * @brief Delete one remote canonical memory record through `memory.deleteRecord`.
@@ -203,9 +203,9 @@ CXX_C_API int turbo_agent_runtime_remote_client_list_memory_records(
 /**
  * @brief Load one remote thread timeline snapshot through the observability bundle.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_get_thread_timeline_bind(
+CXX_C_API int turbo_agent_runtime_remote_client_get_thread_timeline_json_value(
     turbo_agent_runtime_remote_client_t *client, const char *thread_id,
-    turbo_runtime_data_bind_value_t **out_timeline, json_value_t **out_error_json);
+    json_value_t **out_timeline, json_value_t **out_error_json);
 
 /**
  * @brief Load one remote branch tree snapshot through the observability bundle.
@@ -290,20 +290,20 @@ CXX_C_API int turbo_agent_runtime_remote_client_get_child_multi_agent_inspect(
 /**
  * @brief Apply one command to one remote thread head and resume it.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_resume_thread_command_bind(
+CXX_C_API int turbo_agent_runtime_remote_client_resume_thread_command_json_value(
     turbo_agent_runtime_remote_client_t *client, const char *graph_name,
-    const char *thread_id, const turbo_runtime_data_bind_value_t *command,
+    const char *thread_id, const json_value_t *command,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state, json_value_t **out_error_json);
+    json_value_t **out_state, json_value_t **out_error_json);
 
 /**
  * @brief Apply one command to one remote thread head and fork a new run from it.
  */
-CXX_C_API int turbo_agent_runtime_remote_client_fork_thread_command_bind(
+CXX_C_API int turbo_agent_runtime_remote_client_fork_thread_command_json_value(
     turbo_agent_runtime_remote_client_t *client, const char *graph_name,
-    const char *thread_id, const turbo_runtime_data_bind_value_t *command,
+    const char *thread_id, const json_value_t *command,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state, json_value_t **out_error_json);
+    json_value_t **out_state, json_value_t **out_error_json);
 
 #ifdef __cplusplus
 }

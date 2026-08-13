@@ -545,11 +545,11 @@ CXX_C_API int turbo_agent_runtime_get_thread_observability_index(
   json_value_t *control_snapshot_json = NULL;
   json_value_t *current_checkpoint_summary_json = NULL;
   json_value_t *thread_state_json = NULL;
-  turbo_runtime_data_bind_value_t *thread_timeline_bind = NULL;
-  turbo_runtime_data_bind_value_t *history_events_bind = NULL;
-  turbo_runtime_data_bind_value_t *trace_events_bind = NULL;
-  turbo_runtime_data_bind_value_t *thread_state_bind = NULL;
-  turbo_runtime_data_bind_value_t *control_snapshot_bind = NULL;
+  json_value_t *thread_timeline_json_value = NULL;
+  json_value_t *history_events_json_value = NULL;
+  json_value_t *trace_events_json_value = NULL;
+  json_value_t *thread_state_json_value = NULL;
+  json_value_t *control_snapshot_json_value = NULL;
   const json_value_t *review_json = NULL;
   const json_value_t *replan_json = NULL;
   const json_value_t *failure_json = NULL;
@@ -590,11 +590,11 @@ CXX_C_API int turbo_agent_runtime_get_thread_observability_index(
   if (turbo_agent_runtime_get_pending_run(runtime, thread_id, &pending_run_json) != 0) {
     turbo_free_json(&pending_run_json);
   }
-  if (turbo_agent_runtime_get_thread_timeline_bind(runtime, thread_id, &thread_timeline_bind) != 0 ||
-      !thread_timeline_bind) {
+  if (turbo_agent_runtime_get_thread_timeline_json_value(runtime, thread_id, &thread_timeline_json_value) != 0 ||
+      !thread_timeline_json_value) {
     goto cleanup;
   }
-  thread_timeline_json = turbo_runtime_data_bind_value_to_json(thread_timeline_bind);
+  thread_timeline_json = turbo_json_clone(thread_timeline_json_value);
   if (!thread_timeline_json) {
     goto cleanup;
   }
@@ -606,33 +606,33 @@ CXX_C_API int turbo_agent_runtime_get_thread_observability_index(
       !branch_tree_json) {
     goto cleanup;
   }
-  if (turbo_agent_runtime_load_thread_history_events_bind(runtime, thread_id,
-                                                          &history_events_bind) != 0 ||
-      !history_events_bind) {
+  if (turbo_agent_runtime_load_thread_history_events_json_value(runtime, thread_id,
+                                                          &history_events_json_value) != 0 ||
+      !history_events_json_value) {
     goto cleanup;
   }
-  history_events_json = turbo_runtime_data_bind_value_to_json(history_events_bind);
+  history_events_json = turbo_json_clone(history_events_json_value);
   if (!history_events_json) {
     goto cleanup;
   }
-  if (turbo_agent_runtime_get_thread_trace_events_bind(runtime, thread_id, &trace_events_bind) !=
+  if (turbo_agent_runtime_get_thread_trace_events_json_value(runtime, thread_id, &trace_events_json_value) !=
           0 ||
-      !trace_events_bind) {
+      !trace_events_json_value) {
     goto cleanup;
   }
-  trace_events_json = turbo_runtime_data_bind_value_to_json(trace_events_bind);
+  trace_events_json = turbo_json_clone(trace_events_json_value);
   if (!trace_events_json) {
     goto cleanup;
   }
-  if (turbo_agent_runtime_get_thread_state_bind(runtime, thread_id, &thread_state_bind) == 0 &&
-      thread_state_bind) {
-    thread_state_json = turbo_runtime_data_bind_value_to_json(thread_state_bind);
+  if (turbo_agent_runtime_get_thread_state_json_value(runtime, thread_id, &thread_state_json_value) == 0 &&
+      thread_state_json_value) {
+    thread_state_json = turbo_json_clone(thread_state_json_value);
     if (!thread_state_json) {
       goto cleanup;
     }
-    control_snapshot_bind = turbo_agent_state_control_snapshot_bind(thread_state_bind);
-    if (control_snapshot_bind) {
-      control_snapshot_json = turbo_runtime_data_bind_value_to_json(control_snapshot_bind);
+    control_snapshot_json_value = turbo_agent_state_control_snapshot_json_value(thread_state_json_value);
+    if (control_snapshot_json_value) {
+      control_snapshot_json = turbo_json_clone(control_snapshot_json_value);
       if (!control_snapshot_json) {
         goto cleanup;
       }
@@ -814,22 +814,22 @@ CXX_C_API int turbo_agent_runtime_get_thread_observability_index(
   *out_index_json = index_json;
   index_json = NULL;
   free(owned_executor_failure_reason);
-  turbo_runtime_data_bind_value_destroy(control_snapshot_bind);
-  turbo_runtime_data_bind_value_destroy(thread_state_bind);
-  turbo_runtime_data_bind_value_destroy(trace_events_bind);
-  turbo_runtime_data_bind_value_destroy(history_events_bind);
-  turbo_runtime_data_bind_value_destroy(thread_timeline_bind);
+  turbo_runtime_json_destroy(control_snapshot_json_value);
+  turbo_runtime_json_destroy(thread_state_json_value);
+  turbo_runtime_json_destroy(trace_events_json_value);
+  turbo_runtime_json_destroy(history_events_json_value);
+  turbo_runtime_json_destroy(thread_timeline_json_value);
   turbo_free_json(&thread_state_json);
   turbo_free_json(&control_snapshot_json);
   return 0;
 
 cleanup:
   free(owned_executor_failure_reason);
-  turbo_runtime_data_bind_value_destroy(control_snapshot_bind);
-  turbo_runtime_data_bind_value_destroy(thread_state_bind);
-  turbo_runtime_data_bind_value_destroy(trace_events_bind);
-  turbo_runtime_data_bind_value_destroy(history_events_bind);
-  turbo_runtime_data_bind_value_destroy(thread_timeline_bind);
+  turbo_runtime_json_destroy(control_snapshot_json_value);
+  turbo_runtime_json_destroy(thread_state_json_value);
+  turbo_runtime_json_destroy(trace_events_json_value);
+  turbo_runtime_json_destroy(history_events_json_value);
+  turbo_runtime_json_destroy(thread_timeline_json_value);
   turbo_free_json(&thread_state_json);
   turbo_free_json(&current_checkpoint_summary_json);
   turbo_free_json(&control_snapshot_json);

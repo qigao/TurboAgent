@@ -9,10 +9,10 @@ static int fake_tool_handler(const char *arguments_json, char **out_output, void
   return 0;
 }
 
-static int fake_tool_bind_handler(const turbo_runtime_data_bind_value_t *arguments,
-                                  turbo_runtime_data_bind_value_t **out_result,
+static int fake_tool_json_value_handler(const json_value_t *arguments,
+                                  json_value_t **out_result,
                                   void *user_data) {
-  turbo_runtime_data_bind_value_t *result;
+  json_value_t *result;
 
   (void)arguments;
   (void)user_data;
@@ -20,14 +20,14 @@ static int fake_tool_bind_handler(const turbo_runtime_data_bind_value_t *argumen
     return -1;
   }
 
-  result = turbo_runtime_data_bind_value_create_object();
+  result = turbo_json_create_object();
   if (!result) {
     return -1;
   }
-  if (turbo_runtime_data_bind_object_set(
-          result, "ok", turbo_runtime_data_bind_value_create_bool(1)) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(result);
+  if (turbo_runtime_json_object_set(
+          result, "ok", turbo_json_create_bool(1)) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(result);
     return -1;
   }
   *out_result = result;
@@ -47,7 +47,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = NULL,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -62,12 +62,12 @@ spec("turbo tool schema helpers") {
       check_ptr_eq(view.parameters_schema, NULL);
       check_int_eq(view.strict, 1);
       check_ptr_eq(view.handler, fake_tool_handler);
-      check_ptr_eq(view.bind_handler, NULL);
+      check_ptr_eq(view.json_value_handler, NULL);
 
       turbo_tool_registry_destroy(registry);
     }
 
-    it("should execute bind-native tools through the registry") {
+    it("should execute TurboParser JSON-native tools through the registry") {
       turbo_tool_registry_t *registry = turbo_tool_registry_create();
       turbo_tool_definition_t definition = {
           .name = "sum",
@@ -76,24 +76,24 @@ spec("turbo tool schema helpers") {
           .parameters_schema = NULL,
           .strict = 1,
           .handler = NULL,
-          .bind_handler = fake_tool_bind_handler,
+          .json_value_handler = fake_tool_json_value_handler,
           .user_data = NULL,
           .user_data_free = NULL,
       };
-      turbo_runtime_data_bind_value_t *args = turbo_runtime_data_bind_value_create_object();
-      turbo_runtime_data_bind_value_t *result = NULL;
+      json_value_t *args = turbo_json_create_object();
+      json_value_t *result = NULL;
 
       check_not_null(registry);
       check_not_null(args);
       check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
-      check_int_eq(turbo_tool_registry_execute_bind(registry, "sum", args, &result),
+      check_int_eq(turbo_tool_registry_execute_json_value(registry, "sum", args, &result),
                    TURBO_TOOL_OK);
       check_not_null(result);
-      check_true(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(result, "ok"), 0));
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result, "ok"), 0));
 
-      turbo_runtime_data_bind_value_destroy(result);
-      turbo_runtime_data_bind_value_destroy(args);
+      turbo_runtime_json_destroy(result);
+      turbo_runtime_json_destroy(args);
       turbo_tool_registry_destroy(registry);
     }
 
@@ -106,7 +106,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = NULL,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -131,7 +131,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = NULL,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -154,8 +154,8 @@ spec("turbo tool schema helpers") {
 
     it("should accept schema-native tool definitions without parameters_json") {
       turbo_tool_registry_t *registry = turbo_tool_registry_create();
-      turbo_runtime_data_bind_value_t *schema =
-          turbo_runtime_data_bind_value_create_object();
+      json_value_t *schema =
+          turbo_json_create_object();
       turbo_tool_definition_t definition = {
           .name = "sum",
           .description = "add two numbers",
@@ -163,7 +163,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = schema,
           .strict = 1,
           .handler = NULL,
-          .bind_handler = fake_tool_bind_handler,
+          .json_value_handler = fake_tool_json_value_handler,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -171,19 +171,19 @@ spec("turbo tool schema helpers") {
 
       check_not_null(registry);
       check_not_null(schema);
-      check_int_eq(turbo_runtime_data_bind_object_set(
+      check_int_eq(turbo_runtime_json_object_set(
                        schema, "type",
-                       turbo_runtime_data_bind_value_create_string("object")),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+                       turbo_json_create_string("object")),
+                   TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
       check_int_eq(turbo_tool_registry_get_definition(registry, 0, &view), TURBO_TOOL_OK);
       check_not_null(view.parameters_json);
       check_not_null(view.parameters_schema);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(view.parameters_schema, "type")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(view.parameters_schema, "type")),
                    "object");
 
-      turbo_runtime_data_bind_value_destroy(schema);
+      turbo_runtime_json_destroy(schema);
       turbo_tool_registry_destroy(registry);
     }
   }
@@ -199,7 +199,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = NULL,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -226,8 +226,8 @@ spec("turbo tool schema helpers") {
 
     it("should build openai chat tool payloads from schema-native definitions") {
       turbo_tool_registry_t *registry = turbo_tool_registry_create();
-      turbo_runtime_data_bind_value_t *schema =
-          turbo_runtime_data_bind_value_create_object();
+      json_value_t *schema =
+          turbo_json_create_object();
       turbo_tool_definition_t definition = {
           .name = "sum",
           .description = "add two numbers",
@@ -235,7 +235,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = schema,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -245,10 +245,10 @@ spec("turbo tool schema helpers") {
 
       check_not_null(registry);
       check_not_null(schema);
-      check_int_eq(turbo_runtime_data_bind_object_set(
+      check_int_eq(turbo_runtime_json_object_set(
                        schema, "type",
-                       turbo_runtime_data_bind_value_create_string("object")),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+                       turbo_json_create_string("object")),
+                   TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
 
       tools = turbo_tool_schema_build_openai_chat_tools(registry);
@@ -260,7 +260,7 @@ spec("turbo tool schema helpers") {
       check_str_eq(turbo_json_get_string(parameters, "type"), "object");
 
       turbo_free_json(&tools);
-      turbo_runtime_data_bind_value_destroy(schema);
+      turbo_runtime_json_destroy(schema);
       turbo_tool_registry_destroy(registry);
     }
 
@@ -287,7 +287,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = NULL,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -312,8 +312,8 @@ spec("turbo tool schema helpers") {
 
     it("should build compatible chat tool payloads from schema-native definitions") {
       turbo_tool_registry_t *registry = turbo_tool_registry_create();
-      turbo_runtime_data_bind_value_t *schema =
-          turbo_runtime_data_bind_value_create_object();
+      json_value_t *schema =
+          turbo_json_create_object();
       turbo_tool_definition_t definition = {
           .name = "codex.files.read",
           .description = "read a file",
@@ -321,7 +321,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = schema,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -331,10 +331,10 @@ spec("turbo tool schema helpers") {
 
       check_not_null(registry);
       check_not_null(schema);
-      check_int_eq(turbo_runtime_data_bind_object_set(
+      check_int_eq(turbo_runtime_json_object_set(
                        schema, "type",
-                       turbo_runtime_data_bind_value_create_string("object")),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+                       turbo_json_create_string("object")),
+                   TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
 
       tools = turbo_tool_schema_build_openai_compatible_chat_tools(registry);
@@ -346,7 +346,7 @@ spec("turbo tool schema helpers") {
       check_str_eq(turbo_json_get_string(parameters, "type"), "object");
 
       turbo_free_json(&tools);
-      turbo_runtime_data_bind_value_destroy(schema);
+      turbo_runtime_json_destroy(schema);
       turbo_tool_registry_destroy(registry);
     }
 
@@ -359,7 +359,7 @@ spec("turbo tool schema helpers") {
           .parameters_schema = NULL,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -379,23 +379,23 @@ spec("turbo tool schema helpers") {
     }
 
     it("should parse parameter schema into a bind tree") {
-      turbo_runtime_data_bind_value_t *schema =
-          turbo_tool_schema_parse_parameters_bind("{\"type\":\"object\"}", 1);
+      json_value_t *schema =
+          turbo_tool_schema_parse_parameters_json_value("{\"type\":\"object\"}", 1);
 
       check_not_null(schema);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(schema, "type")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(schema, "type")),
                    "object");
-      check_true(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(schema, "additionalProperties"), 1) == 0);
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(schema, "additionalProperties"), 1) == 0);
 
-      turbo_runtime_data_bind_value_destroy(schema);
+      turbo_runtime_json_destroy(schema);
     }
 
-    it("should export registry definitions into a bind-native schema surface") {
+    it("should export registry definitions into a TurboParser JSON-native schema surface") {
       turbo_tool_registry_t *registry = turbo_tool_registry_create();
-      turbo_runtime_data_bind_value_t *schema =
-          turbo_runtime_data_bind_value_create_object();
+      json_value_t *schema =
+          turbo_json_create_object();
       turbo_tool_definition_t definition = {
           .name = "sum",
           .description = "add two numbers",
@@ -403,37 +403,37 @@ spec("turbo tool schema helpers") {
           .parameters_schema = schema,
           .strict = 1,
           .handler = fake_tool_handler,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
-      turbo_runtime_data_bind_value_t *tools = NULL;
-      const turbo_runtime_data_bind_value_t *tool = NULL;
-      const turbo_runtime_data_bind_value_t *parameters = NULL;
+      json_value_t *tools = NULL;
+      const json_value_t *tool = NULL;
+      const json_value_t *parameters = NULL;
 
       check_not_null(registry);
       check_not_null(schema);
-      check_int_eq(turbo_runtime_data_bind_object_set(
+      check_int_eq(turbo_runtime_json_object_set(
                        schema, "type",
-                       turbo_runtime_data_bind_value_create_string("object")),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+                       turbo_json_create_string("object")),
+                   TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
 
-      tools = turbo_tool_schema_build_registry_bind(registry);
+      tools = turbo_tool_schema_build_registry_json_value(registry);
       check_not_null(tools);
-      check_size_eq(turbo_runtime_data_bind_value_size(tools), 1);
-      tool = turbo_runtime_data_bind_array_get(tools, 0);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(tool, "name")),
+      check_size_eq(turbo_runtime_json_value_size(tools), 1);
+      tool = turbo_json_array_get(tools, 0);
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(tool, "name")),
                    "sum");
-      parameters = turbo_runtime_data_bind_object_get(tool, "parameters");
+      parameters = turbo_json_object_get(tool, "parameters");
       check_not_null(parameters);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(parameters, "type")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(parameters, "type")),
                    "object");
 
-      turbo_runtime_data_bind_value_destroy(schema);
-      turbo_runtime_data_bind_value_destroy(tools);
+      turbo_runtime_json_destroy(schema);
+      turbo_runtime_json_destroy(tools);
       turbo_tool_registry_destroy(registry);
     }
   }

@@ -1,6 +1,6 @@
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
 #include "turbo_agent_state_flow_domain_internal.h"
-#include "turbo_agent_state_bind_internal.h"
+#include "turbo_agent_state_json_value_internal.h"
 #include "turbo_agent_state_flow_internal.h"
 #include "turbo_agent_event_internal.h"
 #include "turbo_agent_runtime_internal.h"

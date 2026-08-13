@@ -6,7 +6,7 @@
 #include "turbo_chain.h"
 #include "turbo_event_log.h"
 #include "turbo_graph.h"
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 #include "turbo_state_graph.h"
 
 #ifdef __cplusplus
@@ -18,41 +18,41 @@ typedef struct turbo_runnable_s turbo_runnable_t;
 typedef struct turbo_agent_app_s turbo_agent_app_t;
 typedef struct turbo_agent_session_s turbo_agent_session_t;
 
-typedef int (*turbo_runnable_invoke_bind_fn)(
-    const turbo_runtime_data_bind_value_t *input,
-    turbo_runtime_data_bind_value_t **out_output, void *user_data);
-typedef int (*turbo_runnable_invoke_bind_stream_fn)(
-    const turbo_runtime_data_bind_value_t *input, turbo_event_sink_bind_fn event_sink,
-    void *event_sink_user_data, turbo_runtime_data_bind_value_t **out_output, void *user_data);
-typedef int (*turbo_runnable_batch_bind_fn)(
-    const turbo_runtime_data_bind_value_t *inputs,
-    turbo_runtime_data_bind_value_t **out_outputs, void *user_data);
+typedef int (*turbo_runnable_invoke_json_value_fn)(
+    const json_value_t *input,
+    json_value_t **out_output, void *user_data);
+typedef int (*turbo_runnable_invoke_json_value_stream_fn)(
+    const json_value_t *input, turbo_event_sink_json_value_fn event_sink,
+    void *event_sink_user_data, json_value_t **out_output, void *user_data);
+typedef int (*turbo_runnable_batch_json_value_fn)(
+    const json_value_t *inputs,
+    json_value_t **out_outputs, void *user_data);
 typedef void (*turbo_runnable_user_data_free_fn)(void *user_data);
-typedef int (*turbo_runnable_before_bind_fn)(
-    const turbo_runtime_data_bind_value_t *input,
-    turbo_runtime_data_bind_value_t **out_input, void *user_data);
-typedef int (*turbo_runnable_after_bind_fn)(
-    const turbo_runtime_data_bind_value_t *input,
-    const turbo_runtime_data_bind_value_t *output,
-    turbo_runtime_data_bind_value_t **out_output, void *user_data);
+typedef int (*turbo_runnable_before_json_value_fn)(
+    const json_value_t *input,
+    json_value_t **out_input, void *user_data);
+typedef int (*turbo_runnable_after_json_value_fn)(
+    const json_value_t *input,
+    const json_value_t *output,
+    json_value_t **out_output, void *user_data);
 
 typedef struct turbo_runnable_config_s {
-  turbo_runnable_invoke_bind_fn invoke_bind;
-  turbo_runnable_invoke_bind_stream_fn invoke_bind_stream;
-  turbo_runnable_batch_bind_fn batch_bind;
+  turbo_runnable_invoke_json_value_fn invoke_json_value;
+  turbo_runnable_invoke_json_value_stream_fn invoke_json_value_stream;
+  turbo_runnable_batch_json_value_fn batch_json_value;
   void *user_data;
   turbo_runnable_user_data_free_fn user_data_free;
 } turbo_runnable_config_t;
 
 typedef struct turbo_runnable_wrap_config_s {
-  turbo_runnable_before_bind_fn before_invoke;
-  turbo_runnable_after_bind_fn after_invoke;
+  turbo_runnable_before_json_value_fn before_invoke;
+  turbo_runnable_after_json_value_fn after_invoke;
   void *user_data;
   turbo_runnable_user_data_free_fn user_data_free;
 } turbo_runnable_wrap_config_t;
 
 /**
- * @brief Create one bind-native runnable.
+ * @brief Create one TurboParser JSON-native runnable.
  */
 CXX_C_API turbo_runnable_t *turbo_runnable_create(const turbo_runnable_config_t *config);
 
@@ -62,33 +62,33 @@ CXX_C_API turbo_runnable_t *turbo_runnable_create(const turbo_runnable_config_t 
 CXX_C_API void turbo_runnable_destroy(turbo_runnable_t *runnable);
 
 /**
- * @brief Invoke one runnable against bind-native input.
+ * @brief Invoke one runnable against TurboParser JSON-native input.
  */
-CXX_C_API int turbo_runnable_invoke_bind(const turbo_runnable_t *runnable,
-                                         const turbo_runtime_data_bind_value_t *input,
-                                         turbo_runtime_data_bind_value_t **out_output);
+CXX_C_API int turbo_runnable_invoke_json_value(const turbo_runnable_t *runnable,
+                                         const json_value_t *input,
+                                         json_value_t **out_output);
 
 /**
  * @brief Invoke one runnable and stream canonical trace events to one sink.
  */
-CXX_C_API int turbo_runnable_invoke_bind_stream(
-    const turbo_runnable_t *runnable, const turbo_runtime_data_bind_value_t *input,
-    turbo_event_sink_bind_fn event_sink, void *event_sink_user_data,
-    turbo_runtime_data_bind_value_t **out_output);
+CXX_C_API int turbo_runnable_invoke_json_value_stream(
+    const turbo_runnable_t *runnable, const json_value_t *input,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    json_value_t **out_output);
 
 /**
  * @brief Invoke one runnable and capture canonical events into one log.
  */
-CXX_C_API int turbo_runnable_invoke_bind_log(
-    const turbo_runnable_t *runnable, const turbo_runtime_data_bind_value_t *input,
-    turbo_event_log_t *log, turbo_runtime_data_bind_value_t **out_output);
+CXX_C_API int turbo_runnable_invoke_json_value_log(
+    const turbo_runnable_t *runnable, const json_value_t *input,
+    turbo_event_log_t *log, json_value_t **out_output);
 
 /**
- * @brief Invoke one runnable for each element in a bind-native input array.
+ * @brief Invoke one runnable for each element in a TurboParser JSON-native input array.
  */
-CXX_C_API int turbo_runnable_batch_bind(
-    const turbo_runnable_t *runnable, const turbo_runtime_data_bind_value_t *inputs,
-    turbo_runtime_data_bind_value_t **out_outputs);
+CXX_C_API int turbo_runnable_batch_json_value(
+    const turbo_runnable_t *runnable, const json_value_t *inputs,
+    json_value_t **out_outputs);
 
 /**
  * @brief Compose two runnables left-to-right.
@@ -97,12 +97,12 @@ CXX_C_API turbo_runnable_t *turbo_runnable_pipe(const turbo_runnable_t *first,
                                                 const turbo_runnable_t *second);
 
 /**
- * @brief Wrap one runnable with before/after bind-native hooks.
+ * @brief Wrap one runnable with before/after TurboParser JSON-native hooks.
  *
  * The inner runnable is borrowed and must outlive the wrapper. Hook replacement
  * values transfer ownership to the wrapper; NULL means "use the original".
  */
-CXX_C_API turbo_runnable_t *turbo_runnable_wrap_bind(
+CXX_C_API turbo_runnable_t *turbo_runnable_wrap_json_value(
     const turbo_runnable_t *inner, const turbo_runnable_wrap_config_t *config);
 
 /**

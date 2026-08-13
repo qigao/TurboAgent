@@ -45,16 +45,16 @@ CXX_C_API void turbo_agent_runtime_remote_destroy(turbo_agent_runtime_remote_t *
  * - `runtime.resume`
  * - `runtime.fork`
  * - `runtime.applyCommand`
- * - `runtime.resumeThreadCommandBindGraph`
- * - `runtime.forkThreadCommandBindGraph`
+ * - `runtime.resumeThreadCommandJsonValueGraph`
+ * - `runtime.forkThreadCommandJsonValueGraph`
  * - `runtime.getThreadState`
  * - `runtime.updateThreadState`
  * - `runtime.applyThreadStatePatch`
- * - `runtime.resumeThreadBindGraph`
- * - `runtime.forkThreadBindGraph`
+ * - `runtime.resumeThreadJsonValueGraph`
+ * - `runtime.forkThreadJsonValueGraph`
  * - `runtime.getCheckpointContext`
- * - `runtime.resumeThreadStatePatchBindGraph`
- * - `runtime.forkThreadStatePatchBindGraph`
+ * - `runtime.resumeThreadStatePatchJsonValueGraph`
+ * - `runtime.forkThreadStatePatchJsonValueGraph`
  * - `runtime.getStartupDiagnostics`
  * - `runtime.getThreadObservabilityIndex`
  * - `runtime.listObservabilityIndexesFiltered`

@@ -4,7 +4,7 @@
 #include "tinytest.h"
 #include "turbo_event.h"
 #include "turbo_parser.h"
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 
 #include <stdio.h>
 #include <stddef.h>
@@ -176,7 +176,7 @@ typedef struct turbo_agent_test_replay_capture_s {
 } turbo_agent_test_replay_capture_t;
 
 static void turbo_agent_test_capture_replayed_history_event(
-    const turbo_runtime_data_bind_value_t *event, void *user_data) {
+    const json_value_t *event, void *user_data) {
   turbo_agent_test_replay_capture_t *capture =
       (turbo_agent_test_replay_capture_t *)user_data;
   const char *type;
@@ -186,8 +186,8 @@ static void turbo_agent_test_capture_replayed_history_event(
   check_not_null(capture);
   capture->count++;
 
-  type = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(event, "type"));
+  type = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(event, "type"));
   if (type) {
     if (strcmp(type, "node_start") == 0) {
       capture->node_start_count++;
@@ -198,8 +198,8 @@ static void turbo_agent_test_capture_replayed_history_event(
     }
   }
 
-  kind = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(event, "kind"));
+  kind = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(event, "kind"));
   if (kind) {
     if (strcmp(kind, "model") == 0) {
       capture->model_count++;
@@ -222,7 +222,7 @@ typedef struct turbo_agent_test_observer_capture_s {
 } turbo_agent_test_observer_capture_t;
 
 static void turbo_agent_test_capture_observer_event(
-    const turbo_runtime_data_bind_value_t *event, void *user_data) {
+    const json_value_t *event, void *user_data) {
   turbo_agent_test_observer_capture_t *capture =
       (turbo_agent_test_observer_capture_t *)user_data;
   const char *kind;
@@ -232,12 +232,12 @@ static void turbo_agent_test_capture_observer_event(
   check_not_null(capture);
   capture->count++;
 
-  kind = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(event, "kind"));
-  type = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(event, "type"));
+  kind = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(event, "kind"));
+  type = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(event, "type"));
   check_str_eq(kind, "observer");
-  check_not_null(turbo_runtime_data_bind_object_get(event, "event"));
+  check_not_null(turbo_json_object_get(event, "event"));
 
   if (!type) {
     return;
@@ -267,7 +267,7 @@ typedef struct turbo_agent_test_trace_capture_s {
 } turbo_agent_test_trace_capture_t;
 
 static void turbo_agent_test_capture_trace_event(turbo_agent_t *agent_unused,
-                                                 const turbo_runtime_data_bind_value_t *event,
+                                                 const json_value_t *event,
                                                  void *user_data) {
   turbo_agent_test_trace_capture_t *capture =
       (turbo_agent_test_trace_capture_t *)user_data;
@@ -278,13 +278,13 @@ static void turbo_agent_test_capture_trace_event(turbo_agent_t *agent_unused,
   check_not_null(event);
   check_not_null(capture);
   capture->count++;
-  kind = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(event, "kind"));
+  kind = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(event, "kind"));
   if (kind && strcmp(kind, "trace") == 0) {
     capture->trace_count++;
   }
-  name = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(event, "name"));
+  name = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(event, "name"));
   if (name) {
     if (strcmp(name, "model_request") == 0) {
       capture->model_request_count++;
@@ -294,36 +294,36 @@ static void turbo_agent_test_capture_trace_event(turbo_agent_t *agent_unused,
   }
 }
 
-static void turbo_agent_test_check_thread_timeline_bind(
-    const turbo_runtime_data_bind_value_t *timeline, const char *thread_id,
+static void turbo_agent_test_check_thread_timeline_json_value(
+    const json_value_t *timeline, const char *thread_id,
     const char *latest_run_id, const char *resolved_current_checkpoint_id,
     int pending_run_expected, size_t expected_run_count,
     size_t expected_checkpoint_count, size_t minimum_history_event_count) {
-  const turbo_runtime_data_bind_value_t *thread;
-  const turbo_runtime_data_bind_value_t *latest_run;
-  const turbo_runtime_data_bind_value_t *pending_run;
-  const turbo_runtime_data_bind_value_t *resolved_current_run;
-  const turbo_runtime_data_bind_value_t *resolved_current_checkpoint_id_value;
-  const turbo_runtime_data_bind_value_t *resolved_current_checkpoint;
-  const turbo_runtime_data_bind_value_t *runs;
-  const turbo_runtime_data_bind_value_t *current_run_checkpoints;
-  const turbo_runtime_data_bind_value_t *history_events;
+  const json_value_t *thread;
+  const json_value_t *latest_run;
+  const json_value_t *pending_run;
+  const json_value_t *resolved_current_run;
+  const json_value_t *resolved_current_checkpoint_id_value;
+  const json_value_t *resolved_current_checkpoint;
+  const json_value_t *runs;
+  const json_value_t *current_run_checkpoints;
+  const json_value_t *history_events;
   json_value_t *resolved_current_checkpoint_json = NULL;
 
   check_not_null(timeline);
   check_not_null(thread_id);
   check_not_null(latest_run_id);
-  thread = turbo_runtime_data_bind_object_get(timeline, "thread");
-  latest_run = turbo_runtime_data_bind_object_get(timeline, "latest_run");
-  pending_run = turbo_runtime_data_bind_object_get(timeline, "pending_run");
-  resolved_current_run = turbo_runtime_data_bind_object_get(timeline, "resolved_current_run");
+  thread = turbo_json_object_get(timeline, "thread");
+  latest_run = turbo_json_object_get(timeline, "latest_run");
+  pending_run = turbo_json_object_get(timeline, "pending_run");
+  resolved_current_run = turbo_json_object_get(timeline, "resolved_current_run");
   resolved_current_checkpoint_id_value =
-      turbo_runtime_data_bind_object_get(timeline, "resolved_current_checkpoint_id");
+      turbo_json_object_get(timeline, "resolved_current_checkpoint_id");
   resolved_current_checkpoint =
-      turbo_runtime_data_bind_object_get(timeline, "resolved_current_checkpoint");
-  runs = turbo_runtime_data_bind_object_get(timeline, "runs");
-  current_run_checkpoints = turbo_runtime_data_bind_object_get(timeline, "current_run_checkpoints");
-  history_events = turbo_runtime_data_bind_object_get(timeline, "history_events");
+      turbo_json_object_get(timeline, "resolved_current_checkpoint");
+  runs = turbo_json_object_get(timeline, "runs");
+  current_run_checkpoints = turbo_json_object_get(timeline, "current_run_checkpoints");
+  history_events = turbo_json_object_get(timeline, "history_events");
 
   check_not_null(thread);
   check_not_null(latest_run);
@@ -334,62 +334,62 @@ static void turbo_agent_test_check_thread_timeline_bind(
   check_not_null(runs);
   check_not_null(current_run_checkpoints);
   check_not_null(history_events);
-  check_true(turbo_runtime_data_bind_value_kind(thread) == TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT);
-  check_true(turbo_runtime_data_bind_value_kind(latest_run) == TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT);
-  check_true(turbo_runtime_data_bind_value_kind(resolved_current_run) ==
-              TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT);
-  check_true(turbo_runtime_data_bind_value_kind(runs) == TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY);
-  check_true(turbo_runtime_data_bind_value_kind(current_run_checkpoints) ==
-              TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY);
-  check_true(turbo_runtime_data_bind_value_kind(history_events) ==
-              TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY);
+  check_true(turbo_json_type(thread) == TURBO_JSON_OBJECT);
+  check_true(turbo_json_type(latest_run) == TURBO_JSON_OBJECT);
+  check_true(turbo_json_type(resolved_current_run) ==
+              TURBO_JSON_OBJECT);
+  check_true(turbo_json_type(runs) == TURBO_JSON_ARRAY);
+  check_true(turbo_json_type(current_run_checkpoints) ==
+              TURBO_JSON_ARRAY);
+  check_true(turbo_json_type(history_events) ==
+              TURBO_JSON_ARRAY);
   check_str_eq(
-      turbo_runtime_data_bind_value_as_string(turbo_runtime_data_bind_object_get(thread, "id")),
+      turbo_runtime_json_value_as_string(turbo_json_object_get(thread, "id")),
       thread_id);
   check_str_eq(
-      turbo_runtime_data_bind_value_as_string(turbo_runtime_data_bind_object_get(latest_run, "id")),
+      turbo_runtime_json_value_as_string(turbo_json_object_get(latest_run, "id")),
       latest_run_id);
   check_str_eq(
-      turbo_runtime_data_bind_value_as_string(
-          turbo_runtime_data_bind_object_get(resolved_current_run, "id")),
+      turbo_runtime_json_value_as_string(
+          turbo_json_object_get(resolved_current_run, "id")),
       latest_run_id);
   if (resolved_current_checkpoint_id) {
-    check_str_eq(turbo_runtime_data_bind_value_as_string(resolved_current_checkpoint_id_value),
+    check_str_eq(turbo_runtime_json_value_as_string(resolved_current_checkpoint_id_value),
                  resolved_current_checkpoint_id);
-    check_true(turbo_runtime_data_bind_value_kind(resolved_current_checkpoint) ==
-               TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT);
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(resolved_current_checkpoint, "id")),
+    check_true(turbo_json_type(resolved_current_checkpoint) ==
+               TURBO_JSON_OBJECT);
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(resolved_current_checkpoint, "id")),
                  resolved_current_checkpoint_id);
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(resolved_current_checkpoint, "run_id")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(resolved_current_checkpoint, "run_id")),
                  latest_run_id);
     resolved_current_checkpoint_json =
-        turbo_runtime_data_bind_value_to_json(resolved_current_checkpoint);
+        turbo_json_clone(resolved_current_checkpoint);
     check_not_null(resolved_current_checkpoint_json);
     turbo_agent_test_check_checkpoint_summary_shape(resolved_current_checkpoint_json,
                                                     resolved_current_checkpoint_id, latest_run_id,
                                                     NULL);
   } else {
-    check_true(turbo_runtime_data_bind_value_kind(resolved_current_checkpoint_id_value) ==
-               TURBO_RUNTIME_DATA_BIND_VALUE_NULL);
-    check_true(turbo_runtime_data_bind_value_kind(resolved_current_checkpoint) ==
-               TURBO_RUNTIME_DATA_BIND_VALUE_NULL);
+    check_true(turbo_json_type(resolved_current_checkpoint_id_value) ==
+               TURBO_JSON_NULL);
+    check_true(turbo_json_type(resolved_current_checkpoint) ==
+               TURBO_JSON_NULL);
   }
-  check_size_eq(turbo_runtime_data_bind_value_size(runs), expected_run_count);
-  check_size_eq(turbo_runtime_data_bind_value_size(current_run_checkpoints),
+  check_size_eq(turbo_runtime_json_value_size(runs), expected_run_count);
+  check_size_eq(turbo_runtime_json_value_size(current_run_checkpoints),
                 expected_checkpoint_count);
-  check_true(turbo_runtime_data_bind_value_size(history_events) >= minimum_history_event_count);
+  check_true(turbo_runtime_json_value_size(history_events) >= minimum_history_event_count);
 
   if (pending_run_expected) {
-    check_true(turbo_runtime_data_bind_value_kind(pending_run) ==
-               TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT);
+    check_true(turbo_json_type(pending_run) ==
+               TURBO_JSON_OBJECT);
     check_str_eq(
-        turbo_runtime_data_bind_value_as_string(
-            turbo_runtime_data_bind_object_get(pending_run, "id")),
+        turbo_runtime_json_value_as_string(
+            turbo_json_object_get(pending_run, "id")),
         latest_run_id);
   } else {
-    check_true(turbo_runtime_data_bind_value_kind(pending_run) == TURBO_RUNTIME_DATA_BIND_VALUE_NULL);
+    check_true(turbo_json_type(pending_run) == TURBO_JSON_NULL);
   }
   turbo_free_json(&resolved_current_checkpoint_json);
 }
@@ -602,7 +602,7 @@ static void turbo_agent_test_check_supervisor_inspect(const json_value_t *inspec
   check_not_null(turbo_json_object_get(workflow, "supervisor"));
 }
 
-static void turbo_agent_test_check_thread_lineage_bind(const json_value_t *lineage,
+static void turbo_agent_test_check_thread_lineage_json_value(const json_value_t *lineage,
                                                        const char *thread_id,
                                                        const char *latest_run_id,
                                                        const char *pending_run_id,
@@ -807,7 +807,7 @@ static void turbo_agent_test_check_orchestration_inspect(
   const json_value_t *thread_lineage;
   const json_value_t *branch_tree;
   const json_value_t *child_runs;
-  turbo_runtime_data_bind_value_t *timeline = NULL;
+  json_value_t *timeline = NULL;
 
   check_not_null(inspect);
   check_true(turbo_json_type(inspect) == TURBO_JSON_OBJECT);
@@ -821,17 +821,17 @@ static void turbo_agent_test_check_orchestration_inspect(
   check_not_null(child_runs);
   turbo_agent_test_check_supervisor_inspect(supervisor_inspect, active_agent, target_agent,
                                             handoff_reason, 0, 1);
-  timeline = turbo_runtime_data_bind_value_from_json(turbo_json_object_get(inspect, "thread_timeline"));
+  timeline = turbo_json_clone(turbo_json_object_get(inspect, "thread_timeline"));
   check_not_null(timeline);
-  turbo_agent_test_check_thread_timeline_bind(timeline, thread_id, run_id, checkpoint_id, 1, 1,
+  turbo_agent_test_check_thread_timeline_json_value(timeline, thread_id, run_id, checkpoint_id, 1, 1,
                                               1, 1);
-  turbo_agent_test_check_thread_lineage_bind(thread_lineage, thread_id, run_id, run_id,
+  turbo_agent_test_check_thread_lineage_json_value(thread_lineage, thread_id, run_id, run_id,
                                              checkpoint_id);
   turbo_agent_test_check_branch_tree(branch_tree, thread_id, run_id, run_id, run_id,
                                      checkpoint_id, 1, 0);
   check_true(turbo_json_type(child_runs) == TURBO_JSON_ARRAY);
   check_true(turbo_json_array_size(child_runs) >= minimum_child_run_count);
-  turbo_runtime_data_bind_value_destroy(timeline);
+  turbo_runtime_json_destroy(timeline);
 }
 
 static void turbo_agent_test_check_child_inspect(const json_value_t *inspect,
@@ -845,7 +845,7 @@ static void turbo_agent_test_check_child_inspect(const json_value_t *inspect,
   const json_value_t *history_events;
   const json_value_t *trace_events;
   const json_value_t *branch_tree;
-  turbo_runtime_data_bind_value_t *timeline = NULL;
+  json_value_t *timeline = NULL;
 
   check_not_null(inspect);
   check_true(turbo_json_type(inspect) == TURBO_JSON_OBJECT);
@@ -872,13 +872,13 @@ static void turbo_agent_test_check_child_inspect(const json_value_t *inspect,
   check_true(turbo_json_type(history_events) == TURBO_JSON_ARRAY);
   check_true(turbo_json_array_size(history_events) >= minimum_history_event_count);
   check_true(turbo_json_type(trace_events) == TURBO_JSON_ARRAY);
-  timeline = turbo_runtime_data_bind_value_from_json(turbo_json_object_get(inspect, "thread_timeline"));
+  timeline = turbo_json_clone(turbo_json_object_get(inspect, "thread_timeline"));
   check_not_null(timeline);
-  turbo_agent_test_check_thread_timeline_bind(timeline, thread_id, run_id, checkpoint_id, 1, 1,
+  turbo_agent_test_check_thread_timeline_json_value(timeline, thread_id, run_id, checkpoint_id, 1, 1,
                                               1, 1);
   turbo_agent_test_check_branch_tree(branch_tree, thread_id, run_id, run_id, run_id,
                                      checkpoint_id, 1, 0);
-  turbo_runtime_data_bind_value_destroy(timeline);
+  turbo_runtime_json_destroy(timeline);
 }
 
 static void turbo_agent_test_check_child_orchestration_inspect(

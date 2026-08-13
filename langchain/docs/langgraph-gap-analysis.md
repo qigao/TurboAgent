@@ -51,7 +51,7 @@
 
 - canonical tool-result envelope
 - tool failure 不再靠手拼 JSON
-- canonical bind-native event contract
+- canonical TurboParser JSON-native event contract
 - SSE aggregation helpers
 - child-run / parent-run lineage 贯穿 `runtime -> session -> app -> subagent -> tool_result`
 
@@ -85,16 +85,16 @@ LangGraph 强调的不只是 checkpoint 存档，还包括：
 
 - 读取 checkpoint record
 - 手动构造 `state_override`
-- 再调 `resume_bind_graph(...)` 或 `fork_bind_graph(...)`
+- 再调 `resume_json_value_graph(...)` 或 `fork_json_value_graph(...)`
 
 这在 runtime 内核层面成立，但 host ergonomics 仍偏底层。此处已经补了第一步正式 API：
 
-- `get_thread_state_bind(...)`
-- `get_run_state_bind(...)`
-- `get_checkpoint_state_bind(...)`
-- `apply_command_bind(...)`
-- `resume_checkpoint_bind_graph(...)` / `fork_checkpoint_bind_graph(...)`
-- `resume_thread_bind_graph(...)` / `fork_thread_bind_graph(...)`
+- `get_thread_state_json_value(...)`
+- `get_run_state_json_value(...)`
+- `get_checkpoint_state_json_value(...)`
+- `apply_command_json_value(...)`
+- `resume_checkpoint_json_value_graph(...)` / `fork_checkpoint_json_value_graph(...)`
+- `resume_thread_json_value_graph(...)` / `fork_thread_json_value_graph(...)`
 
 checkpoint-scoped replay alias 是显式 time-travel 主面；thread-scoped replay
 convenience path 只是把“thread state edit -> replay”收成一条更好用的
@@ -102,9 +102,9 @@ host-facing 调用链，主事实源仍然是 thread state 与 checkpoint record
 
 接下来最小且最直接的 host-facing 抬升，是把 thread timeline 变成一等视图：
 
-- `turbo_agent_runtime_get_thread_timeline_bind(...)`
-- `turbo_agent_session_get_thread_timeline_bind(...)`
-- `turbo_agent_app_get_thread_timeline_bind(...)`
+- `turbo_agent_runtime_get_thread_timeline_json_value(...)`
+- `turbo_agent_session_get_thread_timeline_json_value(...)`
+- `turbo_agent_app_get_thread_timeline_json_value(...)`
 
 timeline 至少包含：
 
@@ -122,9 +122,9 @@ timeline 至少包含：
 
 最小切口：
 
-- 新增 `turbo_agent_runtime_get_state_bind(...)`
-- 新增 `turbo_agent_runtime_update_state_bind(...)`
-- 新增 `turbo_agent_runtime_replay_checkpoint_bind(...)`
+- 新增 `turbo_agent_runtime_get_state_json_value(...)`
+- 新增 `turbo_agent_runtime_update_state_json_value(...)`
+- 新增 `turbo_agent_runtime_replay_checkpoint_json_value(...)`
 - 让 `session/app` 暴露同构 wrapper，而不是迫使 host 手拼 state mutation 流程
 
 ### 2. 缺真正的 time-travel / branch inspection 产品面
@@ -138,10 +138,10 @@ LangGraph 的持久化不只为了 resume，还强调：
 
 我们已经有：
 
-- `fork_bind_graph(...)`
+- `fork_json_value_graph(...)`
 - `list_runs(...)`
 - `list_checkpoints(...)`
-- `load_history_events_bind(...)`
+- `load_history_events_json_value(...)`
 - `turbo_agent_runtime_list_thread_lineage(...)` / `turbo_agent_session_list_thread_lineage(...)` /
   `turbo_agent_app_list_thread_lineage(...)`
 
@@ -166,7 +166,7 @@ LangGraph 的持久化不只为了 resume，还强调：
   `source_checkpoint_summary`；fork edge 的方向应当是从 source checkpoint
   指向 child run
 - 这个 surface 只是只读 lineage 浏览面，不改变
-  `resume_bind_graph(...)` / `fork_bind_graph(...)` 的语义
+  `resume_json_value_graph(...)` / `fork_json_value_graph(...)` 的语义
 - `branch_root_checkpoint_id` 已可作为 branch node 的稳定入口 checkpoint
   锚点；后续仍可再补更多 checkpoint summary，进一步减少 host 侧二次推导
 - 这些 summary 字段是轻量 inspect 视图，不替代 `get_checkpoint(...)`
@@ -180,8 +180,8 @@ LangGraph 的持久化不只为了 resume，还强调：
 同一个 JSON 对象里，适合作为 host/UI 的 checkpoint detail panel，但不替代
 `get_checkpoint(...)` 或 branch tree。
 
-同一条线下，也适合把 `apply_checkpoint_command_bind(...)`、
-`resume_checkpoint_command_bind(...)`、`fork_checkpoint_command_bind(...)`
+同一条线下，也适合把 `apply_checkpoint_command_json_value(...)`、
+`resume_checkpoint_command_json_value(...)`、`fork_checkpoint_command_json_value(...)`
 作为显式 checkpoint-scoped command 主面保留下来；thread-scoped command
 入口继续只是便利层。
 
@@ -368,7 +368,7 @@ LangChain / LangGraph 在 multi-agent 侧已把这些模式讲清楚：
   - `get_supervisor_inbox(...)`
   - `get_supervisor_handoff_history(...)`
   - `get_supervisor_inspect(...)`
-  - `append_supervisor_inbox_message_bind(...)`
+  - `append_supervisor_inbox_message_json_value(...)`
 
 还没正式定型：
 
@@ -443,18 +443,18 @@ LangGraph 产品面并不止本地库，还覆盖：
 - `turbo_agent_runtime_remote_dispatch_jsonrpc_text(...)`
 - `turbo_agent_runtime_remote_handle_http_jsonrpc(...)`
 - `turbo_agent_runtime_remote_client_call_json(...)`
-- `turbo_agent_runtime_remote_client_start_bind_graph(...)`
-- `turbo_agent_runtime_remote_client_resume_bind_graph(...)`
-- `turbo_agent_runtime_remote_client_fork_bind_graph(...)`
-- `turbo_agent_runtime_remote_client_get_thread_state_bind(...)`
+- `turbo_agent_runtime_remote_client_start_json_value_graph(...)`
+- `turbo_agent_runtime_remote_client_resume_json_value_graph(...)`
+- `turbo_agent_runtime_remote_client_fork_json_value_graph(...)`
+- `turbo_agent_runtime_remote_client_get_thread_state_json_value(...)`
 - `turbo_agent_runtime_remote_client_get_checkpoint_context(...)`
 - `turbo_agent_runtime_remote_client_get_run(...)`
 - `turbo_agent_runtime_remote_client_get_checkpoint(...)`
 - `turbo_agent_runtime_remote_client_list_checkpoints(...)`
-- `turbo_agent_runtime_remote_client_load_history_events_bind(...)`
-- `turbo_agent_runtime_remote_client_get_run_trace_events_bind(...)`
-- `turbo_agent_runtime_remote_client_get_checkpoint_trace_events_bind(...)`
-- `turbo_agent_runtime_remote_client_get_thread_timeline_bind(...)`
+- `turbo_agent_runtime_remote_client_load_history_events_json_value(...)`
+- `turbo_agent_runtime_remote_client_get_run_trace_events_json_value(...)`
+- `turbo_agent_runtime_remote_client_get_checkpoint_trace_events_json_value(...)`
+- `turbo_agent_runtime_remote_client_get_thread_timeline_json_value(...)`
 - `turbo_agent_runtime_remote_client_get_branch_tree(...)`
 - `turbo_agent_runtime_remote_client_get_thread_observability_index(...)`
 - `turbo_agent_runtime_remote_client_list_observability_indexes(...)`
@@ -470,18 +470,18 @@ LangGraph 产品面并不止本地库，还覆盖：
 - `turbo_agent_runtime_remote_client_query_memory_records_ex(...)`
 - `turbo_agent_runtime_remote_client_query_memory_records(...)`
 - `turbo_agent_runtime_remote_client_list_memory_records(...)`
-- `turbo_agent_runtime_remote_client_resume_thread_command_bind(...)`
-- `turbo_agent_runtime_remote_client_fork_thread_command_bind(...)`
+- `turbo_agent_runtime_remote_client_resume_thread_command_json_value(...)`
+- `turbo_agent_runtime_remote_client_fork_thread_command_json_value(...)`
 - `turbo_agent_remote_session_*`
   - 当前已覆盖 `start/resume/fork`
   - 也已补 `get_thread(...)` / `get_latest_run(...)` / `get_pending_run(...)`
   - 并补 `start_text(...)` / `start_messages(...)` / `invoke_text(...)` /
     `invoke_messages_text(...)` / `invoke_json(...)` /
     `invoke_messages_json(...)`
-  - 也已补 `load_thread_history_events_bind(...)` /
-    `replay_thread_history_bind(...)` /
-    `observe_thread_history_bind(...)` /
-    `get_thread_trace_events_bind(...)`
+  - 也已补 `load_thread_history_events_json_value(...)` /
+    `replay_thread_history_json_value(...)` /
+    `observe_thread_history_json_value(...)` /
+    `get_thread_trace_events_json_value(...)`
   - 也已补 `list_thread_lineage(...)` /
     `get_supervisor_inbox(...)` /
     `get_supervisor_handoff_history(...)` /
@@ -493,9 +493,9 @@ LangGraph 产品面并不止本地库，还覆盖：
     `memory_query_records(...)` / `memory_query_records_ex(...)`
   - 也已补 `get_child_run(...)` / `get_child_checkpoint(...)` /
     `get_child_checkpoint_context(...)` /
-    `get_child_thread_timeline_bind(...)` / `get_child_branch_tree(...)` /
-    `list_child_checkpoints(...)` / `load_child_history_events_bind(...)` /
-    `get_child_trace_events_bind(...)` / `get_child_inspect(...)` /
+    `get_child_thread_timeline_json_value(...)` / `get_child_branch_tree(...)` /
+    `list_child_checkpoints(...)` / `load_child_history_events_json_value(...)` /
+    `get_child_trace_events_json_value(...)` / `get_child_inspect(...)` /
     `get_child_orchestration_inspect(...)` /
     `get_child_multi_agent_inspect(...)`
   - 继续复用同一份 remote observability bundle，而不是新增 RPC method
@@ -505,10 +505,10 @@ LangGraph 产品面并不止本地库，还覆盖：
   - 并补 `start_text(...)` / `start_messages(...)` / `invoke_text(...)` /
     `invoke_messages_text(...)` / `invoke_json(...)` /
     `invoke_messages_json(...)`
-  - 也已补 `load_thread_history_events_bind(...)` /
-    `replay_thread_history_bind(...)` /
-    `observe_thread_history_bind(...)` /
-    `get_thread_trace_events_bind(...)`
+  - 也已补 `load_thread_history_events_json_value(...)` /
+    `replay_thread_history_json_value(...)` /
+    `observe_thread_history_json_value(...)` /
+    `get_thread_trace_events_json_value(...)`
   - 也已补 `list_thread_lineage(...)` /
     `get_supervisor_inbox(...)` /
     `get_supervisor_handoff_history(...)` /
@@ -520,9 +520,9 @@ LangGraph 产品面并不止本地库，还覆盖：
     `memory_query_records(...)` / `memory_query_records_ex(...)`
   - 也已补 `get_child_run(...)` / `get_child_checkpoint(...)` /
     `get_child_checkpoint_context(...)` /
-    `get_child_thread_timeline_bind(...)` / `get_child_branch_tree(...)` /
-    `list_child_checkpoints(...)` / `load_child_history_events_bind(...)` /
-    `get_child_trace_events_bind(...)` / `get_child_inspect(...)` /
+    `get_child_thread_timeline_json_value(...)` / `get_child_branch_tree(...)` /
+    `list_child_checkpoints(...)` / `load_child_history_events_json_value(...)` /
+    `get_child_trace_events_json_value(...)` / `get_child_inspect(...)` /
     `get_child_orchestration_inspect(...)` /
     `get_child_multi_agent_inspect(...)`
   - 仅作为 `remote_session` 之上的 graph-name facade
@@ -532,16 +532,16 @@ LangGraph 产品面并不止本地库，还覆盖：
   - `runtime.resume`
   - `runtime.fork`
   - `runtime.applyCommand`
-  - `runtime.resumeThreadCommandBindGraph`
-  - `runtime.forkThreadCommandBindGraph`
+  - `runtime.resumeThreadCommandJsonValueGraph`
+  - `runtime.forkThreadCommandJsonValueGraph`
   - `runtime.getThreadState`
   - `runtime.updateThreadState`
   - `runtime.applyThreadStatePatch`
-  - `runtime.resumeThreadBindGraph`
-  - `runtime.forkThreadBindGraph`
+  - `runtime.resumeThreadJsonValueGraph`
+  - `runtime.forkThreadJsonValueGraph`
   - `runtime.getCheckpointContext`
-  - `runtime.resumeThreadStatePatchBindGraph`
-  - `runtime.forkThreadStatePatchBindGraph`
+  - `runtime.resumeThreadStatePatchJsonValueGraph`
+  - `runtime.forkThreadStatePatchJsonValueGraph`
   - `runtime.getThreadObservabilityIndex`
   - `runtime.listObservabilityIndexesFiltered`
   - `memory.getRecord`
@@ -604,7 +604,7 @@ LangChain 除 agent / graph 外，还有较强的：
 - stream
 - batch
 
-归一到 bind-native runnable vtable 上。现在也已有最小 before/after
+归一到 TurboParser JSON-native runnable vtable 上。现在也已有最小 before/after
 hook wrapper，但仍未完整覆盖的是更丰富的 middleware 链、远程 runnable、
 并行 batch 调度、configurable runtime 选项等更高层组合能力。
 
@@ -613,10 +613,10 @@ hook wrapper，但仍未完整覆盖的是更丰富的 middleware 链、远程 r
 - session/app 默认 workflow 已有 `start_text_stream(...)` /
   `start_messages_stream(...)`
 - session/app 默认 workflow 已有串行 `batch_text(...)`
-- `turbo_runnable_batch_bind(...)` 已提供通用数组批处理 fallback
+- `turbo_runnable_batch_json_value(...)` 已提供通用数组批处理 fallback
 - `turbo_runnable_from_agent_session(...)` /
   `turbo_runnable_from_agent_app(...)` 可把默认 workflow 包成 runnable
-- `turbo_runnable_wrap_bind(...)` 可用 before/after hook 包裹 bind-native
+- `turbo_runnable_wrap_json_value(...)` 可用 before/after hook 包裹 TurboParser JSON-native
   runnable，并覆盖 invoke / stream / batch 三条入口
 - `turbo_langchain_runnable_batch(...)` /
   `turbo_langchain_runnable_wrap(...)` /
@@ -655,10 +655,10 @@ config passthrough、remote runnable transport，以及更丰富的 batch/async 
 
 当前已补到的最小桥接面：
 
-- `observe_history_bind(...)` / `observe_thread_history_bind(...)`
-- `add_observer_bind_sink(...)`
-- `turbo_event_stream_mode_accepts_bind(...)` /
-  `turbo_event_stream_filter_sink_bind(...)` 这一层 core stream-mode filter
+- `observe_history_json_value(...)` / `observe_thread_history_json_value(...)`
+- `add_observer_json_value_sink(...)`
+- `turbo_event_stream_mode_accepts_json_value(...)` /
+  `turbo_event_stream_filter_sink_json_value(...)` 这一层 core stream-mode filter
 
 但这仍只是对现有 durable history 与 live trace 的 host-facing bridge，
 不是第二套持久化 observer log，也还不是完整的 runtime stream narrative。

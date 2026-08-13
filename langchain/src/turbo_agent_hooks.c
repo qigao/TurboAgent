@@ -242,27 +242,27 @@ static int turbo_agent_trace_sink_reserve(turbo_agent_t *agent) {
   return 0;
 }
 
-static int turbo_agent_trace_bind_sink_reserve(turbo_agent_t *agent) {
-  turbo_agent_trace_bind_sink_t *resized;
+static int turbo_agent_trace_json_value_sink_reserve(turbo_agent_t *agent) {
+  turbo_agent_trace_json_value_sink_t *resized;
   size_t new_capacity;
 
   if (!agent) {
     return -1;
   }
 
-  if (agent->trace_bind_sink_count < agent->trace_bind_sink_capacity) {
+  if (agent->trace_json_value_sink_count < agent->trace_json_value_sink_capacity) {
     return 0;
   }
 
-  new_capacity = agent->trace_bind_sink_capacity == 0 ? 2 : agent->trace_bind_sink_capacity * 2;
-  resized = (turbo_agent_trace_bind_sink_t *)realloc(agent->trace_bind_sinks,
+  new_capacity = agent->trace_json_value_sink_capacity == 0 ? 2 : agent->trace_json_value_sink_capacity * 2;
+  resized = (turbo_agent_trace_json_value_sink_t *)realloc(agent->trace_json_value_sinks,
                                                      new_capacity * sizeof(*resized));
   if (!resized) {
     return -1;
   }
 
-  agent->trace_bind_sinks = resized;
-  agent->trace_bind_sink_capacity = new_capacity;
+  agent->trace_json_value_sinks = resized;
+  agent->trace_json_value_sink_capacity = new_capacity;
   return 0;
 }
 
@@ -280,17 +280,17 @@ CXX_C_API int turbo_agent_add_trace_sink(turbo_agent_t *agent,
   return 0;
 }
 
-CXX_C_API int turbo_agent_add_trace_bind_sink(
-    turbo_agent_t *agent, const turbo_agent_trace_bind_sink_t *sink) {
+CXX_C_API int turbo_agent_add_trace_json_value_sink(
+    turbo_agent_t *agent, const turbo_agent_trace_json_value_sink_t *sink) {
   if (!agent || !sink || !sink->callback) {
     return -1;
   }
 
-  if (turbo_agent_trace_bind_sink_reserve(agent) != 0) {
+  if (turbo_agent_trace_json_value_sink_reserve(agent) != 0) {
     return -1;
   }
 
-  agent->trace_bind_sinks[agent->trace_bind_sink_count++] = *sink;
+  agent->trace_json_value_sinks[agent->trace_json_value_sink_count++] = *sink;
   return 0;
 }
 
@@ -337,7 +337,7 @@ static int turbo_agent_append_trace_history(json_value_t *state,
                                             const char *name, const char *detail,
                                             const char *payload, int status) {
   json_value_t *events;
-  turbo_runtime_data_bind_value_t *event_bind;
+  json_value_t *event_json_value;
   json_value_t *event;
 
   if (!state) {
@@ -349,14 +349,14 @@ static int turbo_agent_append_trace_history(json_value_t *state,
     return -1;
   }
 
-  event_bind = turbo_event_trace_create_bind(turbo_agent_trace_kind_name(kind),
+  event_json_value = turbo_event_trace_create_json_value(turbo_agent_trace_kind_name(kind),
                                              detail ? detail : "", payload ? payload : "",
                                              status);
-  if (!event_bind) {
+  if (!event_json_value) {
     return -1;
   }
-  event = turbo_runtime_data_bind_value_to_json(event_bind);
-  turbo_runtime_data_bind_value_destroy(event_bind);
+  event = turbo_json_clone(event_json_value);
+  turbo_runtime_json_destroy(event_json_value);
   if (!event) {
     return -1;
   }
@@ -387,18 +387,18 @@ CXX_C_API void turbo_agent_emit_trace(turbo_agent_t *agent, json_value_t *state,
     }
   }
 
-  if (agent->trace_bind_sink_count > 0) {
-    turbo_runtime_data_bind_value_t *event =
-        turbo_event_trace_create_bind(turbo_agent_trace_kind_name(kind), detail, payload,
+  if (agent->trace_json_value_sink_count > 0) {
+    json_value_t *event =
+        turbo_event_trace_create_json_value(turbo_agent_trace_kind_name(kind), detail, payload,
                                       status);
     if (event) {
-      for (i = 0; i < agent->trace_bind_sink_count; ++i) {
-        turbo_agent_trace_bind_sink_t *sink = &agent->trace_bind_sinks[i];
+      for (i = 0; i < agent->trace_json_value_sink_count; ++i) {
+        turbo_agent_trace_json_value_sink_t *sink = &agent->trace_json_value_sinks[i];
         if (sink->callback) {
           sink->callback(agent, event, sink->user_data);
         }
       }
-      turbo_runtime_data_bind_value_destroy(event);
+      turbo_runtime_json_destroy(event);
     }
   }
 }

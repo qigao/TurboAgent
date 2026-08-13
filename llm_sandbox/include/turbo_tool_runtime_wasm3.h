@@ -3,7 +3,7 @@
 
 #include <platform.h>
 
-#include "turbo_tool_runtime.h"
+#include "turbo_tool_runtime_wasm.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,29 +20,14 @@ typedef struct turbo_tool_runtime_wasm3_config_s {
 } turbo_tool_runtime_wasm3_config_t;
 
 /**
- * @brief Create a wasm3-backed tool runtime from a guest module file.
+ * @brief Create a TurboWasm-backed tool runtime using the legacy config.
  *
- * Guest modules can include `turbo_llm_sandbox_guest.h` to use the canonical
- * export names and export attribute macro.
+ * This source-compatibility entry derives a least-privilege TurboWasm policy
+ * from module_path. Broad legacy TurboNet/HTTP/Redis host switches are rejected;
+ * use `turbo_tool_runtime_wasm_create()` with an explicit TurboWasm policy.
+ * Guest modules must implement the pointer-free ABI documented there.
  *
- * Expected guest exports:
- * - `turbo_tool_count() -> i32`
- * - `turbo_tool_name(index) -> i32`
- * - `turbo_tool_description(index) -> i32`
- * - `turbo_tool_parameters(index) -> i32`
- * - `turbo_tool_strict(index) -> i32`
- * - `turbo_tool_input_ptr() -> i32`
- * - `turbo_tool_input_capacity() -> i32`
- * - `turbo_tool_output_ptr() -> i32`
- * - `turbo_tool_output_capacity() -> i32`
- * - `turbo_tool_invoke(index, input_len) -> i32`
- *
- * Pointer-returning metadata functions must return guest-memory offsets to
- * NUL-terminated UTF-8 strings. `turbo_tool_invoke(...)` should write output
- * bytes into the exported output buffer and return the output length, or a
- * negative value on failure.
- *
- * @param config Wasm runtime configuration.
+ * @param config Legacy runtime configuration.
  * @return Runtime handle or NULL on load/validation failure.
  */
 CXX_C_API turbo_tool_runtime_t *
@@ -51,9 +36,9 @@ turbo_tool_runtime_wasm3_create(const turbo_tool_runtime_wasm3_config_t *config)
 /**
  * @brief Create the default sandboxed tool runtime backend.
  *
- * The current default backend is wasm3.
+ * The current default backend is TurboWasm.
  *
- * @param config Wasm3 runtime configuration.
+ * @param config Legacy runtime configuration.
  * @return Runtime handle or NULL on allocation or module-load failure.
  */
 CXX_C_API turbo_tool_runtime_t *

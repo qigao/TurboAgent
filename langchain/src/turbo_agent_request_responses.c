@@ -1,11 +1,12 @@
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
-#include "turbo_agent_state_memory_internal.h"
 #include "turbo_agent_request_common_internal.h"
-#include "turbo_agent_request_text_internal.h"
-#include "turbo_agent_request_structured_output_internal.h"
 #include "turbo_agent_request_messages_internal.h"
+#include "turbo_agent_request_structured_output_internal.h"
+#include "turbo_agent_request_text_internal.h"
 #include "turbo_agent_runtime_internal.h"
+#include "turbo_agent_state_memory_internal.h"
 
+#include "turbo_model_provider.h"
 #include "turbo_tool_schema.h"
 
 #include <stdlib.h>
@@ -15,6 +16,7 @@ CXX_C_API int turbo_agent_build_responses_turn_request(const turbo_agent_t *agen
                                                        char **out_request_json) {
   json_value_t *request;
   json_value_t *input_clone = NULL;
+  json_value_t *canonical_messages = NULL;
   json_value_t *tools = NULL;
   const json_value_t *input_source = NULL;
   char *effective_instructions = NULL;
@@ -29,22 +31,37 @@ CXX_C_API int turbo_agent_build_responses_turn_request(const turbo_agent_t *agen
     return -1;
   }
 
-  input_source = turbo_agent_request_responses_input_source(state, request);
-  if (!input_source) {
-    turbo_free_json(&request);
-    return -1;
-  }
-
-  if (turbo_json_object_get(request, "previous_response_id")) {
-    if (turbo_agent_clone_json(input_source, &input_clone) != TURBO_GRAPH_EXEC_OK) {
+  if (agent->context_projection_active) {
+    canonical_messages = turbo_agent_request_build_canonical_messages_with_options(agent, state, 0);
+    if (!canonical_messages) {
+      turbo_free_json(&request);
+      return -1;
+    }
+    input_clone = turbo_model_provider_messages_to_wire_json(
+        turbo_model_provider_openai_responses(), canonical_messages, NULL);
+    turbo_runtime_json_destroy(canonical_messages);
+    if (!input_clone) {
       turbo_free_json(&request);
       return -1;
     }
   } else {
-    input_clone = turbo_agent_request_build_responses_input_messages(input_source);
-    if (!input_clone) {
+    input_source = turbo_agent_request_responses_input_source(state, request);
+    if (!input_source) {
       turbo_free_json(&request);
       return -1;
+    }
+
+    if (turbo_json_object_get(request, "previous_response_id")) {
+      if (turbo_agent_clone_json(input_source, &input_clone) != TURBO_GRAPH_EXEC_OK) {
+        turbo_free_json(&request);
+        return -1;
+      }
+    } else {
+      input_clone = turbo_agent_request_build_responses_input_messages(input_source);
+      if (!input_clone) {
+        turbo_free_json(&request);
+        return -1;
+      }
     }
   }
 

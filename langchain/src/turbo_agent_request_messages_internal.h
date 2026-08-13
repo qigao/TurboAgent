@@ -7,12 +7,14 @@
 extern "C" {
 #endif
 
-CXX_C_API const json_value_t *turbo_agent_request_responses_input_source(
-    const json_value_t *state, json_value_t *request);
-CXX_C_API json_value_t *turbo_agent_request_build_responses_input_messages(
-    const json_value_t *input_source);
-CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages(
-    const turbo_agent_t *agent, const json_value_t *state);
+CXX_C_API const json_value_t *turbo_agent_request_responses_input_source(const json_value_t *state,
+                                                                         json_value_t *request);
+CXX_C_API json_value_t *
+turbo_agent_request_build_responses_input_messages(const json_value_t *input_source);
+CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages(const turbo_agent_t *agent,
+                                                                     const json_value_t *state);
+CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages_with_options(
+    const turbo_agent_t *agent, const json_value_t *state, int include_instructions);
 CXX_C_API json_value_t *turbo_agent_request_build_chat_messages(const turbo_agent_t *agent,
                                                                 const json_value_t *state);
 CXX_C_API int turbo_agent_request_build_anthropic_wire_messages(const turbo_agent_t *agent,

@@ -11,248 +11,144 @@ target_compile_definitions(llm_sandbox PRIVATE SHARED_CXX)
 target_include_directories(
   llm_sandbox PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                      $<INSTALL_INTERFACE:include>)
-target_link_libraries(llm_sandbox PUBLIC TurboNet::RuntimeTools PRIVATE turbo_wasm3)
+target_link_libraries(llm_sandbox PUBLIC TurboAgent::RuntimeTools
+                                         TurboWasm::Runtime)
 
-cmake_config_target(llm_sandbox FOLDER "LLM Sandbox" ALIAS TurboNet::LLMSandbox)
+cmake_config_target(llm_sandbox FOLDER "LLM Sandbox" EXPORT_NAME LLMSandbox
+                    ALIAS TurboAgent::LLMSandbox)
+add_library(TurboNet::LLMSandbox ALIAS llm_sandbox)
+cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+                      DESTINATION include)
 
 if(BUILD_TESTS)
-  find_program(LLM_SANDBOX_WASM3_CLANG NAMES clang clang.exe)
-  if(LLM_SANDBOX_WASM3_CLANG)
-    set(LLM_SANDBOX_WASM3_TOOL_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_test.wasm")
-    set(LLM_SANDBOX_WASM3_BAD_INVOKE_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_bad_invoke_test.wasm")
-    set(LLM_SANDBOX_WASM3_MISSING_EXPORT_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_missing_export_test.wasm")
-    set(LLM_SANDBOX_WASM3_NEGATIVE_COUNT_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_negative_count_test.wasm")
-    set(LLM_SANDBOX_WASM3_ZERO_TOOLS_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_zero_tools_test.wasm")
-    set(LLM_SANDBOX_WASM3_BAD_METADATA_PTR_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_bad_metadata_ptr_test.wasm")
-    set(LLM_SANDBOX_WASM3_BAD_SCHEMA_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_bad_schema_test.wasm")
-    set(LLM_SANDBOX_WASM3_BAD_INPUT_BUFFER_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_bad_input_buffer_test.wasm")
-    set(LLM_SANDBOX_WASM3_BAD_OUTPUT_BUFFER_WASM
-        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_wasm3_bad_output_buffer_test.wasm")
+  find_program(LLM_SANDBOX_WASM_CLANG NAMES clang clang.exe)
+  if(LLM_SANDBOX_WASM_CLANG)
+    get_target_property(LLM_SANDBOX_TURBOWASM_INCLUDES TurboWasm::Runtime
+                        INTERFACE_INCLUDE_DIRECTORIES)
+    set(LLM_SANDBOX_GUEST_INCLUDE_ARGS ${LLM_SANDBOX_TURBOWASM_INCLUDES})
+    list(TRANSFORM LLM_SANDBOX_GUEST_INCLUDE_ARGS PREPEND "-I")
 
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_TOOL_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity
-        -Wl,--export=turbo_tool_invoke -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_TOOL_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
+    function(llm_sandbox_add_guest output source max_memory)
+      add_custom_command(
+        OUTPUT "${output}"
+        COMMAND
+          ${LLM_SANDBOX_WASM_CLANG} --target=wasm32-unknown-unknown -O2
+          -nostdlib ${LLM_SANDBOX_GUEST_INCLUDE_ARGS} -Wl,--no-entry
+          -Wl,--export-if-defined=turbo_tool_count
+          -Wl,--export-if-defined=turbo_tool_describe
+          -Wl,--export-if-defined=turbo_tool_invoke
+          -Wl,--initial-memory=131072 -Wl,--max-memory=${max_memory}
+          -Wl,--allow-undefined -o "${output}" "${source}"
+        DEPENDS "${source}"
+                ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
+        VERBATIM)
+    endfunction()
 
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_BAD_INVOKE_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity
-        -Wl,--export=turbo_tool_invoke -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_BAD_INVOKE_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_invoke.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_invoke.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
+    set(LLM_SANDBOX_WASM_TOOL_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_test.wasm")
+    set(LLM_SANDBOX_WASM_MEMORY_GROW_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_memory_grow_test.wasm")
+    set(LLM_SANDBOX_WASM_BAD_INVOKE_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_bad_invoke_test.wasm")
+    set(LLM_SANDBOX_WASM_MISSING_EXPORT_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_missing_export_test.wasm")
+    set(LLM_SANDBOX_WASM_NEGATIVE_COUNT_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_negative_count_test.wasm")
+    set(LLM_SANDBOX_WASM_ZERO_TOOLS_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_zero_tools_test.wasm")
+    set(LLM_SANDBOX_WASM_BAD_METADATA_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_bad_metadata_test.wasm")
+    set(LLM_SANDBOX_WASM_BAD_SCHEMA_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_bad_schema_test.wasm")
 
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_MISSING_EXPORT_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_MISSING_EXPORT_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_missing_export.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_missing_export.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
-
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_NEGATIVE_COUNT_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity
-        -Wl,--export=turbo_tool_invoke -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_NEGATIVE_COUNT_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_negative_count.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_negative_count.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
-
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_ZERO_TOOLS_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity
-        -Wl,--export=turbo_tool_invoke -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_ZERO_TOOLS_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_zero_tools.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_zero_tools.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
-
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_BAD_METADATA_PTR_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity
-        -Wl,--export=turbo_tool_invoke -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_BAD_METADATA_PTR_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_metadata_ptr.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_metadata_ptr.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
-
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_BAD_SCHEMA_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity
-        -Wl,--export=turbo_tool_invoke -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_BAD_SCHEMA_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_schema.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_schema.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
-
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_BAD_INPUT_BUFFER_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity
-        -Wl,--export=turbo_tool_invoke -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_BAD_INPUT_BUFFER_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_input_buffer.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_input_buffer.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
-
-    add_custom_command(
-      OUTPUT ${LLM_SANDBOX_WASM3_BAD_OUTPUT_BUFFER_WASM}
-      COMMAND
-        ${LLM_SANDBOX_WASM3_CLANG} --target=wasm32-unknown-unknown -O2
-        -nostdlib -Wl,--no-entry -Wl,--export=turbo_tool_count
-        -Wl,--export=turbo_tool_name -Wl,--export=turbo_tool_description
-        -Wl,--export=turbo_tool_parameters -Wl,--export=turbo_tool_strict
-        -Wl,--export=turbo_tool_input_ptr
-        -Wl,--export=turbo_tool_input_capacity
-        -Wl,--export=turbo_tool_output_ptr
-        -Wl,--export=turbo_tool_output_capacity
-        -Wl,--export=turbo_tool_invoke -Wl,--export-memory
-        -Wl,--initial-memory=131072 -Wl,--max-memory=131072
-        -Wl,--allow-undefined -o ${LLM_SANDBOX_WASM3_BAD_OUTPUT_BUFFER_WASM}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_output_buffer.c
-      DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_output_buffer.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
-      VERBATIM)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_TOOL_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3.c" 131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_MEMORY_GROW_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_memory_grow.c"
+      1179648)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_BAD_INVOKE_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_invoke.c" 131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_MISSING_EXPORT_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_missing_export.c"
+      131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_NEGATIVE_COUNT_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_negative_count.c"
+      131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_ZERO_TOOLS_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_zero_tools.c" 131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_BAD_METADATA_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_metadata_ptr.c"
+      131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_schema.c" 131072)
 
     cmake_add_test(
-      SOURCES
-      tests/test_turbo_tool_runtime_wasm3.c
-      LIBS
-      llm_sandbox
-      TurboNet::TinyTest
-      FOLDER
-      "LLM Sandbox/tests")
+      SOURCES tests/test_turbo_tool_runtime_wasm.c
+      LIBS llm_sandbox TurboUtils::TinyTest
+      FOLDER "LLM Sandbox/tests")
 
-    if(TARGET test_turbo_tool_runtime_wasm3)
-      add_custom_target(llm_sandbox_wasm3_tool_guest_test
-                        DEPENDS
-                          ${LLM_SANDBOX_WASM3_TOOL_WASM}
-                          ${LLM_SANDBOX_WASM3_BAD_INVOKE_WASM}
-                          ${LLM_SANDBOX_WASM3_MISSING_EXPORT_WASM}
-                          ${LLM_SANDBOX_WASM3_NEGATIVE_COUNT_WASM}
-                          ${LLM_SANDBOX_WASM3_ZERO_TOOLS_WASM}
-                          ${LLM_SANDBOX_WASM3_BAD_METADATA_PTR_WASM}
-                          ${LLM_SANDBOX_WASM3_BAD_SCHEMA_WASM}
-                          ${LLM_SANDBOX_WASM3_BAD_INPUT_BUFFER_WASM}
-                          ${LLM_SANDBOX_WASM3_BAD_OUTPUT_BUFFER_WASM})
-      set_target_properties(llm_sandbox_wasm3_tool_guest_test
+    cmake_add_test(
+      SOURCES tests/test_turbo_wasm_tool_pack.c
+      LIBS llm_sandbox TurboUtils::TinyTest
+      FOLDER "LLM Sandbox/tests")
+
+    if(TARGET langchain)
+      cmake_add_test(
+        SOURCES tests/test_turbo_wasm_tool_pack_workspace.c
+        LIBS llm_sandbox langchain TurboUtils::TinyTest
+        FOLDER "LLM Sandbox/tests")
+    endif()
+
+    if(TARGET test_turbo_tool_runtime_wasm)
+      add_custom_target(
+        llm_sandbox_wasm_tool_guests
+        DEPENDS ${LLM_SANDBOX_WASM_TOOL_WASM}
+                ${LLM_SANDBOX_WASM_MEMORY_GROW_WASM}
+                ${LLM_SANDBOX_WASM_BAD_INVOKE_WASM}
+                ${LLM_SANDBOX_WASM_MISSING_EXPORT_WASM}
+                ${LLM_SANDBOX_WASM_NEGATIVE_COUNT_WASM}
+                ${LLM_SANDBOX_WASM_ZERO_TOOLS_WASM}
+                ${LLM_SANDBOX_WASM_BAD_METADATA_WASM}
+                ${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM})
+      set_target_properties(llm_sandbox_wasm_tool_guests
                             PROPERTIES FOLDER "LLM Sandbox")
-      add_dependencies(test_turbo_tool_runtime_wasm3
-                       llm_sandbox_wasm3_tool_guest_test)
+      add_dependencies(test_turbo_tool_runtime_wasm llm_sandbox_wasm_tool_guests)
       target_compile_definitions(
-        test_turbo_tool_runtime_wasm3
+        test_turbo_tool_runtime_wasm
         PRIVATE
-          LLM_SANDBOX_WASM3_TOOL_WASM_PATH=\"${LLM_SANDBOX_WASM3_TOOL_WASM}\"
-          LLM_SANDBOX_WASM3_BAD_INVOKE_WASM_PATH=\"${LLM_SANDBOX_WASM3_BAD_INVOKE_WASM}\"
-          LLM_SANDBOX_WASM3_MISSING_EXPORT_WASM_PATH=\"${LLM_SANDBOX_WASM3_MISSING_EXPORT_WASM}\"
-          LLM_SANDBOX_WASM3_NEGATIVE_COUNT_WASM_PATH=\"${LLM_SANDBOX_WASM3_NEGATIVE_COUNT_WASM}\"
-          LLM_SANDBOX_WASM3_ZERO_TOOLS_WASM_PATH=\"${LLM_SANDBOX_WASM3_ZERO_TOOLS_WASM}\"
-          LLM_SANDBOX_WASM3_BAD_METADATA_PTR_WASM_PATH=\"${LLM_SANDBOX_WASM3_BAD_METADATA_PTR_WASM}\"
-          LLM_SANDBOX_WASM3_BAD_SCHEMA_WASM_PATH=\"${LLM_SANDBOX_WASM3_BAD_SCHEMA_WASM}\"
-          LLM_SANDBOX_WASM3_BAD_INPUT_BUFFER_WASM_PATH=\"${LLM_SANDBOX_WASM3_BAD_INPUT_BUFFER_WASM}\"
-          LLM_SANDBOX_WASM3_BAD_OUTPUT_BUFFER_WASM_PATH=\"${LLM_SANDBOX_WASM3_BAD_OUTPUT_BUFFER_WASM}\")
+          LLM_SANDBOX_WASM_TOOL_WASM_PATH="${LLM_SANDBOX_WASM_TOOL_WASM}"
+          LLM_SANDBOX_WASM_MEMORY_GROW_WASM_PATH="${LLM_SANDBOX_WASM_MEMORY_GROW_WASM}"
+          LLM_SANDBOX_WASM_BAD_INVOKE_WASM_PATH="${LLM_SANDBOX_WASM_BAD_INVOKE_WASM}"
+          LLM_SANDBOX_WASM_MISSING_EXPORT_WASM_PATH="${LLM_SANDBOX_WASM_MISSING_EXPORT_WASM}"
+          LLM_SANDBOX_WASM_NEGATIVE_COUNT_WASM_PATH="${LLM_SANDBOX_WASM_NEGATIVE_COUNT_WASM}"
+          LLM_SANDBOX_WASM_ZERO_TOOLS_WASM_PATH="${LLM_SANDBOX_WASM_ZERO_TOOLS_WASM}"
+          LLM_SANDBOX_WASM_BAD_METADATA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_METADATA_WASM}"
+          LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}")
+      if(TARGET test_turbo_wasm_tool_pack)
+        add_dependencies(test_turbo_wasm_tool_pack llm_sandbox_wasm_tool_guests)
+        target_compile_definitions(
+          test_turbo_wasm_tool_pack
+          PRIVATE
+            LLM_SANDBOX_WASM_TOOL_WASM_PATH="${LLM_SANDBOX_WASM_TOOL_WASM}"
+            LLM_SANDBOX_WASM_MEMORY_GROW_WASM_PATH="${LLM_SANDBOX_WASM_MEMORY_GROW_WASM}"
+            LLM_SANDBOX_WASM_ZERO_TOOLS_WASM_PATH="${LLM_SANDBOX_WASM_ZERO_TOOLS_WASM}")
+      endif()
+      if(TARGET test_turbo_wasm_tool_pack_workspace)
+        add_dependencies(test_turbo_wasm_tool_pack_workspace
+                         llm_sandbox_wasm_tool_guests)
+        target_compile_definitions(
+          test_turbo_wasm_tool_pack_workspace
+          PRIVATE
+            LLM_SANDBOX_WASM_TOOL_WASM_PATH="${LLM_SANDBOX_WASM_TOOL_WASM}")
+      endif()
     endif()
   endif()
 endif()

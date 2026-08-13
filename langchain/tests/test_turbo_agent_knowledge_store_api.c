@@ -92,22 +92,22 @@ static void knowledge_test_write_binary_file(const char *path) {
   check_int_eq(fclose(file), 0);
 }
 
-static void knowledge_test_bind_set_string(turbo_runtime_data_bind_value_t *object,
+static void knowledge_test_json_value_set_string(json_value_t *object,
                                            const char *key, const char *value) {
-  turbo_runtime_data_bind_value_t *field =
-      turbo_runtime_data_bind_value_create_string(value);
+  json_value_t *field =
+      turbo_json_create_string(value);
   check_not_null(field);
-  check_int_eq(turbo_runtime_data_bind_object_set(object, key, field),
-               TURBO_RUNTIME_DATA_BIND_OK);
+  check_int_eq(turbo_runtime_json_object_set(object, key, field),
+               TURBO_RUNTIME_JSON_OK);
 }
 
-static void knowledge_test_bind_set_int64(turbo_runtime_data_bind_value_t *object,
+static void knowledge_test_json_value_set_int64(json_value_t *object,
                                           const char *key, int64_t value) {
-  turbo_runtime_data_bind_value_t *field =
-      turbo_runtime_data_bind_value_create_int64(value);
+  json_value_t *field =
+      turbo_json_create_int64(value);
   check_not_null(field);
-  check_int_eq(turbo_runtime_data_bind_object_set(object, key, field),
-               TURBO_RUNTIME_DATA_BIND_OK);
+  check_int_eq(turbo_runtime_json_object_set(object, key, field),
+               TURBO_RUNTIME_JSON_OK);
 }
 
 static const json_value_t *knowledge_test_first_result(const json_value_t *results) {
@@ -446,11 +446,11 @@ spec("turbo agent knowledge store") {
     char *output = NULL;
     json_value_t *output_json = NULL;
     json_value_t *post_delete_results = NULL;
-    turbo_runtime_data_bind_value_t *search_args =
-        turbo_runtime_data_bind_value_create_object();
-    turbo_runtime_data_bind_value_t *search_result = NULL;
-    const turbo_runtime_data_bind_value_t *results_value;
-    const turbo_runtime_data_bind_value_t *context_value;
+    json_value_t *search_args =
+        turbo_json_create_object();
+    json_value_t *search_result = NULL;
+    const json_value_t *results_value;
+    const json_value_t *context_value;
 
     check_not_null(store);
     check_not_null(registry);
@@ -593,37 +593,37 @@ spec("turbo agent knowledge store") {
     free(output);
     output = NULL;
 
-    knowledge_test_bind_set_string(search_args, "query", "local context");
-    knowledge_test_bind_set_string(search_args, "kind", "note");
-    knowledge_test_bind_set_string(search_args, "uri_prefix", json_dir);
-    knowledge_test_bind_set_int64(search_args, "limit", 3);
-    check_int_eq(turbo_tool_registry_execute_bind(registry, "agent.knowledge.search",
+    knowledge_test_json_value_set_string(search_args, "query", "local context");
+    knowledge_test_json_value_set_string(search_args, "kind", "note");
+    knowledge_test_json_value_set_string(search_args, "uri_prefix", json_dir);
+    knowledge_test_json_value_set_int64(search_args, "limit", 3);
+    check_int_eq(turbo_tool_registry_execute_json_value(registry, "agent.knowledge.search",
                                                   search_args, &search_result),
                  TURBO_TOOL_OK);
     check_not_null(search_result);
-    check_true(turbo_runtime_data_bind_value_as_bool(
-        turbo_runtime_data_bind_object_get(search_result, "ok"), 0));
-    results_value = turbo_runtime_data_bind_object_get(search_result, "results");
+    check_true(turbo_runtime_json_value_as_bool(
+        turbo_json_object_get(search_result, "ok"), 0));
+    results_value = turbo_json_object_get(search_result, "results");
     check_not_null(results_value);
-    check_int_eq((int)turbo_runtime_data_bind_value_kind(results_value),
-                 TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY);
-    check_true(turbo_runtime_data_bind_value_size(results_value) > 0);
+    check_int_eq((int)turbo_json_type(results_value),
+                 TURBO_JSON_ARRAY);
+    check_true(turbo_runtime_json_value_size(results_value) > 0);
 
-    turbo_runtime_data_bind_value_destroy(search_result);
+    turbo_runtime_json_destroy(search_result);
     search_result = NULL;
-    check_int_eq(turbo_tool_registry_execute_bind(
+    check_int_eq(turbo_tool_registry_execute_json_value(
                      registry, "agent.knowledge.build_context", search_args,
                      &search_result),
                  TURBO_TOOL_OK);
     check_not_null(search_result);
-    context_value = turbo_runtime_data_bind_object_get(search_result, "context");
+    context_value = turbo_json_object_get(search_result, "context");
     check_not_null(context_value);
-    check_int_eq((int)turbo_runtime_data_bind_value_kind(context_value),
-                 TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT);
-    check_true(turbo_runtime_data_bind_value_as_string(
-                   turbo_runtime_data_bind_object_get(context_value, "context_text")) != NULL);
+    check_int_eq((int)turbo_json_type(context_value),
+                 TURBO_JSON_OBJECT);
+    check_true(turbo_runtime_json_value_as_string(
+                   turbo_json_object_get(context_value, "context_text")) != NULL);
 
-    turbo_runtime_data_bind_value_destroy(search_result);
+    turbo_runtime_json_destroy(search_result);
     search_result = NULL;
     snprintf(arguments_json, sizeof(arguments_json),
              "{\"document_id\":\"%s\"}", json_text_path);
@@ -644,7 +644,7 @@ spec("turbo agent knowledge store") {
                  0);
     check_size_eq(turbo_json_array_size(post_delete_results), 0);
     turbo_free_json(&post_delete_results);
-    turbo_runtime_data_bind_value_destroy(search_args);
+    turbo_runtime_json_destroy(search_args);
     turbo_tool_registry_destroy(registry);
     turbo_agent_knowledge_store_close(store);
     remove(tool_docs_path);
@@ -1055,8 +1055,8 @@ spec("turbo agent knowledge store") {
                      "plan_advance", "end", 1),
                  TURBO_GRAPH_EXEC_OK);
     check_str_eq(turbo_graph_get_entry(graph), "knowledge");
-    check_size_eq(turbo_graph_node_count(graph), 12);
-    check_size_eq(turbo_graph_edge_count(graph), 15);
+    check_size_eq(turbo_graph_node_count(graph), 13);
+    check_size_eq(turbo_graph_edge_count(graph), 17);
     check_not_null(turbo_graph_topology_id(graph));
 
     turbo_agent_destroy(executor);

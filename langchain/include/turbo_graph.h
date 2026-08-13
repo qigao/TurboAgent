@@ -6,7 +6,7 @@
 #include <turbo_parser.h>
 
 #include "turbo_event.h"
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,6 +14,7 @@ extern "C" {
 
 typedef struct turbo_graph_s turbo_graph_t;
 typedef struct turbo_graph_checkpoint_s turbo_graph_checkpoint_t;
+typedef struct turbo_cancel_token_s turbo_cancel_token_t;
 
 typedef enum {
   TURBO_GRAPH_EXEC_OK = 0,
@@ -26,25 +27,27 @@ typedef enum {
   TURBO_GRAPH_EXEC_INVALID_ARGUMENT = -5,
   TURBO_GRAPH_EXEC_DUPLICATE_NODE = -6,
   TURBO_GRAPH_EXEC_OUT_OF_MEMORY = -7,
-  TURBO_GRAPH_EXEC_CHECKPOINT_MISMATCH = -8
+  TURBO_GRAPH_EXEC_CHECKPOINT_MISMATCH = -8,
+  TURBO_GRAPH_EXEC_CANCELLED = -9,
+  TURBO_GRAPH_EXEC_DEADLINE = -10
 } turbo_graph_exec_status_t;
 
 typedef struct turbo_graph_exec_ctx_s {
   turbo_graph_t *graph;
   json_value_t *state;
-  turbo_runtime_data_bind_value_t *bind_state;
+  json_value_t *json_value_state;
   const char *current_node;
   const char *next_node;
   size_t step;
   int stop;
-  turbo_event_sink_bind_fn event_sink;
+  turbo_event_sink_json_value_fn event_sink;
   void *event_sink_user_data;
 } turbo_graph_exec_ctx_t;
 
 typedef int (*turbo_graph_node_fn)(turbo_graph_exec_ctx_t *ctx, void *user_data);
-typedef int (*turbo_graph_bind_node_fn)(turbo_graph_exec_ctx_t *ctx, void *user_data);
+typedef int (*turbo_graph_json_value_node_fn)(turbo_graph_exec_ctx_t *ctx, void *user_data);
 typedef int (*turbo_graph_edge_predicate_fn)(const turbo_graph_exec_ctx_t *ctx, void *user_data);
-typedef int (*turbo_graph_bind_edge_predicate_fn)(const turbo_graph_exec_ctx_t *ctx,
+typedef int (*turbo_graph_json_value_edge_predicate_fn)(const turbo_graph_exec_ctx_t *ctx,
                                                   void *user_data);
 typedef void (*turbo_graph_checkpoint_cb)(const turbo_graph_checkpoint_t *checkpoint,
                                           void *user_data);
@@ -100,19 +103,19 @@ CXX_C_API turbo_graph_exec_status_t turbo_graph_add_node_ex(turbo_graph_t *graph
                                                             void *user_data);
 
 /**
- * @brief Add a bind-native node callback to the graph.
+ * @brief Add a TurboParser JSON-native node callback to the graph.
  */
 CXX_C_API turbo_graph_exec_status_t
-turbo_graph_add_bind_node(turbo_graph_t *graph, const char *name, turbo_graph_bind_node_fn fn,
+turbo_graph_add_json_value_node(turbo_graph_t *graph, const char *name, turbo_graph_json_value_node_fn fn,
                           void *user_data);
 
 /**
- * @brief Add a bind-native node callback with an explicit stable semantic id.
+ * @brief Add a TurboParser JSON-native node callback with an explicit stable semantic id.
  */
-CXX_C_API turbo_graph_exec_status_t turbo_graph_add_bind_node_ex(turbo_graph_t *graph,
+CXX_C_API turbo_graph_exec_status_t turbo_graph_add_json_value_node_ex(turbo_graph_t *graph,
                                                                  const char *name,
                                                                  const char *semantic_id,
-                                                                 turbo_graph_bind_node_fn fn,
+                                                                 turbo_graph_json_value_node_fn fn,
                                                                  void *user_data);
 
 /**
@@ -138,19 +141,19 @@ CXX_C_API turbo_graph_exec_status_t turbo_graph_add_edge_ex(turbo_graph_t *graph
                                                             void *user_data);
 
 /**
- * @brief Add a directed edge with a bind-native predicate.
+ * @brief Add a directed edge with a TurboParser JSON-native predicate.
  */
 CXX_C_API turbo_graph_exec_status_t
-turbo_graph_add_bind_edge(turbo_graph_t *graph, const char *from, const char *to,
-                          turbo_graph_bind_edge_predicate_fn predicate, void *user_data);
+turbo_graph_add_json_value_edge(turbo_graph_t *graph, const char *from, const char *to,
+                          turbo_graph_json_value_edge_predicate_fn predicate, void *user_data);
 
 /**
- * @brief Add a directed bind-native edge with an explicit stable semantic id.
+ * @brief Add a directed TurboParser JSON-native edge with an explicit stable semantic id.
  */
 CXX_C_API turbo_graph_exec_status_t
-turbo_graph_add_bind_edge_ex(turbo_graph_t *graph, const char *from, const char *to,
+turbo_graph_add_json_value_edge_ex(turbo_graph_t *graph, const char *from, const char *to,
                              const char *semantic_id,
-                             turbo_graph_bind_edge_predicate_fn predicate, void *user_data);
+                             turbo_graph_json_value_edge_predicate_fn predicate, void *user_data);
 
 /**
  * @brief Set the default entry node.
@@ -203,7 +206,7 @@ turbo_graph_run(turbo_graph_t *graph, json_value_t *state,
                 turbo_graph_run_result_t *out_result);
 
 /**
- * @brief Execute the graph against a runtime data-bind state boundary.
+ * @brief Execute the graph against a TurboParser JSON state boundary.
  * @param graph Graph handle.
  * @param state Optional input state tree. NULL creates a null state.
  * @param options Optional run options.
@@ -212,19 +215,33 @@ turbo_graph_run(turbo_graph_t *graph, json_value_t *state,
  * @return Status code.
  */
 CXX_C_API turbo_graph_exec_status_t
-turbo_graph_run_bind(turbo_graph_t *graph, const turbo_runtime_data_bind_value_t *state,
+turbo_graph_run_json_value(turbo_graph_t *graph, const json_value_t *state,
                      const turbo_graph_run_options_t *options,
                      turbo_graph_run_result_t *out_result,
-                     turbo_runtime_data_bind_value_t **out_state);
+                     json_value_t **out_state);
 
 /**
- * @brief Execute the graph against a runtime data-bind state boundary and emit canonical events.
+ * @brief Execute the graph against a TurboParser JSON state boundary and emit canonical events.
  */
-CXX_C_API turbo_graph_exec_status_t turbo_graph_run_bind_stream(
-    turbo_graph_t *graph, const turbo_runtime_data_bind_value_t *state,
-    const turbo_graph_run_options_t *options, turbo_event_sink_bind_fn event_sink,
+CXX_C_API turbo_graph_exec_status_t turbo_graph_run_json_value_stream(
+    turbo_graph_t *graph, const json_value_t *state,
+    const turbo_graph_run_options_t *options, turbo_event_sink_json_value_fn event_sink,
     void *event_sink_user_data, turbo_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
+
+/**
+ * @brief Run a TurboParser JSON-native graph with cooperative cancellation.
+ *
+ * The token is borrowed for the synchronous call. Cancellation is checked
+ * before every node and after each routed checkpoint. A running node must use
+ * its own execution context to support cancellation inside the callback.
+ */
+CXX_C_API turbo_graph_exec_status_t turbo_graph_run_json_value_stream_controlled(
+    turbo_graph_t *graph, const json_value_t *state,
+    const turbo_graph_run_options_t *options,
+    const turbo_cancel_token_t *cancel_token,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    turbo_graph_run_result_t *out_result, json_value_t **out_state);
 
 /**
  * @brief Resume graph execution from a checkpoint snapshot.
@@ -240,7 +257,7 @@ turbo_graph_run_checkpoint(turbo_graph_t *graph, turbo_graph_checkpoint_t *check
                            turbo_graph_run_result_t *out_result);
 
 /**
- * @brief Resume graph execution from a checkpoint into a bind-native state boundary.
+ * @brief Resume graph execution from a checkpoint into a TurboParser JSON-native state boundary.
  * @param graph Graph handle.
  * @param checkpoint Checkpoint created earlier by the same graph topology.
  * @param options Optional run options. `start_node` is ignored.
@@ -249,27 +266,36 @@ turbo_graph_run_checkpoint(turbo_graph_t *graph, turbo_graph_checkpoint_t *check
  * @return Status code.
  */
 CXX_C_API turbo_graph_exec_status_t
-turbo_graph_run_checkpoint_bind(turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
+turbo_graph_run_checkpoint_json_value(turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
                                 const turbo_graph_run_options_t *options,
                                 turbo_graph_run_result_t *out_result,
-                                turbo_runtime_data_bind_value_t **out_state);
+                                json_value_t **out_state);
 
 /**
  * @brief Resume graph execution from a checkpoint, emit canonical events, and return bind state.
  * @param graph Graph handle.
  * @param checkpoint Checkpoint created earlier by the same graph topology.
  * @param options Optional run options. `start_node` is ignored.
- * @param event_sink Event callback receiving canonical bind-native events.
+ * @param event_sink Event callback receiving canonical TurboParser JSON-native events.
  * @param event_sink_user_data Opaque pointer passed to event_sink.
  * @param out_result Optional result summary.
  * @param out_state Output runtime state tree owned by caller.
  * @return Status code.
  */
-CXX_C_API turbo_graph_exec_status_t turbo_graph_run_checkpoint_bind_stream(
+CXX_C_API turbo_graph_exec_status_t turbo_graph_run_checkpoint_json_value_stream(
     turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
-    const turbo_graph_run_options_t *options, turbo_event_sink_bind_fn event_sink,
+    const turbo_graph_run_options_t *options, turbo_event_sink_json_value_fn event_sink,
     void *event_sink_user_data, turbo_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
+
+/** @brief Resume a JSON-native checkpoint with cooperative cancellation. */
+CXX_C_API turbo_graph_exec_status_t
+turbo_graph_run_checkpoint_json_value_stream_controlled(
+    turbo_graph_t *graph, const turbo_graph_checkpoint_t *checkpoint,
+    const turbo_graph_run_options_t *options,
+    const turbo_cancel_token_t *cancel_token,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    turbo_graph_run_result_t *out_result, json_value_t **out_state);
 
 /**
  * @brief Override the next node from inside a node callback.
@@ -299,7 +325,7 @@ turbo_graph_checkpoint_create(const char *next_node, size_t steps, const json_va
                               turbo_graph_checkpoint_t **out_checkpoint);
 
 /**
- * @brief Create a checkpoint from a runtime data-bind state snapshot.
+ * @brief Create a checkpoint from a TurboParser JSON state snapshot.
  * @param next_node Next node to execute on resume.
  * @param steps Number of nodes already executed.
  * @param state State snapshot to clone. NULL stores a null state.
@@ -307,8 +333,8 @@ turbo_graph_checkpoint_create(const char *next_node, size_t steps, const json_va
  * @return Status code.
  */
 CXX_C_API turbo_graph_exec_status_t
-turbo_graph_checkpoint_create_bind(const char *next_node, size_t steps,
-                                   const turbo_runtime_data_bind_value_t *state,
+turbo_graph_checkpoint_create_json_value(const char *next_node, size_t steps,
+                                   const json_value_t *state,
                                    turbo_graph_checkpoint_t **out_checkpoint);
 
 /**
@@ -384,12 +410,12 @@ CXX_C_API size_t turbo_graph_checkpoint_steps(const turbo_graph_checkpoint_t *ch
 CXX_C_API json_value_t *turbo_graph_checkpoint_state(turbo_graph_checkpoint_t *checkpoint);
 
 /**
- * @brief Return a runtime data-bind clone of the checkpoint state.
+ * @brief Return a TurboParser JSON clone of the checkpoint state.
  * @param checkpoint Checkpoint handle.
  * @return Owned runtime state tree or NULL on failure.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_graph_checkpoint_state_bind(const turbo_graph_checkpoint_t *checkpoint);
+CXX_C_API json_value_t *
+turbo_graph_checkpoint_state_json_value(const turbo_graph_checkpoint_t *checkpoint);
 
 #ifdef __cplusplus
 }

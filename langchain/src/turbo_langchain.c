@@ -1,18 +1,18 @@
 #include "turbo_langchain.h"
 
-turbo_runtime_data_bind_value_t *turbo_langchain_messages_create(void) {
-  return turbo_prompt_messages_create_bind();
+json_value_t *turbo_langchain_messages_create(void) {
+  return turbo_prompt_messages_create_json_value();
 }
 
 turbo_prompt_status_t
-turbo_langchain_messages_append(turbo_runtime_data_bind_value_t *messages,
+turbo_langchain_messages_append(json_value_t *messages,
                                 const char *role, const char *content) {
-  return turbo_prompt_messages_append_bind(messages, role, content);
+  return turbo_prompt_messages_append_json_value(messages, role, content);
 }
 
-char *turbo_langchain_prompt_render_bind(
-    const char *template_text, const turbo_runtime_data_bind_value_t *input) {
-  return turbo_prompt_render_template_bind(template_text, input);
+char *turbo_langchain_prompt_render_json_value(
+    const char *template_text, const json_value_t *input) {
+  return turbo_prompt_render_template_json_value(template_text, input);
 }
 
 turbo_langchain_runnable_t *
@@ -26,32 +26,32 @@ void turbo_langchain_runnable_destroy(turbo_langchain_runnable_t *runnable) {
 
 int turbo_langchain_runnable_invoke(
     const turbo_langchain_runnable_t *runnable,
-    const turbo_runtime_data_bind_value_t *input,
-    turbo_runtime_data_bind_value_t **out_output) {
-  return turbo_runnable_invoke_bind(runnable, input, out_output);
+    const json_value_t *input,
+    json_value_t **out_output) {
+  return turbo_runnable_invoke_json_value(runnable, input, out_output);
 }
 
 int turbo_langchain_runnable_stream(
     const turbo_langchain_runnable_t *runnable,
-    const turbo_runtime_data_bind_value_t *input,
-    turbo_event_sink_bind_fn event_sink, void *event_sink_user_data,
-    turbo_runtime_data_bind_value_t **out_output) {
-  return turbo_runnable_invoke_bind_stream(runnable, input, event_sink,
+    const json_value_t *input,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    json_value_t **out_output) {
+  return turbo_runnable_invoke_json_value_stream(runnable, input, event_sink,
                                            event_sink_user_data, out_output);
 }
 
 int turbo_langchain_runnable_log(
     const turbo_langchain_runnable_t *runnable,
-    const turbo_runtime_data_bind_value_t *input, turbo_langchain_event_log_t *log,
-    turbo_runtime_data_bind_value_t **out_output) {
-  return turbo_runnable_invoke_bind_log(runnable, input, log, out_output);
+    const json_value_t *input, turbo_langchain_event_log_t *log,
+    json_value_t **out_output) {
+  return turbo_runnable_invoke_json_value_log(runnable, input, log, out_output);
 }
 
 int turbo_langchain_runnable_batch(
     const turbo_langchain_runnable_t *runnable,
-    const turbo_runtime_data_bind_value_t *inputs,
-    turbo_runtime_data_bind_value_t **out_outputs) {
-  return turbo_runnable_batch_bind(runnable, inputs, out_outputs);
+    const json_value_t *inputs,
+    json_value_t **out_outputs) {
+  return turbo_runnable_batch_json_value(runnable, inputs, out_outputs);
 }
 
 turbo_langchain_runnable_t *turbo_langchain_pipe(
@@ -63,7 +63,7 @@ turbo_langchain_runnable_t *turbo_langchain_pipe(
 turbo_langchain_runnable_t *turbo_langchain_runnable_wrap(
     const turbo_langchain_runnable_t *inner,
     const turbo_runnable_wrap_config_t *config) {
-  return turbo_runnable_wrap_bind(inner, config);
+  return turbo_runnable_wrap_json_value(inner, config);
 }
 
 turbo_langchain_runnable_t *
@@ -121,27 +121,27 @@ turbo_chain_status_t turbo_langchain_chain_add_tools(
 }
 
 turbo_chain_status_t turbo_langchain_chain_run(
-    turbo_langchain_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-    turbo_runtime_data_bind_value_t **out_state) {
-  return turbo_chain_run_bind(chain, state, out_state);
+    turbo_langchain_chain_t *chain, const json_value_t *state,
+    json_value_t **out_state) {
+  return turbo_chain_run_json_value(chain, state, out_state);
 }
 
 turbo_chain_status_t turbo_langchain_chain_stream(
-    turbo_langchain_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-    turbo_event_sink_bind_fn event_sink, void *event_sink_user_data,
-    turbo_runtime_data_bind_value_t **out_state) {
-  return turbo_chain_run_bind_stream(chain, state, event_sink, event_sink_user_data,
+    turbo_langchain_chain_t *chain, const json_value_t *state,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    json_value_t **out_state) {
+  return turbo_chain_run_json_value_stream(chain, state, event_sink, event_sink_user_data,
                                      out_state);
 }
 
 turbo_chain_status_t turbo_langchain_chain_log(
-    turbo_langchain_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-    turbo_langchain_event_log_t *log, turbo_runtime_data_bind_value_t **out_state) {
-  return turbo_chain_run_bind_log(chain, state, log, out_state);
+    turbo_langchain_chain_t *chain, const json_value_t *state,
+    turbo_langchain_event_log_t *log, json_value_t **out_state) {
+  return turbo_chain_run_json_value_log(chain, state, log, out_state);
 }
 
-turbo_runtime_data_bind_value_t *turbo_langchain_chain_state_create(void) {
-  return turbo_chain_state_create_bind();
+json_value_t *turbo_langchain_chain_state_create(void) {
+  return turbo_chain_state_create_json_value();
 }
 
 turbo_langchain_tool_registry_t *turbo_langchain_tools_create(void) {
@@ -163,11 +163,11 @@ turbo_tool_status_t turbo_langchain_tool_invoke(
   return turbo_tool_registry_execute(tools, name, arguments_json, out_output);
 }
 
-turbo_tool_status_t turbo_langchain_tool_invoke_bind(
+turbo_tool_status_t turbo_langchain_tool_invoke_json_value(
     const turbo_langchain_tool_registry_t *tools, const char *name,
-    const turbo_runtime_data_bind_value_t *arguments,
-    turbo_runtime_data_bind_value_t **out_result) {
-  return turbo_tool_registry_execute_bind(tools, name, arguments, out_result);
+    const json_value_t *arguments,
+    json_value_t **out_result) {
+  return turbo_tool_registry_execute_json_value(tools, name, arguments, out_result);
 }
 
 turbo_langchain_agent_t *
@@ -201,7 +201,7 @@ int turbo_langchain_agent_invoke_json(
 int turbo_langchain_agent_start_text(
     turbo_langchain_agent_t *agent, const char *user_text,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   return turbo_agent_app_start_text(agent, user_text, options, out_summary_json,
                                     out_state);
 }

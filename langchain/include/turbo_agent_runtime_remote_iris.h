@@ -3,7 +3,7 @@
 
 #include <platform.h>
 
-#include "iris_app.h"
+#include <iris/iris_app.h>
 #include "turbo_agent_runtime_remote.h"
 
 #ifdef __cplusplus

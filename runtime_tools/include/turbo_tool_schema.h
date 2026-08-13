@@ -4,7 +4,7 @@
 #include <platform.h>
 #include <turbo_parser.h>
 
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 #include "turbo_tool_registry.h"
 
 #ifdef __cplusplus
@@ -20,21 +20,21 @@ CXX_C_API json_value_t *
 turbo_tool_schema_build_openai_tools(const turbo_tool_registry_t *registry);
 
 /**
- * @brief Parse one tool parameter schema into a runtime data-bind tree.
+ * @brief Parse one tool parameter schema into a TurboParser JSON tree.
  * @param parameters_json JSON schema string for parameters.
  * @param strict Whether to enforce `additionalProperties=false` when absent.
- * @return Runtime data-bind tree owned by caller, or NULL on failure.
+ * @return TurboParser JSON tree owned by caller, or NULL on failure.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_tool_schema_parse_parameters_bind(const char *parameters_json, int strict);
+CXX_C_API json_value_t *
+turbo_tool_schema_parse_parameters_json_value(const char *parameters_json, int strict);
 
 /**
- * @brief Export registry tool definitions into one bind-native schema array.
+ * @brief Export registry tool definitions into one TurboParser JSON-native schema array.
  * @param registry Tool registry.
- * @return Runtime data-bind array owned by caller, or NULL on failure.
+ * @return TurboParser JSON array owned by caller, or NULL on failure.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_tool_schema_build_registry_bind(const turbo_tool_registry_t *registry);
+CXX_C_API json_value_t *
+turbo_tool_schema_build_registry_json_value(const turbo_tool_registry_t *registry);
 
 /**
  * @brief Build one OpenAI Chat tool object from raw definition fields.

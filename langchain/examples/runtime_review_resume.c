@@ -17,14 +17,14 @@ static const char *runtime_example_text(const char *text) {
 
 static int runtime_example_write_bool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   runtime_example_bool_write_t *write = (runtime_example_bool_write_t *)user_data;
-  turbo_runtime_data_bind_value_t *value;
+  json_value_t *value;
 
-  value = turbo_runtime_data_bind_value_create_bool(write->value);
+  value = turbo_json_create_bool(write->value);
   if (!value) {
     return -1;
   }
-  return turbo_runtime_data_bind_object_set(ctx->bind_state, write->key, value) ==
-                 TURBO_RUNTIME_DATA_BIND_OK
+  return turbo_runtime_json_object_set(ctx->json_value_state, write->key, value) ==
+                 TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
 }
@@ -37,14 +37,14 @@ static turbo_graph_t *runtime_example_create_review_graph(void) {
   if (!graph) {
     return NULL;
   }
-  if (turbo_graph_add_bind_node(graph, "start", runtime_example_write_bool_node, &start) !=
+  if (turbo_graph_add_json_value_node(graph, "start", runtime_example_write_bool_node, &start) !=
           TURBO_GRAPH_EXEC_OK ||
       turbo_graph_add_node(graph, "review", turbo_agent_review_node, NULL) !=
           TURBO_GRAPH_EXEC_OK ||
-      turbo_graph_add_bind_node(graph, "end", runtime_example_write_bool_node, &end) !=
+      turbo_graph_add_json_value_node(graph, "end", runtime_example_write_bool_node, &end) !=
           TURBO_GRAPH_EXEC_OK ||
-      turbo_graph_add_bind_edge(graph, "start", "review", NULL, NULL) != TURBO_GRAPH_EXEC_OK ||
-      turbo_graph_add_bind_edge(graph, "review", "end", NULL, NULL) != TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_add_json_value_edge(graph, "start", "review", NULL, NULL) != TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_add_json_value_edge(graph, "review", "end", NULL, NULL) != TURBO_GRAPH_EXEC_OK ||
       turbo_graph_set_entry(graph, "start") != TURBO_GRAPH_EXEC_OK) {
     turbo_graph_destroy(graph);
     return NULL;
@@ -53,9 +53,9 @@ static turbo_graph_t *runtime_example_create_review_graph(void) {
   return graph;
 }
 
-static turbo_runtime_data_bind_value_t *runtime_example_initial_state(void) {
+static json_value_t *runtime_example_initial_state(void) {
   json_value_t *state = turbo_agent_state_create();
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   if (!state) {
     return NULL;
@@ -65,23 +65,23 @@ static turbo_runtime_data_bind_value_t *runtime_example_initial_state(void) {
     turbo_free_json(&state);
     return NULL;
   }
-  bound = turbo_runtime_data_bind_value_from_json(state);
+  bound = turbo_json_clone(state);
   turbo_free_json(&state);
   return bound;
 }
 
-static turbo_runtime_data_bind_value_t *runtime_example_approve_review_command(void) {
-  turbo_runtime_data_bind_value_t *command =
-      turbo_runtime_data_bind_value_create_object();
+static json_value_t *runtime_example_approve_review_command(void) {
+  json_value_t *command =
+      turbo_json_create_object();
 
   if (!command) {
     return NULL;
   }
-  if (turbo_runtime_data_bind_object_set(
+  if (turbo_runtime_json_object_set(
           command, "kind",
-          turbo_runtime_data_bind_value_create_string("approve_review")) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(command);
+          turbo_json_create_string("approve_review")) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(command);
     return NULL;
   }
   return command;
@@ -167,10 +167,10 @@ int main(void) {
   turbo_agent_runtime_store_t store;
   turbo_agent_runtime_t *runtime = NULL;
   turbo_graph_t *graph = NULL;
-  turbo_runtime_data_bind_value_t *state = NULL;
-  turbo_runtime_data_bind_value_t *resumed_state = NULL;
-  turbo_runtime_data_bind_value_t *command = NULL;
-  turbo_runtime_data_bind_value_t *fork_state = NULL;
+  json_value_t *state = NULL;
+  json_value_t *resumed_state = NULL;
+  json_value_t *command = NULL;
+  json_value_t *fork_state = NULL;
   json_value_t *summary = NULL;
   json_value_t *resume_summary = NULL;
   json_value_t *fork_summary = NULL;
@@ -191,7 +191,7 @@ int main(void) {
   options.interrupt_before_nodes = interrupt_before_review;
   options.interrupt_before_count = 1;
   if (turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &resumed_state) != 0) {
-    fprintf(stderr, "start_bind_graph failed\n");
+    fprintf(stderr, "start_json_value_graph failed\n");
     return 1;
   }
 
@@ -210,7 +210,7 @@ int main(void) {
          turbo_json_object_get(checkpoint, "control_snapshot") ? "yes" : "no");
 
   command = runtime_example_approve_review_command();
-  turbo_runtime_data_bind_value_destroy(resumed_state);
+  turbo_runtime_json_destroy(resumed_state);
   resumed_state = NULL;
   options.interrupt_before_nodes = NULL;
   options.interrupt_before_count = 0;
@@ -224,7 +224,7 @@ int main(void) {
               .checkpoint_id = checkpoint_id,
           },
           &resume_summary, &resumed_state) != 0) {
-    fprintf(stderr, "resume_command_bind failed\n");
+    fprintf(stderr, "resume_command_json_value failed\n");
     return 1;
   }
   runtime_example_print_summary("resumed run", resume_summary);
@@ -237,7 +237,7 @@ int main(void) {
               .checkpoint_id = checkpoint_id,
           },
           &fork_summary, &fork_state) != 0) {
-    fprintf(stderr, "fork_command_bind failed\n");
+    fprintf(stderr, "fork_command_json_value failed\n");
     return 1;
   }
   runtime_example_print_summary("forked run", fork_summary);
@@ -246,10 +246,10 @@ int main(void) {
   turbo_free_json(&resume_summary);
   turbo_free_json(&summary);
   turbo_free_json(&checkpoint);
-  turbo_runtime_data_bind_value_destroy(fork_state);
-  turbo_runtime_data_bind_value_destroy(command);
-  turbo_runtime_data_bind_value_destroy(resumed_state);
-  turbo_runtime_data_bind_value_destroy(state);
+  turbo_runtime_json_destroy(fork_state);
+  turbo_runtime_json_destroy(command);
+  turbo_runtime_json_destroy(resumed_state);
+  turbo_runtime_json_destroy(state);
   turbo_graph_destroy(graph);
   turbo_agent_runtime_destroy(runtime);
   return 0;

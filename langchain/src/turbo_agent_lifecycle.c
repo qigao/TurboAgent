@@ -2,6 +2,7 @@
 #include "turbo_agent_config_internal.h"
 #include "turbo_agent_transport_internal.h"
 #include "turbo_agent_lifecycle_internal.h"
+#include "turbo_agent_tool_executor_internal.h"
 
 #include "http_client.h"
 #include "CoroNet/turbo_coro_context.h"
@@ -69,8 +70,13 @@ static void turbo_agent_release_owned_resources(turbo_agent_t *agent) {
   if (agent->owns_tool_registry && agent->tool_registry) {
     turbo_tool_registry_destroy(agent->tool_registry);
   }
+  turbo_agent_tool_executor_destroy(agent->tool_executor);
+  agent->tool_executor = NULL;
   if (agent->owned_resource_free) {
     agent->owned_resource_free(agent->owned_resource);
+  }
+  if (agent->transport_v2_user_data_free) {
+    agent->transport_v2_user_data_free(agent->transport_v2_user_data);
   }
   for (i = 0; i < agent->middleware_count; ++i) {
     if (agent->middlewares[i].user_data_free) {
@@ -93,12 +99,12 @@ static void turbo_agent_release_owned_resources(turbo_agent_t *agent) {
   free(agent->middlewares);
   free(agent->guardrails);
   free(agent->trace_sinks);
-  for (i = 0; i < agent->trace_bind_sink_count; ++i) {
-    if (agent->trace_bind_sinks[i].user_data_free) {
-      agent->trace_bind_sinks[i].user_data_free(agent->trace_bind_sinks[i].user_data);
+  for (i = 0; i < agent->trace_json_value_sink_count; ++i) {
+    if (agent->trace_json_value_sinks[i].user_data_free) {
+      agent->trace_json_value_sinks[i].user_data_free(agent->trace_json_value_sinks[i].user_data);
     }
   }
-  free(agent->trace_bind_sinks);
+  free(agent->trace_json_value_sinks);
 }
 
 static void turbo_agent_free_strings(turbo_agent_t *agent) {
@@ -113,6 +119,9 @@ static void turbo_agent_free_strings(turbo_agent_t *agent) {
   tstr_free(agent->instructions);
   tstr_free(agent->structured_output_name);
   tstr_free(agent->structured_output_schema_json);
+  tstr_free(agent->last_provider_request_id);
+  turbo_runtime_json_destroy(agent->context_summary);
+  agent->context_summary = NULL;
   turbo_agent_clear_last_stream_sse(agent);
 }
 
@@ -155,7 +164,13 @@ CXX_C_API turbo_agent_t *turbo_agent_create(const turbo_agent_config_t *config) 
   }
 
   provider = turbo_agent_resolve_provider(config->provider, config->api_mode, &agent->api_mode);
+  turbo_agent_retry_policy_init(&agent->retry_policy);
   if (turbo_agent_apply_core_config(agent, config, provider) != 0) {
+    turbo_agent_destroy(agent);
+    return NULL;
+  }
+
+  if (agent->tool_registry && turbo_agent_tool_executor_create(NULL, &agent->tool_executor) != 0) {
     turbo_agent_destroy(agent);
     return NULL;
   }

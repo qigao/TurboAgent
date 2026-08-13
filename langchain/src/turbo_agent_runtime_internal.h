@@ -13,6 +13,8 @@ typedef struct turbo_agent_execution_context_s {
   const char *run_id;
   const char *tool_call_id;
   const char *tool_name;
+  turbo_agent_runtime_t *runtime;
+  const turbo_cancel_token_t *cancel_token;
 } turbo_agent_execution_context_t;
 
 CXX_C_API const char *turbo_agent_provider_name(const turbo_agent_t *agent);

@@ -11,16 +11,18 @@
 
 ## 专项技能参考
 
-本文件保留核心约束与原则。详细技术规范已拆分为独立 skills，按需激活：
+本文件保留核心约束与原则。详细技术规范已迁移为全局 Codex skills，按需激活：
 
-- **`skills/turbonet_utils.md`** - TurboNet Utils 完整 API 参考（内存管理、字符串、文件、日志、并发、无锁数据结构）
-- **`skills/c_design_patterns.md`** - C 语言设计模式实现指南（12 种模式、SOLID 原则、反模式警告）
-- **`skills/performance_optimization.md`** - 性能优化专项指南（热路径识别、SIMD、缓存优化、性能测试）
-- **`skills/logging_guide.md`** - 日志系统最佳实践（数量约束、质量规范、文件管理、生产配置）
-- **`skills/plugin_system.md`** - 插件系统开发规范（架构设计、隔离机制、热重载、安全）
-- **`skills/tinytest.md`** - TinyTest 测试框架指南（C/C++ 测试结构、断言、fixture、JUnit/TAP、benchmark）
+- **`turboutils`** - TurboUtils 共享 API 参考（错误、字符串、容器、文件、内存映射、平台安全、线程、协程、链接）
+- **`memory-design-protocols`** - 内存、buffer、ring、Disruptor、queue、pool 与零拷贝 API/设计协议（所有权、容量、背压、关闭、验证）
+- **`cmake-presets`** - CMake Presets 构建测试指南（configure/build/test preset、target 构建、build tree 恢复）
+- **`c-design-patterns`** - C 语言设计模式实现指南（12 种模式、SOLID 原则、反模式警告）
+- **`performance-optimization`** - 性能优化专项指南（热路径识别、SIMD、缓存优化、性能测试）
+- **`logging-guide`** - 日志系统最佳实践（数量约束、质量规范、文件管理、生产配置）
+- **`plugin-system`** - 插件系统开发规范（架构设计、隔离机制、热重载、安全）
+- **`tinytest`** - TinyTest 测试框架指南（C/C++ 测试结构、断言、fixture、JUnit/TAP、benchmark）
 
-激活方式：在 Kiro 中使用 `#` 引用 skill 文件（如 `#skills/turbonet_utils.md`），或查看 `skills/README.md` 了解详细使用说明。
+激活方式：在任务中涉及对应主题时使用相应全局 skill；需要显式指定时使用 `$turboutils`、`$memory-design-protocols`、`$cmake-presets`、`$c-design-patterns`、`$performance-optimization`、`$logging-guide`、`$plugin-system` 或 `$tinytest`。
 
 ---
 
@@ -91,7 +93,7 @@
 - 默认保持现有用户可见行为稳定
 - 优先做小而清晰之改动，不引入无谓抽象
 - 分层/分类设计，修改/实现的原则以清晰的结构为佳
-- 不把 fallback 作为默认设计；优先修正边界、数据模型或调用契约
+- 默认 fail fast；除非用户、协议或设计文档明确要求，不引入 fallback
 - 删除死代码、重复代码与逃生式补丁，但不可误删仍有用之行为
 - 函数应短小单纯，复杂逻辑先拆职责，再实现
 
@@ -124,78 +126,20 @@
   - 跨模块重复优先复用既有公共库，不新建 utils 堆砌
   - 若抽象需要 >3 个参数控制行为，说明抽象过早或边界不清
 
-## Fallback 与错误处理
+## Fail Fast 与错误处理
 
-- 仅在外部依赖不可用、平台能力差异、兼容旧行为或可选加速路径缺失时采用 fallback
-- fallback 必须保持与主路径一致的语义；若只能降级，必须明确用户可见差异、风险与验证方式
-- 不得用 fallback 掩盖不变量破坏、数据损坏、解析错误、权限失败、安全失败或状态不一致
-- fallback 的触发条件必须集中、清晰、可复验，不得散落在多处分支里隐式生效
+- 默认 fail fast：发现前置条件、依赖、配置、权限、解析、状态不变量或资源约束不满足时，立即返回明确错误，不自动降级、不静默修复、不继续执行半可信状态
+- 只有用户、协议、兼容性要求或设计文档明确要求时，才允许 fallback；不得把 fallback 作为默认容错策略
+- fallback 必须有显式触发条件、同语义要求、用户可见差异、风险说明、测试覆盖和移除条件；不得散落在多处分支里隐式生效
 - fallback 路径必须和主路径共享同一事实源；不得让主路径与 fallback 各自维护状态
-- 临时 fallback 必须说明移除条件或后续迁移路径
+- 不得用 fallback 掩盖不变量破坏、数据损坏、解析错误、权限失败、安全失败或状态不一致
 - 错误处理边界：错误检查集中在能处理的边界层，例如入口函数、线程入口、插件边界、外部库适配器、测试边界
-- 中间层若不能恢复、重试、补偿或转换错误，应直接返回错误码向上传播；禁止仅记录日志后返回成功
+- 中间层若不能恢复、重试、补偿或转换错误，应直接返回错误码或 Result 向上传播；禁止仅记录日志后返回成功
 - 资源释放依靠清晰的 cleanup 路径或 goto cleanup 惯用法，不在多个错误分支重复清理逻辑
 - 可预期失败优先使用项目既有错误码、返回值（-1/NULL/错误码枚举）或 Result 结构表达
+- Result 设计以全局 skill `c-design-patterns` 的“错误处理（Result 模式）”为准；`AGENTS.md` 只规定适用边界，不重复定义结构体样式
+- 调用方必须检查错误码、NULL 或 Result 的失败状态；禁止忽略失败后继续使用未验证输出
 - 日志归属应集中在错误被消费或转换的边界，避免每层重复记录同一错误
-
-### 错误码与 Result 结构
-
-- C 语言错误处理模式：
-  - 返回错误码：函数返回 int/enum（0=成功，负数=错误），输出通过指针参数
-  - 返回 NULL：指针函数失败返回 NULL，调用方检查
-  - errno 兼容：边界层可把底层错误转换为项目错误码
-  - Result 结构：`struct { bool ok; union { T value; Error err; }; }`
-- 错误码设计：
-  - 使用 enum 类型，不用裸 int
-  - 错误码必须可序列化为字符串（`error_to_string(code)`）
-  - 成功用 0；错误码从 1 开始或负数表示
-  - 错误码必须文档化：触发条件、恢复建议
-  - 示例：
-    ```c
-    typedef enum {
-        ERR_OK = 0,
-        ERR_INVALID_PARAM = -1,
-        ERR_OUT_OF_MEMORY = -2,
-        ERR_FILE_NOT_FOUND = -3
-    } error_code_t;
-    ```
-- Result 结构使用：
-  - 成功携带返回值，失败携带错误信息
-  - 调用方必须检查 ok 字段
-  - 示例：
-    ```c
-    typedef struct {
-        bool ok;
-        union {
-            int value;
-            error_code_t error;
-        };
-    } result_int_t;
-    ```
-- goto cleanup 惯用法：
-  - 用于统一清理资源，避免多个 return 路径重复代码
-  - 标签命名：`cleanup`、`error`、`done`
-  - 示例：
-    ```c
-    int process_file(const char* path) {
-        turbo_file_t f = TURBO_INVALID_FILE;
-        char* buffer = NULL;
-        int result = ERR_OK;
-        
-        f = turbo_fs_open(path, TURBO_FS_O_RDONLY, 0);
-        if (f == TURBO_INVALID_FILE) { result = ERR_FILE_NOT_FOUND; goto cleanup; }
-        
-        buffer = malloc(1024);
-        if (!buffer) { result = ERR_OUT_OF_MEMORY; goto cleanup; }
-        
-        // 处理逻辑...
-        
-    cleanup:
-        if (buffer) free(buffer);
-        if (f != TURBO_INVALID_FILE) turbo_fs_close(f);
-        return result;
-    }
-    ```
 
 ## 数据一致性
 
@@ -240,7 +184,7 @@
 
 ### 插件系统设计规范
 
-> **详细规范参见**: `skills/plugin_system.md`
+> **详细规范参见**: 全局 skill `plugin-system`
 
 插件系统核心约束：
 - 稳定 ABI：纯 C 接口、opaque 指针、禁止跨边界传递复杂结构
@@ -251,7 +195,7 @@
 
 ### 设计模式应用指导
 
-> **详细模式实现参见**: `skills/c_design_patterns.md`
+> **详细模式实现参见**: 全局 skill `c-design-patterns`
 
 模式选择原则：
 - 创建型（工厂、建造者、单例）：对象创建逻辑复杂、延迟初始化、配置驱动
@@ -261,35 +205,36 @@
 
 ### 标准库与成熟算法优先
 
-> **详细 API 参见**: `skills/turbonet_utils.md`
+> **共享 API 参见**: 全局 skill `turboutils`；内存、buffer、queue 与 pool 的 API、选择和协议参见 `memory-design-protocols`
 
 #### 库优先级顺序（从高到低）
 
-1. **TurboNet Utils**（通过 `TURBONET_ROOT` 或项目构建配置定位，例如 `%TURBONET_ROOT%/turbonet/utils/include/`）— 最优先
+1. **TurboUtils**（仓库 `utils/` 模块；构建时优先通过 CMake target `TurboUtils::Core` 使用）— 最优先
 2. **项目内模块**（`exprtk/`、`plugins/` 等）
-3. **vendor/ 库**（sds、croar、stc、mir、monocypher、sha2、uuid、miniblas）
+3. **vendor/ 库**（sds、croar、mir、monocypher、sha2、miniblas）
 4. **vcpkg 依赖**（xxhash、sqlite3、zstd、openssl、c-ares、aklomp-base64、simde）
 5. **C 标准库**（libc：`string.h`、`stdlib.h`、`stdio.h`）
-6. **底层系统 API**（仅允许封装在 TurboNet util/coro 或项目适配层之后使用）
+6. **底层系统 API**（仅允许封装在 TurboUtils 平台/协程适配层或项目适配层之后使用）
 
 #### 手写实现触发条件（严格约束）
 
 允许手写实现的前提：
-1. **TurboNet Utils/vendor/vcpkg 无对应功能**，且项目内没有稳定复用点；或现有库无法满足接口/平台/许可约束
+1. **TurboUtils/vendor/vcpkg 无对应功能**，且项目内没有稳定复用点；或现有库无法满足接口/平台/许可约束
 2. 若是为了替换现有库或优化成熟通用能力，必须有 profiling 证明现有路径是瓶颈（≥20% 总耗时）
 3. 若是因为特殊约束（嵌入式、实时性、代码体积 <50KB），必须说明约束来源
 4. 高风险基础设施必须提供 Benchmark 对比、测试覆盖率目标和文档化理由
 
 #### 避免重复造轮子（强制规则）
 
-- ❌ **禁止手写**：动态数组 → 用 `turbo_buffer` 或 `mem_pool_t`
-- ❌ **禁止手写**：字符串拼接 → 用 `tstr_t`（TurboNet）或 `sds`（vendor）
-- ❌ **禁止手写**：哈希表 → 用 `stc`（vendor）
-- ❌ **禁止手写**：文件读写 → 用 `turbo_fs`（TurboNet）
-- ❌ **禁止手写**：日志系统 → 用 `tlog`（TurboNet）
-- ❌ **禁止手写**：线程池 → 用 `turbo_threadpool`（TurboNet）
-- ❌ **禁止手写**：无锁队列 → 用 `disruptor` 或 `ring_buffer_spsc`（TurboNet）
-- ❌ **禁止手写**：内存池 → 用 `mem_pool_t` 或 `object_pool_t`（TurboNet）
+- ❌ **禁止手写**：动态数组 → 用 `turbo_vec_t` / `TURBO_VEC_DEFINE`；统一生命周期的临时数组按协议选 `MemoryPool` 或 `mem_pool_t`
+- ❌ **禁止手写**：字符串拼接 → 用 `tstr_t`（TurboUtils）或 `sds`（vendor）
+- ❌ **禁止手写**：哈希表/集合 → 用 `turbo_hash_map_t` / `TURBO_HASH_MAP_DEFINE` 或 `turbo_set_t` / `TURBO_SET_DEFINE`
+- ❌ **禁止手写**：双端队列 → 用 `turbo_deque_t` / `TURBO_DEQUE_DEFINE`
+- ❌ **禁止手写**：文件读写 → 用 `turbo_fs`（TurboUtils）
+- ❌ **禁止手写**：日志系统 → 使用 TurboUtils `tlog`，API、数量、交付与生产协议参见 `logging-guide`
+- ❌ **禁止手写**：线程池 → 用 `turbo_threadpool`（TurboUtils）
+- ❌ **禁止手写**：并发 ring/queue → 按拓扑与消费语义选择 `ring_buffer_spsc`、`disruptor`、`turbo_threadpool` 或 bucket priority queue（TurboUtils）
+- ❌ **禁止手写**：arena/slab/object pool → 按生命周期选择 `MemoryPool`、`mem_pool_t`、`mem_buffer_t` / `mem_slice_t` 或 `object_pool_t`（TurboUtils）
 
 ### 依赖管理与接口设计
 
@@ -347,6 +292,20 @@
 - 若新增依赖会改变构建、部署、许可、二进制体积或公开 API，必须先说明影响；高风险或不可逆时先问用户
 - 对外部库要做薄适配层，避免把第三方类型、错误码和生命周期规则扩散到领域核心
 
+## 内存、Buffer 与 Queue 设计协议
+
+> **内存与数据路径 API/设计协议参见**: 全局 skill `memory-design-protocols`；共享错误、线程与链接 API 参见 `turboutils`；性能收益验证参见 `performance-optimization`
+
+- 新增或修改跨模块、跨线程、零拷贝、池化或有界数据路径前，必须写明：数据单元、事实源、所有权、生命周期、线程拓扑、顺序、容量、背压、失败、关闭与观测协议
+- 零拷贝是生命周期协议，不是禁止复制；若复制能隔离所有权、限制大 buffer 滞留或消除危险借用，应选择有界复制并用 benchmark 验证成本
+- 所有可增长结构必须有硬上限、checked arithmetic、满额行为和用户可见错误；禁止用无界扩容代替背压
+- borrowed view 必须标明失效点；不得跨 append、consume、reset、resize、release、callback、协程挂起或 slot 复用保存裸指针，除非来源契约明确保证有效
+- acquire/claim、commit/publish、observe 与 release 必须作为状态机设计；每次成功 claim 必须恰好进入一个公开契约允许的终态
+- 并发 cardinality 必须精确到 single-threaded、SPSC、MPSC、SPMC 或 MPMC；不得只写“线程安全”
+- 满/空、timeout、关闭和模式不匹配必须是可区分结果；不得静默丢弃、覆盖、永久自旋或在资源满时隐式转为无界分配
+- init/reset/trim/resize/topology change/destroy 默认属于控制面，要求数据面 quiescent；若 API 支持并发生命周期变更，必须引用其明确契约和测试
+- 容量预算必须同时计算 slot、对齐、metadata 和 retained payload；以峰值流入、最坏 consumer stall、最大 batch 和 shutdown drain 场景验证
+
 ## 并发与线程安全
 
 - 共享状态默认假设单线程访问；需跨线程时必须说明同步机制（mutex/atomic/lock-free/immutable）
@@ -361,10 +320,11 @@
   - 锁持有期间禁止：分配内存、I/O 操作、调用回调、获取其他锁（除非文档化顺序）
   - 可重入锁仅用于递归调用且无法重构时；普通 mutex 为默认
 - 无锁数据结构适用边界：
-  - 只在 profiling 证明锁竞争是瓶颈后考虑
-  - 必须提供带锁版本作为验证基准
-  - 必须处理 ABA 问题：hazard pointer、epoch-based reclamation 或引用计数
-  - 限于队列、栈、计数器等简单结构；复杂状态机仍用锁保护
+  - 只在 profiling 证明锁竞争是瓶颈，或既有架构明确要求对应 SPSC/MPMC 拓扑时考虑
+  - 优先复用 TurboUtils 已有实现；性能验证以现有实现或简单带锁实现为基线
+  - 只有算法实际存在地址复用与并发回收时，才设计 hazard pointer、epoch reclamation 或引用计数等 ABA/回收协议；固定槽位 ring 不机械套用
+  - 线程角色、memory ordering、容量、背压、claim/publish/release 和 shutdown 以 `memory-design-protocols` 为准
+  - 复杂共享状态机仍优先用锁或单 owner 消息传递
 - 线程安全保证传播：
   - `const` 方法不保证线程安全，除非类型明确标注 `thread-safe`
   - 不可变对象可安全共享；可变对象需明确所有权转移或同步协议
@@ -377,20 +337,20 @@
 
 ## 性能与资源约束
 
-> **详细优化指南参见**: `skills/performance_optimization.md`
+> **详细优化指南参见**: 全局 skill `performance-optimization`；内存与数据路径协议参见 `memory-design-protocols`
 
 - 热路径识别：每秒 >1000 次或占比 >20%（以 profiling 为准）
 - 热路径禁止：动态分配、函数指针间接调用、字符串拷贝
 - 算法复杂度：必须标注时间/空间复杂度；O(n²) 以上需说明数据规模
-- 内存管理：默认 malloc/free + 明确所有权；热路径用 arena/对象池
-- SIMD 与向量化：必须提供标量 fallback 并测试
+- 内存管理：普通路径默认使用既有 allocator + 明确所有权；只有测量证明分配或生命周期是瓶颈时，才按 `memory-design-protocols` 选择 arena/slab/object pool/retained buffer
+- SIMD 与向量化：默认 fail fast；仅当需求明确要求跨平台兼容路径时，提供同语义标量实现并测试
 - 缓存策略：定义容量上限、失效策略（LRU/TTL）、命中率 >60%
 - 资源配额：可增长结构必须设置上限（容器、递归、句柄、内存）
 - 性能测试：关键模块必须有 benchmark，覆盖典型/峰值/边界负载
 
 ## 可观测性与诊断
 
-> **详细日志规范参见**: `skills/logging_guide.md`
+> **详细日志规范参见**: 全局 skill `logging-guide`
 
 - 错误上下文传播：错误必须携带操作类型、输入摘要、失败阶段、错误码
 - 日志分级：ERROR（用户可见失败）、WARN（降级/重试）、INFO（里程碑）、DEBUG（详细流程）
@@ -430,7 +390,7 @@
 
 ## 测试与验证
 
-> **TinyTest 使用指南参见**: `skills/tinytest.md`
+> **TinyTest 使用指南参见**: 全局 skill `tinytest`
 
 - 每次改动都应给出可重复的本地验证步骤
 - 验证顺序默认遵循：先最小相关测试，再相邻回归，最后按需扩大范围

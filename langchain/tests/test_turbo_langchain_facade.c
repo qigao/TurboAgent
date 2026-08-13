@@ -34,18 +34,18 @@ spec("turbo langchain facade") {
     turbo_langchain_chain_t *chain = turbo_langchain_chain_create("facade-chain");
     turbo_langchain_runnable_t *runnable = NULL;
     turbo_langchain_event_log_t *log = turbo_langchain_event_log_create();
-    turbo_runtime_data_bind_value_t *state = turbo_langchain_chain_state_create();
-    turbo_runtime_data_bind_value_t *input;
-    turbo_runtime_data_bind_value_t *out_state = NULL;
+    json_value_t *state = turbo_langchain_chain_state_create();
+    json_value_t *input;
+    json_value_t *out_state = NULL;
 
     check_not_null(chain);
     check_not_null(log);
     check_not_null(state);
-    input = (turbo_runtime_data_bind_value_t *)turbo_runtime_data_bind_object_get(state, "input");
+    input = (json_value_t *)turbo_json_object_get(state, "input");
     check_not_null(input);
-    check_int_eq(turbo_runtime_data_bind_object_set(
-                     input, "task", turbo_runtime_data_bind_value_create_string("ship")),
-                 TURBO_RUNTIME_DATA_BIND_OK);
+    check_int_eq(turbo_runtime_json_object_set(
+                     input, "task", turbo_json_create_string("ship")),
+                 TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_langchain_chain_add_prompt(chain, "prompt", "user", "Please {{task}}."),
                  TURBO_CHAIN_OK);
 
@@ -53,13 +53,13 @@ spec("turbo langchain facade") {
     check_not_null(runnable);
     check_int_eq(turbo_langchain_runnable_log(runnable, state, log, &out_state), 0);
     check_not_null(out_state);
-    check_size_eq(turbo_runtime_data_bind_value_size(
-                      turbo_runtime_data_bind_object_get(out_state, "messages")),
+    check_size_eq(turbo_runtime_json_value_size(
+                      turbo_json_object_get(out_state, "messages")),
                   1);
-    check_size_eq(turbo_runtime_data_bind_value_size(turbo_event_log_events_bind(log)), 2);
+    check_size_eq(turbo_runtime_json_value_size(turbo_event_log_events_json_value(log)), 2);
 
-    turbo_runtime_data_bind_value_destroy(out_state);
-    turbo_runtime_data_bind_value_destroy(state);
+    turbo_runtime_json_destroy(out_state);
+    turbo_runtime_json_destroy(state);
     turbo_langchain_runnable_destroy(runnable);
     turbo_langchain_event_log_destroy(log);
     turbo_langchain_chain_destroy(chain);

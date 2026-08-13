@@ -2,20 +2,19 @@
 
 #include "turbo_agent_util_internal.h"
 #include "turbo_parser.h"
+#include <turbo_fs.h>
 
-#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
-#include <direct.h>
 #include <windows.h>
 #else
 #include <dirent.h>
-#include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 #endif
 
 typedef struct turbo_agent_memory_record_s {
@@ -86,18 +85,17 @@ static int turbo_agent_memory_record_matches_query(const json_value_t *record, c
                                                    const char *text_substring);
 
 static int turbo_agent_memory_ensure_dir(const char *path) {
+  turbo_fs_stat_t stat;
+
   if (!path || path[0] == '\0') {
     return -1;
   }
-#ifdef _WIN32
-  if (_mkdir(path) == 0 || errno == EEXIST) {
+  if (turbo_fs_mkdir(path, 0777) == 0) {
     return 0;
   }
-#else
-  if (mkdir(path, 0777) == 0 || errno == EEXIST) {
+  if (turbo_fs_stat(path, &stat) == 0 && stat.is_directory) {
     return 0;
   }
-#endif
   return -1;
 }
 
@@ -121,63 +119,90 @@ static char *turbo_agent_memory_join_path(const char *left, const char *right) {
 }
 
 static int turbo_agent_memory_write_text_file(const char *path, const char *content) {
-  FILE *fp;
+  enum { TURBO_AGENT_MEMORY_TEMP_SUFFIX_SIZE = 22 };
+  turbo_file_t file = TURBO_INVALID_FILE;
+  uint64_t nonce;
+  char *temp_path = NULL;
+  size_t path_len;
   size_t len;
+  size_t temp_path_size;
+  int temp_path_length;
+  int status = -1;
 
   if (!path || !content) {
     return -1;
   }
-  fp = fopen(path, "wb");
-  if (!fp) {
-    return -1;
-  }
+  path_len = strlen(path);
   len = strlen(content);
-  if (len > 0 && fwrite(content, 1, len, fp) != len) {
-    fclose(fp);
+  if (len > INT_MAX || path_len > SIZE_MAX - TURBO_AGENT_MEMORY_TEMP_SUFFIX_SIZE ||
+      turbo_secure_random(&nonce, sizeof(nonce)) != 0) {
     return -1;
   }
-  fclose(fp);
-  return 0;
+  temp_path_size = path_len + TURBO_AGENT_MEMORY_TEMP_SUFFIX_SIZE;
+  temp_path = (char *)malloc(temp_path_size);
+  if (!temp_path) {
+    return -1;
+  }
+  temp_path_length = snprintf(temp_path, temp_path_size, "%s.tmp.%016llx", path,
+                              (unsigned long long)nonce);
+  if (temp_path_length < 0 || (size_t)temp_path_length >= temp_path_size) {
+    goto cleanup;
+  }
+
+  file = turbo_fs_open(temp_path, TURBO_FS_O_WRONLY | TURBO_FS_O_CREAT | TURBO_FS_O_TRUNC,
+                       TURBO_FS_DEFAULT_MODE);
+  if (file == TURBO_INVALID_FILE) {
+    goto cleanup;
+  }
+  if (len > 0 && turbo_fs_write(file, content, len) != (int)len) {
+    goto cleanup;
+  }
+  if (turbo_fs_fsync(file) != 0) {
+    goto cleanup;
+  }
+  if (turbo_fs_close(file) != 0) {
+    file = TURBO_INVALID_FILE;
+    goto cleanup;
+  }
+  file = TURBO_INVALID_FILE;
+  if (turbo_fs_rename(temp_path, path) != 0) {
+    goto cleanup;
+  }
+  status = 0;
+
+cleanup:
+  if (file != TURBO_INVALID_FILE) {
+    turbo_fs_close(file);
+  }
+  if (status != 0) {
+    turbo_fs_unlink(temp_path);
+  }
+  free(temp_path);
+  return status;
 }
 
 static int turbo_agent_memory_read_text_file(const char *path, char **out_content) {
-  FILE *fp;
-  long size;
+  turbo_fs_buf_t file_buffer = {0};
   char *buffer;
 
   if (!path || !out_content) {
     return -1;
   }
   *out_content = NULL;
-  fp = fopen(path, "rb");
-  if (!fp) {
+  if (turbo_fs_read_file(path, &file_buffer) != 0 || file_buffer.len == SIZE_MAX) {
+    turbo_fs_buf_free(&file_buffer);
     return -1;
   }
-  if (fseek(fp, 0, SEEK_END) != 0) {
-    fclose(fp);
-    return -1;
-  }
-  size = ftell(fp);
-  if (size < 0) {
-    fclose(fp);
-    return -1;
-  }
-  if (fseek(fp, 0, SEEK_SET) != 0) {
-    fclose(fp);
-    return -1;
-  }
-  buffer = (char *)malloc((size_t)size + 1);
+  buffer = (char *)malloc(file_buffer.len + 1);
   if (!buffer) {
-    fclose(fp);
+    turbo_fs_buf_free(&file_buffer);
     return -1;
   }
-  if (size > 0 && fread(buffer, 1, (size_t)size, fp) != (size_t)size) {
-    free(buffer);
-    fclose(fp);
-    return -1;
+  if (file_buffer.len > 0) {
+    memcpy(buffer, file_buffer.base, file_buffer.len);
   }
-  buffer[size] = '\0';
-  fclose(fp);
+  buffer[file_buffer.len] = '\0';
+  turbo_fs_buf_free(&file_buffer);
   *out_content = buffer;
   return 0;
 }

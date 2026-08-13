@@ -1,13 +1,14 @@
 #include "turbo_agent_graph.h"
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
-#include "turbo_agent_state_core_internal.h"
-#include "turbo_agent_state_flow_domain_internal.h"
-#include "turbo_agent_hooks_internal.h"
 #include "turbo_agent_event_internal.h"
-#include "turbo_agent_validation_internal.h"
+#include "turbo_agent_hooks_internal.h"
 #include "turbo_agent_lifecycle_internal.h"
 #include "turbo_agent_runtime_internal.h"
+#include "turbo_agent_resilience_internal.h"
+#include "turbo_agent_state_core_internal.h"
+#include "turbo_agent_state_flow_domain_internal.h"
 #include "turbo_agent_util_internal.h"
+#include "turbo_agent_validation_internal.h"
 #include "turbo_model_provider.h"
 
 #include "turbo_parser.h"
@@ -26,9 +27,17 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   char *guardrail_reason = NULL;
   int rc;
   int stream_emit_failed = 0;
+  int overflow_retried = 0;
   size_t attempt = 0;
+  size_t provider_attempt = 0;
 
   if (!ctx || !ctx->state || !agent || !agent->transport_fn) {
+    return -1;
+  }
+
+  if (agent->before_turn &&
+      agent->before_turn(agent, ctx->state, agent->before_turn_user_data) != 0) {
+    turbo_agent_state_set_model_error(ctx->state, "before_turn", "failed to prepare session turn");
     return -1;
   }
 
@@ -45,8 +54,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     }
 
     if (turbo_agent_invoke_before_model_middlewares(agent, attempt_state, &request_json) != 0) {
-      turbo_agent_state_set_model_error(ctx->state, "middleware",
-                                        "before_model middleware failed");
+      turbo_agent_state_set_model_error(ctx->state, "middleware", "before_model middleware failed");
       turbo_json_serialize_free(request_json);
       if (attempt_state != ctx->state) {
         turbo_free_json(&attempt_state);
@@ -58,10 +66,9 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       turbo_agent_state_set_guardrail_rejection(
           ctx->state, "before_model",
           guardrail_reason ? guardrail_reason : "before_model guardrail rejected request");
-      turbo_agent_emit_trace(agent, attempt_state, TURBO_AGENT_TRACE_GUARDRAIL_REJECTED,
-                             "before_model",
-                             guardrail_reason ? guardrail_reason : "guardrail rejected request",
-                             request_json, -1);
+      turbo_agent_emit_trace(
+          agent, attempt_state, TURBO_AGENT_TRACE_GUARDRAIL_REJECTED, "before_model",
+          guardrail_reason ? guardrail_reason : "guardrail rejected request", request_json, -1);
       turbo_agent_state_set_model_error(
           ctx->state, "guardrail",
           guardrail_reason ? guardrail_reason : "before_model guardrail rejected request");
@@ -74,12 +81,12 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     }
 
     turbo_agent_emit_trace(agent, attempt_state, TURBO_AGENT_TRACE_MODEL_REQUEST, agent->model,
-                           turbo_agent_provider_name(agent), request_json, (int)attempt);
-    rc = agent->transport_fn(request_json, &response_json, agent->transport_user_data);
+                           turbo_agent_provider_name(agent), request_json, (int)provider_attempt);
+    rc = turbo_agent_resilient_transport(agent, ctx->state, request_json, &response_json);
+    ++provider_attempt;
     if (turbo_agent_invoke_after_model_middlewares(agent, attempt_state, request_json,
                                                    &response_json, rc) != 0) {
-      turbo_agent_state_set_model_error(ctx->state, "middleware",
-                                        "after_model middleware failed");
+      turbo_agent_state_set_model_error(ctx->state, "middleware", "after_model middleware failed");
       turbo_json_serialize_free(request_json);
       free(response_json);
       if (attempt_state != ctx->state) {
@@ -89,6 +96,28 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     }
     turbo_agent_emit_trace(agent, attempt_state, TURBO_AGENT_TRACE_MODEL_RESPONSE, agent->model,
                            turbo_agent_provider_name(agent), response_json, rc);
+    if (!overflow_retried && agent->context_overflow) {
+      int overflow_rc = agent->context_overflow(agent, attempt_state, rc, response_json,
+                                                agent->context_overflow_user_data);
+      if (overflow_rc == 1) {
+        overflow_retried = 1;
+        turbo_json_serialize_free(request_json);
+        request_json = NULL;
+        free(response_json);
+        response_json = NULL;
+        continue;
+      }
+      if (overflow_rc < 0) {
+        turbo_agent_state_set_model_error(ctx->state, "context_compaction",
+                                          "context overflow recovery failed");
+        turbo_json_serialize_free(request_json);
+        free(response_json);
+        if (attempt_state != ctx->state) {
+          turbo_free_json(&attempt_state);
+        }
+        return -1;
+      }
+    }
     turbo_json_serialize_free(request_json);
     request_json = NULL;
     if (rc != 0 || !response_json) {
@@ -116,6 +145,13 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       }
       return -1;
     }
+    if (turbo_agent_usage_record(agent, ctx->state, response) != TURBO_OK) {
+      turbo_agent_state_set_model_error(ctx->state, "usage", "failed to record provider usage");
+      free(response_json);
+      turbo_runtime_json_destroy(response);
+      if (attempt_state != ctx->state) turbo_runtime_json_destroy(attempt_state);
+      return -1;
+    }
 
     rc = turbo_agent_append_model_event(agent, attempt_state, response);
     if (rc == 0 && turbo_agent_invoke_after_model_guardrails(agent, attempt_state, response_json,
@@ -123,16 +159,14 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       turbo_agent_state_set_guardrail_rejection(
           ctx->state, "after_model",
           guardrail_reason ? guardrail_reason : "after_model guardrail rejected response");
-      turbo_agent_emit_trace(agent, attempt_state, TURBO_AGENT_TRACE_GUARDRAIL_REJECTED,
-                             "after_model",
-                             guardrail_reason ? guardrail_reason
-                                              : "guardrail rejected response",
-                           response_json, -1);
+      turbo_agent_emit_trace(
+          agent, attempt_state, TURBO_AGENT_TRACE_GUARDRAIL_REJECTED, "after_model",
+          guardrail_reason ? guardrail_reason : "guardrail rejected response", response_json, -1);
       rc = -1;
     }
     if (rc == 0 && ctx->event_sink &&
-        turbo_model_provider_response_emit_bind(agent->provider, response, ctx->event_sink,
-                                                ctx->event_sink_user_data) != 0) {
+        turbo_model_provider_response_emit_json_value(agent->provider, response, ctx->event_sink,
+                                                      ctx->event_sink_user_data) != 0) {
       stream_emit_failed = 1;
       rc = -1;
     }
@@ -202,8 +236,8 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     turbo_agent_emit_trace(agent, ctx->state, TURBO_AGENT_TRACE_STRUCTURED_RETRY,
                            agent->structured_output_name ? agent->structured_output_name
                                                          : "structured_output",
-                           structured_reason ? structured_reason : "schema_validation_failed",
-                           NULL, (int)(attempt + 1));
+                           structured_reason ? structured_reason : "schema_validation_failed", NULL,
+                           (int)(attempt + 1));
     if (attempt_state != ctx->state) {
       turbo_free_json(&attempt_state);
     }

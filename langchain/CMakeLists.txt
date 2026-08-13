@@ -31,19 +31,23 @@ target_include_directories(langchain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # Link dependencies
 target_link_libraries(
   langchain
-  PUBLIC TurboNet::RuntimeData
-         TurboNet::RuntimeTools
-         TurboNet::Parser
+  PUBLIC TurboAgent::RuntimeCore
+         TurboAgent::RuntimeData
+         TurboAgent::RuntimeTools
+         TurboParser::Parser
          TurboHttp::HttpClient
+         TurboHttp::TurboHttp
          TurboHttp::Iris
-         TurboHttp::RPCClient
-         TurboNet::Utils
-         TurboNet::Mustache
+         TurboUtils::Core
+         TurboParser::Mustache
          unofficial::sqlite3::sqlite3
-  PRIVATE libfsm::libre libfsm::libfsm)
+  PRIVATE OpenSSL::Crypto libfsm::libre libfsm::libfsm)
 
 # Use the utility to configure common settings (Folder, Version, etc.)
-cmake_config_target(langchain FOLDER "LangChain")
+cmake_config_target(langchain FOLDER "LangChain" EXPORT_NAME LangChain
+                    ALIAS TurboAgent::LangChain)
+cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+                      DESTINATION include)
 
 if(BUILD_EXAMPLES)
   file(GLOB LANGCHAIN_EXAMPLE_SOURCES CONFIGURE_DEPENDS "examples/*.c")
@@ -65,7 +69,7 @@ if(BUILD_TESTS)
     ${TEST_SOURCES}
     LIBS
     langchain
-    TurboNet::TinyTest
+    TurboUtils::TinyTest
     INCLUDES
     include
     tests

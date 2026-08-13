@@ -48,7 +48,7 @@ static void turbo_agent_subgraph_add_pending_string(json_value_t *result,
 }
 
 static json_value_t *turbo_agent_subgraph_result_json(
-    const json_value_t *summary, const turbo_runtime_data_bind_value_t *state) {
+    const json_value_t *summary, const json_value_t *state) {
   json_value_t *result = NULL;
   json_value_t *state_json = NULL;
   json_value_t *summary_clone = NULL;
@@ -62,7 +62,7 @@ static json_value_t *turbo_agent_subgraph_result_json(
   }
 
   result = turbo_json_create_object();
-  state_json = turbo_runtime_data_bind_value_to_json(state);
+  state_json = turbo_json_clone(state);
   summary_clone = turbo_json_clone(summary);
   if (!result || !state_json || !summary_clone) {
     turbo_free_json(&result);
@@ -105,15 +105,15 @@ CXX_C_API int turbo_agent_subgraph_node(turbo_graph_exec_ctx_t *ctx, void *user_
       (const turbo_agent_subgraph_node_config_t *)user_data;
   turbo_agent_execution_context_t current_context = {0};
   turbo_agent_runtime_parent_link_t parent_link = {0};
-  turbo_runtime_data_bind_value_t *child_state = NULL;
-  turbo_runtime_data_bind_value_t *result_bind = NULL;
+  json_value_t *child_state = NULL;
+  json_value_t *result_json_value = NULL;
   json_value_t *summary = NULL;
   json_value_t *result_json = NULL;
   const char *call_frame_id;
   const char *output_key;
   int rc = -1;
 
-  if (!ctx || !ctx->bind_state || !config || !config->runtime || !config->subgraph) {
+  if (!ctx || !ctx->json_value_state || !config || !config->runtime || !config->subgraph) {
     return -1;
   }
 
@@ -132,7 +132,7 @@ CXX_C_API int turbo_agent_subgraph_node(turbo_graph_exec_ctx_t *ctx, void *user_
   exec_options.parent_link = &parent_link;
 
   if (turbo_agent_runtime_exec_start(
-          config->runtime, config->subgraph, ctx->bind_state, config->options,
+          config->runtime, config->subgraph, ctx->json_value_state, config->options,
           &exec_options, &summary, &child_state) != 0 ||
       !summary || !child_state) {
     goto cleanup;
@@ -142,22 +142,22 @@ CXX_C_API int turbo_agent_subgraph_node(turbo_graph_exec_ctx_t *ctx, void *user_
   if (!result_json) {
     goto cleanup;
   }
-  result_bind = turbo_runtime_data_bind_value_from_json(result_json);
-  if (!result_bind) {
+  result_json_value = turbo_json_clone(result_json);
+  if (!result_json_value) {
     goto cleanup;
   }
-  if (turbo_runtime_data_bind_object_set(ctx->bind_state, output_key, result_bind) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
+  if (turbo_runtime_json_object_set(ctx->json_value_state, output_key, result_json_value) !=
+      TURBO_RUNTIME_JSON_OK) {
     goto cleanup;
   }
-  result_bind = NULL;
+  result_json_value = NULL;
   rc = 0;
 
 cleanup:
-  turbo_runtime_data_bind_value_destroy(result_bind);
+  turbo_runtime_json_destroy(result_json_value);
   turbo_free_json(&result_json);
   turbo_free_json(&summary);
-  turbo_runtime_data_bind_value_destroy(child_state);
+  turbo_runtime_json_destroy(child_state);
   return rc;
 }
 
@@ -167,6 +167,6 @@ CXX_C_API turbo_graph_exec_status_t turbo_agent_install_subgraph_node(
   if (!graph || !node_name || !config || !config->runtime || !config->subgraph) {
     return TURBO_GRAPH_EXEC_INVALID_ARGUMENT;
   }
-  return turbo_graph_add_bind_node_ex(graph, node_name, semantic_id, turbo_agent_subgraph_node,
+  return turbo_graph_add_json_value_node_ex(graph, node_name, semantic_id, turbo_agent_subgraph_node,
                                       (void *)config);
 }

@@ -11,9 +11,12 @@ server, and embedded-friendly native builds:
 - host-agnostic tool runtimes and registry bridges
 - action-tool bridges
 - agent runtime
+- bounded tool executor with versioned execution policy and durable journal
+- configurable provider retry metadata and exact usage records
 
-It does not include shell execution, builtin file tools, or engineering-loop application
-helpers. Those live in `agent/` and are exposed through the `turbo_agent` target.
+It does not include shell execution or workspace mutation tools. The optional
+`TurboAgent::CodingTools` target currently provides the bounded read-only
+`fs.read` and `fs.list` tools.
 
 ## Long-term aim
 
@@ -26,8 +29,8 @@ The target shape is:
 - host-agnostic workflow runtime in `langchain/`
 - stable action and tool contracts instead of CLI-specific behavior
 - cross-platform tool execution through pluggable runtimes
-- schema-driven runtime data bind for context, tool payloads, and checkpoints
-- native and sandboxed backends, including DLL-style native tools and wasm3-based tools
+- TurboParser JSON DOM for context, tool payloads, and checkpoints
+- native and sandboxed backends, including DLL-style native tools and TurboWasm tools
 - policy, trace, checkpoint, review, and replan semantics that stay stable across hosts
 
 This module should own the reusable semantics. Concrete CLIs, shells, approval
@@ -52,7 +55,8 @@ For a one-shot include, use:
 ```
 
 Or include only the narrower headers you need, such as `turbo_graph.h` or
-`turbo_agent.h`.
+`turbo_agent.h`. Retry/transport v2 and executor configuration are also available
+through `turbo_agent_resilience.h` and `turbo_agent_tool_executor.h`.
 
 For the local JSON-RPC bridge over the durable runtime surface, use:
 
@@ -74,11 +78,11 @@ helpers. `turbo_agent_remote_app.h` adds one thinner wrapper that fixes one
 remote `graph_name` and forwards the same inspect/control helpers through that
 session layer.
 
-`turbo_prompt.h` now exposes parallel bind-native message and template helpers,
-and `turbo_tool_registry.h` exposes bind-native tool execution. That lets hosts
+`turbo_prompt.h` now exposes parallel TurboParser JSON-native message and template helpers,
+and `turbo_tool_registry.h` exposes TurboParser JSON-native tool execution. That lets hosts
 keep prompt input, tool arguments, and tool results on one runtime value model
 instead of bouncing through ad hoc JSON strings.
-It also exposes canonical bind-native message schemas and validation helpers, so
+It also exposes canonical TurboParser JSON-native message schemas and validation helpers, so
 upper layers can depend on one explicit message contract instead of implicit
 `role/content` object conventions.
 
@@ -89,79 +93,44 @@ For host-agnostic tool execution and `tool_registry` bridging, use:
 ```
 
 That layer defines a small vtable-based runtime contract so native callbacks,
-shared-library loaders, and future wasm3-backed tool hosts can converge on one
+shared-library loaders, and TurboWasm-backed tool hosts can converge on one
 execution surface.
 
-For the optional wasm3-backed runtime backend, use:
+For the optional TurboWasm-backed runtime backend, use:
 
 ```c
-#include "turbo_tool_runtime_wasm3.h"
+#include "turbo_tool_runtime_wasm.h"
 ```
 
-That backend loads guest modules through TurboNet's wasm3 wrapper and maps a
-small exported tool ABI back into the same `turbo_tool_runtime_t` surface.
-The generic `turbo_tool_runtime_default_create(...)` entry now resolves to this
-wasm3 backend; hosts that want in-process callbacks must opt into the native
-runtime explicitly.
+That backend loads guest modules through `TurboWasm::Runtime`. The host supplies
+one immutable TurboWasm policy as the sole source of module-root, capability,
+memory, execution, host-call, and byte quotas. Tool descriptors and invocation
+payloads cross the guest boundary through bounded App I/O; raw guest pointers
+and engine handles are never exposed. The legacy
+`turbo_tool_runtime_default_create(...)` entry resolves to the same TurboWasm
+backend, while in-process callbacks remain an explicit native-runtime choice.
 
-For schema-driven runtime value binding, use:
+For TurboParser JSON/YAML/XML parsing, use:
 
 ```c
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 ```
 
-That layer exposes a small host-neutral value tree plus a builder vtable meant
-for future schema codecs. The default implementation is in-memory and portable;
-future MIR-backed codecs should target that vtable instead of baking host
-details into public APIs. `turbo_chain` and `turbo_graph` now also expose small
-bind-boundary helpers so hosts can keep JSON as an implementation detail rather
-than a required application data model.
-
-For binary wire parsing primitives, use:
-
-```c
-#include "turbo_runtime_binary_reader.h"
-```
-
-That layer defines the canonical little-endian cursor and var-string rules the
-future binary codec should reuse for validation, interpreter fallback, and MIR
-JIT generation. The codec should compile against one wire contract, not hide
-multiple ad hoc readers in different backends.
-
-For declarative binary layouts and ABI planning, use:
-
-```c
-#include "turbo_runtime_binary_schema.h"
-```
-
-That layer describes canonical binary object fields, validates payloads against
-the wire contract, and collects the exact
-`turbo_runtime_data_bind_value_api_t` callbacks a future MIR parser will need.
-
-For MIR-backed binary parser planning and JIT stubs, use:
-
-```c
-#include "turbo_runtime_binary_mir.h"
-```
-
-That layer turns binary schema requirements into a stable external-symbol plan
-and can JIT a parser entry against the vendored MIR runtime. The current
-implementation has three specialized fast paths plus one conservative fallback:
-
-- all scalar fields: field-by-field MIR assembly over one shared reader
-- all repeated-scalar fields: MIR skeleton plus one repeated-value bridge per field
-- all string-key-map scalar fields: MIR skeleton plus one map-value bridge per field
-- mixed schemas or nested objects: validated interpreter fallback through one stable
-  parser entry
-
-This keeps one real parser surface available now while MIR specialization grows
-incrementally behind the same ABI contract.
+That layer exposes only checked ownership and value-access helpers. It does not define a second
+value tree: TurboParser `json_value_t` is the single runtime DOM used by agent
+state, tools, persistence, and transport adapters. YAML enters that DOM through
+`turbo_yaml_to_json(...)`; XML stays on TurboParser's XML DOM at the external
+format boundary.
 
 The Agent surface is layered from low to high as:
 
 - `turbo_agent.h` for core config and lifecycle
 - `turbo_agent_runtime.h` for durable thread/run/checkpoint execution
 - `turbo_agent_session.h` for runtime session helpers
+- `turbo_agent_context.h` for provider-owned token estimation, committed
+  context projections, compaction, and explicit overflow recovery
+- `turbo_agent_inbox.h` for bounded durable STEER/FOLLOW_UP input, crash
+  recovery, and explicit custom-graph claim/commit control
 - `turbo_agent_subagent.h` for subagent-as-tool adapters
 - `turbo_agent_subgraph.h` for graph-native subgraph nodes
 - `turbo_agent_memory_store.h` for namespaced long-term memory records
@@ -246,48 +215,48 @@ The runtime keeps the current graph semantics:
 
 What changes is persistence and replay:
 
-- `start_bind_graph(...)` creates one thread/run and executes one segment
-- `resume_bind_graph(...)` reloads one persisted checkpoint and continues the
+- `start_json_value_graph(...)` creates one thread/run and executes one segment
+- `resume_json_value_graph(...)` reloads one persisted checkpoint and continues the
   same run
-- `fork_bind_graph(...)` starts a new run from an old checkpoint
-- `get_*_state_bind(...)` reads persisted thread/run/checkpoint state without
+- `fork_json_value_graph(...)` starts a new run from an old checkpoint
+- `get_*_state_json_value(...)` reads persisted thread/run/checkpoint state without
   forcing the host to parse checkpoint JSON manually
 - `get_latest_run(...)`, `get_pending_run(...)`, and `get_latest_checkpoint(...)`
   remove the common "list then sort/filter" host boilerplate
-- `turbo_agent_runtime_get_thread_timeline_bind(...)` bundles one thread,
+- `turbo_agent_runtime_get_thread_timeline_json_value(...)` bundles one thread,
   the resolved current run, the latest run, the pending run, all runs, the
   current run checkpoints, and history events into one host-facing view; the
   resolved current run rule is pending run first, otherwise latest run
-- `turbo_agent_session_get_thread_timeline_bind(...)` and
-  `turbo_agent_app_get_thread_timeline_bind(...)` expose the same timeline
+- `turbo_agent_session_get_thread_timeline_json_value(...)` and
+  `turbo_agent_app_get_thread_timeline_json_value(...)` expose the same timeline
   shape at their respective wrapper layers
-- `load_thread_history_events_bind(...)` removes the remaining
+- `load_thread_history_events_json_value(...)` removes the remaining
   "resolve pending/latest run, then replay history" boilerplate
-- `apply_command_bind(...)` turns one checkpoint plus one host-facing command
+- `apply_command_json_value(...)` turns one checkpoint plus one host-facing command
   into a fresh `state_override`
-- `resume_command_bind(...)` / `fork_command_bind(...)` collapse command-apply
+- `resume_command_json_value(...)` / `fork_command_json_value(...)` collapse command-apply
   plus continue/fork into one host-facing call
-- `apply_thread_command_bind(...)` / `resume_thread_command_bind(...)` /
-  `fork_thread_command_bind(...)` do the same at thread scope, so hosts can
+- `apply_thread_command_json_value(...)` / `resume_thread_command_json_value(...)` /
+  `fork_thread_command_json_value(...)` do the same at thread scope, so hosts can
   stay on one thread id instead of resolving pending runs or latest
   checkpoints first
-- `resume_checkpoint_bind_graph(...)` / `fork_checkpoint_bind_graph(...)` are
+- `resume_checkpoint_json_value_graph(...)` / `fork_checkpoint_json_value_graph(...)` are
   the explicit checkpoint-scoped replay aliases; they take a concrete
   checkpoint id and continue or fork directly from that historical point
-- `apply_checkpoint_command_bind(...)`, `resume_checkpoint_command_bind(...)`,
-  and `fork_checkpoint_command_bind(...)` are the matching explicit
+- `apply_checkpoint_command_json_value(...)`, `resume_checkpoint_command_json_value(...)`,
+  and `fork_checkpoint_command_json_value(...)` are the matching explicit
   checkpoint-scoped command aliases; they keep command application pinned to
   one concrete historical checkpoint instead of relying on cached checkpoint
   fallback
-- `resume_thread_bind_graph(...)` / `fork_thread_bind_graph(...)` are the
+- `resume_thread_json_value_graph(...)` / `fork_thread_json_value_graph(...)` are the
   thread-scoped replay convenience path: they resolve the current checkpoint
   from the thread, then forward the caller's state override into the existing
   replay path
-- `update_checkpoint_state_bind(...)` / `update_thread_state_bind(...)` are the
+- `update_checkpoint_state_json_value(...)` / `update_thread_state_json_value(...)` are the
   low-level state-edit counterparts to command helpers: they return one merged
   full-state override without mutating persisted checkpoint records in place
-- `resume_checkpoint_state_bind_graph(...)` /
-  `fork_checkpoint_state_bind_graph(...)` and their thread-scoped variants
+- `resume_checkpoint_state_json_value_graph(...)` /
+  `fork_checkpoint_state_json_value_graph(...)` and their thread-scoped variants
   collapse state patch plus resume/fork into one host-facing time-travel call
 - completed-only threads have no current checkpoint, so the thread-scoped
   replay helpers fail explicitly instead of guessing a replay target
@@ -301,14 +270,14 @@ What changes is persistence and replay:
   render action panels and input forms, but they are host-facing metadata only
   and do not change the legacy `available_commands` list, the command name
   lookup, or the resume/fork semantics
-- `load_history_events_bind(...)` replays persisted segment events as one
-  bind-native array
-- `replay_history_bind(...)` / `replay_thread_history_bind(...)` feed the same
-  durable history events back through the existing `turbo_event_sink_bind_fn`
+- `load_history_events_json_value(...)` replays persisted segment events as one
+  TurboParser JSON-native array
+- `replay_history_json_value(...)` / `replay_thread_history_json_value(...)` feed the same
+  durable history events back through the existing `turbo_event_sink_json_value_fn`
   callback boundary, so hosts can observe persisted runtime history without
   inventing a second event contract
-- `turbo_event_stream_mode_accepts_bind(...)` and
-  `turbo_event_stream_filter_sink_bind(...)` add a transport-agnostic stream
+- `turbo_event_stream_mode_accepts_json_value(...)` and
+  `turbo_event_stream_filter_sink_json_value(...)` add a transport-agnostic stream
   mode adapter above the same canonical events. Hosts can filter existing
   runtime/session/app sinks into `all`, `messages`, `updates`, `tools`, or
   `debug` style streams before exposing them through CLI callbacks, TurboHTTP
@@ -324,33 +293,33 @@ What changes is persistence and replay:
   add the first high-level batch entry points. They run a sequence of user-text
   inputs through the same default workflow and return one JSON result item per
   input.
-- `turbo_runnable_batch_bind(...)`,
+- `turbo_runnable_batch_json_value(...)`,
   `turbo_runnable_from_agent_session(...)`, and
   `turbo_runnable_from_agent_app(...)` put the default session/app workflow on
-  the same bind-native runnable surface as chains, graphs, and state graphs.
-  `turbo_runnable_wrap_bind(...)` adds the first before/after hook wrapper for
-  bind-native runnable input and output shaping.
+  the same TurboParser JSON-native runnable surface as chains, graphs, and state graphs.
+  `turbo_runnable_wrap_json_value(...)` adds the first before/after hook wrapper for
+  TurboParser JSON-native runnable input and output shaping.
   Runnable batches execute sequentially over an input array and can still be
   composed with `turbo_runnable_pipe(...)`.
-- `observe_history_bind(...)` / `observe_thread_history_bind(...)` are the
+- `observe_history_json_value(...)` / `observe_thread_history_json_value(...)` are the
   matching host-facing observer bridge: they map the same durable history
   facts into one narrower observer event family
   (`model_delta`, `tool_call_started`, `tool_result`, `state_updated`,
   `interrupted`, `completed`) without persisting a second log; each observer
   object carries `kind="observer"`, one narrowed `type`, and the original
   canonical event clone under `event`
-- `turbo_agent_session_add_trace_bind_sink(...)` /
-  `turbo_agent_app_add_trace_bind_sink(...)` are the live-side convenience
+- `turbo_agent_session_add_trace_json_value_sink(...)` /
+  `turbo_agent_app_add_trace_json_value_sink(...)` are the live-side convenience
   wrappers for the same canonical trace event shape, and
   `*_set_trace_history_enabled(...)` lets hosts persist those trace events into
   run state for later checkpoint or thread inspection
-- `turbo_agent_session_add_observer_bind_sink(...)` /
-  `turbo_agent_app_add_observer_bind_sink(...)` are the live-side observer
+- `turbo_agent_session_add_observer_json_value_sink(...)` /
+  `turbo_agent_app_add_observer_json_value_sink(...)` are the live-side observer
   bridge wrappers for that same trace stream; they reuse the existing trace
   facts and emit the same observer categories where a stable mapping exists
-- `get_*_trace_events_bind(...)` is the matching durable snapshot convenience
+- `get_*_trace_events_json_value(...)` is the matching durable snapshot convenience
   layer; it reads persisted state and returns `trace_events` directly, so hosts
-  no longer need to unwrap `get_*_state_bind(...)` by hand
+  no longer need to unwrap `get_*_state_json_value(...)` by hand
 - `get_thread_observability_index(...)` and the matching session/app wrappers
   are the read-only observability bundle for one thread: they reuse the
   existing `thread`, `timeline`, `lineage`, `branch_tree`, `history_events`,
@@ -380,14 +349,14 @@ What changes is persistence and replay:
   dispatcher above that same runtime surface. The current minimal method set
   currently includes:
   `runtime.start`, `runtime.resume`, `runtime.fork`, `runtime.applyCommand`,
-  `runtime.resumeThreadCommandBindGraph`,
-  `runtime.forkThreadCommandBindGraph`,
+  `runtime.resumeThreadCommandJsonValueGraph`,
+  `runtime.forkThreadCommandJsonValueGraph`,
   `runtime.getThreadState`, `runtime.updateThreadState`,
   `runtime.applyThreadStatePatch`,
-  `runtime.resumeThreadBindGraph`, `runtime.forkThreadBindGraph`,
+  `runtime.resumeThreadJsonValueGraph`, `runtime.forkThreadJsonValueGraph`,
   `runtime.getCheckpointContext`,
-  `runtime.resumeThreadStatePatchBindGraph`,
-  `runtime.forkThreadStatePatchBindGraph`,
+  `runtime.resumeThreadStatePatchJsonValueGraph`,
+  `runtime.forkThreadStatePatchJsonValueGraph`,
   `runtime.getThreadObservabilityIndex`, and
   `runtime.listObservabilityIndexesFiltered`. When the remote config borrows
   one optional `memory_store`, the same dispatcher also exposes:
@@ -405,22 +374,22 @@ What changes is persistence and replay:
   side bridge over `rpc_client`. It keeps the same `result` payloads, returns
   normalized JSON-RPC error objects (`code`, `message`, `http_status`,
   `transport_error`), and does not invent a second remote contract
-- `turbo_agent_runtime_remote_client_start_bind_graph(...)`,
-  `resume_bind_graph(...)`, `fork_bind_graph(...)`,
-  `get_thread_state_bind(...)`, `get_checkpoint_context(...)`,
+- `turbo_agent_runtime_remote_client_start_json_value_graph(...)`,
+  `resume_json_value_graph(...)`, `fork_json_value_graph(...)`,
+  `get_thread_state_json_value(...)`, `get_checkpoint_context(...)`,
   `get_run(...)`, `get_checkpoint(...)`, `list_checkpoints(...)`,
-  `load_history_events_bind(...)`, `get_run_trace_events_bind(...)`,
-  `get_checkpoint_trace_events_bind(...)`,
+  `load_history_events_json_value(...)`, `get_run_trace_events_json_value(...)`,
+  `get_checkpoint_trace_events_json_value(...)`,
   `get_memory_record(...)`, `put_memory_record(...)`,
   `delete_memory_record(...)`, `query_memory_records_ex(...)`,
   `query_memory_records(...)`, `list_memory_records(...)`,
-  `get_thread_timeline_bind(...)`, `get_branch_tree(...)`,
+  `get_thread_timeline_json_value(...)`, `get_branch_tree(...)`,
   `get_thread_observability_index(...)`,
   `list_observability_indexes(...)`,
   `list_observability_indexes_filtered(...)`,
   `list_child_runs(...)`,
   `get_supervisor_inspect(...)`, `get_orchestration_inspect(...)`,
-  `resume_thread_command_bind(...)`, and `fork_thread_command_bind(...)` are
+  `resume_thread_command_json_value(...)`, and `fork_thread_command_json_value(...)` are
   the first typed convenience helpers above that generic client call. They keep
   the remote method names hidden while preserving the existing runtime
   `summary/state/context/index` split
@@ -430,54 +399,54 @@ What changes is persistence and replay:
   for child-lineage and multi-agent inspect. They are still derived from the
   existing remote thread-state, observability, child-run, and child-history
   facts instead of inventing a second client-only contract
-- `turbo_agent_remote_session_start_bind_graph(...)`,
-  `start_text(...)`, `start_messages(...)`, `resume_bind_graph(...)`,
-  `fork_bind_graph(...)`, `invoke_text(...)`, `invoke_messages_text(...)`,
+- `turbo_agent_remote_session_start_json_value_graph(...)`,
+  `start_text(...)`, `start_messages(...)`, `resume_json_value_graph(...)`,
+  `fork_json_value_graph(...)`, `invoke_text(...)`, `invoke_messages_text(...)`,
   `invoke_json(...)`, `invoke_messages_json(...)`,
   `memory_list_records(...)`, `memory_get_record(...)`,
   `memory_put_record(...)`, `memory_validate_record(...)`,
   `memory_query_records(...)`, `memory_query_records_ex(...)`,
   `get_thread(...)`, `get_latest_run(...)`, `get_pending_run(...)`,
-  `get_thread_state_bind(...)`, `get_checkpoint_context(...)`,
-  `get_observability_index(...)`, `get_thread_timeline_bind(...)`,
-  `load_thread_history_events_bind(...)`, `replay_thread_history_bind(...)`,
-  `observe_thread_history_bind(...)`, `get_thread_trace_events_bind(...)`,
+  `get_thread_state_json_value(...)`, `get_checkpoint_context(...)`,
+  `get_observability_index(...)`, `get_thread_timeline_json_value(...)`,
+  `load_thread_history_events_json_value(...)`, `replay_thread_history_json_value(...)`,
+  `observe_thread_history_json_value(...)`, `get_thread_trace_events_json_value(...)`,
   `get_branch_tree(...)`, `list_thread_lineage(...)`,
   `get_supervisor_inbox(...)`, `get_supervisor_handoff_history(...)`,
   `get_supervisor_inspect(...)`, `list_child_runs(...)`,
   `get_orchestration_inspect(...)`,
   `get_child_run(...)`, `get_child_checkpoint(...)`,
-  `get_child_checkpoint_context(...)`, `get_child_thread_timeline_bind(...)`,
+  `get_child_checkpoint_context(...)`, `get_child_thread_timeline_json_value(...)`,
   `get_child_branch_tree(...)`, `list_child_checkpoints(...)`,
-  `load_child_history_events_bind(...)`, `get_child_trace_events_bind(...)`,
+  `load_child_history_events_json_value(...)`, `get_child_trace_events_json_value(...)`,
   `get_child_inspect(...)`, `get_child_orchestration_inspect(...)`,
   `get_child_multi_agent_inspect(...)`,
-  `resume_thread_command_bind(...)`, and `fork_thread_command_bind(...)` add
+  `resume_thread_command_json_value(...)`, and `fork_thread_command_json_value(...)` add
   one thread-scoped host facade above the typed remote client without
   inventing a second remote payload shape
-- `turbo_agent_remote_app_start_bind_graph(...)`,
-  `start_text(...)`, `start_messages(...)`, `resume_bind_graph(...)`,
-  `fork_bind_graph(...)`, `invoke_text(...)`, `invoke_messages_text(...)`,
+- `turbo_agent_remote_app_start_json_value_graph(...)`,
+  `start_text(...)`, `start_messages(...)`, `resume_json_value_graph(...)`,
+  `fork_json_value_graph(...)`, `invoke_text(...)`, `invoke_messages_text(...)`,
   `invoke_json(...)`, `invoke_messages_json(...)`,
   `memory_list_records(...)`, `memory_get_record(...)`,
   `memory_put_record(...)`, `memory_validate_record(...)`,
   `memory_query_records(...)`, `memory_query_records_ex(...)`,
   `get_thread(...)`, `get_latest_run(...)`, `get_pending_run(...)`,
-  `get_thread_state_bind(...)`, `get_checkpoint_context(...)`,
-  `get_observability_index(...)`, `get_thread_timeline_bind(...)`,
-  `load_thread_history_events_bind(...)`, `replay_thread_history_bind(...)`,
-  `observe_thread_history_bind(...)`, `get_thread_trace_events_bind(...)`,
+  `get_thread_state_json_value(...)`, `get_checkpoint_context(...)`,
+  `get_observability_index(...)`, `get_thread_timeline_json_value(...)`,
+  `load_thread_history_events_json_value(...)`, `replay_thread_history_json_value(...)`,
+  `observe_thread_history_json_value(...)`, `get_thread_trace_events_json_value(...)`,
   `get_branch_tree(...)`, `list_thread_lineage(...)`,
   `get_supervisor_inbox(...)`, `get_supervisor_handoff_history(...)`,
   `get_supervisor_inspect(...)`, `list_child_runs(...)`,
   `get_orchestration_inspect(...)`,
   `get_child_run(...)`, `get_child_checkpoint(...)`,
-  `get_child_checkpoint_context(...)`, `get_child_thread_timeline_bind(...)`,
+  `get_child_checkpoint_context(...)`, `get_child_thread_timeline_json_value(...)`,
   `get_child_branch_tree(...)`, `list_child_checkpoints(...)`,
-  `load_child_history_events_bind(...)`, `get_child_trace_events_bind(...)`,
+  `load_child_history_events_json_value(...)`, `get_child_trace_events_json_value(...)`,
   `get_child_inspect(...)`, `get_child_orchestration_inspect(...)`,
   `get_child_multi_agent_inspect(...)`,
-  `resume_thread_command_bind(...)`, and `fork_thread_command_bind(...)` add
+  `resume_thread_command_json_value(...)`, and `fork_thread_command_json_value(...)` add
   one graph-name-configured app facade on top of that remote session layer
 - `turbo_agent_runtime_remote_iris_mount(...)` mounts that same adapter on an
   `iris_app_t` through Iris's app-local RPC endpoint registry, so it may now
@@ -659,15 +628,15 @@ also lock canonical request shapes, not only success envelopes. That keeps
 Graph-bound success responses are also golden-locked so the remote bridge keeps
 one stable `summary/state` envelope for resume/fork and thread-scoped replay
 paths.
-- `get_child_trace_events_bind(...)` extends that same convenience to
+- `get_child_trace_events_json_value(...)` extends that same convenience to
   subagent/tool-result lineage by resolving `child_checkpoint_id` first and
   then falling back to `child_run_id`
 - `turbo_agent_session_get_child_checkpoint_context(...)` /
   `turbo_agent_app_get_child_checkpoint_context(...)` are the matching
   one-shot inspect helpers when a parent tool-result output already carries
   `child_checkpoint_id`
-- `turbo_agent_session_get_child_thread_timeline_bind(...)` /
-  `turbo_agent_app_get_child_thread_timeline_bind(...)` are the matching
+- `turbo_agent_session_get_child_thread_timeline_json_value(...)` /
+  `turbo_agent_app_get_child_thread_timeline_json_value(...)` are the matching
   child-thread timeline helpers when a parent tool-result output already
   carries `child_thread_id`
 - `turbo_agent_session_get_child_branch_tree(...)` /
@@ -707,8 +676,8 @@ paths.
   layer above that: they bundle `supervisor_inspect`, `thread_timeline`,
   `thread_lineage`, `branch_tree`, and `child_runs` in one host-facing
   multi-agent inspect object without adding a new runtime collection
-- `turbo_agent_session_append_supervisor_inbox_message_bind(...)` /
-  `turbo_agent_app_append_supervisor_inbox_message_bind(...)` are the matching
+- `turbo_agent_session_append_supervisor_inbox_message_json_value(...)` /
+  `turbo_agent_app_append_supervisor_inbox_message_json_value(...)` are the matching
   write-side mailbox helpers; they return a full state override bind value for
   the existing replay/resume/fork surfaces instead of mutating persisted state
   in place
@@ -721,8 +690,8 @@ paths.
 - `turbo_agent_runtime_get_branch_tree(...)` / `turbo_agent_session_get_branch_tree(...)`
   / `turbo_agent_app_get_branch_tree(...)` expose a read-only time-travel
   inspect surface for one thread or lineage root; the returned tree is for
-  browsing only and does not change `resume_bind_graph(...)` /
-  `fork_bind_graph(...)` semantics
+  browsing only and does not change `resume_json_value_graph(...)` /
+  `fork_json_value_graph(...)` semantics
 
 The branch-tree inspect payload should include, at minimum, the resolved
 thread and run identity plus the branch topology:
@@ -764,12 +733,12 @@ The runtime store is intentionally separate from `turbo_agent_set_store(...)`:
 
 1. Build a graph that may stop at a review gate or other interrupt point.
 2. Create a runtime with either the memory or file store.
-3. Start one run with bind-native state.
+3. Start one run with TurboParser JSON-native state.
 4. If the run returns `interrupted`, inspect `control_snapshot` and
    `workflow_snapshot` through the persisted checkpoint record.
 5. Mutate a fresh state copy with `turbo_agent_state_*`.
 6. Resume the checkpoint with `state_override`, whether built directly with
-   `turbo_agent_state_*` or via `apply_command_bind(...)`.
+   `turbo_agent_state_*` or via `apply_command_json_value(...)`.
 
 The smallest end-to-end example lives in
 `langchain/examples/runtime_review_resume.c`.
@@ -787,7 +756,7 @@ That example shows:
 - `get_checkpoint(...)`
 - `list_runs(...)`
 - `list_checkpoints(...)`
-- `load_history_events_bind(...)`
+- `load_history_events_json_value(...)`
 - stable nullable `summary.parent_*` fields
 
 Its CMake target name is:
@@ -839,8 +808,8 @@ workflow injects retriever context before planning without coupling the host to
 the SQLite knowledge-store schema.
 
 The lineage-browser surface above is read-only: it exposes thread/run/checkpoint
-ancestry for inspection, but it does not alter `resume_bind_graph(...)` /
-`fork_bind_graph(...)` semantics.
+ancestry for inspection, but it does not alter `resume_json_value_graph(...)` /
+`fork_json_value_graph(...)` semantics.
 
 If even that is too low-level for the host, `turbo_agent_app_t` now provides
 one thinner surface above session:
@@ -860,14 +829,14 @@ one thinner surface above session:
 - `turbo_agent_app_get_child_run(...)`
 - `turbo_agent_app_get_child_checkpoint(...)`
 - `turbo_agent_app_list_child_runs(...)`
-- `turbo_agent_app_load_child_history_events_bind(...)`
+- `turbo_agent_app_load_child_history_events_json_value(...)`
 - `turbo_agent_app_list_runs(...)`
 - `turbo_agent_app_list_checkpoints(...)`
 - `turbo_agent_app_get_branch_tree(...)`
 - `turbo_agent_app_list_thread_lineage(...)`
-- `turbo_agent_app_load_history_events_bind(...)`
-- `turbo_agent_app_replay_history_bind(...)`
-- `turbo_agent_app_replay_thread_history_bind(...)`
+- `turbo_agent_app_load_history_events_json_value(...)`
+- `turbo_agent_app_replay_history_json_value(...)`
+- `turbo_agent_app_replay_thread_history_json_value(...)`
 - `turbo_agent_app_start_text(...)`
 - `turbo_agent_app_start_text_stream(...)`
 - `turbo_agent_app_start_messages(...)`
@@ -907,10 +876,10 @@ can surface the same child lineage through `turbo_agent_state_*` helpers. The
 same output item can then be resolved through
 `turbo_agent_session_get_child_run(...)`,
 `turbo_agent_session_get_child_checkpoint(...)`,
-`turbo_agent_session_load_child_history_events_bind(...)`,
+`turbo_agent_session_load_child_history_events_json_value(...)`,
 `turbo_agent_app_get_child_run(...)`, and
 `turbo_agent_app_get_child_checkpoint(...)`,
-`turbo_agent_app_load_child_history_events_bind(...)`.
+`turbo_agent_app_load_child_history_events_json_value(...)`.
 When no parent lineage is known, top-level `parent_agent_run_id`,
 `parent_tool_call_id`, `parent_tool_name`, `parent_graph_run_id`, and
 `call_frame_id` remain present as `null` so hosts can treat the result envelope
@@ -935,7 +904,7 @@ wrappers, so hosts can query child runs without restating the parent run id
 inside that tool execution window.
 
 For graph-native nesting, `turbo_agent_subgraph.h` adds
-`turbo_agent_install_subgraph_node(...)`. The installed bind-native node starts
+`turbo_agent_install_subgraph_node(...)`. The installed TurboParser JSON-native node starts
 the child graph through the same durable runtime and records the child run with
 the current parent run id plus `parent_graph_run_id` / `call_frame_id`. The
 parent state receives one `subgraph_result` envelope by default, including
@@ -990,9 +959,9 @@ host-facing layer as canonical record post-processing.
 
 and direct preset-run wrappers:
 
-- `turbo_agent_session_create_input_state_bind(...)`
-- `turbo_agent_session_create_input_messages_state_bind(...)`
-- `turbo_agent_session_start_preset_bind_graph(...)`
+- `turbo_agent_session_create_input_state_json_value(...)`
+- `turbo_agent_session_create_input_messages_state_json_value(...)`
+- `turbo_agent_session_start_preset_json_value_graph(...)`
 - `turbo_agent_session_start_preset_text(...)`
 - `turbo_agent_session_start_text(...)`
 - `turbo_agent_session_start_text_stream(...)`
@@ -1021,15 +990,15 @@ and direct preset-run wrappers:
 - `turbo_agent_session_memory_query_records(...)`
 - `turbo_agent_session_memory_query_records_ex(...)`
 - `turbo_agent_session_load_memory_context(...)`
-- `turbo_agent_session_create_input_state_with_memory_bind(...)`
-- `turbo_agent_session_create_input_messages_state_with_memory_bind(...)`
+- `turbo_agent_session_create_input_state_with_memory_json_value(...)`
+- `turbo_agent_session_create_input_messages_state_with_memory_json_value(...)`
 - `turbo_agent_session_start_preset_text_with_memory(...)`
 - `turbo_agent_session_invoke_preset_text_with_memory(...)`
 - `turbo_agent_session_invoke_preset_json_with_memory(...)`
-- `turbo_agent_session_resume_preset_bind_graph(...)`
-- `turbo_agent_session_fork_preset_bind_graph(...)`
+- `turbo_agent_session_resume_preset_json_value_graph(...)`
+- `turbo_agent_session_fork_preset_json_value_graph(...)`
 
-This is now a minimal runnable composition surface for bind-native
+This is now a minimal runnable composition surface for TurboParser JSON-native
 `invoke` / `stream` / `batch`: chains, graphs, state graphs, and session/app
 default workflows can be wrapped and piped. The wrapper surface is still a
 small before/after hook layer, not a full LangChain middleware or
@@ -1088,19 +1057,19 @@ For a fuller walkthrough, see:
 turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
 turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
 turbo_graph_t *graph = build_review_graph();
-turbo_runtime_data_bind_value_t *state = create_initial_review_state();
+json_value_t *state = create_initial_review_state();
 json_value_t *summary = NULL;
-turbo_runtime_data_bind_value_t *result_state = NULL;
+json_value_t *result_state = NULL;
 
-turbo_agent_runtime_start_bind_graph(runtime, graph, state, &options, NULL, &summary,
+turbo_agent_runtime_start_json_value_graph(runtime, graph, state, &options, NULL, &summary,
                                      &result_state);
 
 if (strcmp(turbo_json_get_string(summary, "status"), "interrupted") == 0) {
-  turbo_runtime_data_bind_value_t *override = approve_review(result_state);
+  json_value_t *override = approve_review(result_state);
   json_value_t *resume_summary = NULL;
-  turbo_runtime_data_bind_value_t *final_state = NULL;
+  json_value_t *final_state = NULL;
 
-  turbo_agent_runtime_resume_bind_graph(
+  turbo_agent_runtime_resume_json_value_graph(
       runtime, graph, turbo_json_get_string(summary, "checkpoint_id"), override, NULL,
       &resume_summary, &final_state);
 }
@@ -1125,7 +1094,7 @@ json_value_t *runs = NULL;
 json_value_t *checkpoints = NULL;
 json_value_t *lineage = NULL;
 json_value_t *timeline = NULL;
-turbo_runtime_data_bind_value_t *history = NULL;
+json_value_t *history = NULL;
 
 turbo_agent_runtime_get_thread(runtime, thread_id, &thread);
 turbo_agent_runtime_get_run(runtime, run_id, &run);
@@ -1133,8 +1102,8 @@ turbo_agent_runtime_get_checkpoint(runtime, checkpoint_id, &checkpoint);
 turbo_agent_runtime_list_runs(runtime, thread_id, &runs);
 turbo_agent_runtime_list_checkpoints(runtime, run_id, &checkpoints);
 turbo_agent_runtime_list_thread_lineage(runtime, thread_id, &lineage);
-turbo_agent_runtime_get_thread_timeline_bind(runtime, thread_id, &timeline);
-turbo_agent_runtime_load_history_events_bind(runtime, run_id, NULL, &history);
+turbo_agent_runtime_get_thread_timeline_json_value(runtime, thread_id, &timeline);
+turbo_agent_runtime_load_history_events_json_value(runtime, run_id, NULL, &history);
 ```
 
 This keeps the runtime model narrow:
@@ -1157,7 +1126,7 @@ This keeps the runtime model narrow:
   not full checkpoint records
 - the current run in that bundle always resolves to pending run first, otherwise
   latest run
-- event history stays bind-native
+- event history stays TurboParser JSON-native
 - returned summaries keep `parent_agent_run_id`, `parent_tool_call_id`, and
   `parent_tool_name` as stable nullable fields
 - hosts can inspect or persist lineage without adopting private structs
@@ -1363,11 +1332,8 @@ The library layer keeps platform-sensitive behavior narrow:
 - path policy is case-sensitive on non-Windows hosts
 - Windows path separators are normalized only on Windows
 - tool execution should converge on host-neutral contracts with backend vtables
-- runtime data binding should converge on host-neutral value builders and schemas
-- binary codec work should share one validated wire reader before MIR specialization
-- binary schema work should collect one explicit ABI contract before MIR emission
-- MIR codegen should target one stable extern plan instead of ad hoc callback wiring
-- backend implementations may use native loaders or wasm3-based sandboxes
+- JSON, YAML, and XML parsing must stay on TurboParser-owned DOMs and adapters
+- backend implementations may use native loaders or TurboWasm sandboxes
 - cross-platform utilities such as filesystem and platform helpers should be reused
   rather than reimplemented inside agent hosts
 - application CLI integration tests stay outside this module

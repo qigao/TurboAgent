@@ -16,7 +16,7 @@ typedef struct turbo_tool_runtime_tool_s {
   const char *name;
   const char *description;
   const char *parameters_json;
-  const turbo_runtime_data_bind_value_t *parameters_schema;
+  const json_value_t *parameters_schema;
   int strict;
 } turbo_tool_runtime_tool_t;
 
@@ -25,11 +25,11 @@ typedef struct turbo_tool_runtime_vtable_s {
   size_t (*tool_count)(const void *impl);
   turbo_tool_status_t (*get_tool)(const void *impl, size_t index,
                                   turbo_tool_runtime_tool_t *out_tool);
-  turbo_tool_status_t (*invoke)(void *impl, const char *name,
-                                const char *arguments_json, char **out_output);
-  turbo_tool_status_t (*invoke_bind)(void *impl, const char *name,
-                                     const turbo_runtime_data_bind_value_t *arguments,
-                                     turbo_runtime_data_bind_value_t **out_result);
+  turbo_tool_status_t (*invoke)(void *impl, const char *name, const char *arguments_json,
+                                char **out_output);
+  turbo_tool_status_t (*invoke_json_value)(void *impl, const char *name,
+                                           const json_value_t *arguments,
+                                           json_value_t **out_result);
 } turbo_tool_runtime_vtable_t;
 
 /**
@@ -38,8 +38,8 @@ typedef struct turbo_tool_runtime_vtable_s {
  * @param impl Backend implementation pointer owned by the runtime.
  * @return Runtime handle or NULL on allocation failure.
  */
-CXX_C_API turbo_tool_runtime_t *
-turbo_tool_runtime_create(const turbo_tool_runtime_vtable_t *vtable, void *impl);
+CXX_C_API turbo_tool_runtime_t *turbo_tool_runtime_create(const turbo_tool_runtime_vtable_t *vtable,
+                                                          void *impl);
 
 /**
  * @brief Retain a runtime handle for shared ownership.
@@ -68,9 +68,9 @@ CXX_C_API size_t turbo_tool_runtime_count(const turbo_tool_runtime_t *runtime);
  * @param out_tool Borrowed descriptor view populated on success.
  * @return Status code.
  */
-CXX_C_API turbo_tool_status_t
-turbo_tool_runtime_get_tool(const turbo_tool_runtime_t *runtime, size_t index,
-                            turbo_tool_runtime_tool_t *out_tool);
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_get_tool(const turbo_tool_runtime_t *runtime,
+                                                          size_t index,
+                                                          turbo_tool_runtime_tool_t *out_tool);
 
 /**
  * @brief Invoke one runtime tool by name with raw JSON arguments.
@@ -80,22 +80,23 @@ turbo_tool_runtime_get_tool(const turbo_tool_runtime_t *runtime, size_t index,
  * @param out_output Output string allocated with malloc/free on success.
  * @return Status code.
  */
-CXX_C_API turbo_tool_status_t
-turbo_tool_runtime_invoke(turbo_tool_runtime_t *runtime, const char *name,
-                          const char *arguments_json, char **out_output);
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_invoke(turbo_tool_runtime_t *runtime,
+                                                        const char *name,
+                                                        const char *arguments_json,
+                                                        char **out_output);
 
 /**
- * @brief Invoke one runtime tool by name through the bind-native boundary.
+ * @brief Invoke one runtime tool by name through the TurboParser JSON-native boundary.
  * @param runtime Runtime handle.
  * @param name Tool name.
- * @param arguments Runtime data-bind arguments tree. NULL means no arguments.
+ * @param arguments TurboParser JSON arguments tree. NULL means no arguments.
  * @param out_result Output runtime value owned by caller.
  * @return Status code.
  */
-CXX_C_API turbo_tool_status_t
-turbo_tool_runtime_invoke_bind(turbo_tool_runtime_t *runtime, const char *name,
-                               const turbo_runtime_data_bind_value_t *arguments,
-                               turbo_runtime_data_bind_value_t **out_result);
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_invoke_json_value(turbo_tool_runtime_t *runtime,
+                                                                   const char *name,
+                                                                   const json_value_t *arguments,
+                                                                   json_value_t **out_result);
 
 /**
  * @brief Build a `turbo_tool_registry_t` bridge over a runtime.
@@ -111,6 +112,24 @@ CXX_C_API turbo_tool_registry_t *
 turbo_tool_runtime_build_registry_bridge(turbo_tool_runtime_t *runtime);
 
 /**
+ * @brief Atomically append every runtime tool to an existing registry.
+ *
+ * Metadata is copied by the registry. Each successful binding retains the
+ * runtime and releases it when removed or when the registry is destroyed.
+ * On any error, bindings added by this call are removed and the registry's
+ * previous contents remain intact. The runtime must not be mutated
+ * concurrently while this control-plane operation runs.
+ *
+ * @param runtime Runtime whose immutable catalog is appended.
+ * @param registry Destination registry owned by the caller.
+ * @param execution_policy Policy applied to every tool in this runtime.
+ * @return Status code; duplicate names return TURBO_TOOL_DUPLICATE.
+ */
+CXX_C_API turbo_tool_status_t
+turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_registry_t *registry,
+                                   const turbo_tool_execution_policy_t *execution_policy);
+
+/**
  * @brief Create an in-process native runtime backed by function tool callbacks.
  * @return Runtime handle or NULL on allocation failure.
  */
@@ -122,9 +141,8 @@ CXX_C_API turbo_tool_runtime_t *turbo_tool_runtime_native_create(void);
  * @param definition Tool definition copied into the owned backend registry.
  * @return Status code.
  */
-CXX_C_API turbo_tool_status_t
-turbo_tool_runtime_native_add_tool(turbo_tool_runtime_t *runtime,
-                                   const turbo_tool_definition_t *definition);
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_add_tool(
+    turbo_tool_runtime_t *runtime, const turbo_tool_definition_t *definition);
 
 #ifdef __cplusplus
 }

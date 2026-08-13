@@ -25,13 +25,13 @@ static void count_model_user_data_free(void *user_data) {
   (*count)++;
 }
 
-static int custom_bind_append_message(turbo_chain_exec_ctx_t *ctx, void *user_data) {
+static int custom_json_value_append_message(turbo_chain_exec_ctx_t *ctx, void *user_data) {
   (void)user_data;
 
   check_not_null(ctx);
-  check_not_null(ctx->bind_state);
-  return turbo_prompt_messages_append_bind(
-             (turbo_runtime_data_bind_value_t *)turbo_runtime_data_bind_object_get(ctx->bind_state,
+  check_not_null(ctx->json_value_state);
+  return turbo_prompt_messages_append_json_value(
+             (json_value_t *)turbo_json_object_get(ctx->json_value_state,
                                                                                    "messages"),
              "assistant", "custom bind") == TURBO_PROMPT_OK
              ? TURBO_CHAIN_OK
@@ -56,13 +56,13 @@ static char *test_strdup(const char *text) {
   return copy;
 }
 
-static void capture_chain_event(const turbo_runtime_data_bind_value_t *event, void *user_data) {
+static void capture_chain_event(const json_value_t *event, void *user_data) {
   chain_event_capture_t *capture = (chain_event_capture_t *)user_data;
   const char *kind;
 
   check_not_null(event);
   check_not_null(capture);
-  kind = turbo_runtime_data_bind_value_as_string(turbo_runtime_data_bind_object_get(event, "kind"));
+  kind = turbo_runtime_json_value_as_string(turbo_json_object_get(event, "kind"));
   capture->count++;
   free(capture->last_kind);
   free(capture->last_output_text);
@@ -73,14 +73,14 @@ static void capture_chain_event(const turbo_runtime_data_bind_value_t *event, vo
 
   if (kind && strcmp(kind, "model") == 0) {
     capture->model_count++;
-    capture->last_output_text = test_strdup(turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(event, "output_text")));
+    capture->last_output_text = test_strdup(turbo_runtime_json_value_as_string(
+        turbo_json_object_get(event, "output_text")));
   } else if (kind && strcmp(kind, "tool_result") == 0) {
     capture->tool_result_count++;
-    capture->last_tool_name = test_strdup(turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(event, "name")));
-    capture->last_output_text = test_strdup(turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(event, "output")));
+    capture->last_tool_name = test_strdup(turbo_runtime_json_value_as_string(
+        turbo_json_object_get(event, "name")));
+    capture->last_output_text = test_strdup(turbo_runtime_json_value_as_string(
+        turbo_json_object_get(event, "output")));
   }
 }
 
@@ -96,22 +96,22 @@ static int fake_sum_tool(const char *arguments_json, char **out_output, void *us
   return *out_output ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
 }
 
-static int fake_sum_tool_bind(const turbo_runtime_data_bind_value_t *arguments,
-                              turbo_runtime_data_bind_value_t **out_result, void *user_data) {
-  const turbo_runtime_data_bind_value_t *a;
-  const turbo_runtime_data_bind_value_t *b;
-  turbo_runtime_data_bind_value_t *result;
+static int fake_sum_tool_json_value(const json_value_t *arguments,
+                              json_value_t **out_result, void *user_data) {
+  const json_value_t *a;
+  const json_value_t *b;
+  json_value_t *result;
 
   (void)user_data;
   if (!arguments || !out_result) {
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
 
-  a = turbo_runtime_data_bind_object_get(arguments, "a");
-  b = turbo_runtime_data_bind_object_get(arguments, "b");
-  result = turbo_runtime_data_bind_value_create_int64(
-      turbo_runtime_data_bind_value_as_int64(a, 0) +
-      turbo_runtime_data_bind_value_as_int64(b, 0));
+  a = turbo_json_object_get(arguments, "a");
+  b = turbo_json_object_get(arguments, "b");
+  result = turbo_json_create_int64(
+      turbo_runtime_json_value_as_int64(a, 0) +
+      turbo_runtime_json_value_as_int64(b, 0));
   if (!result) {
     return TURBO_TOOL_OUT_OF_MEMORY;
   }
@@ -120,10 +120,10 @@ static int fake_sum_tool_bind(const turbo_runtime_data_bind_value_t *arguments,
   return TURBO_TOOL_OK;
 }
 
-static int fake_child_lineage_tool_bind(const turbo_runtime_data_bind_value_t *arguments,
-                                        turbo_runtime_data_bind_value_t **out_result,
+static int fake_child_lineage_tool_json_value(const json_value_t *arguments,
+                                        json_value_t **out_result,
                                         void *user_data) {
-  turbo_runtime_data_bind_value_t *result;
+  json_value_t *result;
 
   (void)arguments;
   (void)user_data;
@@ -131,60 +131,60 @@ static int fake_child_lineage_tool_bind(const turbo_runtime_data_bind_value_t *a
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
 
-  result = turbo_runtime_data_bind_value_create_object();
+  result = turbo_json_create_object();
   if (!result) {
     return TURBO_TOOL_OUT_OF_MEMORY;
   }
   check_int_eq(
-      turbo_runtime_data_bind_object_set(result, "ok",
-                                         turbo_runtime_data_bind_value_create_bool(1)),
-      TURBO_RUNTIME_DATA_BIND_OK);
+      turbo_runtime_json_object_set(result, "ok",
+                                         turbo_json_create_bool(1)),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(result, "summary",
-                                         turbo_runtime_data_bind_value_create_string("ok")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+      turbo_runtime_json_object_set(result, "summary",
+                                         turbo_json_create_string("ok")),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(result, "stdout",
-                                         turbo_runtime_data_bind_value_create_string("")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+      turbo_runtime_json_object_set(result, "stdout",
+                                         turbo_json_create_string("")),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(result, "stderr",
-                                         turbo_runtime_data_bind_value_create_string("")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+      turbo_runtime_json_object_set(result, "stderr",
+                                         turbo_json_create_string("")),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(
+      turbo_runtime_json_object_set(
           result, "child_thread_id",
-          turbo_runtime_data_bind_value_create_string("thr_child")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+          turbo_json_create_string("thr_child")),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(result, "child_run_id",
-                                         turbo_runtime_data_bind_value_create_string(
+      turbo_runtime_json_object_set(result, "child_run_id",
+                                         turbo_json_create_string(
                                              "run_child")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(result, "child_checkpoint_id",
-                                         turbo_runtime_data_bind_value_create_null()),
-      TURBO_RUNTIME_DATA_BIND_OK);
+      turbo_runtime_json_object_set(result, "child_checkpoint_id",
+                                         turbo_json_create_null()),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(
+      turbo_runtime_json_object_set(
           result, "child_status",
-          turbo_runtime_data_bind_value_create_string("completed")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+          turbo_json_create_string("completed")),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(
+      turbo_runtime_json_object_set(
           result, "parent_agent_run_id",
-          turbo_runtime_data_bind_value_create_string("run_parent")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+          turbo_json_create_string("run_parent")),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(
+      turbo_runtime_json_object_set(
           result, "parent_tool_call_id",
-          turbo_runtime_data_bind_value_create_string("call_parent")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+          turbo_json_create_string("call_parent")),
+      TURBO_RUNTIME_JSON_OK);
   check_int_eq(
-      turbo_runtime_data_bind_object_set(
+      turbo_runtime_json_object_set(
           result, "parent_tool_name",
-          turbo_runtime_data_bind_value_create_string("delegate")),
-      TURBO_RUNTIME_DATA_BIND_OK);
+          turbo_json_create_string("delegate")),
+      TURBO_RUNTIME_JSON_OK);
 
   *out_result = result;
   return TURBO_TOOL_OK;
@@ -225,15 +225,15 @@ static int fake_model_invoke(void *user_data, const json_value_t *messages,
   return 0;
 }
 
-static int fake_model_invoke_bind(void *user_data, const turbo_runtime_data_bind_value_t *messages,
+static int fake_model_invoke_json_value(void *user_data, const json_value_t *messages,
                                   const turbo_tool_registry_t *tools,
-                                  turbo_model_bind_result_t *out_result) {
+                                  turbo_model_json_value_result_t *out_result) {
   fake_model_t *model = (fake_model_t *)user_data;
-  const turbo_runtime_data_bind_value_t *first;
-  const turbo_runtime_data_bind_value_t *last;
-  turbo_runtime_data_bind_value_t *args;
-  turbo_runtime_data_bind_value_t *a;
-  turbo_runtime_data_bind_value_t *b;
+  const json_value_t *first;
+  const json_value_t *last;
+  json_value_t *args;
+  json_value_t *a;
+  json_value_t *b;
 
   check_not_null(model);
   check_not_null(messages);
@@ -241,26 +241,26 @@ static int fake_model_invoke_bind(void *user_data, const turbo_runtime_data_bind
   check_not_null(tools);
 
   model->call_count++;
-  first = turbo_runtime_data_bind_array_get(messages, 0);
-  last = turbo_runtime_data_bind_array_get(messages, turbo_runtime_data_bind_value_size(messages) - 1);
+  first = turbo_json_array_get(messages, 0);
+  last = turbo_json_array_get(messages, turbo_runtime_json_value_size(messages) - 1);
 
   if (model->call_count == 1) {
-    check_size_eq(turbo_runtime_data_bind_value_size(messages), 1);
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(first, "role")),
+    check_size_eq(turbo_runtime_json_value_size(messages), 1);
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(first, "role")),
                  "user");
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(first, "content")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(first, "content")),
                  "Add 41 and 1");
 
-    args = turbo_runtime_data_bind_value_create_object();
-    a = turbo_runtime_data_bind_value_create_int64(41);
-    b = turbo_runtime_data_bind_value_create_int64(1);
+    args = turbo_json_create_object();
+    a = turbo_json_create_int64(41);
+    b = turbo_json_create_int64(1);
     check_not_null(args);
     check_not_null(a);
     check_not_null(b);
-    check_int_eq(turbo_runtime_data_bind_object_set(args, "a", a), TURBO_RUNTIME_DATA_BIND_OK);
-    check_int_eq(turbo_runtime_data_bind_object_set(args, "b", b), TURBO_RUNTIME_DATA_BIND_OK);
+    check_int_eq(turbo_runtime_json_object_set(args, "a", a), TURBO_RUNTIME_JSON_OK);
+    check_int_eq(turbo_runtime_json_object_set(args, "b", b), TURBO_RUNTIME_JSON_OK);
 
     out_result->output_text = "Calling sum";
     out_result->tool_name = "sum";
@@ -268,12 +268,12 @@ static int fake_model_invoke_bind(void *user_data, const turbo_runtime_data_bind
     return 0;
   }
 
-  check_size_eq(turbo_runtime_data_bind_value_size(messages), 3);
-  check_str_eq(turbo_runtime_data_bind_value_as_string(
-                   turbo_runtime_data_bind_object_get(last, "role")),
+  check_size_eq(turbo_runtime_json_value_size(messages), 3);
+  check_str_eq(turbo_runtime_json_value_as_string(
+                   turbo_json_object_get(last, "role")),
                "tool");
-  check_str_eq(turbo_runtime_data_bind_value_as_string(
-                   turbo_runtime_data_bind_object_get(last, "content")),
+  check_str_eq(turbo_runtime_json_value_as_string(
+                   turbo_json_object_get(last, "content")),
                "42");
   out_result->output_text = "42";
   out_result->tool_name = NULL;
@@ -281,12 +281,12 @@ static int fake_model_invoke_bind(void *user_data, const turbo_runtime_data_bind
   return 0;
 }
 
-static int fake_model_invoke_bind_child_lineage(
-    void *user_data, const turbo_runtime_data_bind_value_t *messages,
-    const turbo_tool_registry_t *tools, turbo_model_bind_result_t *out_result) {
+static int fake_model_invoke_json_value_child_lineage(
+    void *user_data, const json_value_t *messages,
+    const turbo_tool_registry_t *tools, turbo_model_json_value_result_t *out_result) {
   fake_model_t *model = (fake_model_t *)user_data;
-  turbo_runtime_data_bind_value_t *args;
-  const turbo_runtime_data_bind_value_t *last;
+  json_value_t *args;
+  const json_value_t *last;
   const char *last_role;
   const char *last_content;
 
@@ -297,25 +297,25 @@ static int fake_model_invoke_bind_child_lineage(
 
   model->call_count++;
   if (model->call_count == 1) {
-    args = turbo_runtime_data_bind_value_create_object();
+    args = turbo_json_create_object();
     check_not_null(args);
     check_int_eq(
-        turbo_runtime_data_bind_object_set(args, "input",
-                                           turbo_runtime_data_bind_value_create_string(
+        turbo_runtime_json_object_set(args, "input",
+                                           turbo_json_create_string(
                                                "delegate")),
-        TURBO_RUNTIME_DATA_BIND_OK);
+        TURBO_RUNTIME_JSON_OK);
     out_result->output_text = "Calling delegate";
     out_result->tool_name = "delegate";
     out_result->tool_arguments = args;
     return 0;
   }
 
-  last = turbo_runtime_data_bind_array_get(messages, turbo_runtime_data_bind_value_size(messages) - 1);
+  last = turbo_json_array_get(messages, turbo_runtime_json_value_size(messages) - 1);
   check_not_null(last);
-  last_role = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(last, "role"));
-  last_content = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(last, "content"));
+  last_role = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(last, "role"));
+  last_content = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(last, "content"));
   check_str_eq(last_role, "tool");
   check_true(last_content != NULL);
   check_true(strstr(last_content, "child_run_id") != NULL);
@@ -333,7 +333,7 @@ spec("turbo chain runtime") {
     turbo_model_t model = {
         .name = "fake",
         .invoke = fake_model_invoke,
-        .invoke_bind = NULL,
+        .invoke_json_value = NULL,
         .user_data = &free_count,
         .user_data_free = count_model_user_data_free,
     };
@@ -374,44 +374,44 @@ spec("turbo chain runtime") {
       turbo_chain_destroy(chain);
     }
 
-    it("should run through a runtime data-bind state boundary") {
+    it("should run through a TurboParser JSON state boundary") {
       turbo_chain_t *chain = turbo_chain_create("prompt-bind");
-      turbo_runtime_data_bind_value_t *state = turbo_chain_state_create_bind();
-      turbo_runtime_data_bind_value_t *input = NULL;
-      turbo_runtime_data_bind_value_t *task = NULL;
-      turbo_runtime_data_bind_value_t *result = NULL;
-      const turbo_runtime_data_bind_value_t *messages;
-      const turbo_runtime_data_bind_value_t *message;
+      json_value_t *state = turbo_chain_state_create_json_value();
+      json_value_t *input = NULL;
+      json_value_t *task = NULL;
+      json_value_t *result = NULL;
+      const json_value_t *messages;
+      const json_value_t *message;
 
       check_not_null(chain);
       check_not_null(state);
 
-      input = turbo_runtime_data_bind_object_get(state, "input");
+      input = turbo_json_object_get(state, "input");
       check_not_null(input);
-      task = turbo_runtime_data_bind_value_create_string("read README");
+      task = turbo_json_create_string("read README");
       check_not_null(task);
-      check_int_eq(turbo_runtime_data_bind_object_set((turbo_runtime_data_bind_value_t *)input,
+      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input,
                                                       "task", task),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+                   TURBO_RUNTIME_JSON_OK);
 
       check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
                                                "Please {{task}} now."),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_run_bind(chain, state, &result), TURBO_CHAIN_OK);
+      check_int_eq(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
 
-      messages = turbo_runtime_data_bind_object_get(result, "messages");
+      messages = turbo_json_object_get(result, "messages");
       check_not_null(messages);
-      check_size_eq(turbo_runtime_data_bind_value_size(messages), 1);
-      message = turbo_runtime_data_bind_array_get(messages, 0);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(message, "role")),
+      check_size_eq(turbo_runtime_json_value_size(messages), 1);
+      message = turbo_json_array_get(messages, 0);
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(message, "role")),
                    "user");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(message, "content")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(message, "content")),
                    "Please read README now.");
 
-      turbo_runtime_data_bind_value_destroy(result);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result);
+      turbo_runtime_json_destroy(state);
       turbo_chain_destroy(chain);
     }
   }
@@ -425,7 +425,7 @@ spec("turbo chain runtime") {
       turbo_model_t model = {
           .name = "fake",
           .invoke = fake_model_invoke,
-          .invoke_bind = NULL,
+          .invoke_json_value = NULL,
           .user_data = &model_state,
           .user_data_free = NULL,
       };
@@ -435,7 +435,7 @@ spec("turbo chain runtime") {
           .parameters_json = "{\"type\":\"object\"}",
           .strict = 0,
           .handler = fake_sum_tool,
-          .bind_handler = NULL,
+          .json_value_handler = NULL,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -482,14 +482,14 @@ spec("turbo chain runtime") {
       turbo_chain_destroy(chain);
     }
 
-    it("should execute a bind-native model and tool chain") {
+    it("should execute a TurboParser JSON-native model and tool chain") {
       turbo_chain_t *chain = turbo_chain_create("reactish-bind");
       turbo_tool_registry_t *tools = turbo_tool_registry_create();
       fake_model_t model_state = {0};
       turbo_model_t model = {
           .name = "fake",
           .invoke = NULL,
-          .invoke_bind = fake_model_invoke_bind,
+          .invoke_json_value = fake_model_invoke_json_value,
           .user_data = &model_state,
           .user_data_free = NULL,
       };
@@ -499,7 +499,7 @@ spec("turbo chain runtime") {
           .parameters_json = "{\"type\":\"object\"}",
           .strict = 0,
           .handler = NULL,
-          .bind_handler = fake_sum_tool_bind,
+          .json_value_handler = fake_sum_tool_json_value,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -549,14 +549,14 @@ spec("turbo chain runtime") {
       turbo_chain_destroy(chain);
     }
 
-    it("should execute bind-native state without json round-trip state storage") {
+    it("should execute TurboParser JSON-native state without json round-trip state storage") {
       turbo_chain_t *chain = turbo_chain_create("reactish-bind-state");
       turbo_tool_registry_t *tools = turbo_tool_registry_create();
       fake_model_t model_state = {0};
       turbo_model_t model = {
           .name = "fake",
           .invoke = NULL,
-          .invoke_bind = fake_model_invoke_bind,
+          .invoke_json_value = fake_model_invoke_json_value,
           .user_data = &model_state,
           .user_data_free = NULL,
       };
@@ -566,20 +566,20 @@ spec("turbo chain runtime") {
           .parameters_json = "{\"type\":\"object\"}",
           .strict = 0,
           .handler = NULL,
-          .bind_handler = fake_sum_tool_bind,
+          .json_value_handler = fake_sum_tool_json_value,
           .user_data = NULL,
           .user_data_free = NULL,
       };
-      turbo_runtime_data_bind_value_t *state = turbo_chain_state_create_bind();
-      turbo_runtime_data_bind_value_t *result = NULL;
-      turbo_runtime_data_bind_value_t *a_value = turbo_runtime_data_bind_value_create_string("41");
-      turbo_runtime_data_bind_value_t *b_value = turbo_runtime_data_bind_value_create_string("1");
-      const turbo_runtime_data_bind_value_t *input;
-      const turbo_runtime_data_bind_value_t *tool_requests;
-      const turbo_runtime_data_bind_value_t *tool_results;
-      const turbo_runtime_data_bind_value_t *messages;
-      const turbo_runtime_data_bind_value_t *tool_request;
-      const turbo_runtime_data_bind_value_t *tool_result;
+      json_value_t *state = turbo_chain_state_create_json_value();
+      json_value_t *result = NULL;
+      json_value_t *a_value = turbo_json_create_string("41");
+      json_value_t *b_value = turbo_json_create_string("1");
+      const json_value_t *input;
+      const json_value_t *tool_requests;
+      const json_value_t *tool_results;
+      const json_value_t *messages;
+      const json_value_t *tool_request;
+      const json_value_t *tool_result;
 
       check_not_null(chain);
       check_not_null(tools);
@@ -587,14 +587,14 @@ spec("turbo chain runtime") {
       check_not_null(a_value);
       check_not_null(b_value);
 
-      input = turbo_runtime_data_bind_object_get(state, "input");
+      input = turbo_json_object_get(state, "input");
       check_not_null(input);
-      check_int_eq(turbo_runtime_data_bind_object_set((turbo_runtime_data_bind_value_t *)input, "a",
+      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input, "a",
                                                       a_value),
-                   TURBO_RUNTIME_DATA_BIND_OK);
-      check_int_eq(turbo_runtime_data_bind_object_set((turbo_runtime_data_bind_value_t *)input, "b",
+                   TURBO_RUNTIME_JSON_OK);
+      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input, "b",
                                                       b_value),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+                   TURBO_RUNTIME_JSON_OK);
 
       check_int_eq(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
       check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
@@ -606,77 +606,77 @@ spec("turbo chain runtime") {
       check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools),
                    TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_bind(chain, state, &result), TURBO_CHAIN_OK);
+      check_int_eq(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
       check_int_eq(model_state.call_count, 2);
 
-      tool_requests = turbo_runtime_data_bind_object_get(result, "tool_requests");
+      tool_requests = turbo_json_object_get(result, "tool_requests");
       check_not_null(tool_requests);
-      check_size_eq(turbo_runtime_data_bind_value_size(tool_requests), 1);
-      tool_request = turbo_runtime_data_bind_array_get(tool_requests, 0);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(tool_request, "name")),
+      check_size_eq(turbo_runtime_json_value_size(tool_requests), 1);
+      tool_request = turbo_json_array_get(tool_requests, 0);
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(tool_request, "name")),
                    "sum");
-      check_int_eq((int)turbo_runtime_data_bind_value_as_int64(
-                       turbo_runtime_data_bind_object_get(
-                           turbo_runtime_data_bind_object_get(tool_request, "arguments"), "a"),
+      check_int_eq((int)turbo_runtime_json_value_as_int64(
+                       turbo_json_object_get(
+                           turbo_json_object_get(tool_request, "arguments"), "a"),
                        0),
                    41);
 
-      tool_results = turbo_runtime_data_bind_object_get(result, "tool_results");
+      tool_results = turbo_json_object_get(result, "tool_results");
       check_not_null(tool_results);
-      check_size_eq(turbo_runtime_data_bind_value_size(tool_results), 1);
-      tool_result = turbo_runtime_data_bind_array_get(tool_results, 0);
-      check_int_eq((int)turbo_runtime_data_bind_value_as_int64(
-                       turbo_runtime_data_bind_object_get(tool_result, "output_value"), 0),
+      check_size_eq(turbo_runtime_json_value_size(tool_results), 1);
+      tool_result = turbo_json_array_get(tool_results, 0);
+      check_int_eq((int)turbo_runtime_json_value_as_int64(
+                       turbo_json_object_get(tool_result, "output_value"), 0),
                    42);
 
-      messages = turbo_runtime_data_bind_object_get(result, "messages");
+      messages = turbo_json_object_get(result, "messages");
       check_not_null(messages);
-      check_size_eq(turbo_runtime_data_bind_value_size(messages), 4);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(
-                           turbo_runtime_data_bind_array_get(messages, 2), "content")),
+      check_size_eq(turbo_runtime_json_value_size(messages), 4);
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(
+                           turbo_json_array_get(messages, 2), "content")),
                    "42");
 
-      turbo_runtime_data_bind_value_destroy(result);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result);
+      turbo_runtime_json_destroy(state);
       turbo_tool_registry_destroy(tools);
       turbo_chain_destroy(chain);
     }
 
-    it("should run a bind-native custom step without json bridge") {
+    it("should run a TurboParser JSON-native custom step without json bridge") {
       turbo_chain_t *chain = turbo_chain_create("custom-bind");
-      turbo_runtime_data_bind_value_t *state = turbo_chain_state_create_bind();
-      turbo_runtime_data_bind_value_t *result = NULL;
-      const turbo_runtime_data_bind_value_t *messages;
+      json_value_t *state = turbo_chain_state_create_json_value();
+      json_value_t *result = NULL;
+      const json_value_t *messages;
 
       check_not_null(chain);
       check_not_null(state);
-      check_int_eq(turbo_chain_add_bind_step(chain, "custom", custom_bind_append_message, NULL, NULL),
+      check_int_eq(turbo_chain_add_json_value_step(chain, "custom", custom_json_value_append_message, NULL, NULL),
                    TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_bind(chain, state, &result), TURBO_CHAIN_OK);
-      messages = turbo_runtime_data_bind_object_get(result, "messages");
+      check_int_eq(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
+      messages = turbo_json_object_get(result, "messages");
       check_not_null(messages);
-      check_size_eq(turbo_runtime_data_bind_value_size(messages), 1);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(
-                           turbo_runtime_data_bind_array_get(messages, 0), "content")),
+      check_size_eq(turbo_runtime_json_value_size(messages), 1);
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(
+                           turbo_json_array_get(messages, 0), "content")),
                    "custom bind");
 
-      turbo_runtime_data_bind_value_destroy(result);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result);
+      turbo_runtime_json_destroy(state);
       turbo_chain_destroy(chain);
     }
 
-    it("should emit canonical model and tool result events while running a bind-native chain") {
+    it("should emit canonical model and tool result events while running a TurboParser JSON-native chain") {
       turbo_chain_t *chain = turbo_chain_create("reactish-bind-stream");
       turbo_tool_registry_t *tools = turbo_tool_registry_create();
       fake_model_t model_state = {0};
       turbo_model_t model = {
           .name = "fake",
           .invoke = NULL,
-          .invoke_bind = fake_model_invoke_bind,
+          .invoke_json_value = fake_model_invoke_json_value,
           .user_data = &model_state,
           .user_data_free = NULL,
       };
@@ -686,27 +686,27 @@ spec("turbo chain runtime") {
           .parameters_json = "{\"type\":\"object\"}",
           .strict = 0,
           .handler = NULL,
-          .bind_handler = fake_sum_tool_bind,
+          .json_value_handler = fake_sum_tool_json_value,
           .user_data = NULL,
           .user_data_free = NULL,
       };
-      turbo_runtime_data_bind_value_t *state = turbo_chain_state_create_bind();
-      turbo_runtime_data_bind_value_t *result = NULL;
-      const turbo_runtime_data_bind_value_t *input;
+      json_value_t *state = turbo_chain_state_create_json_value();
+      json_value_t *result = NULL;
+      const json_value_t *input;
       chain_event_capture_t capture = {0};
 
       check_not_null(chain);
       check_not_null(tools);
       check_not_null(state);
 
-      input = turbo_runtime_data_bind_object_get(state, "input");
+      input = turbo_json_object_get(state, "input");
       check_not_null(input);
-      check_int_eq(turbo_runtime_data_bind_object_set((turbo_runtime_data_bind_value_t *)input, "a",
-                                                      turbo_runtime_data_bind_value_create_string("41")),
-                   TURBO_RUNTIME_DATA_BIND_OK);
-      check_int_eq(turbo_runtime_data_bind_object_set((turbo_runtime_data_bind_value_t *)input, "b",
-                                                      turbo_runtime_data_bind_value_create_string("1")),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input, "a",
+                                                      turbo_json_create_string("41")),
+                   TURBO_RUNTIME_JSON_OK);
+      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input, "b",
+                                                      turbo_json_create_string("1")),
+                   TURBO_RUNTIME_JSON_OK);
 
       check_int_eq(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
       check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
@@ -716,7 +716,7 @@ spec("turbo chain runtime") {
       check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
       check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_bind_stream(chain, state, capture_chain_event, &capture, &result),
+      check_int_eq(turbo_chain_run_json_value_stream(chain, state, capture_chain_event, &capture, &result),
                    TURBO_CHAIN_OK);
       check_not_null(result);
       check_int_eq(model_state.call_count, 2);
@@ -729,23 +729,23 @@ spec("turbo chain runtime") {
       free(capture.last_tool_name);
       free(capture.last_output_text);
       free(capture.last_kind);
-      turbo_runtime_data_bind_value_destroy(result);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result);
+      turbo_runtime_json_destroy(state);
       turbo_tool_registry_destroy(tools);
       turbo_chain_destroy(chain);
     }
 
-    it("should capture canonical events into an event log while running a bind-native chain") {
+    it("should capture canonical events into an event log while running a TurboParser JSON-native chain") {
       turbo_chain_t *chain = turbo_chain_create("reactish-bind-log");
       turbo_tool_registry_t *tools = turbo_tool_registry_create();
       turbo_event_log_t *log = turbo_event_log_create();
-      turbo_runtime_data_bind_value_t *state = turbo_chain_state_create_bind();
-      turbo_runtime_data_bind_value_t *result = NULL;
+      json_value_t *state = turbo_chain_state_create_json_value();
+      json_value_t *result = NULL;
       fake_model_t model_state = {0};
       turbo_model_t model = {
           .name = "fake",
           .invoke = NULL,
-          .invoke_bind = fake_model_invoke_bind,
+          .invoke_json_value = fake_model_invoke_json_value,
           .user_data = &model_state,
           .user_data_free = NULL,
       };
@@ -755,7 +755,7 @@ spec("turbo chain runtime") {
           .parameters_json = "{\"type\":\"object\"}",
           .strict = 0,
           .handler = NULL,
-          .bind_handler = fake_sum_tool_bind,
+          .json_value_handler = fake_sum_tool_json_value,
           .user_data = NULL,
           .user_data_free = NULL,
       };
@@ -771,17 +771,17 @@ spec("turbo chain runtime") {
       check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
       check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_bind_log(chain, state, log, &result), TURBO_CHAIN_OK);
+      check_int_eq(turbo_chain_run_json_value_log(chain, state, log, &result), TURBO_CHAIN_OK);
       check_not_null(result);
       check_int_eq(model_state.call_count, 2);
       check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
       check_size_eq(turbo_event_log_size(log), 3);
-      check_str_eq(turbo_event_kind_bind(turbo_event_log_get(log, 0)), "model");
-      check_str_eq(turbo_event_kind_bind(turbo_event_log_get(log, 1)), "tool_result");
-      check_str_eq(turbo_event_kind_bind(turbo_event_log_get(log, 2)), "model");
+      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 0)), "model");
+      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 1)), "tool_result");
+      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 2)), "model");
 
-      turbo_runtime_data_bind_value_destroy(result);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result);
+      turbo_runtime_json_destroy(state);
       turbo_event_log_destroy(log);
       turbo_tool_registry_destroy(tools);
       turbo_chain_destroy(chain);
@@ -791,13 +791,13 @@ spec("turbo chain runtime") {
       turbo_chain_t *chain = turbo_chain_create("reactish-bind-child-log");
       turbo_tool_registry_t *tools = turbo_tool_registry_create();
       turbo_event_log_t *log = turbo_event_log_create();
-      turbo_runtime_data_bind_value_t *state = turbo_chain_state_create_bind();
-      turbo_runtime_data_bind_value_t *result = NULL;
+      json_value_t *state = turbo_chain_state_create_json_value();
+      json_value_t *result = NULL;
       fake_model_t model_state = {0};
       turbo_model_t model = {
           .name = "fake-child",
           .invoke = NULL,
-          .invoke_bind = fake_model_invoke_bind_child_lineage,
+          .invoke_json_value = fake_model_invoke_json_value_child_lineage,
           .user_data = &model_state,
           .user_data_free = NULL,
       };
@@ -807,11 +807,11 @@ spec("turbo chain runtime") {
           .parameters_json = "{\"type\":\"object\"}",
           .strict = 0,
           .handler = NULL,
-          .bind_handler = fake_child_lineage_tool_bind,
+          .json_value_handler = fake_child_lineage_tool_json_value,
           .user_data = NULL,
           .user_data_free = NULL,
       };
-      const turbo_runtime_data_bind_value_t *tool_event;
+      const json_value_t *tool_event;
 
       check_not_null(chain);
       check_not_null(tools);
@@ -824,37 +824,37 @@ spec("turbo chain runtime") {
       check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
       check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_bind_log(chain, state, log, &result), TURBO_CHAIN_OK);
+      check_int_eq(turbo_chain_run_json_value_log(chain, state, log, &result), TURBO_CHAIN_OK);
       check_not_null(result);
       check_int_eq(model_state.call_count, 2);
       check_size_eq(turbo_event_log_size(log), 3);
 
       tool_event = turbo_event_log_get(log, 1);
-      check_str_eq(turbo_event_kind_bind(tool_event), "tool_result");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(tool_event, "child_thread_id")),
+      check_str_eq(turbo_event_kind_json_value(tool_event), "tool_result");
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(tool_event, "child_thread_id")),
                    "thr_child");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(tool_event, "child_run_id")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(tool_event, "child_run_id")),
                    "run_child");
-      check_int_eq(turbo_runtime_data_bind_value_kind(
-                       turbo_runtime_data_bind_object_get(tool_event, "child_checkpoint_id")),
-                   TURBO_RUNTIME_DATA_BIND_VALUE_NULL);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(tool_event, "child_status")),
+      check_int_eq(turbo_json_type(
+                       turbo_json_object_get(tool_event, "child_checkpoint_id")),
+                   TURBO_JSON_NULL);
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(tool_event, "child_status")),
                    "completed");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(tool_event, "parent_agent_run_id")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(tool_event, "parent_agent_run_id")),
                    "run_parent");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(tool_event, "parent_tool_call_id")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(tool_event, "parent_tool_call_id")),
                    "call_parent");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(tool_event, "parent_tool_name")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(tool_event, "parent_tool_name")),
                    "delegate");
 
-      turbo_runtime_data_bind_value_destroy(result);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result);
+      turbo_runtime_json_destroy(state);
       turbo_event_log_destroy(log);
       turbo_tool_registry_destroy(tools);
       turbo_chain_destroy(chain);

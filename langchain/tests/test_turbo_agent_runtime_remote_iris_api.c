@@ -3,7 +3,7 @@
 #include "CoroNet.h"
 #include "error_recovery.h"
 #include "iris_app.h"
-#include "rpc.h"
+#include "rpc_server.h"
 #include "server.h"
 #include "turbo_agent_graph.h"
 #include "turbo_agent_runtime.h"
@@ -68,16 +68,16 @@ static void remote_iris_test_state_cleanup(remote_iris_test_state_t *state) {
   }
 }
 
-static int remote_iris_write_bool_bind_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+static int remote_iris_write_bool_json_value_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   remote_iris_bool_write_t *write = (remote_iris_bool_write_t *)user_data;
-  turbo_runtime_data_bind_value_t *value;
+  json_value_t *value;
 
-  value = turbo_runtime_data_bind_value_create_bool(write->value);
+  value = turbo_json_create_bool(write->value);
   if (!value) {
     return -1;
   }
-  return turbo_runtime_data_bind_object_set(ctx->bind_state, write->key, value) ==
-                 TURBO_RUNTIME_DATA_BIND_OK
+  return turbo_runtime_json_object_set(ctx->json_value_state, write->key, value) ==
+                 TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
 }
@@ -98,23 +98,23 @@ static turbo_graph_t *create_remote_iris_graph(void) {
 
   check_not_null(graph);
   check_int_eq(
-      turbo_graph_add_bind_node(graph, "start", remote_iris_write_bool_bind_node, &start),
+      turbo_graph_add_json_value_node(graph, "start", remote_iris_write_bool_json_value_node, &start),
       TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_bind_node(graph, "end", remote_iris_write_bool_bind_node, &end),
+  check_int_eq(turbo_graph_add_json_value_node(graph, "end", remote_iris_write_bool_json_value_node, &end),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_bind_edge(graph, "start", "end", NULL, NULL),
+  check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
                TURBO_GRAPH_EXEC_OK);
   check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
   return graph;
 }
 
 static json_value_t *create_remote_iris_state_json(void) {
-  turbo_runtime_data_bind_value_t *state = turbo_agent_state_create_bind();
+  json_value_t *state = turbo_agent_state_create_json_value();
   json_value_t *state_json;
 
   check_not_null(state);
-  state_json = turbo_runtime_data_bind_value_to_json(state);
-  turbo_runtime_data_bind_value_destroy(state);
+  state_json = turbo_json_clone(state);
+  turbo_runtime_json_destroy(state);
   return state_json;
 }
 

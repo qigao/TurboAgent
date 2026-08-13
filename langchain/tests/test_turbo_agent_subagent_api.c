@@ -150,52 +150,52 @@ static int subagent_retriever_engineering_transport(
   return 0;
 }
 
-static turbo_runtime_data_bind_value_t *subagent_create_text_args(const char *text) {
-  turbo_runtime_data_bind_value_t *arguments = turbo_runtime_data_bind_value_create_object();
+static json_value_t *subagent_create_text_args(const char *text) {
+  json_value_t *arguments = turbo_json_create_object();
 
   if (!arguments) {
     return NULL;
   }
-  check_int_eq(turbo_runtime_data_bind_object_set(
-                   arguments, "input", turbo_runtime_data_bind_value_create_string(text)),
-               TURBO_RUNTIME_DATA_BIND_OK);
+  check_int_eq(turbo_runtime_json_object_set(
+                   arguments, "input", turbo_json_create_string(text)),
+               TURBO_RUNTIME_JSON_OK);
   return arguments;
 }
 
-static turbo_runtime_data_bind_value_t *subagent_create_messages_args(void) {
-  turbo_runtime_data_bind_value_t *arguments = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *messages = turbo_runtime_data_bind_value_create_array();
-  turbo_runtime_data_bind_value_t *system_message = turbo_runtime_data_bind_value_create_object();
-  turbo_runtime_data_bind_value_t *user_message = turbo_runtime_data_bind_value_create_object();
+static json_value_t *subagent_create_messages_args(void) {
+  json_value_t *arguments = turbo_json_create_object();
+  json_value_t *messages = turbo_json_create_array();
+  json_value_t *system_message = turbo_json_create_object();
+  json_value_t *user_message = turbo_json_create_object();
 
   if (!arguments || !messages || !system_message || !user_message) {
-    turbo_runtime_data_bind_value_destroy(arguments);
-    turbo_runtime_data_bind_value_destroy(messages);
-    turbo_runtime_data_bind_value_destroy(system_message);
-    turbo_runtime_data_bind_value_destroy(user_message);
+    turbo_runtime_json_destroy(arguments);
+    turbo_runtime_json_destroy(messages);
+    turbo_runtime_json_destroy(system_message);
+    turbo_runtime_json_destroy(user_message);
     return NULL;
   }
 
-  check_int_eq(turbo_runtime_data_bind_object_set(
-                   system_message, "role", turbo_runtime_data_bind_value_create_string("system")),
-               TURBO_RUNTIME_DATA_BIND_OK);
-  check_int_eq(turbo_runtime_data_bind_object_set(
+  check_int_eq(turbo_runtime_json_object_set(
+                   system_message, "role", turbo_json_create_string("system")),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_object_set(
                    system_message, "content",
-                   turbo_runtime_data_bind_value_create_string("Be terse.")),
-               TURBO_RUNTIME_DATA_BIND_OK);
-  check_int_eq(turbo_runtime_data_bind_object_set(
-                   user_message, "role", turbo_runtime_data_bind_value_create_string("user")),
-               TURBO_RUNTIME_DATA_BIND_OK);
-  check_int_eq(turbo_runtime_data_bind_object_set(
+                   turbo_json_create_string("Be terse.")),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_object_set(
+                   user_message, "role", turbo_json_create_string("user")),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_object_set(
                    user_message, "content",
-                   turbo_runtime_data_bind_value_create_string("hello from tool")),
-               TURBO_RUNTIME_DATA_BIND_OK);
-  check_int_eq(turbo_runtime_data_bind_array_append(messages, system_message),
-               TURBO_RUNTIME_DATA_BIND_OK);
-  check_int_eq(turbo_runtime_data_bind_array_append(messages, user_message),
-               TURBO_RUNTIME_DATA_BIND_OK);
-  check_int_eq(turbo_runtime_data_bind_object_set(arguments, "messages", messages),
-               TURBO_RUNTIME_DATA_BIND_OK);
+                   turbo_json_create_string("hello from tool")),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_array_append(messages, system_message),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_array_append(messages, user_message),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_object_set(arguments, "messages", messages),
+               TURBO_RUNTIME_JSON_OK);
   return arguments;
 }
 
@@ -206,10 +206,10 @@ spec("turbo agent subagent api") {
     turbo_agent_config_t agent_config = {0};
     turbo_agent_session_config_t session_config = {0};
     turbo_agent_subagent_tool_config_t tool_config = {0};
-    turbo_runtime_data_bind_value_t *args1 = NULL;
-    turbo_runtime_data_bind_value_t *args2 = NULL;
-    turbo_runtime_data_bind_value_t *result1 = NULL;
-    turbo_runtime_data_bind_value_t *result2 = NULL;
+    json_value_t *args1 = NULL;
+    json_value_t *args2 = NULL;
+    json_value_t *result1 = NULL;
+    json_value_t *result2 = NULL;
     const char *thread1;
     const char *thread2;
     const char *run1;
@@ -237,31 +237,31 @@ spec("turbo agent subagent api") {
     check_not_null(args1);
     check_not_null(args2);
 
-    check_int_eq(turbo_tool_runtime_invoke_bind(runtime, "delegate", args1, &result1),
+    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate", args1, &result1),
                  TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_runtime_invoke_bind(runtime, "delegate", args2, &result2),
+    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate", args2, &result2),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result1, "output_text")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result1, "output_text")),
                  "ok");
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result2, "output_text")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result2, "output_text")),
                  "ok");
 
-    thread1 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result1, "thread_id"));
-    thread2 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result2, "thread_id"));
-    run1 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result1, "run_id"));
-    run2 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result2, "run_id"));
-    child_thread1 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result1, "child_thread_id"));
-    child_run1 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result1, "child_run_id"));
-    child_status1 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result1, "child_status"));
+    thread1 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result1, "thread_id"));
+    thread2 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result2, "thread_id"));
+    run1 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result1, "run_id"));
+    run2 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result2, "run_id"));
+    child_thread1 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result1, "child_thread_id"));
+    child_run1 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result1, "child_run_id"));
+    child_status1 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result1, "child_status"));
 
     check_not_null(thread1);
     check_not_null(thread2);
@@ -272,17 +272,17 @@ spec("turbo agent subagent api") {
     check_str_eq(child_thread1, thread1);
     check_str_eq(child_run1, run1);
     check_str_eq(child_status1, "completed");
-    check_int_eq(turbo_runtime_data_bind_value_kind(
-                     turbo_runtime_data_bind_object_get(result1, "checkpoint_id")),
-                 TURBO_RUNTIME_DATA_BIND_VALUE_NULL);
-    check_int_eq(turbo_runtime_data_bind_value_kind(
-                     turbo_runtime_data_bind_object_get(result1, "child_checkpoint_id")),
-                 TURBO_RUNTIME_DATA_BIND_VALUE_NULL);
+    check_int_eq(turbo_json_type(
+                     turbo_json_object_get(result1, "checkpoint_id")),
+                 TURBO_JSON_NULL);
+    check_int_eq(turbo_json_type(
+                     turbo_json_object_get(result1, "child_checkpoint_id")),
+                 TURBO_JSON_NULL);
 
-    turbo_runtime_data_bind_value_destroy(result2);
-    turbo_runtime_data_bind_value_destroy(result1);
-    turbo_runtime_data_bind_value_destroy(args2);
-    turbo_runtime_data_bind_value_destroy(args1);
+    turbo_runtime_json_destroy(result2);
+    turbo_runtime_json_destroy(result1);
+    turbo_runtime_json_destroy(args2);
+    turbo_runtime_json_destroy(args1);
     turbo_tool_runtime_destroy(runtime);
   }
 
@@ -291,10 +291,10 @@ spec("turbo agent subagent api") {
     turbo_agent_config_t agent_config = {0};
     turbo_agent_session_config_t session_config = {0};
     turbo_agent_subagent_tool_config_t tool_config = {0};
-    turbo_runtime_data_bind_value_t *args1 = NULL;
-    turbo_runtime_data_bind_value_t *args2 = NULL;
-    turbo_runtime_data_bind_value_t *result1 = NULL;
-    turbo_runtime_data_bind_value_t *result2 = NULL;
+    json_value_t *args1 = NULL;
+    json_value_t *args2 = NULL;
+    json_value_t *result1 = NULL;
+    json_value_t *result2 = NULL;
     const char *thread1;
     const char *thread2;
 
@@ -316,23 +316,23 @@ spec("turbo agent subagent api") {
     check_not_null(args1);
     check_not_null(args2);
 
-    check_int_eq(turbo_tool_runtime_invoke_bind(runtime, "delegate_once", args1, &result1),
+    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate_once", args1, &result1),
                  TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_runtime_invoke_bind(runtime, "delegate_once", args2, &result2),
+    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate_once", args2, &result2),
                  TURBO_TOOL_OK);
 
-    thread1 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result1, "thread_id"));
-    thread2 = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(result2, "thread_id"));
+    thread1 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result1, "thread_id"));
+    thread2 = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(result2, "thread_id"));
     check_not_null(thread1);
     check_not_null(thread2);
     check(strcmp(thread1, thread2) != 0);
 
-    turbo_runtime_data_bind_value_destroy(result2);
-    turbo_runtime_data_bind_value_destroy(result1);
-    turbo_runtime_data_bind_value_destroy(args2);
-    turbo_runtime_data_bind_value_destroy(args1);
+    turbo_runtime_json_destroy(result2);
+    turbo_runtime_json_destroy(result1);
+    turbo_runtime_json_destroy(args2);
+    turbo_runtime_json_destroy(args1);
     turbo_tool_runtime_destroy(runtime);
   }
 
@@ -344,8 +344,8 @@ spec("turbo agent subagent api") {
     turbo_agent_config_t agent_config = {0};
     turbo_agent_session_config_t session_config = {0};
     turbo_agent_subagent_tool_config_t tool_config = {0};
-    turbo_runtime_data_bind_value_t *args = NULL;
-    turbo_runtime_data_bind_value_t *result = NULL;
+    json_value_t *args = NULL;
+    json_value_t *result = NULL;
 
     snprintf(db_path, sizeof(db_path), "subagent_knowledge_%llx.sqlite3",
              (unsigned long long)turbo_hrtime());
@@ -379,18 +379,18 @@ spec("turbo agent subagent api") {
                  TURBO_TOOL_OK);
     args = subagent_create_text_args("use local knowledge");
     check_not_null(args);
-    check_int_eq(turbo_tool_runtime_invoke_bind(runtime, "delegate_knowledge",
+    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate_knowledge",
                                                 args, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result, "status")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result, "status")),
                  "completed");
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result, "output_text")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result, "output_text")),
                  "ok");
 
-    turbo_runtime_data_bind_value_destroy(result);
-    turbo_runtime_data_bind_value_destroy(args);
+    turbo_runtime_json_destroy(result);
+    turbo_runtime_json_destroy(args);
     turbo_agent_knowledge_store_close(store);
     turbo_tool_runtime_destroy(runtime);
     remove(db_path);
@@ -405,8 +405,8 @@ spec("turbo agent subagent api") {
     turbo_agent_config_t agent_config = {0};
     turbo_agent_session_config_t session_config = {0};
     turbo_agent_subagent_tool_config_t tool_config = {0};
-    turbo_runtime_data_bind_value_t *args = NULL;
-    turbo_runtime_data_bind_value_t *result = NULL;
+    json_value_t *args = NULL;
+    json_value_t *result = NULL;
 
     retriever_config.query = subagent_retriever_query;
     retriever_config.user_data = &query_state;
@@ -434,21 +434,21 @@ spec("turbo agent subagent api") {
                  TURBO_TOOL_OK);
     args = subagent_create_text_args("use retriever context");
     check_not_null(args);
-    check_int_eq(turbo_tool_runtime_invoke_bind(runtime, "delegate_retriever",
+    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate_retriever",
                                                 args, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result, "status")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result, "status")),
                  "completed");
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result, "output_text")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result, "output_text")),
                  "ok");
     check_int_eq(query_state.call_count, 1);
     check_int_eq(transport_state.call_count, 2);
     check_int_eq(transport_state.saw_retriever_context, 1);
 
-    turbo_runtime_data_bind_value_destroy(result);
-    turbo_runtime_data_bind_value_destroy(args);
+    turbo_runtime_json_destroy(result);
+    turbo_runtime_json_destroy(args);
     turbo_tool_runtime_destroy(runtime);
     turbo_retriever_destroy(retriever);
   }
@@ -502,8 +502,8 @@ spec("turbo agent subagent api") {
     turbo_agent_config_t agent_config = {0};
     turbo_agent_session_config_t session_config = {0};
     turbo_agent_subagent_tool_config_t tool_config = {0};
-    turbo_runtime_data_bind_value_t *args = NULL;
-    turbo_runtime_data_bind_value_t *result = NULL;
+    json_value_t *args = NULL;
+    json_value_t *result = NULL;
 
     agent_config.model = "gpt-5.4";
     agent_config.transport_fn = subagent_success_transport;
@@ -521,17 +521,17 @@ spec("turbo agent subagent api") {
 
     args = subagent_create_messages_args();
     check_not_null(args);
-    check_int_eq(turbo_tool_registry_execute_bind(registry, "delegate_messages", args, &result),
+    check_int_eq(turbo_tool_registry_execute_json_value(registry, "delegate_messages", args, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result, "status")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result, "status")),
                  "completed");
-    check_str_eq(turbo_runtime_data_bind_value_as_string(
-                     turbo_runtime_data_bind_object_get(result, "output_text")),
+    check_str_eq(turbo_runtime_json_value_as_string(
+                     turbo_json_object_get(result, "output_text")),
                  "ok");
 
-    turbo_runtime_data_bind_value_destroy(result);
-    turbo_runtime_data_bind_value_destroy(args);
+    turbo_runtime_json_destroy(result);
+    turbo_runtime_json_destroy(args);
     turbo_tool_registry_destroy(registry);
   }
 

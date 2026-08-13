@@ -38,14 +38,14 @@ static char *remote_strdup(const char *text) {
   return copy;
 }
 
-static int remote_write_bool_bind_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+static int remote_write_bool_json_value_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   remote_bool_write_t *write = (remote_bool_write_t *)user_data;
-  turbo_runtime_data_bind_value_t *value;
+  json_value_t *value;
 
-  value = turbo_runtime_data_bind_value_create_bool(write->value);
+  value = turbo_json_create_bool(write->value);
   check_not_null(value);
-  return turbo_runtime_data_bind_object_set(ctx->bind_state, write->key, value) ==
-                 TURBO_RUNTIME_DATA_BIND_OK
+  return turbo_runtime_json_object_set(ctx->json_value_state, write->key, value) ==
+                 TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
 }
@@ -65,23 +65,23 @@ static turbo_graph_t *create_remote_graph(void) {
   static remote_bool_write_t end = {"visited_end", 1};
 
   check_not_null(graph);
-  check_int_eq(turbo_graph_add_bind_node(graph, "start", remote_write_bool_bind_node, &start),
+  check_int_eq(turbo_graph_add_json_value_node(graph, "start", remote_write_bool_json_value_node, &start),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_bind_node(graph, "end", remote_write_bool_bind_node, &end),
+  check_int_eq(turbo_graph_add_json_value_node(graph, "end", remote_write_bool_json_value_node, &end),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_bind_edge(graph, "start", "end", NULL, NULL),
+  check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
                TURBO_GRAPH_EXEC_OK);
   check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
   return graph;
 }
 
 static json_value_t *create_remote_state_json(void) {
-  turbo_runtime_data_bind_value_t *state = turbo_agent_state_create_bind();
+  json_value_t *state = turbo_agent_state_create_json_value();
   json_value_t *state_json;
 
   check_not_null(state);
-  state_json = turbo_runtime_data_bind_value_to_json(state);
-  turbo_runtime_data_bind_value_destroy(state);
+  state_json = turbo_json_clone(state);
+  turbo_runtime_json_destroy(state);
   return state_json;
 }
 
@@ -646,7 +646,7 @@ spec("turbo agent runtime remote api") {
     const char *checkpoint_id;
     const char *run_id;
     const char *thread_id = "remote-thread-1";
-    turbo_runtime_data_bind_value_t *result_state = NULL;
+    json_value_t *result_state = NULL;
     const char *thread2_id = "remote-thread-2";
     char *thread2_run_id = NULL;
     json_value_t *thread2_start_params = NULL;
@@ -1172,7 +1172,7 @@ spec("turbo agent runtime remote api") {
       turbo_json_object_set_string(thread_command_json, "text", "fork from thread command");
       turbo_json_object_add(thread_command_params, "command", thread_command_json);
       request_json = create_remote_jsonrpc_request("req-thread-fork",
-                                                   "runtime.forkThreadCommandBindGraph",
+                                                   "runtime.forkThreadCommandJsonValueGraph",
                                                    thread_command_params);
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
@@ -1208,7 +1208,7 @@ spec("turbo agent runtime remote api") {
       turbo_json_object_set_string(thread_command_json, "text", "resume from thread command");
       turbo_json_object_add(thread_command_params, "command", thread_command_json);
       request_json = create_remote_jsonrpc_request("req-thread-resume",
-                                                   "runtime.resumeThreadCommandBindGraph",
+                                                   "runtime.resumeThreadCommandJsonValueGraph",
                                                    thread_command_params);
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
@@ -1272,7 +1272,7 @@ spec("turbo agent runtime remote api") {
       turbo_json_object_set_bool(thread3_replay_state, "patched", true);
       turbo_json_object_add(thread3_replay_params, "state", thread3_replay_state);
       request_json = create_remote_jsonrpc_request("req-thread-resume-state",
-                                                   "runtime.resumeThreadBindGraph",
+                                                   "runtime.resumeThreadJsonValueGraph",
                                                    thread3_replay_params);
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
@@ -1342,7 +1342,7 @@ spec("turbo agent runtime remote api") {
       turbo_json_object_set_bool(thread4_replay_state, "patched", true);
       turbo_json_object_add(thread4_replay_params, "state", thread4_replay_state);
       request_json = create_remote_jsonrpc_request("req-thread-fork-state",
-                                                   "runtime.forkThreadBindGraph",
+                                                   "runtime.forkThreadJsonValueGraph",
                                                    thread4_replay_params);
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
@@ -1408,7 +1408,7 @@ spec("turbo agent runtime remote api") {
       turbo_json_object_set_bool(thread5_patch_json, "patched_via_state_patch", true);
       turbo_json_object_add(thread5_patch_params, "state_patch", thread5_patch_json);
       request_json = create_remote_jsonrpc_request("req-thread-resume-patch",
-                                                   "runtime.resumeThreadStatePatchBindGraph",
+                                                   "runtime.resumeThreadStatePatchJsonValueGraph",
                                                    thread5_patch_params);
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
@@ -1478,7 +1478,7 @@ spec("turbo agent runtime remote api") {
       turbo_json_object_set_bool(thread6_patch_json, "patched_via_state_patch", true);
       turbo_json_object_add(thread6_patch_params, "state_patch", thread6_patch_json);
       request_json = create_remote_jsonrpc_request("req-thread-fork-patch",
-                                                   "runtime.forkThreadStatePatchBindGraph",
+                                                   "runtime.forkThreadStatePatchJsonValueGraph",
                                                    thread6_patch_params);
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",

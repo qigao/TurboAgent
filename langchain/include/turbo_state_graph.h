@@ -5,7 +5,7 @@
 
 #include <stddef.h>
 
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,8 +54,8 @@ typedef struct turbo_state_graph_pending_send_s turbo_state_graph_pending_send_t
 
 typedef struct turbo_state_graph_exec_ctx_s {
   turbo_state_graph_t *graph;
-  const turbo_runtime_data_bind_value_t *state;
-  turbo_runtime_data_bind_value_t *update;
+  const json_value_t *state;
+  json_value_t *update;
   const char *current_node;
   const char *next_node;
   turbo_state_graph_pending_send_t *sends;
@@ -65,15 +65,15 @@ typedef struct turbo_state_graph_exec_ctx_s {
   int stop;
 } turbo_state_graph_exec_ctx_t;
 
-typedef int (*turbo_state_graph_bind_node_fn)(turbo_state_graph_exec_ctx_t *ctx,
+typedef int (*turbo_state_graph_json_value_node_fn)(turbo_state_graph_exec_ctx_t *ctx,
                                               void *user_data);
-typedef int (*turbo_state_graph_bind_edge_predicate_fn)(
-    const turbo_runtime_data_bind_value_t *state, void *user_data);
+typedef int (*turbo_state_graph_json_value_edge_predicate_fn)(
+    const json_value_t *state, void *user_data);
 
 typedef struct turbo_state_graph_channel_config_s {
   turbo_state_graph_reducer_kind_t reducer;
-  turbo_runtime_data_bind_value_kind_t value_kind;
-  const turbo_runtime_data_bind_value_t *default_value;
+  turbo_json_type_t value_kind;
+  const json_value_t *default_value;
   const char *description;
 } turbo_state_graph_channel_config_t;
 
@@ -118,16 +118,16 @@ CXX_C_API turbo_state_graph_status_t turbo_state_graph_add_channel(
     const turbo_state_graph_channel_config_t *config);
 
 CXX_C_API turbo_state_graph_status_t
-turbo_state_graph_add_bind_node(turbo_state_graph_t *graph, const char *name,
-                                turbo_state_graph_bind_node_fn fn, void *user_data);
+turbo_state_graph_add_json_value_node(turbo_state_graph_t *graph, const char *name,
+                                turbo_state_graph_json_value_node_fn fn, void *user_data);
 
 CXX_C_API turbo_state_graph_status_t turbo_state_graph_add_subgraph_node(
     turbo_state_graph_t *graph, const char *name,
     const turbo_state_graph_subgraph_node_config_t *config);
 
 CXX_C_API turbo_state_graph_status_t
-turbo_state_graph_add_bind_edge(turbo_state_graph_t *graph, const char *from, const char *to,
-                                turbo_state_graph_bind_edge_predicate_fn predicate,
+turbo_state_graph_add_json_value_edge(turbo_state_graph_t *graph, const char *from, const char *to,
+                                turbo_state_graph_json_value_edge_predicate_fn predicate,
                                 void *user_data);
 
 CXX_C_API turbo_state_graph_status_t
@@ -151,103 +151,103 @@ CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_ctx_goto(turbo_state_graph_exec_ctx_t *ctx, const char *next_node);
 CXX_C_API turbo_state_graph_status_t turbo_state_graph_ctx_send(
     turbo_state_graph_exec_ctx_t *ctx, const char *target_node,
-    const turbo_runtime_data_bind_value_t *update);
+    const json_value_t *update);
 CXX_C_API void turbo_state_graph_ctx_stop(turbo_state_graph_exec_ctx_t *ctx);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_start(turbo_state_graph_t *graph, const char *thread_id,
-                        const turbo_runtime_data_bind_value_t *input_state,
+                        const json_value_t *input_state,
                         const turbo_state_graph_run_options_t *options,
                         turbo_state_graph_run_result_t *out_result,
-                        turbo_runtime_data_bind_value_t **out_state);
+                        json_value_t **out_state);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_resume(turbo_state_graph_t *graph, const char *run_id,
                          const turbo_state_graph_run_options_t *options,
                          turbo_state_graph_run_result_t *out_result,
-                         turbo_runtime_data_bind_value_t **out_state);
+                         json_value_t **out_state);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_update_state(turbo_state_graph_t *graph, const char *run_id,
-                               const turbo_runtime_data_bind_value_t *update,
+                               const json_value_t *update,
                                const turbo_state_graph_history_options_t *options,
                                turbo_state_graph_run_result_t *out_result,
-                               turbo_runtime_data_bind_value_t **out_state);
+                               json_value_t **out_state);
 
 CXX_C_API turbo_state_graph_status_t turbo_state_graph_resume_from_history(
     turbo_state_graph_t *graph, const char *history_entry_id,
-    const turbo_runtime_data_bind_value_t *update,
+    const json_value_t *update,
     const turbo_state_graph_history_options_t *history_options,
     const turbo_state_graph_run_options_t *run_options,
     turbo_state_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
 CXX_C_API turbo_state_graph_status_t turbo_state_graph_fork_from_history(
     turbo_state_graph_t *graph, const char *history_entry_id,
-    const turbo_runtime_data_bind_value_t *update,
+    const json_value_t *update,
     const turbo_state_graph_history_options_t *history_options,
     const turbo_state_graph_run_options_t *run_options,
     turbo_state_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_state(turbo_state_graph_t *graph, const char *run_id,
-                            turbo_runtime_data_bind_value_t **out_state);
+                            json_value_t **out_state);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_run(turbo_state_graph_t *graph, const char *run_id,
-                          turbo_runtime_data_bind_value_t **out_run);
+                          json_value_t **out_run);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_thread(turbo_state_graph_t *graph, const char *thread_id,
-                             turbo_runtime_data_bind_value_t **out_thread);
+                             json_value_t **out_thread);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_latest_run(turbo_state_graph_t *graph, const char *thread_id,
-                                 turbo_runtime_data_bind_value_t **out_run);
+                                 json_value_t **out_run);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_pending_run(turbo_state_graph_t *graph, const char *thread_id,
-                                  turbo_runtime_data_bind_value_t **out_run);
+                                  json_value_t **out_run);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_thread_state(turbo_state_graph_t *graph, const char *thread_id,
-                                   turbo_runtime_data_bind_value_t **out_state);
+                                   json_value_t **out_state);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_history_entry(turbo_state_graph_t *graph,
                                     const char *history_entry_id,
-                                    turbo_runtime_data_bind_value_t **out_entry);
+                                    json_value_t **out_entry);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_history_entry_state(turbo_state_graph_t *graph,
                                           const char *history_entry_id,
-                                          turbo_runtime_data_bind_value_t **out_state);
+                                          json_value_t **out_state);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_checkpoint(turbo_state_graph_t *graph, const char *checkpoint_id,
-                                 turbo_runtime_data_bind_value_t **out_checkpoint);
+                                 json_value_t **out_checkpoint);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_list_state_history(turbo_state_graph_t *graph, const char *run_id,
-                                     turbo_runtime_data_bind_value_t **out_entries);
+                                     json_value_t **out_entries);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_list_checkpoints(turbo_state_graph_t *graph, const char *run_id,
-                                   turbo_runtime_data_bind_value_t **out_checkpoints);
+                                   json_value_t **out_checkpoints);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_list_runs(turbo_state_graph_t *graph, const char *thread_id,
-                            turbo_runtime_data_bind_value_t **out_runs);
+                            json_value_t **out_runs);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_checkpoint_context(turbo_state_graph_t *graph,
                                          const char *checkpoint_id,
-                                         turbo_runtime_data_bind_value_t **out_context);
+                                         json_value_t **out_context);
 
 CXX_C_API turbo_state_graph_status_t
 turbo_state_graph_get_branch_tree(turbo_state_graph_t *graph, const char *thread_id,
-                                  turbo_runtime_data_bind_value_t **out_tree);
+                                  json_value_t **out_tree);
 
 #ifdef __cplusplus
 }

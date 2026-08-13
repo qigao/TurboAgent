@@ -2,7 +2,7 @@
 #include "turbo_agent_memory_store.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_state.h"
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,17 +43,17 @@ static json_value_t *runtime_memory_record_create_record(const char *id, const c
 
 static int runtime_memory_record_print_session_memory_text(
     const turbo_agent_session_t *session, const char *namespace_prefix) {
-  turbo_runtime_data_bind_value_t *state = NULL;
+  json_value_t *state = NULL;
   json_value_t *state_json = NULL;
   char *memory_text = NULL;
   int rc = -1;
 
-  state = turbo_agent_session_create_input_state_with_memory_bind(session, "hello",
+  state = turbo_agent_session_create_input_state_with_memory_json_value(session, "hello",
                                                                   namespace_prefix);
   if (!state) {
     goto cleanup;
   }
-  state_json = turbo_runtime_data_bind_value_to_json(state);
+  state_json = turbo_json_clone(state);
   if (!state_json) {
     goto cleanup;
   }
@@ -67,7 +67,7 @@ static int runtime_memory_record_print_session_memory_text(
 cleanup:
   free(memory_text);
   turbo_free_json(&state_json);
-  turbo_runtime_data_bind_value_destroy(state);
+  turbo_runtime_json_destroy(state);
   return rc;
 }
 

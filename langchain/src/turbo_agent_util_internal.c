@@ -7,56 +7,56 @@ CXX_C_API tstr_t turbo_agent_util_strdup(const char *src) {
   return tstr_dup(src);
 }
 
-CXX_C_API int turbo_agent_util_bind_object_set_string(
-    turbo_runtime_data_bind_value_t *object, const char *key, const char *value) {
-  turbo_runtime_data_bind_value_t *field;
+CXX_C_API int turbo_agent_util_json_value_object_set_string(
+    json_value_t *object, const char *key, const char *value) {
+  json_value_t *field;
 
   if (!object || !key || !value) {
     return -1;
   }
-  field = turbo_runtime_data_bind_value_create_string(value);
+  field = turbo_json_create_string(value);
   if (!field) {
     return -1;
   }
-  if (turbo_runtime_data_bind_object_set(object, key, field) != TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(field);
+  if (turbo_runtime_json_object_set(object, key, field) != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field);
     return -1;
   }
   return 0;
 }
 
-CXX_C_API int turbo_agent_util_bind_object_set_int64(
-    turbo_runtime_data_bind_value_t *object, const char *key, int64_t value) {
-  turbo_runtime_data_bind_value_t *field;
+CXX_C_API int turbo_agent_util_json_value_object_set_int64(
+    json_value_t *object, const char *key, int64_t value) {
+  json_value_t *field;
 
   if (!object || !key) {
     return -1;
   }
-  field = turbo_runtime_data_bind_value_create_int64(value);
+  field = turbo_json_create_int64(value);
   if (!field) {
     return -1;
   }
-  if (turbo_runtime_data_bind_object_set(object, key, field) != TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(field);
+  if (turbo_runtime_json_object_set(object, key, field) != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field);
     return -1;
   }
   return 0;
 }
 
-CXX_C_API int turbo_agent_util_bind_object_set_clone(
-    turbo_runtime_data_bind_value_t *object, const char *key,
-    const turbo_runtime_data_bind_value_t *value) {
-  turbo_runtime_data_bind_value_t *copy;
+CXX_C_API int turbo_agent_util_json_value_object_set_clone(
+    json_value_t *object, const char *key,
+    const json_value_t *value) {
+  json_value_t *copy;
 
   if (!object || !key || !value) {
     return -1;
   }
-  copy = turbo_runtime_data_bind_value_clone(value);
+  copy = turbo_json_clone(value);
   if (!copy) {
     return -1;
   }
-  if (turbo_runtime_data_bind_object_set(object, key, copy) != TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(copy);
+  if (turbo_runtime_json_object_set(object, key, copy) != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(copy);
     return -1;
   }
   return 0;

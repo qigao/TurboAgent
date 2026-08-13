@@ -33,7 +33,7 @@ static char *test_strdup_local(const char *text) {
   return copy;
 }
 
-static void capture_model_provider_event(const turbo_runtime_data_bind_value_t *event,
+static void capture_model_provider_event(const json_value_t *event,
                                          void *user_data) {
   model_provider_event_capture_t *capture = (model_provider_event_capture_t *)user_data;
 
@@ -45,18 +45,18 @@ static void capture_model_provider_event(const turbo_runtime_data_bind_value_t *
   free(capture->output_text);
   free(capture->first_tool_arguments);
   capture->kind = test_strdup_local(
-      turbo_runtime_data_bind_value_as_string(turbo_runtime_data_bind_object_get(event, "kind")));
-  capture->response_id = test_strdup_local(turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(event, "response_id")));
-  capture->output_text = test_strdup_local(turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(event, "output_text")));
+      turbo_runtime_json_value_as_string(turbo_json_object_get(event, "kind")));
+  capture->response_id = test_strdup_local(turbo_runtime_json_value_as_string(
+      turbo_json_object_get(event, "response_id")));
+  capture->output_text = test_strdup_local(turbo_runtime_json_value_as_string(
+      turbo_json_object_get(event, "output_text")));
   capture->tool_call_count =
-      turbo_runtime_data_bind_value_size(turbo_runtime_data_bind_object_get(event, "tool_calls"));
+      turbo_runtime_json_value_size(turbo_json_object_get(event, "tool_calls"));
   if (capture->tool_call_count > 0) {
-    const turbo_runtime_data_bind_value_t *tool_call = turbo_runtime_data_bind_array_get(
-        turbo_runtime_data_bind_object_get(event, "tool_calls"), 0);
-    capture->first_tool_arguments = test_strdup_local(turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(tool_call, "arguments")));
+    const json_value_t *tool_call = turbo_json_array_get(
+        turbo_json_object_get(event, "tool_calls"), 0);
+    capture->first_tool_arguments = test_strdup_local(turbo_runtime_json_value_as_string(
+        turbo_json_object_get(tool_call, "arguments")));
   } else {
     capture->first_tool_arguments = NULL;
   }
@@ -124,19 +124,19 @@ spec("turbo model provider helpers") {
     }
 
     it("should build provider-specific wire messages from canonical messages") {
-      turbo_runtime_data_bind_value_t *messages = turbo_prompt_messages_create_bind();
+      json_value_t *messages = turbo_prompt_messages_create_json_value();
       json_value_t *chat_messages;
       json_value_t *responses_messages;
       json_value_t *anthropic_messages;
       char *system_text = NULL;
 
       check_not_null(messages);
-      check_int_eq(turbo_runtime_data_bind_array_append(
-                       messages, turbo_prompt_message_create_bind("system", "Rules")),
-                   TURBO_RUNTIME_DATA_BIND_OK);
-      check_int_eq(turbo_runtime_data_bind_array_append(
-                       messages, turbo_prompt_message_create_bind("user", "Ping")),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+      check_int_eq(turbo_runtime_json_array_append(
+                       messages, turbo_prompt_message_create_json_value("system", "Rules")),
+                   TURBO_RUNTIME_JSON_OK);
+      check_int_eq(turbo_runtime_json_array_append(
+                       messages, turbo_prompt_message_create_json_value("user", "Ping")),
+                   TURBO_RUNTIME_JSON_OK);
 
       chat_messages = turbo_model_provider_messages_to_wire_json(
           turbo_model_provider_openai_chat_completions(), messages, NULL);
@@ -164,7 +164,7 @@ spec("turbo model provider helpers") {
       turbo_free_json(&anthropic_messages);
       turbo_free_json(&responses_messages);
       turbo_free_json(&chat_messages);
-      turbo_runtime_data_bind_value_destroy(messages);
+      turbo_runtime_json_destroy(messages);
     }
 
     it("should normalize provider responses into canonical model events") {
@@ -308,13 +308,13 @@ spec("turbo model provider helpers") {
       turbo_free_json(&chat_event);
     }
 
-    it("should emit bind-native events from provider sse payloads") {
+    it("should emit TurboParser JSON-native events from provider sse payloads") {
       const char *chat_sse =
           "data: {\"id\":\"chat_1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
           "data: [DONE]\n\n";
       model_provider_event_capture_t capture = {0};
 
-      check_int_eq(turbo_model_provider_sse_emit_bind(
+      check_int_eq(turbo_model_provider_sse_emit_json_value(
                        turbo_model_provider_openai_chat_completions(), chat_sse, strlen(chat_sse),
                        capture_model_provider_event, &capture),
                     0);
@@ -336,30 +336,30 @@ spec("turbo model provider helpers") {
           "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_log\",\"output\":[]}}\n\n"
           "data: [DONE]\n\n";
       turbo_event_log_t *log = turbo_event_log_create();
-      const turbo_runtime_data_bind_value_t *last_event;
+      const json_value_t *last_event;
 
       check_not_null(log);
-      check_int_eq(turbo_model_provider_sse_emit_bind(turbo_model_provider_openai_responses(),
+      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
                                                       responses_sse, strlen(responses_sse),
-                                                      turbo_event_log_capture_bind, log),
+                                                      turbo_event_log_capture_json_value, log),
                    0);
       check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
       check_size_eq(turbo_event_log_size(log), 2);
 
       last_event = turbo_event_log_get(log, turbo_event_log_size(log) - 1);
       check_not_null(last_event);
-      check_str_eq(turbo_event_kind_bind(last_event), "model");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(last_event, "response_id")),
+      check_str_eq(turbo_event_kind_json_value(last_event), "model");
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(last_event, "response_id")),
                    "resp_log");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(last_event, "output_text")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(last_event, "output_text")),
                    "42");
 
       turbo_event_log_destroy(log);
     }
 
-    it("should emit incremental bind-native events from multi-frame provider sse payloads") {
+    it("should emit incremental TurboParser JSON-native events from multi-frame provider sse payloads") {
       const char *responses_sse =
           "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_stream\",\"output\":[]}}\n\n"
           "data: {\"type\":\"response.output_text.delta\",\"delta\":\"4\"}\n\n"
@@ -374,7 +374,7 @@ spec("turbo model provider helpers") {
       model_provider_event_capture_t responses_capture = {0};
       model_provider_event_capture_t anthropic_capture = {0};
 
-      check_int_eq(turbo_model_provider_sse_emit_bind(turbo_model_provider_openai_responses(),
+      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
                                                       responses_sse, strlen(responses_sse),
                                                       capture_model_provider_event,
                                                       &responses_capture),
@@ -384,7 +384,7 @@ spec("turbo model provider helpers") {
       check_str_eq(responses_capture.response_id, "resp_stream");
       check_str_eq(responses_capture.output_text, "42");
 
-      check_int_eq(turbo_model_provider_sse_emit_bind(turbo_model_provider_anthropic_messages(),
+      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_anthropic_messages(),
                                                       anthropic_sse, strlen(anthropic_sse),
                                                       capture_model_provider_event,
                                                       &anthropic_capture),
@@ -404,7 +404,7 @@ spec("turbo model provider helpers") {
       free(responses_capture.kind);
     }
 
-    it("should emit incremental bind-native tool call events from provider sse payloads") {
+    it("should emit incremental TurboParser JSON-native tool call events from provider sse payloads") {
       const char *responses_sse =
           "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_tool_stream\",\"output\":[]}}\n\n"
           "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"sum\",\"arguments\":\"\"}}\n\n"
@@ -421,7 +421,7 @@ spec("turbo model provider helpers") {
       model_provider_event_capture_t responses_capture = {0};
       model_provider_event_capture_t anthropic_capture = {0};
 
-      check_int_eq(turbo_model_provider_sse_emit_bind(turbo_model_provider_openai_responses(),
+      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
                                                       responses_sse, strlen(responses_sse),
                                                       capture_model_provider_event,
                                                       &responses_capture),
@@ -431,7 +431,7 @@ spec("turbo model provider helpers") {
       check_str_eq(responses_capture.response_id, "resp_tool_stream");
       check_str_eq(responses_capture.first_tool_arguments, "{\"a\":2,\"b\":3}");
 
-      check_int_eq(turbo_model_provider_sse_emit_bind(turbo_model_provider_anthropic_messages(),
+      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_anthropic_messages(),
                                                       anthropic_sse, strlen(anthropic_sse),
                                                       capture_model_provider_event,
                                                       &anthropic_capture),
@@ -451,7 +451,7 @@ spec("turbo model provider helpers") {
       free(responses_capture.kind);
     }
 
-    it("should emit bind-native events from provider responses") {
+    it("should emit TurboParser JSON-native events from provider responses") {
       json_value_t *chat_response = turbo_json_create_object();
       json_value_t *choices = turbo_json_create_array();
       json_value_t *choice = turbo_json_create_object();
@@ -464,7 +464,7 @@ spec("turbo model provider helpers") {
       turbo_json_array_add(choices, choice);
       turbo_json_object_add(chat_response, "choices", choices);
 
-      check_int_eq(turbo_model_provider_response_emit_bind(
+      check_int_eq(turbo_model_provider_response_emit_json_value(
                        turbo_model_provider_openai_chat_completions(), chat_response,
                        capture_model_provider_event, &capture),
                    0);
@@ -478,16 +478,16 @@ spec("turbo model provider helpers") {
       turbo_free_json(&chat_response);
     }
 
-    it("should normalize provider responses directly into bind-native model events") {
+    it("should normalize provider responses directly into TurboParser JSON-native model events") {
       json_value_t *responses_response = turbo_json_create_object();
       json_value_t *responses_output = turbo_json_create_array();
       json_value_t *responses_text_item = turbo_json_create_object();
       json_value_t *responses_content = turbo_json_create_array();
       json_value_t *responses_text_part = turbo_json_create_object();
       json_value_t *responses_tool_call = turbo_json_create_object();
-      turbo_runtime_data_bind_value_t *event = NULL;
-      const turbo_runtime_data_bind_value_t *tool_calls;
-      const turbo_runtime_data_bind_value_t *first_call;
+      json_value_t *event = NULL;
+      const json_value_t *tool_calls;
+      const json_value_t *first_call;
 
       check_not_null(responses_response);
       check_not_null(responses_output);
@@ -496,7 +496,7 @@ spec("turbo model provider helpers") {
       check_not_null(responses_text_part);
       check_not_null(responses_tool_call);
 
-      turbo_json_object_set_string(responses_response, "id", "resp_bind");
+      turbo_json_object_set_string(responses_response, "id", "resp_json_value");
       turbo_json_object_set_string(responses_text_part, "type", "output_text");
       turbo_json_object_set_string(responses_text_part, "text", "hello");
       turbo_json_array_add(responses_content, responses_text_part);
@@ -504,35 +504,35 @@ spec("turbo model provider helpers") {
       turbo_json_object_add(responses_text_item, "content", responses_content);
       turbo_json_array_add(responses_output, responses_text_item);
       turbo_json_object_set_string(responses_tool_call, "type", "function_call");
-      turbo_json_object_set_string(responses_tool_call, "call_id", "call_bind");
+      turbo_json_object_set_string(responses_tool_call, "call_id", "call_json_value");
       turbo_json_object_set_string(responses_tool_call, "name", "sum");
       turbo_json_object_set_string(responses_tool_call, "arguments", "{\"a\":1}");
       turbo_json_array_add(responses_output, responses_tool_call);
       turbo_json_object_add(responses_response, "output", responses_output);
 
-      event = turbo_model_provider_response_to_event_bind(
+      event = turbo_model_provider_response_to_event_json_value(
           turbo_model_provider_openai_responses(), responses_response);
       check_not_null(event);
-      check_str_eq(turbo_event_kind_bind(event), "model");
+      check_str_eq(turbo_event_kind_json_value(event), "model");
       check_str_eq(
-          turbo_runtime_data_bind_value_as_string(
-              turbo_runtime_data_bind_object_get(event, "response_id")),
-          "resp_bind");
+          turbo_runtime_json_value_as_string(
+              turbo_json_object_get(event, "response_id")),
+          "resp_json_value");
       check_str_eq(
-          turbo_runtime_data_bind_value_as_string(
-              turbo_runtime_data_bind_object_get(event, "output_text")),
+          turbo_runtime_json_value_as_string(
+              turbo_json_object_get(event, "output_text")),
           "hello");
 
-      tool_calls = turbo_runtime_data_bind_object_get(event, "tool_calls");
+      tool_calls = turbo_json_object_get(event, "tool_calls");
       check_not_null(tool_calls);
-      check_size_eq(turbo_runtime_data_bind_value_size(tool_calls), 1);
-      first_call = turbo_runtime_data_bind_array_get(tool_calls, 0);
+      check_size_eq(turbo_runtime_json_value_size(tool_calls), 1);
+      first_call = turbo_json_array_get(tool_calls, 0);
       check_str_eq(
-          turbo_runtime_data_bind_value_as_string(
-              turbo_runtime_data_bind_object_get(first_call, "name")),
+          turbo_runtime_json_value_as_string(
+              turbo_json_object_get(first_call, "name")),
           "sum");
 
-      turbo_runtime_data_bind_value_destroy(event);
+      turbo_runtime_json_destroy(event);
       turbo_free_json(&responses_response);
     }
   }

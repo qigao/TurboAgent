@@ -13,13 +13,13 @@ typedef struct {
   char *name;
   char *description;
   turbo_state_graph_reducer_kind_t reducer;
-  turbo_runtime_data_bind_value_kind_t value_kind;
-  turbo_runtime_data_bind_value_t *default_value;
+  turbo_json_type_t value_kind;
+  json_value_t *default_value;
 } turbo_state_graph_channel_entry_t;
 
 typedef struct {
   char *name;
-  turbo_state_graph_bind_node_fn bind_fn;
+  turbo_state_graph_json_value_node_fn json_value_fn;
   void *user_data;
   void (*user_data_free)(void *user_data);
 } turbo_state_graph_node_entry_t;
@@ -27,7 +27,7 @@ typedef struct {
 typedef struct {
   size_t from_index;
   size_t to_index;
-  turbo_state_graph_bind_edge_predicate_fn predicate;
+  turbo_state_graph_json_value_edge_predicate_fn predicate;
   void *user_data;
 } turbo_state_graph_edge_entry_t;
 
@@ -47,8 +47,8 @@ typedef struct {
   char *next_node;
   turbo_state_graph_source_kind_t source_kind;
   size_t step;
-  turbo_runtime_data_bind_value_t *update;
-  turbo_runtime_data_bind_value_t *state;
+  json_value_t *update;
+  json_value_t *state;
 } turbo_state_graph_history_entry_t;
 
 typedef struct {
@@ -61,12 +61,12 @@ typedef struct {
   size_t steps;
   int interrupted;
   int completed;
-  turbo_runtime_data_bind_value_t *state;
+  json_value_t *state;
 } turbo_state_graph_run_entry_t;
 
 struct turbo_state_graph_pending_send_s {
   char *target_node;
-  turbo_runtime_data_bind_value_t *update;
+  json_value_t *update;
 };
 
 typedef struct {
@@ -105,8 +105,8 @@ struct turbo_state_graph_s {
   size_t next_checkpoint_id;
 };
 
-static turbo_state_graph_status_t turbo_state_graph_add_bind_node_owned(
-    turbo_state_graph_t *graph, const char *name, turbo_state_graph_bind_node_fn fn,
+static turbo_state_graph_status_t turbo_state_graph_add_json_value_node_owned(
+    turbo_state_graph_t *graph, const char *name, turbo_state_graph_json_value_node_fn fn,
     void *user_data, void (*user_data_free)(void *user_data));
 
 static void turbo_state_graph_free_subgraph_node_data(void *user_data);
@@ -115,8 +115,8 @@ static turbo_state_graph_status_t turbo_state_graph_add_history_record(
     turbo_state_graph_t *graph, turbo_state_graph_run_entry_t *run,
     turbo_state_graph_source_kind_t source_kind, const char *source_name, const char *reason,
     const char *last_node, const char *next_node, size_t step,
-    const turbo_runtime_data_bind_value_t *update,
-    const turbo_runtime_data_bind_value_t *state,
+    const json_value_t *update,
+    const json_value_t *state,
     turbo_state_graph_history_entry_t **out_history_entry);
 
 static void turbo_state_graph_result_init(turbo_state_graph_run_result_t *result,
@@ -159,22 +159,22 @@ static char *turbo_state_graph_make_id(const char *prefix, size_t value) {
   return turbo_state_graph_strdup(buffer);
 }
 
-static int turbo_state_graph_bind_object_set_nullable_string(
-    turbo_runtime_data_bind_value_t *object, const char *key, const char *value) {
-  turbo_runtime_data_bind_value_t *field = NULL;
+static int turbo_state_graph_json_value_object_set_nullable_string(
+    json_value_t *object, const char *key, const char *value) {
+  json_value_t *field = NULL;
 
   if (!object || !key) {
     return -1;
   }
 
-  field = value ? turbo_runtime_data_bind_value_create_string(value)
-                : turbo_runtime_data_bind_value_create_null();
+  field = value ? turbo_json_create_string(value)
+                : turbo_json_create_null();
   if (!field) {
     return -1;
   }
-  if (turbo_runtime_data_bind_object_set(object, key, field) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(field);
+  if (turbo_runtime_json_object_set(object, key, field) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field);
     return -1;
   }
   return 0;
@@ -187,7 +187,7 @@ static void turbo_state_graph_free_channel(turbo_state_graph_channel_entry_t *ch
 
   turbo_state_graph_str_free(channel->name);
   turbo_state_graph_str_free(channel->description);
-  turbo_runtime_data_bind_value_destroy(channel->default_value);
+  turbo_runtime_json_destroy(channel->default_value);
 }
 
 static void turbo_state_graph_free_node(turbo_state_graph_node_entry_t *node) {
@@ -224,8 +224,8 @@ static void turbo_state_graph_free_history_entry(
   turbo_state_graph_str_free(history_entry->reason);
   turbo_state_graph_str_free(history_entry->last_node);
   turbo_state_graph_str_free(history_entry->next_node);
-  turbo_runtime_data_bind_value_destroy(history_entry->update);
-  turbo_runtime_data_bind_value_destroy(history_entry->state);
+  turbo_runtime_json_destroy(history_entry->update);
+  turbo_runtime_json_destroy(history_entry->state);
 }
 
 static void turbo_state_graph_free_run(turbo_state_graph_run_entry_t *run) {
@@ -239,7 +239,7 @@ static void turbo_state_graph_free_run(turbo_state_graph_run_entry_t *run) {
   turbo_state_graph_str_free(run->forked_from_history_id);
   turbo_state_graph_str_free(run->latest_history_entry_id);
   turbo_state_graph_str_free(run->current_node);
-  turbo_runtime_data_bind_value_destroy(run->state);
+  turbo_runtime_json_destroy(run->state);
 }
 
 static const char *turbo_state_graph_source_kind_text(
@@ -497,32 +497,32 @@ static void turbo_state_graph_clear_runtime_state(turbo_state_graph_t *graph) {
 }
 
 static int turbo_state_graph_set_nullable_string_field(
-    turbo_runtime_data_bind_value_t *object, const char *key, const char *value) {
-  return turbo_state_graph_bind_object_set_nullable_string(object, key, value);
+    json_value_t *object, const char *key, const char *value) {
+  return turbo_state_graph_json_value_object_set_nullable_string(object, key, value);
 }
 
 static turbo_state_graph_status_t turbo_state_graph_channel_object(
-    const turbo_state_graph_channel_entry_t *channel, turbo_runtime_data_bind_value_t **out_object) {
-  turbo_runtime_data_bind_value_t *object = NULL;
+    const turbo_state_graph_channel_entry_t *channel, json_value_t **out_object) {
+  json_value_t *object = NULL;
 
   if (!channel || !out_object) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  object = turbo_runtime_data_bind_value_create_object();
+  object = turbo_json_create_object();
   if (!object) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  if (turbo_agent_util_bind_object_set_string(object, "name", channel->name) != 0 ||
-      turbo_agent_util_bind_object_set_int64(object, "reducer", (int64_t)channel->reducer) != 0 ||
-      turbo_agent_util_bind_object_set_int64(object, "value_kind",
+  if (turbo_agent_util_json_value_object_set_string(object, "name", channel->name) != 0 ||
+      turbo_agent_util_json_value_object_set_int64(object, "reducer", (int64_t)channel->reducer) != 0 ||
+      turbo_agent_util_json_value_object_set_int64(object, "value_kind",
                                              (int64_t)channel->value_kind) != 0 ||
       turbo_state_graph_set_nullable_string_field(object, "description",
                                                   channel->description) != 0 ||
-      turbo_agent_util_bind_object_set_clone(object, "default_value",
+      turbo_agent_util_json_value_object_set_clone(object, "default_value",
                                              channel->default_value) != 0) {
-    turbo_runtime_data_bind_value_destroy(object);
+    turbo_runtime_json_destroy(object);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
@@ -531,91 +531,91 @@ static turbo_state_graph_status_t turbo_state_graph_channel_object(
 }
 
 static turbo_state_graph_status_t turbo_state_graph_topology_snapshot(
-    const turbo_state_graph_t *graph, turbo_runtime_data_bind_value_t **out_object) {
-  turbo_runtime_data_bind_value_t *root = NULL;
-  turbo_runtime_data_bind_value_t *channels = NULL;
-  turbo_runtime_data_bind_value_t *nodes = NULL;
-  turbo_runtime_data_bind_value_t *edges = NULL;
+    const turbo_state_graph_t *graph, json_value_t **out_object) {
+  json_value_t *root = NULL;
+  json_value_t *channels = NULL;
+  json_value_t *nodes = NULL;
+  json_value_t *edges = NULL;
   size_t i;
 
   if (!graph || !out_object) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  root = turbo_runtime_data_bind_value_create_object();
-  channels = turbo_runtime_data_bind_value_create_array();
-  nodes = turbo_runtime_data_bind_value_create_array();
-  edges = turbo_runtime_data_bind_value_create_array();
+  root = turbo_json_create_object();
+  channels = turbo_json_create_array();
+  nodes = turbo_json_create_array();
+  edges = turbo_json_create_array();
   if (!root || !channels || !nodes || !edges) {
-    turbo_runtime_data_bind_value_destroy(root);
-    turbo_runtime_data_bind_value_destroy(channels);
-    turbo_runtime_data_bind_value_destroy(nodes);
-    turbo_runtime_data_bind_value_destroy(edges);
+    turbo_runtime_json_destroy(root);
+    turbo_runtime_json_destroy(channels);
+    turbo_runtime_json_destroy(nodes);
+    turbo_runtime_json_destroy(edges);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
   if (turbo_state_graph_set_nullable_string_field(root, "graph_name", graph->name) != 0 ||
       turbo_state_graph_set_nullable_string_field(root, "entry_node", graph->entry_node) != 0) {
-    turbo_runtime_data_bind_value_destroy(root);
-    turbo_runtime_data_bind_value_destroy(channels);
-    turbo_runtime_data_bind_value_destroy(nodes);
-    turbo_runtime_data_bind_value_destroy(edges);
+    turbo_runtime_json_destroy(root);
+    turbo_runtime_json_destroy(channels);
+    turbo_runtime_json_destroy(nodes);
+    turbo_runtime_json_destroy(edges);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
   for (i = 0; i < graph->channel_count; ++i) {
-    turbo_runtime_data_bind_value_t *channel = NULL;
+    json_value_t *channel = NULL;
     if (turbo_state_graph_channel_object(&graph->channels[i], &channel) !=
         TURBO_STATE_GRAPH_OK ||
-        turbo_runtime_data_bind_array_append(channels, channel) != TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(channel);
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(channels);
-      turbo_runtime_data_bind_value_destroy(nodes);
-      turbo_runtime_data_bind_value_destroy(edges);
+        turbo_runtime_json_array_append(channels, channel) != TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(channel);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(channels);
+      turbo_runtime_json_destroy(nodes);
+      turbo_runtime_json_destroy(edges);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
 
   for (i = 0; i < graph->node_count; ++i) {
-    turbo_runtime_data_bind_value_t *node = turbo_runtime_data_bind_value_create_string(
+    json_value_t *node = turbo_json_create_string(
         graph->nodes[i].name);
-    if (!node || turbo_runtime_data_bind_array_append(nodes, node) !=
-                     TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(node);
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(channels);
-      turbo_runtime_data_bind_value_destroy(nodes);
-      turbo_runtime_data_bind_value_destroy(edges);
+    if (!node || turbo_runtime_json_array_append(nodes, node) !=
+                     TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(node);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(channels);
+      turbo_runtime_json_destroy(nodes);
+      turbo_runtime_json_destroy(edges);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
 
   for (i = 0; i < graph->edge_count; ++i) {
-    turbo_runtime_data_bind_value_t *edge = turbo_runtime_data_bind_value_create_object();
+    json_value_t *edge = turbo_json_create_object();
     if (!edge ||
-        turbo_agent_util_bind_object_set_string(edge, "from",
+        turbo_agent_util_json_value_object_set_string(edge, "from",
                                                 graph->nodes[graph->edges[i].from_index].name) != 0 ||
-        turbo_agent_util_bind_object_set_string(edge, "to",
+        turbo_agent_util_json_value_object_set_string(edge, "to",
                                                 graph->nodes[graph->edges[i].to_index].name) != 0 ||
-        turbo_runtime_data_bind_array_append(edges, edge) != TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(edge);
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(channels);
-      turbo_runtime_data_bind_value_destroy(nodes);
-      turbo_runtime_data_bind_value_destroy(edges);
+        turbo_runtime_json_array_append(edges, edge) != TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(edge);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(channels);
+      turbo_runtime_json_destroy(nodes);
+      turbo_runtime_json_destroy(edges);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
 
-  if (turbo_runtime_data_bind_object_set(root, "channels", channels) !=
-          TURBO_RUNTIME_DATA_BIND_OK ||
-      turbo_runtime_data_bind_object_set(root, "nodes", nodes) != TURBO_RUNTIME_DATA_BIND_OK ||
-      turbo_runtime_data_bind_object_set(root, "edges", edges) != TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(channels);
-    turbo_runtime_data_bind_value_destroy(nodes);
-    turbo_runtime_data_bind_value_destroy(edges);
-    turbo_runtime_data_bind_value_destroy(root);
+  if (turbo_runtime_json_object_set(root, "channels", channels) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(root, "nodes", nodes) != TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(root, "edges", edges) != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(channels);
+    turbo_runtime_json_destroy(nodes);
+    turbo_runtime_json_destroy(edges);
+    turbo_runtime_json_destroy(root);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
@@ -625,124 +625,124 @@ static turbo_state_graph_status_t turbo_state_graph_topology_snapshot(
 
 static turbo_state_graph_status_t
 turbo_state_graph_validate_channel_value(const turbo_state_graph_channel_entry_t *channel,
-                                         const turbo_runtime_data_bind_value_t *value) {
+                                         const json_value_t *value) {
   size_t i;
 
   if (!channel || !value) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  if (turbo_runtime_data_bind_value_kind(value) == TURBO_RUNTIME_DATA_BIND_VALUE_NULL ||
-      channel->value_kind == TURBO_RUNTIME_DATA_BIND_VALUE_NULL) {
+  if (turbo_json_type(value) == TURBO_JSON_NULL ||
+      channel->value_kind == TURBO_JSON_NULL) {
     return TURBO_STATE_GRAPH_OK;
   }
 
   if (channel->reducer == TURBO_STATE_GRAPH_REDUCER_APPEND &&
-      turbo_runtime_data_bind_value_kind(value) == TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
-    for (i = 0; i < turbo_runtime_data_bind_value_size(value); ++i) {
-      const turbo_runtime_data_bind_value_t *child =
-          turbo_runtime_data_bind_array_get(value, i);
-      if (child && turbo_runtime_data_bind_value_kind(child) != channel->value_kind &&
-          turbo_runtime_data_bind_value_kind(child) != TURBO_RUNTIME_DATA_BIND_VALUE_NULL) {
+      turbo_json_type(value) == TURBO_JSON_ARRAY) {
+    for (i = 0; i < turbo_runtime_json_value_size(value); ++i) {
+      const json_value_t *child =
+          turbo_json_array_get(value, i);
+      if (child && turbo_json_type(child) != channel->value_kind &&
+          turbo_json_type(child) != TURBO_JSON_NULL) {
         return TURBO_STATE_GRAPH_TYPE_MISMATCH;
       }
     }
     return TURBO_STATE_GRAPH_OK;
   }
 
-  if (turbo_runtime_data_bind_value_kind(value) != channel->value_kind) {
+  if (turbo_json_type(value) != channel->value_kind) {
     return TURBO_STATE_GRAPH_TYPE_MISMATCH;
   }
 
   return TURBO_STATE_GRAPH_OK;
 }
 
-static turbo_runtime_data_bind_value_t *
-turbo_state_graph_clone_or_null(const turbo_runtime_data_bind_value_t *value) {
+static json_value_t *
+turbo_state_graph_clone_or_null(const json_value_t *value) {
   if (!value) {
-    return turbo_runtime_data_bind_value_create_null();
+    return turbo_json_create_null();
   }
-  return turbo_runtime_data_bind_value_clone(value);
+  return turbo_json_clone(value);
 }
 
-static turbo_runtime_data_bind_value_t *turbo_state_graph_channel_base_value(
+static json_value_t *turbo_state_graph_channel_base_value(
     const turbo_state_graph_channel_entry_t *channel,
-    const turbo_runtime_data_bind_value_t *current_value) {
+    const json_value_t *current_value) {
   if (current_value) {
-    return turbo_runtime_data_bind_value_clone(current_value);
+    return turbo_json_clone(current_value);
   }
   if (channel && channel->default_value) {
-    return turbo_runtime_data_bind_value_clone(channel->default_value);
+    return turbo_json_clone(channel->default_value);
   }
-  return turbo_runtime_data_bind_value_create_null();
+  return turbo_json_create_null();
 }
 
 static turbo_state_graph_status_t turbo_state_graph_merge_object_values(
-    const turbo_runtime_data_bind_value_t *current_value,
-    const turbo_runtime_data_bind_value_t *update_value,
-    turbo_runtime_data_bind_value_t **out_value) {
-  turbo_runtime_data_bind_value_t *result = NULL;
+    const json_value_t *current_value,
+    const json_value_t *update_value,
+    json_value_t **out_value) {
+  json_value_t *result = NULL;
   size_t i;
 
   if (!update_value || !out_value) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  if (turbo_runtime_data_bind_value_kind(update_value) !=
-      TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (turbo_json_type(update_value) !=
+      TURBO_JSON_OBJECT) {
     return TURBO_STATE_GRAPH_TYPE_MISMATCH;
   }
 
   if (current_value &&
-      turbo_runtime_data_bind_value_kind(current_value) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT &&
-      turbo_runtime_data_bind_value_kind(current_value) != TURBO_RUNTIME_DATA_BIND_VALUE_NULL) {
+      turbo_json_type(current_value) != TURBO_JSON_OBJECT &&
+      turbo_json_type(current_value) != TURBO_JSON_NULL) {
     return TURBO_STATE_GRAPH_TYPE_MISMATCH;
   }
 
   if (current_value &&
-      turbo_runtime_data_bind_value_kind(current_value) == TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
-    result = turbo_runtime_data_bind_value_clone(current_value);
+      turbo_json_type(current_value) == TURBO_JSON_OBJECT) {
+    result = turbo_json_clone(current_value);
   } else {
-    result = turbo_runtime_data_bind_value_create_object();
+    result = turbo_json_create_object();
   }
   if (!result) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  for (i = 0; i < turbo_runtime_data_bind_value_size(update_value); ++i) {
-    const char *key = turbo_runtime_data_bind_object_key_at(update_value, i);
-    const turbo_runtime_data_bind_value_t *update_child =
-        turbo_runtime_data_bind_object_get(update_value, key);
-    const turbo_runtime_data_bind_value_t *current_child =
-        turbo_runtime_data_bind_object_get(result, key);
-    turbo_runtime_data_bind_value_t *merged_child = NULL;
+  for (i = 0; i < turbo_runtime_json_value_size(update_value); ++i) {
+    const char *key = turbo_json_object_key(update_value, i);
+    const json_value_t *update_child =
+        turbo_json_object_get(update_value, key);
+    const json_value_t *current_child =
+        turbo_json_object_get(result, key);
+    json_value_t *merged_child = NULL;
     turbo_state_graph_status_t status;
 
     if (!key || !update_child) {
-      turbo_runtime_data_bind_value_destroy(result);
+      turbo_runtime_json_destroy(result);
       return TURBO_STATE_GRAPH_INVALID_UPDATE;
     }
 
     if (current_child &&
-        turbo_runtime_data_bind_value_kind(current_child) ==
-            TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT &&
-        turbo_runtime_data_bind_value_kind(update_child) ==
-            TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+        turbo_json_type(current_child) ==
+            TURBO_JSON_OBJECT &&
+        turbo_json_type(update_child) ==
+            TURBO_JSON_OBJECT) {
       status = turbo_state_graph_merge_object_values(current_child, update_child, &merged_child);
     } else {
-      merged_child = turbo_runtime_data_bind_value_clone(update_child);
+      merged_child = turbo_json_clone(update_child);
       status = merged_child ? TURBO_STATE_GRAPH_OK : TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
 
     if (status != TURBO_STATE_GRAPH_OK) {
-      turbo_runtime_data_bind_value_destroy(result);
+      turbo_runtime_json_destroy(result);
       return status;
     }
 
-    if (turbo_runtime_data_bind_object_set(result, key, merged_child) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(merged_child);
-      turbo_runtime_data_bind_value_destroy(result);
+    if (turbo_runtime_json_object_set(result, key, merged_child) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(merged_child);
+      turbo_runtime_json_destroy(result);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
@@ -753,10 +753,10 @@ static turbo_state_graph_status_t turbo_state_graph_merge_object_values(
 
 static turbo_state_graph_status_t turbo_state_graph_reduce_channel(
     const turbo_state_graph_channel_entry_t *channel,
-    const turbo_runtime_data_bind_value_t *current_value,
-    const turbo_runtime_data_bind_value_t *update_value,
-    turbo_runtime_data_bind_value_t **out_value) {
-  turbo_runtime_data_bind_value_t *result = NULL;
+    const json_value_t *current_value,
+    const json_value_t *update_value,
+    json_value_t **out_value) {
+  json_value_t *result = NULL;
   turbo_state_graph_status_t status;
   size_t i;
 
@@ -774,75 +774,75 @@ static turbo_state_graph_status_t turbo_state_graph_reduce_channel(
 
   switch (channel->reducer) {
     case TURBO_STATE_GRAPH_REDUCER_REPLACE:
-      result = turbo_runtime_data_bind_value_clone(update_value);
+      result = turbo_json_clone(update_value);
       return result ? (*out_value = result, TURBO_STATE_GRAPH_OK)
                     : TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     case TURBO_STATE_GRAPH_REDUCER_LAST_NON_NULL:
-      if (turbo_runtime_data_bind_value_kind(update_value) ==
-          TURBO_RUNTIME_DATA_BIND_VALUE_NULL) {
+      if (turbo_json_type(update_value) ==
+          TURBO_JSON_NULL) {
         result = turbo_state_graph_channel_base_value(channel, current_value);
       } else {
-        result = turbo_runtime_data_bind_value_clone(update_value);
+        result = turbo_json_clone(update_value);
       }
       return result ? (*out_value = result, TURBO_STATE_GRAPH_OK)
                     : TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     case TURBO_STATE_GRAPH_REDUCER_APPEND:
       if (current_value &&
-          turbo_runtime_data_bind_value_kind(current_value) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY &&
-          turbo_runtime_data_bind_value_kind(current_value) != TURBO_RUNTIME_DATA_BIND_VALUE_NULL) {
+          turbo_json_type(current_value) != TURBO_JSON_ARRAY &&
+          turbo_json_type(current_value) != TURBO_JSON_NULL) {
         return TURBO_STATE_GRAPH_TYPE_MISMATCH;
       }
       result =
           (current_value &&
-           turbo_runtime_data_bind_value_kind(current_value) == TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY)
-              ? turbo_runtime_data_bind_value_clone(current_value)
-              : turbo_runtime_data_bind_value_create_array();
+           turbo_json_type(current_value) == TURBO_JSON_ARRAY)
+              ? turbo_json_clone(current_value)
+              : turbo_json_create_array();
       if (!result) {
         return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
       }
-      if (turbo_runtime_data_bind_value_kind(update_value) ==
-          TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
-        for (i = 0; i < turbo_runtime_data_bind_value_size(update_value); ++i) {
-          const turbo_runtime_data_bind_value_t *child =
-              turbo_runtime_data_bind_array_get(update_value, i);
-          turbo_runtime_data_bind_value_t *child_copy = NULL;
+      if (turbo_json_type(update_value) ==
+          TURBO_JSON_ARRAY) {
+        for (i = 0; i < turbo_runtime_json_value_size(update_value); ++i) {
+          const json_value_t *child =
+              turbo_json_array_get(update_value, i);
+          json_value_t *child_copy = NULL;
 
           status = turbo_state_graph_validate_channel_value(channel, child);
           if (status != TURBO_STATE_GRAPH_OK) {
-            turbo_runtime_data_bind_value_destroy(result);
+            turbo_runtime_json_destroy(result);
             return status;
           }
 
-          child_copy = turbo_runtime_data_bind_value_clone(child);
+          child_copy = turbo_json_clone(child);
           if (!child_copy) {
-            turbo_runtime_data_bind_value_destroy(result);
+            turbo_runtime_json_destroy(result);
             return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
           }
-          if (turbo_runtime_data_bind_array_append(result, child_copy) !=
-              TURBO_RUNTIME_DATA_BIND_OK) {
-            turbo_runtime_data_bind_value_destroy(child_copy);
-            turbo_runtime_data_bind_value_destroy(result);
+          if (turbo_runtime_json_array_append(result, child_copy) !=
+              TURBO_RUNTIME_JSON_OK) {
+            turbo_runtime_json_destroy(child_copy);
+            turbo_runtime_json_destroy(result);
             return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
           }
         }
       } else {
-        turbo_runtime_data_bind_value_t *child_copy = NULL;
+        json_value_t *child_copy = NULL;
 
         status = turbo_state_graph_validate_channel_value(channel, update_value);
         if (status != TURBO_STATE_GRAPH_OK) {
-          turbo_runtime_data_bind_value_destroy(result);
+          turbo_runtime_json_destroy(result);
           return status;
         }
 
-        child_copy = turbo_runtime_data_bind_value_clone(update_value);
+        child_copy = turbo_json_clone(update_value);
         if (!child_copy) {
-          turbo_runtime_data_bind_value_destroy(result);
+          turbo_runtime_json_destroy(result);
           return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
         }
-        if (turbo_runtime_data_bind_array_append(result, child_copy) !=
-            TURBO_RUNTIME_DATA_BIND_OK) {
-          turbo_runtime_data_bind_value_destroy(child_copy);
-          turbo_runtime_data_bind_value_destroy(result);
+        if (turbo_runtime_json_array_append(result, child_copy) !=
+            TURBO_RUNTIME_JSON_OK) {
+          turbo_runtime_json_destroy(child_copy);
+          turbo_runtime_json_destroy(result);
           return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
         }
       }
@@ -857,35 +857,35 @@ static turbo_state_graph_status_t turbo_state_graph_reduce_channel(
       int64_t sum_int64;
 
       if (update_value &&
-          turbo_runtime_data_bind_value_kind(update_value) != TURBO_RUNTIME_DATA_BIND_VALUE_INT64 &&
-          turbo_runtime_data_bind_value_kind(update_value) != TURBO_RUNTIME_DATA_BIND_VALUE_DOUBLE) {
+          turbo_json_type(update_value) != TURBO_JSON_NUMBER &&
+          turbo_json_type(update_value) != TURBO_JSON_NUMBER) {
         return TURBO_STATE_GRAPH_TYPE_MISMATCH;
       }
       if (current_value &&
-          turbo_runtime_data_bind_value_kind(current_value) != TURBO_RUNTIME_DATA_BIND_VALUE_INT64 &&
-          turbo_runtime_data_bind_value_kind(current_value) != TURBO_RUNTIME_DATA_BIND_VALUE_DOUBLE &&
-          turbo_runtime_data_bind_value_kind(current_value) != TURBO_RUNTIME_DATA_BIND_VALUE_NULL) {
+          turbo_json_type(current_value) != TURBO_JSON_NUMBER &&
+          turbo_json_type(current_value) != TURBO_JSON_NUMBER &&
+          turbo_json_type(current_value) != TURBO_JSON_NULL) {
         return TURBO_STATE_GRAPH_TYPE_MISMATCH;
       }
 
       current_is_double =
           current_value &&
-          turbo_runtime_data_bind_value_kind(current_value) == TURBO_RUNTIME_DATA_BIND_VALUE_DOUBLE;
+          turbo_json_type(current_value) == TURBO_JSON_NUMBER;
       update_is_double =
-          turbo_runtime_data_bind_value_kind(update_value) == TURBO_RUNTIME_DATA_BIND_VALUE_DOUBLE;
+          turbo_json_type(update_value) == TURBO_JSON_NUMBER;
 
       if (current_is_double || update_is_double ||
-          channel->value_kind == TURBO_RUNTIME_DATA_BIND_VALUE_DOUBLE) {
+          channel->value_kind == TURBO_JSON_NUMBER) {
         sum_double =
-            current_is_double ? turbo_runtime_data_bind_value_as_double(current_value, 0.0)
-                              : (double)turbo_runtime_data_bind_value_as_int64(current_value, 0);
-        sum_double += update_is_double ? turbo_runtime_data_bind_value_as_double(update_value, 0.0)
-                                       : (double)turbo_runtime_data_bind_value_as_int64(update_value, 0);
-        result = turbo_runtime_data_bind_value_create_double(sum_double);
+            current_is_double ? turbo_runtime_json_value_as_double(current_value, 0.0)
+                              : (double)turbo_runtime_json_value_as_int64(current_value, 0);
+        sum_double += update_is_double ? turbo_runtime_json_value_as_double(update_value, 0.0)
+                                       : (double)turbo_runtime_json_value_as_int64(update_value, 0);
+        result = turbo_json_create_number(sum_double);
       } else {
-        sum_int64 = turbo_runtime_data_bind_value_as_int64(current_value, 0);
-        sum_int64 += turbo_runtime_data_bind_value_as_int64(update_value, 0);
-        result = turbo_runtime_data_bind_value_create_int64(sum_int64);
+        sum_int64 = turbo_runtime_json_value_as_int64(current_value, 0);
+        sum_int64 += turbo_runtime_json_value_as_int64(update_value, 0);
+        result = turbo_json_create_int64(sum_int64);
       }
       if (!result) {
         return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
@@ -899,25 +899,25 @@ static turbo_state_graph_status_t turbo_state_graph_reduce_channel(
 }
 
 static turbo_state_graph_status_t turbo_state_graph_apply_update(
-    turbo_state_graph_t *graph, turbo_runtime_data_bind_value_t *state,
-    const turbo_runtime_data_bind_value_t *update) {
+    turbo_state_graph_t *graph, json_value_t *state,
+    const json_value_t *update) {
   size_t i;
 
   if (!graph || !state || !update) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
-  if (turbo_runtime_data_bind_value_kind(state) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT ||
-      turbo_runtime_data_bind_value_kind(update) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (turbo_json_type(state) != TURBO_JSON_OBJECT ||
+      turbo_json_type(update) != TURBO_JSON_OBJECT) {
     return TURBO_STATE_GRAPH_TYPE_MISMATCH;
   }
 
-  for (i = 0; i < turbo_runtime_data_bind_value_size(update); ++i) {
-    const char *key = turbo_runtime_data_bind_object_key_at(update, i);
-    const turbo_runtime_data_bind_value_t *update_value =
-        turbo_runtime_data_bind_object_get(update, key);
-    const turbo_runtime_data_bind_value_t *current_value =
-        turbo_runtime_data_bind_object_get(state, key);
-    turbo_runtime_data_bind_value_t *merged_value = NULL;
+  for (i = 0; i < turbo_runtime_json_value_size(update); ++i) {
+    const char *key = turbo_json_object_key(update, i);
+    const json_value_t *update_value =
+        turbo_json_object_get(update, key);
+    const json_value_t *current_value =
+        turbo_json_object_get(state, key);
+    json_value_t *merged_value = NULL;
     turbo_state_graph_status_t status;
     size_t channel_index;
 
@@ -936,9 +936,9 @@ static turbo_state_graph_status_t turbo_state_graph_apply_update(
       return status;
     }
 
-    if (turbo_runtime_data_bind_object_set(state, key, merged_value) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(merged_value);
+    if (turbo_runtime_json_object_set(state, key, merged_value) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(merged_value);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
@@ -954,7 +954,7 @@ static void turbo_state_graph_free_pending_sends(turbo_state_graph_exec_ctx_t *c
   }
   for (i = 0; i < ctx->send_count; ++i) {
     turbo_state_graph_str_free(ctx->sends[i].target_node);
-    turbo_runtime_data_bind_value_destroy(ctx->sends[i].update);
+    turbo_runtime_json_destroy(ctx->sends[i].update);
   }
   free(ctx->sends);
   ctx->sends = NULL;
@@ -967,8 +967,8 @@ static turbo_state_graph_status_t turbo_state_graph_execute_send_node(
     const turbo_state_graph_pending_send_t *send, size_t step,
     turbo_state_graph_history_entry_t **latest_history) {
   size_t target_index;
-  turbo_runtime_data_bind_value_t *branch_update = NULL;
-  turbo_runtime_data_bind_value_t *node_update = NULL;
+  json_value_t *branch_update = NULL;
+  json_value_t *node_update = NULL;
   turbo_state_graph_exec_ctx_t branch_ctx;
   turbo_state_graph_status_t status;
   int callback_status;
@@ -976,7 +976,7 @@ static turbo_state_graph_status_t turbo_state_graph_execute_send_node(
   if (!graph || !run || !send || !send->target_node || !send->update || !latest_history) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
-  if (turbo_runtime_data_bind_value_kind(send->update) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (turbo_json_type(send->update) != TURBO_JSON_OBJECT) {
     return TURBO_STATE_GRAPH_TYPE_MISMATCH;
   }
   target_index = turbo_state_graph_find_node_index(graph, send->target_node);
@@ -984,24 +984,24 @@ static turbo_state_graph_status_t turbo_state_graph_execute_send_node(
     return TURBO_STATE_GRAPH_NODE_NOT_FOUND;
   }
 
-  branch_update = turbo_runtime_data_bind_value_clone(send->update);
+  branch_update = turbo_json_clone(send->update);
   if (!branch_update) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
   status = turbo_state_graph_apply_update(graph, run->state, branch_update);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(branch_update);
+    turbo_runtime_json_destroy(branch_update);
     return status;
   }
   status = turbo_state_graph_add_history_record(
       graph, run, TURBO_STATE_GRAPH_SOURCE_NODE, send->target_node, "send", NULL,
       send->target_node, step, branch_update, run->state, latest_history);
-  turbo_runtime_data_bind_value_destroy(branch_update);
+  turbo_runtime_json_destroy(branch_update);
   if (status != TURBO_STATE_GRAPH_OK) {
     return status;
   }
 
-  node_update = turbo_runtime_data_bind_value_create_object();
+  node_update = turbo_json_create_object();
   if (!node_update) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
@@ -1013,27 +1013,27 @@ static turbo_state_graph_status_t turbo_state_graph_execute_send_node(
   branch_ctx.step = step;
 
   callback_status =
-      graph->nodes[target_index].bind_fn(&branch_ctx, graph->nodes[target_index].user_data);
+      graph->nodes[target_index].json_value_fn(&branch_ctx, graph->nodes[target_index].user_data);
   if (callback_status != 0 || branch_ctx.send_count > 0 || branch_ctx.next_node ||
       branch_ctx.stop) {
     turbo_state_graph_free_pending_sends(&branch_ctx);
-    turbo_runtime_data_bind_value_destroy(node_update);
+    turbo_runtime_json_destroy(node_update);
     return TURBO_STATE_GRAPH_ERROR;
   }
   status = turbo_state_graph_apply_update(graph, run->state, node_update);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(node_update);
+    turbo_runtime_json_destroy(node_update);
     return status;
   }
   status = turbo_state_graph_add_history_record(
       graph, run, TURBO_STATE_GRAPH_SOURCE_NODE, graph->nodes[target_index].name, "send_target",
       graph->nodes[target_index].name, NULL, step, node_update, run->state, latest_history);
-  turbo_runtime_data_bind_value_destroy(node_update);
+  turbo_runtime_json_destroy(node_update);
   return status;
 }
 
 static turbo_state_graph_status_t turbo_state_graph_seed_defaults(
-    turbo_state_graph_t *graph, turbo_runtime_data_bind_value_t *state) {
+    turbo_state_graph_t *graph, json_value_t *state) {
   size_t i;
 
   if (!graph || !state) {
@@ -1041,14 +1041,14 @@ static turbo_state_graph_status_t turbo_state_graph_seed_defaults(
   }
 
   for (i = 0; i < graph->channel_count; ++i) {
-    turbo_runtime_data_bind_value_t *value =
+    json_value_t *value =
         turbo_state_graph_channel_base_value(&graph->channels[i], NULL);
     if (!value) {
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
-    if (turbo_runtime_data_bind_object_set(state, graph->channels[i].name, value) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(value);
+    if (turbo_runtime_json_object_set(state, graph->channels[i].name, value) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(value);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
@@ -1116,7 +1116,7 @@ static turbo_state_graph_status_t turbo_state_graph_add_thread_record(
 
 static turbo_state_graph_status_t turbo_state_graph_add_run_record(
     turbo_state_graph_t *graph, const char *thread_id, const char *parent_run_id,
-    const char *forked_from_history_id, const turbo_runtime_data_bind_value_t *state,
+    const char *forked_from_history_id, const json_value_t *state,
     const char *current_node, size_t steps, turbo_state_graph_run_entry_t **out_run) {
   turbo_state_graph_run_entry_t *run = NULL;
 
@@ -1140,7 +1140,7 @@ static turbo_state_graph_status_t turbo_state_graph_add_run_record(
   run->steps = steps;
   run->interrupted = 0;
   run->completed = current_node ? 0 : 1;
-  run->state = turbo_runtime_data_bind_value_clone(state);
+  run->state = turbo_json_clone(state);
 
   if (!run->id || !run->thread_id || !run->state ||
       (current_node && !run->current_node) ||
@@ -1160,12 +1160,12 @@ static turbo_state_graph_status_t turbo_state_graph_add_history_record(
     turbo_state_graph_t *graph, turbo_state_graph_run_entry_t *run,
     turbo_state_graph_source_kind_t source_kind, const char *source_name,
     const char *reason, const char *last_node, const char *next_node, size_t step,
-    const turbo_runtime_data_bind_value_t *update,
-    const turbo_runtime_data_bind_value_t *state,
+    const json_value_t *update,
+    const json_value_t *state,
     turbo_state_graph_history_entry_t **out_history_entry) {
   turbo_state_graph_history_entry_t *history_entry = NULL;
-  turbo_runtime_data_bind_value_t *update_copy = NULL;
-  turbo_runtime_data_bind_value_t *state_copy = NULL;
+  json_value_t *update_copy = NULL;
+  json_value_t *state_copy = NULL;
 
   if (!graph || !run || !state || !out_history_entry) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
@@ -1177,12 +1177,12 @@ static turbo_state_graph_status_t turbo_state_graph_add_history_record(
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  update_copy = update ? turbo_runtime_data_bind_value_clone(update)
-                       : turbo_runtime_data_bind_value_create_object();
-  state_copy = turbo_runtime_data_bind_value_clone(state);
+  update_copy = update ? turbo_json_clone(update)
+                       : turbo_json_create_object();
+  state_copy = turbo_json_clone(state);
   if (!update_copy || !state_copy) {
-    turbo_runtime_data_bind_value_destroy(update_copy);
-    turbo_runtime_data_bind_value_destroy(state_copy);
+    turbo_runtime_json_destroy(update_copy);
+    turbo_runtime_json_destroy(state_copy);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
@@ -1228,52 +1228,52 @@ static turbo_state_graph_status_t turbo_state_graph_add_history_record(
 
 static turbo_state_graph_status_t
 turbo_state_graph_history_object(const turbo_state_graph_history_entry_t *history_entry,
-                                 turbo_runtime_data_bind_value_t **out_object) {
-  turbo_runtime_data_bind_value_t *object = NULL;
-  turbo_runtime_data_bind_value_t *value = NULL;
+                                 json_value_t **out_object) {
+  json_value_t *object = NULL;
+  json_value_t *value = NULL;
 
   if (!history_entry || !out_object) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  object = turbo_runtime_data_bind_value_create_object();
+  object = turbo_json_create_object();
   if (!object) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  if (turbo_agent_util_bind_object_set_string(object, "history_entry_id", history_entry->id) != 0 ||
-      turbo_agent_util_bind_object_set_string(object, "checkpoint_id",
+  if (turbo_agent_util_json_value_object_set_string(object, "history_entry_id", history_entry->id) != 0 ||
+      turbo_agent_util_json_value_object_set_string(object, "checkpoint_id",
                                               history_entry->checkpoint_id) != 0 ||
-      turbo_agent_util_bind_object_set_string(object, "thread_id", history_entry->thread_id) != 0 ||
-      turbo_agent_util_bind_object_set_string(object, "run_id", history_entry->run_id) != 0 ||
-      turbo_agent_util_bind_object_set_string(object, "source_kind",
+      turbo_agent_util_json_value_object_set_string(object, "thread_id", history_entry->thread_id) != 0 ||
+      turbo_agent_util_json_value_object_set_string(object, "run_id", history_entry->run_id) != 0 ||
+      turbo_agent_util_json_value_object_set_string(object, "source_kind",
                                               turbo_state_graph_source_kind_text(
                                                   history_entry->source_kind)) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "source_name",
+      turbo_state_graph_json_value_object_set_nullable_string(object, "source_name",
                                                         history_entry->source_name) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "reason",
+      turbo_state_graph_json_value_object_set_nullable_string(object, "reason",
                                                         history_entry->reason) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "last_node",
+      turbo_state_graph_json_value_object_set_nullable_string(object, "last_node",
                                                         history_entry->last_node) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "next_node",
+      turbo_state_graph_json_value_object_set_nullable_string(object, "next_node",
                                                         history_entry->next_node) != 0 ||
-      turbo_agent_util_bind_object_set_int64(object, "step",
+      turbo_agent_util_json_value_object_set_int64(object, "step",
                                              (int64_t)history_entry->step) != 0 ||
-      turbo_agent_util_bind_object_set_clone(object, "update", history_entry->update) != 0 ||
-      turbo_agent_util_bind_object_set_clone(object, "state", history_entry->state) != 0) {
-    turbo_runtime_data_bind_value_destroy(object);
+      turbo_agent_util_json_value_object_set_clone(object, "update", history_entry->update) != 0 ||
+      turbo_agent_util_json_value_object_set_clone(object, "state", history_entry->state) != 0) {
+    turbo_runtime_json_destroy(object);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  value = turbo_runtime_data_bind_value_create_bool(1);
+  value = turbo_json_create_bool(1);
   if (!value) {
-    turbo_runtime_data_bind_value_destroy(object);
+    turbo_runtime_json_destroy(object);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
-  if (turbo_runtime_data_bind_object_set(object, "checkpointable", value) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(value);
-    turbo_runtime_data_bind_value_destroy(object);
+  if (turbo_runtime_json_object_set(object, "checkpointable", value) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(value);
+    turbo_runtime_json_destroy(object);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
@@ -1282,34 +1282,34 @@ turbo_state_graph_history_object(const turbo_state_graph_history_entry_t *histor
 }
 
 static turbo_state_graph_status_t turbo_state_graph_run_object(
-    const turbo_state_graph_run_entry_t *run, turbo_runtime_data_bind_value_t **out_object) {
-  turbo_runtime_data_bind_value_t *object = NULL;
+    const turbo_state_graph_run_entry_t *run, json_value_t **out_object) {
+  json_value_t *object = NULL;
 
   if (!run || !out_object) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  object = turbo_runtime_data_bind_value_create_object();
+  object = turbo_json_create_object();
   if (!object) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  if (turbo_agent_util_bind_object_set_string(object, "run_id", run->id) != 0 ||
-      turbo_agent_util_bind_object_set_string(object, "thread_id", run->thread_id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "parent_run_id",
+  if (turbo_agent_util_json_value_object_set_string(object, "run_id", run->id) != 0 ||
+      turbo_agent_util_json_value_object_set_string(object, "thread_id", run->thread_id) != 0 ||
+      turbo_state_graph_json_value_object_set_nullable_string(object, "parent_run_id",
                                                         run->parent_run_id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "forked_from_history_id",
+      turbo_state_graph_json_value_object_set_nullable_string(object, "forked_from_history_id",
                                                         run->forked_from_history_id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "latest_history_entry_id",
+      turbo_state_graph_json_value_object_set_nullable_string(object, "latest_history_entry_id",
                                                         run->latest_history_entry_id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "next_node",
+      turbo_state_graph_json_value_object_set_nullable_string(object, "next_node",
                                                         run->current_node) != 0 ||
-      turbo_agent_util_bind_object_set_string(object, "status",
+      turbo_agent_util_json_value_object_set_string(object, "status",
                                               turbo_state_graph_run_status_text(run)) != 0 ||
-      turbo_agent_util_bind_object_set_int64(object, "steps",
+      turbo_agent_util_json_value_object_set_int64(object, "steps",
                                              (int64_t)run->steps) != 0 ||
-      turbo_agent_util_bind_object_set_clone(object, "state", run->state) != 0) {
-    turbo_runtime_data_bind_value_destroy(object);
+      turbo_agent_util_json_value_object_set_clone(object, "state", run->state) != 0) {
+    turbo_runtime_json_destroy(object);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
@@ -1319,25 +1319,25 @@ static turbo_state_graph_status_t turbo_state_graph_run_object(
 
 static turbo_state_graph_status_t turbo_state_graph_thread_object(
     const turbo_state_graph_thread_entry_t *thread,
-    const turbo_runtime_data_bind_value_t *current_state,
-    turbo_runtime_data_bind_value_t **out_object) {
-  turbo_runtime_data_bind_value_t *object = NULL;
+    const json_value_t *current_state,
+    json_value_t **out_object) {
+  json_value_t *object = NULL;
 
   if (!thread || !out_object) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  object = turbo_runtime_data_bind_value_create_object();
+  object = turbo_json_create_object();
   if (!object) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  if (turbo_agent_util_bind_object_set_string(object, "thread_id", thread->id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(object, "current_run_id",
+  if (turbo_agent_util_json_value_object_set_string(object, "thread_id", thread->id) != 0 ||
+      turbo_state_graph_json_value_object_set_nullable_string(object, "current_run_id",
                                                         thread->current_run_id) != 0 ||
       (current_state &&
-       turbo_agent_util_bind_object_set_clone(object, "current_state", current_state) != 0)) {
-    turbo_runtime_data_bind_value_destroy(object);
+       turbo_agent_util_json_value_object_set_clone(object, "current_state", current_state) != 0)) {
+    turbo_runtime_json_destroy(object);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
@@ -1347,81 +1347,81 @@ static turbo_state_graph_status_t turbo_state_graph_thread_object(
 
 static turbo_state_graph_status_t turbo_state_graph_branch_tree_object(
     turbo_state_graph_t *graph, const turbo_state_graph_thread_entry_t *thread,
-    turbo_runtime_data_bind_value_t **out_object) {
-  turbo_runtime_data_bind_value_t *root = NULL;
-  turbo_runtime_data_bind_value_t *branches = NULL;
+    json_value_t **out_object) {
+  json_value_t *root = NULL;
+  json_value_t *branches = NULL;
   size_t i;
 
   if (!graph || !thread || !out_object) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  root = turbo_runtime_data_bind_value_create_object();
-  branches = turbo_runtime_data_bind_value_create_array();
+  root = turbo_json_create_object();
+  branches = turbo_json_create_array();
   if (!root || !branches) {
-    turbo_runtime_data_bind_value_destroy(root);
-    turbo_runtime_data_bind_value_destroy(branches);
+    turbo_runtime_json_destroy(root);
+    turbo_runtime_json_destroy(branches);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  if (turbo_agent_util_bind_object_set_string(root, "thread_id", thread->id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(root, "current_run_id",
+  if (turbo_agent_util_json_value_object_set_string(root, "thread_id", thread->id) != 0 ||
+      turbo_state_graph_json_value_object_set_nullable_string(root, "current_run_id",
                                                         thread->current_run_id) != 0) {
-    turbo_runtime_data_bind_value_destroy(root);
-    turbo_runtime_data_bind_value_destroy(branches);
+    turbo_runtime_json_destroy(root);
+    turbo_runtime_json_destroy(branches);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
   for (i = 0; i < graph->run_count; ++i) {
     const turbo_state_graph_run_entry_t *run = &graph->runs[i];
-    turbo_runtime_data_bind_value_t *branch = NULL;
+    json_value_t *branch = NULL;
 
     if (strcmp(run->thread_id, thread->id) != 0) {
       continue;
     }
 
-    branch = turbo_runtime_data_bind_value_create_object();
+    branch = turbo_json_create_object();
     if (!branch) {
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(branches);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(branches);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
 
-    if (turbo_agent_util_bind_object_set_string(branch, "run_id", run->id) != 0 ||
-        turbo_state_graph_bind_object_set_nullable_string(branch, "parent_run_id",
+    if (turbo_agent_util_json_value_object_set_string(branch, "run_id", run->id) != 0 ||
+        turbo_state_graph_json_value_object_set_nullable_string(branch, "parent_run_id",
                                                           run->parent_run_id) != 0 ||
-        turbo_state_graph_bind_object_set_nullable_string(branch,
+        turbo_state_graph_json_value_object_set_nullable_string(branch,
                                                           "forked_from_history_id",
                                                           run->forked_from_history_id) != 0 ||
-        turbo_state_graph_bind_object_set_nullable_string(branch,
+        turbo_state_graph_json_value_object_set_nullable_string(branch,
                                                           "latest_history_entry_id",
                                                           run->latest_history_entry_id) != 0 ||
-        turbo_state_graph_bind_object_set_nullable_string(branch, "next_node",
+        turbo_state_graph_json_value_object_set_nullable_string(branch, "next_node",
                                                           run->current_node) != 0 ||
-        turbo_agent_util_bind_object_set_string(branch, "status",
+        turbo_agent_util_json_value_object_set_string(branch, "status",
                                                 turbo_state_graph_run_status_text(run)) != 0 ||
-        turbo_agent_util_bind_object_set_int64(branch, "steps",
+        turbo_agent_util_json_value_object_set_int64(branch, "steps",
                                                (int64_t)run->steps) != 0 ||
-        turbo_agent_util_bind_object_set_clone(branch, "state", run->state) != 0) {
-      turbo_runtime_data_bind_value_destroy(branch);
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(branches);
+        turbo_agent_util_json_value_object_set_clone(branch, "state", run->state) != 0) {
+      turbo_runtime_json_destroy(branch);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(branches);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
 
-    if (turbo_runtime_data_bind_array_append(branches, branch) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(branch);
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(branches);
+    if (turbo_runtime_json_array_append(branches, branch) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(branch);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(branches);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
 
-  if (turbo_runtime_data_bind_object_set(root, "branches", branches) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(branches);
-    turbo_runtime_data_bind_value_destroy(root);
+  if (turbo_runtime_json_object_set(root, "branches", branches) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(branches);
+    turbo_runtime_json_destroy(root);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
@@ -1433,7 +1433,7 @@ static turbo_state_graph_status_t
 turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_entry_t *run,
                               const turbo_state_graph_run_options_t *options,
                               turbo_state_graph_run_result_t *out_result,
-                              turbo_runtime_data_bind_value_t **out_state) {
+                              json_value_t **out_state) {
   const char *current_node = NULL;
   size_t steps;
   int skip_initial_interrupt;
@@ -1462,7 +1462,7 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
 
   while (current_node) {
     turbo_state_graph_exec_ctx_t ctx;
-    turbo_runtime_data_bind_value_t *update = NULL;
+    json_value_t *update = NULL;
     turbo_state_graph_status_t status;
     size_t current_index;
     const char *executed_node = NULL;
@@ -1501,7 +1501,7 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
                                     latest_history ? latest_history->last_node : NULL,
                                     run->current_node,
                                     steps);
-      *out_state = turbo_runtime_data_bind_value_clone(run->state);
+      *out_state = turbo_json_clone(run->state);
       return *out_state ? TURBO_STATE_GRAPH_INTERRUPTED
                         : TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
@@ -1513,7 +1513,7 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
     }
     executed_node = graph->nodes[current_index].name;
 
-    update = turbo_runtime_data_bind_value_create_object();
+    update = turbo_json_create_object();
     if (!update) {
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
@@ -1529,18 +1529,18 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
     ctx.step = steps;
     ctx.stop = 0;
 
-    callback_status = graph->nodes[current_index].bind_fn(&ctx,
+    callback_status = graph->nodes[current_index].json_value_fn(&ctx,
                                                           graph->nodes[current_index].user_data);
     if (callback_status != 0) {
       turbo_state_graph_free_pending_sends(&ctx);
-      turbo_runtime_data_bind_value_destroy(update);
+      turbo_runtime_json_destroy(update);
       return TURBO_STATE_GRAPH_ERROR;
     }
 
     status = turbo_state_graph_apply_update(graph, run->state, update);
     if (status != TURBO_STATE_GRAPH_OK) {
       turbo_state_graph_free_pending_sends(&ctx);
-      turbo_runtime_data_bind_value_destroy(update);
+      turbo_runtime_json_destroy(update);
       return status;
     }
 
@@ -1549,7 +1549,7 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
                                                    &latest_history);
       if (status != TURBO_STATE_GRAPH_OK) {
         turbo_state_graph_free_pending_sends(&ctx);
-        turbo_runtime_data_bind_value_destroy(update);
+        turbo_runtime_json_destroy(update);
         return status;
       }
     }
@@ -1573,7 +1573,7 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
       }
       if (saw_outgoing && !resolved_next) {
         turbo_state_graph_free_pending_sends(&ctx);
-        turbo_runtime_data_bind_value_destroy(update);
+        turbo_runtime_json_destroy(update);
         return TURBO_STATE_GRAPH_ROUTE_NOT_FOUND;
       }
     }
@@ -1586,14 +1586,14 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
     run->completed = resolved_next ? 0 : 1;
     if (resolved_next && !run->current_node) {
       turbo_state_graph_free_pending_sends(&ctx);
-      turbo_runtime_data_bind_value_destroy(update);
+      turbo_runtime_json_destroy(update);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
 
     status = turbo_state_graph_add_history_record(
         graph, run, TURBO_STATE_GRAPH_SOURCE_NODE, executed_node, NULL, executed_node,
         resolved_next, steps, update, run->state, &latest_history);
-    turbo_runtime_data_bind_value_destroy(update);
+    turbo_runtime_json_destroy(update);
     turbo_state_graph_free_pending_sends(&ctx);
     if (status != TURBO_STATE_GRAPH_OK) {
       return status;
@@ -1608,7 +1608,7 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
                                     run->id, latest_history->id,
                                     latest_history->checkpoint_id,
                                     latest_history->last_node, NULL, steps);
-      *out_state = turbo_runtime_data_bind_value_clone(run->state);
+      *out_state = turbo_json_clone(run->state);
       return *out_state ? TURBO_STATE_GRAPH_STOP : TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
 
@@ -1619,43 +1619,43 @@ turbo_state_graph_execute_run(turbo_state_graph_t *graph, turbo_state_graph_run_
                                 latest_history ? latest_history->id : NULL,
                                 latest_history ? latest_history->checkpoint_id : NULL,
                                 latest_history ? latest_history->last_node : NULL, NULL, steps);
-  *out_state = turbo_runtime_data_bind_value_clone(run->state);
+  *out_state = turbo_json_clone(run->state);
   return *out_state ? TURBO_STATE_GRAPH_OK : TURBO_STATE_GRAPH_OUT_OF_MEMORY;
 }
 
 static turbo_state_graph_status_t turbo_state_graph_seed_run(
     turbo_state_graph_t *graph, turbo_state_graph_run_entry_t *run,
     turbo_state_graph_source_kind_t source_kind, const char *source_name, const char *reason,
-    const turbo_runtime_data_bind_value_t *update, const char *next_node, size_t step,
+    const json_value_t *update, const char *next_node, size_t step,
     turbo_state_graph_history_entry_t **out_history_entry) {
-  turbo_runtime_data_bind_value_t *update_object = NULL;
+  json_value_t *update_object = NULL;
   turbo_state_graph_status_t status;
 
   if (!graph || !run || !out_history_entry) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  update_object = update ? turbo_runtime_data_bind_value_clone(update)
-                         : turbo_runtime_data_bind_value_create_object();
+  update_object = update ? turbo_json_clone(update)
+                         : turbo_json_create_object();
   if (!update_object) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
-  if (turbo_runtime_data_bind_value_kind(update_object) !=
-      TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
-    turbo_runtime_data_bind_value_destroy(update_object);
+  if (turbo_json_type(update_object) !=
+      TURBO_JSON_OBJECT) {
+    turbo_runtime_json_destroy(update_object);
     return TURBO_STATE_GRAPH_TYPE_MISMATCH;
   }
 
   status = turbo_state_graph_apply_update(graph, run->state, update_object);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(update_object);
+    turbo_runtime_json_destroy(update_object);
     return status;
   }
 
   turbo_state_graph_str_free(run->current_node);
   run->current_node = turbo_state_graph_strdup(next_node);
   if (next_node && !run->current_node) {
-    turbo_runtime_data_bind_value_destroy(update_object);
+    turbo_runtime_json_destroy(update_object);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
   run->steps = step;
@@ -1665,7 +1665,7 @@ static turbo_state_graph_status_t turbo_state_graph_seed_run(
   status = turbo_state_graph_add_history_record(graph, run, source_kind, source_name, reason, NULL,
                                                 next_node, step, update_object, run->state,
                                                 out_history_entry);
-  turbo_runtime_data_bind_value_destroy(update_object);
+  turbo_runtime_json_destroy(update_object);
   return status;
 }
 
@@ -1744,8 +1744,8 @@ turbo_state_graph_status_t turbo_state_graph_add_channel(
   channel->reducer = config->reducer;
   channel->value_kind = config->value_kind;
   channel->default_value = config->default_value
-                               ? turbo_runtime_data_bind_value_clone(config->default_value)
-                               : turbo_runtime_data_bind_value_create_null();
+                               ? turbo_json_clone(config->default_value)
+                               : turbo_json_create_null();
   if (!channel->name || !channel->default_value ||
       (config->description && !channel->description)) {
     turbo_state_graph_free_channel(channel);
@@ -1766,13 +1766,13 @@ turbo_state_graph_status_t turbo_state_graph_add_channel(
 }
 
 turbo_state_graph_status_t
-turbo_state_graph_add_bind_node(turbo_state_graph_t *graph, const char *name,
-                                turbo_state_graph_bind_node_fn fn, void *user_data) {
-  return turbo_state_graph_add_bind_node_owned(graph, name, fn, user_data, NULL);
+turbo_state_graph_add_json_value_node(turbo_state_graph_t *graph, const char *name,
+                                turbo_state_graph_json_value_node_fn fn, void *user_data) {
+  return turbo_state_graph_add_json_value_node_owned(graph, name, fn, user_data, NULL);
 }
 
-static turbo_state_graph_status_t turbo_state_graph_add_bind_node_owned(
-    turbo_state_graph_t *graph, const char *name, turbo_state_graph_bind_node_fn fn,
+static turbo_state_graph_status_t turbo_state_graph_add_json_value_node_owned(
+    turbo_state_graph_t *graph, const char *name, turbo_state_graph_json_value_node_fn fn,
     void *user_data, void (*user_data_free)(void *user_data)) {
   turbo_state_graph_node_entry_t *node = NULL;
 
@@ -1789,7 +1789,7 @@ static turbo_state_graph_status_t turbo_state_graph_add_bind_node_owned(
 
   node = &graph->nodes[graph->node_count++];
   node->name = turbo_state_graph_strdup(name);
-  node->bind_fn = fn;
+  node->json_value_fn = fn;
   node->user_data = user_data;
   node->user_data_free = user_data_free;
   if (!node->name) {
@@ -1824,9 +1824,9 @@ static int turbo_state_graph_subgraph_node_fn(turbo_state_graph_exec_ctx_t *ctx,
                                               void *user_data) {
   turbo_state_graph_subgraph_node_data_t *data =
       (turbo_state_graph_subgraph_node_data_t *)user_data;
-  turbo_runtime_data_bind_value_t *child_input = NULL;
-  turbo_runtime_data_bind_value_t *child_state = NULL;
-  turbo_runtime_data_bind_value_t *output = NULL;
+  json_value_t *child_input = NULL;
+  json_value_t *child_state = NULL;
+  json_value_t *output = NULL;
   turbo_state_graph_run_result_t result = {0};
   turbo_state_graph_status_t status;
   const char *child_thread_id = NULL;
@@ -1838,74 +1838,74 @@ static int turbo_state_graph_subgraph_node_fn(turbo_state_graph_exec_ctx_t *ctx,
 
   child_thread_id = data->child_thread_id;
   if (data->child_thread_id_channel) {
-    const turbo_runtime_data_bind_value_t *thread_value =
-        turbo_runtime_data_bind_object_get(ctx->state, data->child_thread_id_channel);
-    child_thread_id = turbo_runtime_data_bind_value_as_string(thread_value);
+    const json_value_t *thread_value =
+        turbo_json_object_get(ctx->state, data->child_thread_id_channel);
+    child_thread_id = turbo_runtime_json_value_as_string(thread_value);
   }
   if (!child_thread_id || child_thread_id[0] == '\0') {
     return -1;
   }
 
-  child_input = turbo_runtime_data_bind_value_create_object();
+  child_input = turbo_json_create_object();
   if (!child_input) {
     return -1;
   }
   for (i = 0; i < data->input_channel_count; ++i) {
-    const turbo_runtime_data_bind_value_t *value =
-        turbo_runtime_data_bind_object_get(ctx->state, data->input_channels[i]);
-    turbo_runtime_data_bind_value_t *value_copy = NULL;
+    const json_value_t *value =
+        turbo_json_object_get(ctx->state, data->input_channels[i]);
+    json_value_t *value_copy = NULL;
 
     if (!value) {
-      turbo_runtime_data_bind_value_destroy(child_input);
+      turbo_runtime_json_destroy(child_input);
       return -1;
     }
-    value_copy = turbo_runtime_data_bind_value_clone(value);
+    value_copy = turbo_json_clone(value);
     if (!value_copy ||
-        turbo_runtime_data_bind_object_set(child_input, data->input_channels[i], value_copy) !=
-            TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(value_copy);
-      turbo_runtime_data_bind_value_destroy(child_input);
+        turbo_runtime_json_object_set(child_input, data->input_channels[i], value_copy) !=
+            TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(value_copy);
+      turbo_runtime_json_destroy(child_input);
       return -1;
     }
   }
 
   status = turbo_state_graph_start(data->child_graph, child_thread_id, child_input, NULL,
                                    &result, &child_state);
-  turbo_runtime_data_bind_value_destroy(child_input);
+  turbo_runtime_json_destroy(child_input);
   if (status != TURBO_STATE_GRAPH_OK || !child_state) {
-    turbo_runtime_data_bind_value_destroy(child_state);
+    turbo_runtime_json_destroy(child_state);
     return -1;
   }
 
-  output = turbo_runtime_data_bind_value_create_object();
+  output = turbo_json_create_object();
   if (!output) {
-    turbo_runtime_data_bind_value_destroy(child_state);
+    turbo_runtime_json_destroy(child_state);
     return -1;
   }
-  if (turbo_agent_util_bind_object_set_string(output, "status",
+  if (turbo_agent_util_json_value_object_set_string(output, "status",
                                               turbo_state_graph_status_text(status)) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(output, "thread_id",
+      turbo_state_graph_json_value_object_set_nullable_string(output, "thread_id",
                                                         result.thread_id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(output, "run_id", result.run_id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(output, "history_entry_id",
+      turbo_state_graph_json_value_object_set_nullable_string(output, "run_id", result.run_id) != 0 ||
+      turbo_state_graph_json_value_object_set_nullable_string(output, "history_entry_id",
                                                         result.history_entry_id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(output, "checkpoint_id",
+      turbo_state_graph_json_value_object_set_nullable_string(output, "checkpoint_id",
                                                         result.checkpoint_id) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(output, "last_node",
+      turbo_state_graph_json_value_object_set_nullable_string(output, "last_node",
                                                         result.last_node) != 0 ||
-      turbo_state_graph_bind_object_set_nullable_string(output, "next_node",
+      turbo_state_graph_json_value_object_set_nullable_string(output, "next_node",
                                                         result.next_node) != 0 ||
-      turbo_agent_util_bind_object_set_int64(output, "steps", (int64_t)result.steps) != 0 ||
-      turbo_agent_util_bind_object_set_clone(output, "state", child_state) != 0) {
-    turbo_runtime_data_bind_value_destroy(output);
-    turbo_runtime_data_bind_value_destroy(child_state);
+      turbo_agent_util_json_value_object_set_int64(output, "steps", (int64_t)result.steps) != 0 ||
+      turbo_agent_util_json_value_object_set_clone(output, "state", child_state) != 0) {
+    turbo_runtime_json_destroy(output);
+    turbo_runtime_json_destroy(child_state);
     return -1;
   }
-  turbo_runtime_data_bind_value_destroy(child_state);
+  turbo_runtime_json_destroy(child_state);
 
-  if (turbo_runtime_data_bind_object_set(ctx->update, data->output_channel, output) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(output);
+  if (turbo_runtime_json_object_set(ctx->update, data->output_channel, output) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(output);
     return -1;
   }
   return 0;
@@ -1958,7 +1958,7 @@ turbo_state_graph_status_t turbo_state_graph_add_subgraph_node(
     }
   }
 
-  status = turbo_state_graph_add_bind_node_owned(graph, name, turbo_state_graph_subgraph_node_fn,
+  status = turbo_state_graph_add_json_value_node_owned(graph, name, turbo_state_graph_subgraph_node_fn,
                                                  data, turbo_state_graph_free_subgraph_node_data);
   if (status != TURBO_STATE_GRAPH_OK) {
     turbo_state_graph_free_subgraph_node_data(data);
@@ -1967,8 +1967,8 @@ turbo_state_graph_status_t turbo_state_graph_add_subgraph_node(
 }
 
 turbo_state_graph_status_t
-turbo_state_graph_add_bind_edge(turbo_state_graph_t *graph, const char *from, const char *to,
-                                turbo_state_graph_bind_edge_predicate_fn predicate,
+turbo_state_graph_add_json_value_edge(turbo_state_graph_t *graph, const char *from, const char *to,
+                                turbo_state_graph_json_value_edge_predicate_fn predicate,
                                 void *user_data) {
   size_t from_index;
   size_t to_index;
@@ -2052,11 +2052,11 @@ turbo_state_graph_ctx_goto(turbo_state_graph_exec_ctx_t *ctx, const char *next_n
 
 turbo_state_graph_status_t turbo_state_graph_ctx_send(
     turbo_state_graph_exec_ctx_t *ctx, const char *target_node,
-    const turbo_runtime_data_bind_value_t *update) {
+    const json_value_t *update) {
   turbo_state_graph_pending_send_t *send = NULL;
 
   if (!ctx || !target_node || !update ||
-      turbo_runtime_data_bind_value_kind(update) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+      turbo_json_type(update) != TURBO_JSON_OBJECT) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
   if (!turbo_state_graph_reserve((void **)&ctx->sends, &ctx->send_capacity,
@@ -2065,10 +2065,10 @@ turbo_state_graph_status_t turbo_state_graph_ctx_send(
   }
   send = &ctx->sends[ctx->send_count++];
   send->target_node = turbo_state_graph_strdup(target_node);
-  send->update = turbo_runtime_data_bind_value_clone(update);
+  send->update = turbo_json_clone(update);
   if (!send->target_node || !send->update) {
     turbo_state_graph_str_free(send->target_node);
-    turbo_runtime_data_bind_value_destroy(send->update);
+    turbo_runtime_json_destroy(send->update);
     memset(send, 0, sizeof(*send));
     ctx->send_count--;
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
@@ -2084,14 +2084,14 @@ void turbo_state_graph_ctx_stop(turbo_state_graph_exec_ctx_t *ctx) {
 
 turbo_state_graph_status_t
 turbo_state_graph_start(turbo_state_graph_t *graph, const char *thread_id,
-                        const turbo_runtime_data_bind_value_t *input_state,
+                        const json_value_t *input_state,
                         const turbo_state_graph_run_options_t *options,
                         turbo_state_graph_run_result_t *out_result,
-                        turbo_runtime_data_bind_value_t **out_state) {
+                        json_value_t **out_state) {
   turbo_state_graph_thread_entry_t *thread = NULL;
   turbo_state_graph_run_entry_t *run = NULL;
   turbo_state_graph_history_entry_t *history_entry = NULL;
-  turbo_runtime_data_bind_value_t *seed_state = NULL;
+  json_value_t *seed_state = NULL;
   turbo_state_graph_status_t status;
   const char *start_node;
 
@@ -2105,33 +2105,33 @@ turbo_state_graph_start(turbo_state_graph_t *graph, const char *thread_id,
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  seed_state = turbo_runtime_data_bind_value_create_object();
+  seed_state = turbo_json_create_object();
   if (!seed_state) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
   status = turbo_state_graph_seed_defaults(graph, seed_state);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(seed_state);
+    turbo_runtime_json_destroy(seed_state);
     return status;
   }
 
   status = turbo_state_graph_add_thread_record(graph, thread_id, &thread);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(seed_state);
+    turbo_runtime_json_destroy(seed_state);
     return status;
   }
 
   status = turbo_state_graph_add_run_record(graph, thread->id, NULL, NULL, seed_state, start_node,
                                             0, &run);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(seed_state);
+    turbo_runtime_json_destroy(seed_state);
     return status;
   }
 
   status = turbo_state_graph_seed_run(graph, run, TURBO_STATE_GRAPH_SOURCE_START, "start", NULL,
                                       input_state, start_node, 0, &history_entry);
-  turbo_runtime_data_bind_value_destroy(seed_state);
+  turbo_runtime_json_destroy(seed_state);
   if (status != TURBO_STATE_GRAPH_OK) {
     return status;
   }
@@ -2149,7 +2149,7 @@ turbo_state_graph_status_t
 turbo_state_graph_resume(turbo_state_graph_t *graph, const char *run_id,
                          const turbo_state_graph_run_options_t *options,
                          turbo_state_graph_run_result_t *out_result,
-                         turbo_runtime_data_bind_value_t **out_state) {
+                         json_value_t **out_state) {
   turbo_state_graph_run_entry_t *run = NULL;
   turbo_state_graph_thread_entry_t *thread = NULL;
 
@@ -2181,13 +2181,13 @@ turbo_state_graph_resume(turbo_state_graph_t *graph, const char *run_id,
 
 turbo_state_graph_status_t
 turbo_state_graph_update_state(turbo_state_graph_t *graph, const char *run_id,
-                               const turbo_runtime_data_bind_value_t *update,
+                               const json_value_t *update,
                                const turbo_state_graph_history_options_t *options,
                                turbo_state_graph_run_result_t *out_result,
-                               turbo_runtime_data_bind_value_t **out_state) {
+                               json_value_t **out_state) {
   turbo_state_graph_run_entry_t *run = NULL;
   turbo_state_graph_history_entry_t *history_entry = NULL;
-  turbo_runtime_data_bind_value_t *update_object = NULL;
+  json_value_t *update_object = NULL;
   turbo_state_graph_status_t status;
   const char *source_name;
 
@@ -2195,7 +2195,7 @@ turbo_state_graph_update_state(turbo_state_graph_t *graph, const char *run_id,
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
   *out_state = NULL;
-  if (turbo_runtime_data_bind_value_kind(update) != TURBO_RUNTIME_DATA_BIND_VALUE_OBJECT) {
+  if (turbo_json_type(update) != TURBO_JSON_OBJECT) {
     return TURBO_STATE_GRAPH_TYPE_MISMATCH;
   }
 
@@ -2204,14 +2204,14 @@ turbo_state_graph_update_state(turbo_state_graph_t *graph, const char *run_id,
     return TURBO_STATE_GRAPH_RUN_NOT_FOUND;
   }
 
-  update_object = turbo_runtime_data_bind_value_clone(update);
+  update_object = turbo_json_clone(update);
   if (!update_object) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
   status = turbo_state_graph_apply_update(graph, run->state, update_object);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(update_object);
+    turbo_runtime_json_destroy(update_object);
     return status;
   }
 
@@ -2220,12 +2220,12 @@ turbo_state_graph_update_state(turbo_state_graph_t *graph, const char *run_id,
       graph, run, TURBO_STATE_GRAPH_SOURCE_HOST, source_name,
       options ? options->reason : NULL, source_name, run->current_node, run->steps,
       update_object, run->state, &history_entry);
-  turbo_runtime_data_bind_value_destroy(update_object);
+  turbo_runtime_json_destroy(update_object);
   if (status != TURBO_STATE_GRAPH_OK) {
     return status;
   }
 
-  *out_state = turbo_runtime_data_bind_value_clone(run->state);
+  *out_state = turbo_json_clone(run->state);
   if (!*out_state) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
@@ -2239,12 +2239,12 @@ turbo_state_graph_update_state(turbo_state_graph_t *graph, const char *run_id,
 
 static turbo_state_graph_status_t turbo_state_graph_branch_from_history(
     turbo_state_graph_t *graph, const char *history_entry_id,
-    const turbo_runtime_data_bind_value_t *update,
+    const json_value_t *update,
     const turbo_state_graph_history_options_t *history_options,
     const turbo_state_graph_run_options_t *run_options, int make_current,
     turbo_state_graph_source_kind_t source_kind,
     turbo_state_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   turbo_state_graph_history_entry_t *history_entry = NULL;
   turbo_state_graph_run_entry_t *source_run = NULL;
   turbo_state_graph_run_entry_t *run = NULL;
@@ -2299,7 +2299,7 @@ static turbo_state_graph_status_t turbo_state_graph_branch_from_history(
   }
 
   if (!run->current_node) {
-    *out_state = turbo_runtime_data_bind_value_clone(run->state);
+    *out_state = turbo_json_clone(run->state);
     if (!*out_state) {
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
@@ -2314,11 +2314,11 @@ static turbo_state_graph_status_t turbo_state_graph_branch_from_history(
 
 turbo_state_graph_status_t turbo_state_graph_resume_from_history(
     turbo_state_graph_t *graph, const char *history_entry_id,
-    const turbo_runtime_data_bind_value_t *update,
+    const json_value_t *update,
     const turbo_state_graph_history_options_t *history_options,
     const turbo_state_graph_run_options_t *run_options,
     turbo_state_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   return turbo_state_graph_branch_from_history(
       graph, history_entry_id, update, history_options, run_options, 1,
       TURBO_STATE_GRAPH_SOURCE_HOST, out_result, out_state);
@@ -2326,11 +2326,11 @@ turbo_state_graph_status_t turbo_state_graph_resume_from_history(
 
 turbo_state_graph_status_t turbo_state_graph_fork_from_history(
     turbo_state_graph_t *graph, const char *history_entry_id,
-    const turbo_runtime_data_bind_value_t *update,
+    const json_value_t *update,
     const turbo_state_graph_history_options_t *history_options,
     const turbo_state_graph_run_options_t *run_options,
     turbo_state_graph_run_result_t *out_result,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   return turbo_state_graph_branch_from_history(
       graph, history_entry_id, update, history_options, run_options, 0,
       TURBO_STATE_GRAPH_SOURCE_FORK, out_result, out_state);
@@ -2338,7 +2338,7 @@ turbo_state_graph_status_t turbo_state_graph_fork_from_history(
 
 turbo_state_graph_status_t
 turbo_state_graph_get_state(turbo_state_graph_t *graph, const char *run_id,
-                            turbo_runtime_data_bind_value_t **out_state) {
+                            json_value_t **out_state) {
   turbo_state_graph_run_entry_t *run = NULL;
 
   if (!graph || !run_id || !out_state) {
@@ -2350,13 +2350,13 @@ turbo_state_graph_get_state(turbo_state_graph_t *graph, const char *run_id,
     return TURBO_STATE_GRAPH_RUN_NOT_FOUND;
   }
 
-  *out_state = turbo_runtime_data_bind_value_clone(run->state);
+  *out_state = turbo_json_clone(run->state);
   return *out_state ? TURBO_STATE_GRAPH_OK : TURBO_STATE_GRAPH_OUT_OF_MEMORY;
 }
 
 turbo_state_graph_status_t
 turbo_state_graph_get_run(turbo_state_graph_t *graph, const char *run_id,
-                          turbo_runtime_data_bind_value_t **out_run) {
+                          json_value_t **out_run) {
   turbo_state_graph_run_entry_t *run = NULL;
 
   if (!graph || !run_id || !out_run) {
@@ -2374,7 +2374,7 @@ turbo_state_graph_get_run(turbo_state_graph_t *graph, const char *run_id,
 
 turbo_state_graph_status_t
 turbo_state_graph_get_thread(turbo_state_graph_t *graph, const char *thread_id,
-                             turbo_runtime_data_bind_value_t **out_thread) {
+                             json_value_t **out_thread) {
   turbo_state_graph_thread_entry_t *thread = NULL;
   turbo_state_graph_run_entry_t *run = NULL;
 
@@ -2393,7 +2393,7 @@ turbo_state_graph_get_thread(turbo_state_graph_t *graph, const char *thread_id,
 
 turbo_state_graph_status_t
 turbo_state_graph_get_latest_run(turbo_state_graph_t *graph, const char *thread_id,
-                                 turbo_runtime_data_bind_value_t **out_run) {
+                                 json_value_t **out_run) {
   turbo_state_graph_run_entry_t *run = NULL;
 
   if (!graph || !thread_id || !out_run) {
@@ -2414,7 +2414,7 @@ turbo_state_graph_get_latest_run(turbo_state_graph_t *graph, const char *thread_
 
 turbo_state_graph_status_t
 turbo_state_graph_get_pending_run(turbo_state_graph_t *graph, const char *thread_id,
-                                  turbo_runtime_data_bind_value_t **out_run) {
+                                  json_value_t **out_run) {
   turbo_state_graph_run_entry_t *run = NULL;
 
   if (!graph || !thread_id || !out_run) {
@@ -2435,7 +2435,7 @@ turbo_state_graph_get_pending_run(turbo_state_graph_t *graph, const char *thread
 
 turbo_state_graph_status_t
 turbo_state_graph_get_thread_state(turbo_state_graph_t *graph, const char *thread_id,
-                                   turbo_runtime_data_bind_value_t **out_state) {
+                                   json_value_t **out_state) {
   turbo_state_graph_thread_entry_t *thread = NULL;
 
   if (!graph || !thread_id || !out_state) {
@@ -2455,7 +2455,7 @@ turbo_state_graph_get_thread_state(turbo_state_graph_t *graph, const char *threa
 turbo_state_graph_status_t
 turbo_state_graph_get_history_entry(turbo_state_graph_t *graph,
                                     const char *history_entry_id,
-                                    turbo_runtime_data_bind_value_t **out_entry) {
+                                    json_value_t **out_entry) {
   turbo_state_graph_history_entry_t *history_entry = NULL;
 
   if (!graph || !history_entry_id || !out_entry) {
@@ -2474,7 +2474,7 @@ turbo_state_graph_get_history_entry(turbo_state_graph_t *graph,
 turbo_state_graph_status_t
 turbo_state_graph_get_history_entry_state(turbo_state_graph_t *graph,
                                           const char *history_entry_id,
-                                          turbo_runtime_data_bind_value_t **out_state) {
+                                          json_value_t **out_state) {
   turbo_state_graph_history_entry_t *history_entry = NULL;
 
   if (!graph || !history_entry_id || !out_state) {
@@ -2487,13 +2487,13 @@ turbo_state_graph_get_history_entry_state(turbo_state_graph_t *graph,
     return TURBO_STATE_GRAPH_HISTORY_NOT_FOUND;
   }
 
-  *out_state = turbo_runtime_data_bind_value_clone(history_entry->state);
+  *out_state = turbo_json_clone(history_entry->state);
   return *out_state ? TURBO_STATE_GRAPH_OK : TURBO_STATE_GRAPH_OUT_OF_MEMORY;
 }
 
 turbo_state_graph_status_t
 turbo_state_graph_get_checkpoint(turbo_state_graph_t *graph, const char *checkpoint_id,
-                                 turbo_runtime_data_bind_value_t **out_checkpoint) {
+                                 json_value_t **out_checkpoint) {
   turbo_state_graph_history_entry_t *history_entry = NULL;
 
   if (!graph || !checkpoint_id || !out_checkpoint) {
@@ -2511,8 +2511,8 @@ turbo_state_graph_get_checkpoint(turbo_state_graph_t *graph, const char *checkpo
 
 turbo_state_graph_status_t
 turbo_state_graph_list_state_history(turbo_state_graph_t *graph, const char *run_id,
-                                     turbo_runtime_data_bind_value_t **out_entries) {
-  turbo_runtime_data_bind_value_t *entries = NULL;
+                                     json_value_t **out_entries) {
+  json_value_t *entries = NULL;
   size_t i;
 
   if (!graph || !run_id || !out_entries) {
@@ -2524,14 +2524,14 @@ turbo_state_graph_list_state_history(turbo_state_graph_t *graph, const char *run
     return TURBO_STATE_GRAPH_RUN_NOT_FOUND;
   }
 
-  entries = turbo_runtime_data_bind_value_create_array();
+  entries = turbo_json_create_array();
   if (!entries) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
   for (i = 0; i < graph->history_count; ++i) {
     turbo_state_graph_history_entry_t *history_entry = &graph->history_entries[i];
-    turbo_runtime_data_bind_value_t *object = NULL;
+    json_value_t *object = NULL;
     turbo_state_graph_status_t status;
 
     if (strcmp(history_entry->run_id, run_id) != 0) {
@@ -2540,13 +2540,13 @@ turbo_state_graph_list_state_history(turbo_state_graph_t *graph, const char *run
 
     status = turbo_state_graph_history_object(history_entry, &object);
     if (status != TURBO_STATE_GRAPH_OK) {
-      turbo_runtime_data_bind_value_destroy(entries);
+      turbo_runtime_json_destroy(entries);
       return status;
     }
-    if (turbo_runtime_data_bind_array_append(entries, object) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(object);
-      turbo_runtime_data_bind_value_destroy(entries);
+    if (turbo_runtime_json_array_append(entries, object) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(object);
+      turbo_runtime_json_destroy(entries);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
@@ -2557,14 +2557,14 @@ turbo_state_graph_list_state_history(turbo_state_graph_t *graph, const char *run
 
 turbo_state_graph_status_t
 turbo_state_graph_list_checkpoints(turbo_state_graph_t *graph, const char *run_id,
-                                   turbo_runtime_data_bind_value_t **out_checkpoints) {
+                                   json_value_t **out_checkpoints) {
   return turbo_state_graph_list_state_history(graph, run_id, out_checkpoints);
 }
 
 turbo_state_graph_status_t
 turbo_state_graph_list_runs(turbo_state_graph_t *graph, const char *thread_id,
-                            turbo_runtime_data_bind_value_t **out_runs) {
-  turbo_runtime_data_bind_value_t *runs = NULL;
+                            json_value_t **out_runs) {
+  json_value_t *runs = NULL;
   size_t i;
 
   if (!graph || !thread_id || !out_runs) {
@@ -2576,14 +2576,14 @@ turbo_state_graph_list_runs(turbo_state_graph_t *graph, const char *thread_id,
     return TURBO_STATE_GRAPH_THREAD_NOT_FOUND;
   }
 
-  runs = turbo_runtime_data_bind_value_create_array();
+  runs = turbo_json_create_array();
   if (!runs) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
   for (i = 0; i < graph->run_count; ++i) {
     turbo_state_graph_run_entry_t *run = &graph->runs[i];
-    turbo_runtime_data_bind_value_t *run_object = NULL;
+    json_value_t *run_object = NULL;
     turbo_state_graph_status_t status;
 
     if (strcmp(run->thread_id, thread_id) != 0) {
@@ -2592,13 +2592,13 @@ turbo_state_graph_list_runs(turbo_state_graph_t *graph, const char *thread_id,
 
     status = turbo_state_graph_run_object(run, &run_object);
     if (status != TURBO_STATE_GRAPH_OK) {
-      turbo_runtime_data_bind_value_destroy(runs);
+      turbo_runtime_json_destroy(runs);
       return status;
     }
-    if (turbo_runtime_data_bind_array_append(runs, run_object) !=
-        TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(run_object);
-      turbo_runtime_data_bind_value_destroy(runs);
+    if (turbo_runtime_json_array_append(runs, run_object) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(run_object);
+      turbo_runtime_json_destroy(runs);
       return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
     }
   }
@@ -2610,15 +2610,15 @@ turbo_state_graph_list_runs(turbo_state_graph_t *graph, const char *thread_id,
 turbo_state_graph_status_t
 turbo_state_graph_get_checkpoint_context(turbo_state_graph_t *graph,
                                          const char *checkpoint_id,
-                                         turbo_runtime_data_bind_value_t **out_context) {
+                                         json_value_t **out_context) {
   turbo_state_graph_history_entry_t *history_entry = NULL;
   turbo_state_graph_run_entry_t *run = NULL;
   turbo_state_graph_thread_entry_t *thread = NULL;
-  turbo_runtime_data_bind_value_t *context = NULL;
-  turbo_runtime_data_bind_value_t *checkpoint = NULL;
-  turbo_runtime_data_bind_value_t *run_object = NULL;
-  turbo_runtime_data_bind_value_t *thread_object = NULL;
-  turbo_runtime_data_bind_value_t *branch_tree = NULL;
+  json_value_t *context = NULL;
+  json_value_t *checkpoint = NULL;
+  json_value_t *run_object = NULL;
+  json_value_t *thread_object = NULL;
+  json_value_t *branch_tree = NULL;
   turbo_state_graph_status_t status;
 
   if (!graph || !checkpoint_id || !out_context) {
@@ -2645,45 +2645,45 @@ turbo_state_graph_get_checkpoint_context(turbo_state_graph_t *graph,
   }
   status = turbo_state_graph_run_object(run, &run_object);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(checkpoint);
+    turbo_runtime_json_destroy(checkpoint);
     return status;
   }
   status = turbo_state_graph_thread_object(thread, run->state, &thread_object);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(run_object);
-    turbo_runtime_data_bind_value_destroy(checkpoint);
+    turbo_runtime_json_destroy(run_object);
+    turbo_runtime_json_destroy(checkpoint);
     return status;
   }
   status = turbo_state_graph_branch_tree_object(graph, thread, &branch_tree);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(thread_object);
-    turbo_runtime_data_bind_value_destroy(run_object);
-    turbo_runtime_data_bind_value_destroy(checkpoint);
+    turbo_runtime_json_destroy(thread_object);
+    turbo_runtime_json_destroy(run_object);
+    turbo_runtime_json_destroy(checkpoint);
     return status;
   }
 
-  context = turbo_runtime_data_bind_value_create_object();
+  context = turbo_json_create_object();
   if (!context) {
-    turbo_runtime_data_bind_value_destroy(branch_tree);
-    turbo_runtime_data_bind_value_destroy(thread_object);
-    turbo_runtime_data_bind_value_destroy(run_object);
-    turbo_runtime_data_bind_value_destroy(checkpoint);
+    turbo_runtime_json_destroy(branch_tree);
+    turbo_runtime_json_destroy(thread_object);
+    turbo_runtime_json_destroy(run_object);
+    turbo_runtime_json_destroy(checkpoint);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  if (turbo_runtime_data_bind_object_set(context, "checkpoint", checkpoint) !=
-          TURBO_RUNTIME_DATA_BIND_OK ||
-      turbo_runtime_data_bind_object_set(context, "run", run_object) !=
-          TURBO_RUNTIME_DATA_BIND_OK ||
-      turbo_runtime_data_bind_object_set(context, "thread", thread_object) !=
-          TURBO_RUNTIME_DATA_BIND_OK ||
-      turbo_runtime_data_bind_object_set(context, "branch_tree", branch_tree) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(branch_tree);
-    turbo_runtime_data_bind_value_destroy(thread_object);
-    turbo_runtime_data_bind_value_destroy(run_object);
-    turbo_runtime_data_bind_value_destroy(checkpoint);
-    turbo_runtime_data_bind_value_destroy(context);
+  if (turbo_runtime_json_object_set(context, "checkpoint", checkpoint) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(context, "run", run_object) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(context, "thread", thread_object) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(context, "branch_tree", branch_tree) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(branch_tree);
+    turbo_runtime_json_destroy(thread_object);
+    turbo_runtime_json_destroy(run_object);
+    turbo_runtime_json_destroy(checkpoint);
+    turbo_runtime_json_destroy(context);
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
@@ -2693,7 +2693,7 @@ turbo_state_graph_get_checkpoint_context(turbo_state_graph_t *graph,
 
 turbo_state_graph_status_t
 turbo_state_graph_get_branch_tree(turbo_state_graph_t *graph, const char *thread_id,
-                                  turbo_runtime_data_bind_value_t **out_tree) {
+                                  json_value_t **out_tree) {
   turbo_state_graph_thread_entry_t *thread = NULL;
 
   if (!graph || !thread_id || !out_tree) {
@@ -2714,12 +2714,12 @@ size_t turbo_state_graph_snapshot_schema_version(void) {
 }
 
 char *turbo_state_graph_serialize_snapshot(const turbo_state_graph_t *graph, size_t *out_len) {
-  turbo_runtime_data_bind_value_t *root = NULL;
-  turbo_runtime_data_bind_value_t *topology = NULL;
-  turbo_runtime_data_bind_value_t *runtime = NULL;
-  turbo_runtime_data_bind_value_t *threads = NULL;
-  turbo_runtime_data_bind_value_t *runs = NULL;
-  turbo_runtime_data_bind_value_t *history = NULL;
+  json_value_t *root = NULL;
+  json_value_t *topology = NULL;
+  json_value_t *runtime = NULL;
+  json_value_t *threads = NULL;
+  json_value_t *runs = NULL;
+  json_value_t *history = NULL;
   json_value_t *json = NULL;
   char *serialized = NULL;
   size_t i;
@@ -2728,35 +2728,35 @@ char *turbo_state_graph_serialize_snapshot(const turbo_state_graph_t *graph, siz
     return NULL;
   }
 
-  root = turbo_runtime_data_bind_value_create_object();
-  runtime = turbo_runtime_data_bind_value_create_object();
-  threads = turbo_runtime_data_bind_value_create_array();
-  runs = turbo_runtime_data_bind_value_create_array();
-  history = turbo_runtime_data_bind_value_create_array();
+  root = turbo_json_create_object();
+  runtime = turbo_json_create_object();
+  threads = turbo_json_create_array();
+  runs = turbo_json_create_array();
+  history = turbo_json_create_array();
   if (!root || !runtime || !threads || !runs || !history) {
-    turbo_runtime_data_bind_value_destroy(root);
-    turbo_runtime_data_bind_value_destroy(runtime);
-    turbo_runtime_data_bind_value_destroy(threads);
-    turbo_runtime_data_bind_value_destroy(runs);
-    turbo_runtime_data_bind_value_destroy(history);
+    turbo_runtime_json_destroy(root);
+    turbo_runtime_json_destroy(runtime);
+    turbo_runtime_json_destroy(threads);
+    turbo_runtime_json_destroy(runs);
+    turbo_runtime_json_destroy(history);
     return NULL;
   }
 
   if (turbo_state_graph_topology_snapshot(graph, &topology) != TURBO_STATE_GRAPH_OK ||
-      turbo_agent_util_bind_object_set_int64(root, "snapshot_version",
+      turbo_agent_util_json_value_object_set_int64(root, "snapshot_version",
                                              (int64_t)TURBO_STATE_GRAPH_SNAPSHOT_SCHEMA_VERSION) != 0 ||
-      turbo_runtime_data_bind_object_set(root, "topology", topology) != TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(topology);
-    turbo_runtime_data_bind_value_destroy(root);
-    turbo_runtime_data_bind_value_destroy(runtime);
-    turbo_runtime_data_bind_value_destroy(threads);
-    turbo_runtime_data_bind_value_destroy(runs);
-    turbo_runtime_data_bind_value_destroy(history);
+      turbo_runtime_json_object_set(root, "topology", topology) != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(topology);
+    turbo_runtime_json_destroy(root);
+    turbo_runtime_json_destroy(runtime);
+    turbo_runtime_json_destroy(threads);
+    turbo_runtime_json_destroy(runs);
+    turbo_runtime_json_destroy(history);
     return NULL;
   }
 
   for (i = 0; i < graph->thread_count; ++i) {
-    turbo_runtime_data_bind_value_t *thread = NULL;
+    json_value_t *thread = NULL;
     turbo_state_graph_run_entry_t *run =
         graph->threads[i].current_run_id
             ? turbo_state_graph_find_run((turbo_state_graph_t *)graph,
@@ -2764,71 +2764,71 @@ char *turbo_state_graph_serialize_snapshot(const turbo_state_graph_t *graph, siz
             : NULL;
     if (turbo_state_graph_thread_object(&graph->threads[i], run ? run->state : NULL, &thread) !=
             TURBO_STATE_GRAPH_OK ||
-        turbo_runtime_data_bind_array_append(threads, thread) != TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(thread);
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(runtime);
-      turbo_runtime_data_bind_value_destroy(threads);
-      turbo_runtime_data_bind_value_destroy(runs);
-      turbo_runtime_data_bind_value_destroy(history);
+        turbo_runtime_json_array_append(threads, thread) != TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(thread);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(runtime);
+      turbo_runtime_json_destroy(threads);
+      turbo_runtime_json_destroy(runs);
+      turbo_runtime_json_destroy(history);
       return NULL;
     }
   }
 
   for (i = 0; i < graph->run_count; ++i) {
-    turbo_runtime_data_bind_value_t *run = NULL;
+    json_value_t *run = NULL;
     if (turbo_state_graph_run_object(&graph->runs[i], &run) != TURBO_STATE_GRAPH_OK ||
-        turbo_runtime_data_bind_array_append(runs, run) != TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(run);
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(runtime);
-      turbo_runtime_data_bind_value_destroy(threads);
-      turbo_runtime_data_bind_value_destroy(runs);
-      turbo_runtime_data_bind_value_destroy(history);
+        turbo_runtime_json_array_append(runs, run) != TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(run);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(runtime);
+      turbo_runtime_json_destroy(threads);
+      turbo_runtime_json_destroy(runs);
+      turbo_runtime_json_destroy(history);
       return NULL;
     }
   }
 
   for (i = 0; i < graph->history_count; ++i) {
-    turbo_runtime_data_bind_value_t *entry = NULL;
+    json_value_t *entry = NULL;
     if (turbo_state_graph_history_object(&graph->history_entries[i], &entry) !=
             TURBO_STATE_GRAPH_OK ||
-        turbo_runtime_data_bind_array_append(history, entry) != TURBO_RUNTIME_DATA_BIND_OK) {
-      turbo_runtime_data_bind_value_destroy(entry);
-      turbo_runtime_data_bind_value_destroy(root);
-      turbo_runtime_data_bind_value_destroy(runtime);
-      turbo_runtime_data_bind_value_destroy(threads);
-      turbo_runtime_data_bind_value_destroy(runs);
-      turbo_runtime_data_bind_value_destroy(history);
+        turbo_runtime_json_array_append(history, entry) != TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(entry);
+      turbo_runtime_json_destroy(root);
+      turbo_runtime_json_destroy(runtime);
+      turbo_runtime_json_destroy(threads);
+      turbo_runtime_json_destroy(runs);
+      turbo_runtime_json_destroy(history);
       return NULL;
     }
   }
 
-  if (turbo_agent_util_bind_object_set_int64(runtime, "next_thread_id",
+  if (turbo_agent_util_json_value_object_set_int64(runtime, "next_thread_id",
                                              (int64_t)graph->next_thread_id) != 0 ||
-      turbo_agent_util_bind_object_set_int64(runtime, "next_run_id",
+      turbo_agent_util_json_value_object_set_int64(runtime, "next_run_id",
                                              (int64_t)graph->next_run_id) != 0 ||
-      turbo_agent_util_bind_object_set_int64(runtime, "next_history_id",
+      turbo_agent_util_json_value_object_set_int64(runtime, "next_history_id",
                                              (int64_t)graph->next_history_id) != 0 ||
-      turbo_agent_util_bind_object_set_int64(runtime, "next_checkpoint_id",
+      turbo_agent_util_json_value_object_set_int64(runtime, "next_checkpoint_id",
                                              (int64_t)graph->next_checkpoint_id) != 0 ||
-      turbo_runtime_data_bind_object_set(runtime, "threads", threads) !=
-          TURBO_RUNTIME_DATA_BIND_OK ||
-      turbo_runtime_data_bind_object_set(runtime, "runs", runs) != TURBO_RUNTIME_DATA_BIND_OK ||
-      turbo_runtime_data_bind_object_set(runtime, "history", history) !=
-          TURBO_RUNTIME_DATA_BIND_OK ||
-      turbo_runtime_data_bind_object_set(root, "runtime", runtime) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(runtime);
-    turbo_runtime_data_bind_value_destroy(threads);
-    turbo_runtime_data_bind_value_destroy(runs);
-    turbo_runtime_data_bind_value_destroy(history);
-    turbo_runtime_data_bind_value_destroy(root);
+      turbo_runtime_json_object_set(runtime, "threads", threads) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(runtime, "runs", runs) != TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(runtime, "history", history) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(root, "runtime", runtime) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(runtime);
+    turbo_runtime_json_destroy(threads);
+    turbo_runtime_json_destroy(runs);
+    turbo_runtime_json_destroy(history);
+    turbo_runtime_json_destroy(root);
     return NULL;
   }
 
-  json = turbo_runtime_data_bind_value_to_json(root);
-  turbo_runtime_data_bind_value_destroy(root);
+  json = turbo_json_clone(root);
+  turbo_runtime_json_destroy(root);
   if (!json) {
     return NULL;
   }
@@ -2839,41 +2839,41 @@ char *turbo_state_graph_serialize_snapshot(const turbo_state_graph_t *graph, siz
 }
 
 static turbo_state_graph_status_t turbo_state_graph_validate_topology_snapshot(
-    turbo_state_graph_t *graph, const turbo_runtime_data_bind_value_t *topology) {
-  const turbo_runtime_data_bind_value_t *channels = NULL;
-  const turbo_runtime_data_bind_value_t *nodes = NULL;
-  const turbo_runtime_data_bind_value_t *edges = NULL;
+    turbo_state_graph_t *graph, const json_value_t *topology) {
+  const json_value_t *channels = NULL;
+  const json_value_t *nodes = NULL;
+  const json_value_t *edges = NULL;
   size_t i;
 
   if (!graph || !topology) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  channels = turbo_runtime_data_bind_object_get(topology, "channels");
-  nodes = turbo_runtime_data_bind_object_get(topology, "nodes");
-  edges = turbo_runtime_data_bind_object_get(topology, "edges");
+  channels = turbo_json_object_get(topology, "channels");
+  nodes = turbo_json_object_get(topology, "nodes");
+  edges = turbo_json_object_get(topology, "edges");
   if (!channels || !nodes || !edges ||
-      turbo_runtime_data_bind_value_kind(channels) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY ||
-      turbo_runtime_data_bind_value_kind(nodes) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY ||
-      turbo_runtime_data_bind_value_kind(edges) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+      turbo_json_type(channels) != TURBO_JSON_ARRAY ||
+      turbo_json_type(nodes) != TURBO_JSON_ARRAY ||
+      turbo_json_type(edges) != TURBO_JSON_ARRAY) {
     return TURBO_STATE_GRAPH_ERROR;
   }
 
-  if (turbo_runtime_data_bind_value_size(channels) != graph->channel_count ||
-      turbo_runtime_data_bind_value_size(nodes) != graph->node_count ||
-      turbo_runtime_data_bind_value_size(edges) != graph->edge_count) {
+  if (turbo_runtime_json_value_size(channels) != graph->channel_count ||
+      turbo_runtime_json_value_size(nodes) != graph->node_count ||
+      turbo_runtime_json_value_size(edges) != graph->edge_count) {
     return TURBO_STATE_GRAPH_ERROR;
   }
 
   for (i = 0; i < graph->channel_count; ++i) {
-    const turbo_runtime_data_bind_value_t *channel =
-        turbo_runtime_data_bind_array_get(channels, i);
-    const char *name = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(channel, "name"));
-    int64_t reducer = turbo_runtime_data_bind_value_as_int64(
-        turbo_runtime_data_bind_object_get(channel, "reducer"), -1);
-    int64_t value_kind = turbo_runtime_data_bind_value_as_int64(
-        turbo_runtime_data_bind_object_get(channel, "value_kind"), -1);
+    const json_value_t *channel =
+        turbo_json_array_get(channels, i);
+    const char *name = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(channel, "name"));
+    int64_t reducer = turbo_runtime_json_value_as_int64(
+        turbo_json_object_get(channel, "reducer"), -1);
+    int64_t value_kind = turbo_runtime_json_value_as_int64(
+        turbo_json_object_get(channel, "value_kind"), -1);
 
     if (!channel || !name || strcmp(name, graph->channels[i].name) != 0 ||
         reducer != (int64_t)graph->channels[i].reducer ||
@@ -2883,19 +2883,19 @@ static turbo_state_graph_status_t turbo_state_graph_validate_topology_snapshot(
   }
 
   for (i = 0; i < graph->node_count; ++i) {
-    const turbo_runtime_data_bind_value_t *node = turbo_runtime_data_bind_array_get(nodes, i);
-    const char *name = turbo_runtime_data_bind_value_as_string(node);
+    const json_value_t *node = turbo_json_array_get(nodes, i);
+    const char *name = turbo_runtime_json_value_as_string(node);
     if (!name || strcmp(name, graph->nodes[i].name) != 0) {
       return TURBO_STATE_GRAPH_ERROR;
     }
   }
 
   for (i = 0; i < graph->edge_count; ++i) {
-    const turbo_runtime_data_bind_value_t *edge = turbo_runtime_data_bind_array_get(edges, i);
-    const char *from = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(edge, "from"));
-    const char *to = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(edge, "to"));
+    const json_value_t *edge = turbo_json_array_get(edges, i);
+    const char *from = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(edge, "from"));
+    const char *to = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(edge, "to"));
     if (!from || !to ||
         strcmp(from, graph->nodes[graph->edges[i].from_index].name) != 0 ||
         strcmp(to, graph->nodes[graph->edges[i].to_index].name) != 0) {
@@ -2907,20 +2907,20 @@ static turbo_state_graph_status_t turbo_state_graph_validate_topology_snapshot(
 }
 
 static turbo_state_graph_status_t turbo_state_graph_import_threads(
-    turbo_state_graph_t *graph, const turbo_runtime_data_bind_value_t *threads) {
+    turbo_state_graph_t *graph, const json_value_t *threads) {
   size_t i;
 
   if (!graph || !threads ||
-      turbo_runtime_data_bind_value_kind(threads) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+      turbo_json_type(threads) != TURBO_JSON_ARRAY) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  for (i = 0; i < turbo_runtime_data_bind_value_size(threads); ++i) {
-    const turbo_runtime_data_bind_value_t *thread = turbo_runtime_data_bind_array_get(threads, i);
-    const char *thread_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(thread, "thread_id"));
-    const char *current_run_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(thread, "current_run_id"));
+  for (i = 0; i < turbo_runtime_json_value_size(threads); ++i) {
+    const json_value_t *thread = turbo_json_array_get(threads, i);
+    const char *thread_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(thread, "thread_id"));
+    const char *current_run_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(thread, "current_run_id"));
     turbo_state_graph_thread_entry_t *entry = NULL;
 
     if (!thread_id) {
@@ -2942,32 +2942,32 @@ static turbo_state_graph_status_t turbo_state_graph_import_threads(
 }
 
 static turbo_state_graph_status_t turbo_state_graph_import_runs(
-    turbo_state_graph_t *graph, const turbo_runtime_data_bind_value_t *runs) {
+    turbo_state_graph_t *graph, const json_value_t *runs) {
   size_t i;
 
   if (!graph || !runs ||
-      turbo_runtime_data_bind_value_kind(runs) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+      turbo_json_type(runs) != TURBO_JSON_ARRAY) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  for (i = 0; i < turbo_runtime_data_bind_value_size(runs); ++i) {
-    const turbo_runtime_data_bind_value_t *run = turbo_runtime_data_bind_array_get(runs, i);
-    const char *run_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(run, "run_id"));
-    const char *thread_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(run, "thread_id"));
-    const char *parent_run_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(run, "parent_run_id"));
-    const char *forked_from_history_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(run, "forked_from_history_id"));
-    const char *latest_history_entry_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(run, "latest_history_entry_id"));
-    const char *next_node = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(run, "next_node"));
-    const char *status = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(run, "status"));
-    const turbo_runtime_data_bind_value_t *state =
-        turbo_runtime_data_bind_object_get(run, "state");
+  for (i = 0; i < turbo_runtime_json_value_size(runs); ++i) {
+    const json_value_t *run = turbo_json_array_get(runs, i);
+    const char *run_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(run, "run_id"));
+    const char *thread_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(run, "thread_id"));
+    const char *parent_run_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(run, "parent_run_id"));
+    const char *forked_from_history_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(run, "forked_from_history_id"));
+    const char *latest_history_entry_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(run, "latest_history_entry_id"));
+    const char *next_node = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(run, "next_node"));
+    const char *status = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(run, "status"));
+    const json_value_t *state =
+        turbo_json_object_get(run, "state");
     turbo_state_graph_run_entry_t *entry = NULL;
 
     if (!run_id || !thread_id || !state || !status) {
@@ -2984,11 +2984,11 @@ static turbo_state_graph_status_t turbo_state_graph_import_runs(
     entry->forked_from_history_id = turbo_state_graph_strdup(forked_from_history_id);
     entry->latest_history_entry_id = turbo_state_graph_strdup(latest_history_entry_id);
     entry->current_node = turbo_state_graph_strdup(next_node);
-    entry->steps = (size_t)turbo_runtime_data_bind_value_as_int64(
-        turbo_runtime_data_bind_object_get(run, "steps"), 0);
+    entry->steps = (size_t)turbo_runtime_json_value_as_int64(
+        turbo_json_object_get(run, "steps"), 0);
     entry->interrupted = strcmp(status, "interrupted") == 0;
     entry->completed = strcmp(status, "completed") == 0;
-    entry->state = turbo_runtime_data_bind_value_clone(state);
+    entry->state = turbo_json_clone(state);
     if (!entry->id || !entry->thread_id || !entry->state ||
         (parent_run_id && !entry->parent_run_id) ||
         (forked_from_history_id && !entry->forked_from_history_id) ||
@@ -3002,38 +3002,38 @@ static turbo_state_graph_status_t turbo_state_graph_import_runs(
 }
 
 static turbo_state_graph_status_t turbo_state_graph_import_history(
-    turbo_state_graph_t *graph, const turbo_runtime_data_bind_value_t *history) {
+    turbo_state_graph_t *graph, const json_value_t *history) {
   size_t i;
 
   if (!graph || !history ||
-      turbo_runtime_data_bind_value_kind(history) != TURBO_RUNTIME_DATA_BIND_VALUE_ARRAY) {
+      turbo_json_type(history) != TURBO_JSON_ARRAY) {
     return TURBO_STATE_GRAPH_INVALID_ARGUMENT;
   }
 
-  for (i = 0; i < turbo_runtime_data_bind_value_size(history); ++i) {
-    const turbo_runtime_data_bind_value_t *entry = turbo_runtime_data_bind_array_get(history, i);
-    const char *history_entry_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "history_entry_id"));
-    const char *checkpoint_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "checkpoint_id"));
-    const char *thread_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "thread_id"));
-    const char *run_id = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "run_id"));
-    const char *source_kind = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "source_kind"));
-    const char *source_name = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "source_name"));
-    const char *reason = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "reason"));
-    const char *last_node = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "last_node"));
-    const char *next_node = turbo_runtime_data_bind_value_as_string(
-        turbo_runtime_data_bind_object_get(entry, "next_node"));
-    const turbo_runtime_data_bind_value_t *update =
-        turbo_runtime_data_bind_object_get(entry, "update");
-    const turbo_runtime_data_bind_value_t *state =
-        turbo_runtime_data_bind_object_get(entry, "state");
+  for (i = 0; i < turbo_runtime_json_value_size(history); ++i) {
+    const json_value_t *entry = turbo_json_array_get(history, i);
+    const char *history_entry_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "history_entry_id"));
+    const char *checkpoint_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "checkpoint_id"));
+    const char *thread_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "thread_id"));
+    const char *run_id = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "run_id"));
+    const char *source_kind = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "source_kind"));
+    const char *source_name = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "source_name"));
+    const char *reason = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "reason"));
+    const char *last_node = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "last_node"));
+    const char *next_node = turbo_runtime_json_value_as_string(
+        turbo_json_object_get(entry, "next_node"));
+    const json_value_t *update =
+        turbo_json_object_get(entry, "update");
+    const json_value_t *state =
+        turbo_json_object_get(entry, "state");
     turbo_state_graph_history_entry_t *history_entry = NULL;
 
     if (!history_entry_id || !checkpoint_id || !thread_id || !run_id || !source_kind ||
@@ -3061,10 +3061,10 @@ static turbo_state_graph_status_t turbo_state_graph_import_history(
                   ? TURBO_STATE_GRAPH_SOURCE_NODE
                   : strcmp(source_kind, "fork") == 0 ? TURBO_STATE_GRAPH_SOURCE_FORK
                                                       : TURBO_STATE_GRAPH_SOURCE_HOST;
-    history_entry->step = (size_t)turbo_runtime_data_bind_value_as_int64(
-        turbo_runtime_data_bind_object_get(entry, "step"), 0);
-    history_entry->update = turbo_runtime_data_bind_value_clone(update);
-    history_entry->state = turbo_runtime_data_bind_value_clone(state);
+    history_entry->step = (size_t)turbo_runtime_json_value_as_int64(
+        turbo_json_object_get(entry, "step"), 0);
+    history_entry->update = turbo_json_clone(update);
+    history_entry->state = turbo_json_clone(state);
     if (!history_entry->id || !history_entry->checkpoint_id || !history_entry->thread_id ||
         !history_entry->run_id || !history_entry->update || !history_entry->state ||
         (source_name && !history_entry->source_name) ||
@@ -3081,12 +3081,12 @@ static turbo_state_graph_status_t turbo_state_graph_import_history(
 turbo_state_graph_status_t turbo_state_graph_load_snapshot(
     turbo_state_graph_t *graph, const char *json, size_t len) {
   json_value_t *json_value = NULL;
-  turbo_runtime_data_bind_value_t *root = NULL;
-  const turbo_runtime_data_bind_value_t *topology = NULL;
-  const turbo_runtime_data_bind_value_t *runtime = NULL;
-  const turbo_runtime_data_bind_value_t *threads = NULL;
-  const turbo_runtime_data_bind_value_t *runs = NULL;
-  const turbo_runtime_data_bind_value_t *history = NULL;
+  json_value_t *root = NULL;
+  const json_value_t *topology = NULL;
+  const json_value_t *runtime = NULL;
+  const json_value_t *threads = NULL;
+  const json_value_t *runs = NULL;
+  const json_value_t *history = NULL;
   turbo_state_graph_status_t status;
   int64_t snapshot_version;
 
@@ -3097,45 +3097,45 @@ turbo_state_graph_status_t turbo_state_graph_load_snapshot(
     turbo_free_json(&json_value);
     return TURBO_STATE_GRAPH_ERROR;
   }
-  root = turbo_runtime_data_bind_value_from_json(json_value);
+  root = turbo_json_clone(json_value);
   turbo_free_json(&json_value);
   if (!root) {
     return TURBO_STATE_GRAPH_OUT_OF_MEMORY;
   }
 
-  snapshot_version = turbo_runtime_data_bind_value_as_int64(
-      turbo_runtime_data_bind_object_get(root, "snapshot_version"), 0);
-  topology = turbo_runtime_data_bind_object_get(root, "topology");
-  runtime = turbo_runtime_data_bind_object_get(root, "runtime");
+  snapshot_version = turbo_runtime_json_value_as_int64(
+      turbo_json_object_get(root, "snapshot_version"), 0);
+  topology = turbo_json_object_get(root, "topology");
+  runtime = turbo_json_object_get(root, "runtime");
   if (snapshot_version != (int64_t)TURBO_STATE_GRAPH_SNAPSHOT_SCHEMA_VERSION || !topology ||
       !runtime) {
-    turbo_runtime_data_bind_value_destroy(root);
+    turbo_runtime_json_destroy(root);
     return TURBO_STATE_GRAPH_ERROR;
   }
 
   status = turbo_state_graph_validate_topology_snapshot(graph, topology);
   if (status != TURBO_STATE_GRAPH_OK) {
-    turbo_runtime_data_bind_value_destroy(root);
+    turbo_runtime_json_destroy(root);
     return status;
   }
 
-  threads = turbo_runtime_data_bind_object_get(runtime, "threads");
-  runs = turbo_runtime_data_bind_object_get(runtime, "runs");
-  history = turbo_runtime_data_bind_object_get(runtime, "history");
+  threads = turbo_json_object_get(runtime, "threads");
+  runs = turbo_json_object_get(runtime, "runs");
+  history = turbo_json_object_get(runtime, "history");
   if (!threads || !runs || !history) {
-    turbo_runtime_data_bind_value_destroy(root);
+    turbo_runtime_json_destroy(root);
     return TURBO_STATE_GRAPH_ERROR;
   }
 
   turbo_state_graph_clear_runtime_state(graph);
-  graph->next_thread_id = (size_t)turbo_runtime_data_bind_value_as_int64(
-      turbo_runtime_data_bind_object_get(runtime, "next_thread_id"), 0);
-  graph->next_run_id = (size_t)turbo_runtime_data_bind_value_as_int64(
-      turbo_runtime_data_bind_object_get(runtime, "next_run_id"), 0);
-  graph->next_history_id = (size_t)turbo_runtime_data_bind_value_as_int64(
-      turbo_runtime_data_bind_object_get(runtime, "next_history_id"), 0);
-  graph->next_checkpoint_id = (size_t)turbo_runtime_data_bind_value_as_int64(
-      turbo_runtime_data_bind_object_get(runtime, "next_checkpoint_id"), 0);
+  graph->next_thread_id = (size_t)turbo_runtime_json_value_as_int64(
+      turbo_json_object_get(runtime, "next_thread_id"), 0);
+  graph->next_run_id = (size_t)turbo_runtime_json_value_as_int64(
+      turbo_json_object_get(runtime, "next_run_id"), 0);
+  graph->next_history_id = (size_t)turbo_runtime_json_value_as_int64(
+      turbo_json_object_get(runtime, "next_history_id"), 0);
+  graph->next_checkpoint_id = (size_t)turbo_runtime_json_value_as_int64(
+      turbo_json_object_get(runtime, "next_checkpoint_id"), 0);
 
   status = turbo_state_graph_import_threads(graph, threads);
   if (status == TURBO_STATE_GRAPH_OK) {
@@ -3145,7 +3145,7 @@ turbo_state_graph_status_t turbo_state_graph_load_snapshot(
     status = turbo_state_graph_import_history(graph, history);
   }
 
-  turbo_runtime_data_bind_value_destroy(root);
+  turbo_runtime_json_destroy(root);
   if (status != TURBO_STATE_GRAPH_OK) {
     turbo_state_graph_clear_runtime_state(graph);
   }

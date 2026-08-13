@@ -1,4 +1,5 @@
 #include "turbo_agent_graph.h"
+#include "turbo_agent_workflow_graph_internal.h"
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
 #include "turbo_agent_state_flow_domain_internal.h"
 #include "turbo_agent_state_snapshot_internal.h"
@@ -150,11 +151,58 @@ int turbo_agent_executor_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data
   return rc;
 }
 
+static int turbo_agent_nested_tool_node(turbo_graph_exec_ctx_t *ctx, turbo_agent_t *agent,
+                                        json_value_t *nested_state,
+                                        const char *event_versions_key) {
+  turbo_graph_exec_ctx_t temp_ctx = {0};
+  int rc;
+
+  if (!ctx || !ctx->state || !agent || !nested_state || !event_versions_key) {
+    return -1;
+  }
+
+  temp_ctx.graph = ctx->graph;
+  temp_ctx.state = nested_state;
+  temp_ctx.current_node = ctx->current_node;
+  if (turbo_agent_state_review_approved(ctx->state) &&
+      turbo_agent_state_review_note(ctx->state)) {
+    const char *parent_note = turbo_agent_state_review_note(ctx->state);
+    const char *nested_note = turbo_agent_state_review_note(nested_state);
+    if (!nested_note || strcmp(nested_note, parent_note) != 0) {
+      if (turbo_agent_state_request_review(nested_state, parent_note) != 0) {
+        return -1;
+      }
+    }
+    if (turbo_agent_state_set_review_approved(nested_state, 1) != 0) {
+      return -1;
+    }
+  }
+
+  rc = turbo_agent_tool_node(&temp_ctx, agent);
+  if (temp_ctx.stop) {
+    const char *note = turbo_agent_state_review_note(nested_state);
+    if (turbo_agent_state_review_required(nested_state) &&
+        !turbo_agent_state_review_approved(nested_state) && note &&
+        turbo_agent_state_request_review(ctx->state, note) != 0) {
+      return -1;
+    }
+    if (ctx->current_node) {
+      turbo_graph_ctx_set_next(ctx, ctx->current_node);
+    }
+    turbo_graph_ctx_stop(ctx);
+  } else if (rc == 0) {
+    rc = turbo_agent_append_last_substate_event(ctx->state, event_versions_key, nested_state);
+  } else {
+    turbo_agent_copy_model_error(ctx->state, nested_state);
+    turbo_agent_copy_guardrail_rejection(ctx->state, nested_state);
+  }
+
+  return rc;
+}
+
 int turbo_agent_executor_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   turbo_agent_t *agent = (turbo_agent_t *)user_data;
   json_value_t *executor_state;
-  turbo_graph_exec_ctx_t temp_ctx = {0};
-  int rc;
 
   if (!ctx || !ctx->state || !agent) {
     return -1;
@@ -170,43 +218,24 @@ int turbo_agent_executor_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data)
     return 0;
   }
 
-  temp_ctx.graph = ctx->graph;
-  temp_ctx.state = executor_state;
-  temp_ctx.current_node = ctx->current_node;
-  if (turbo_agent_state_review_approved(ctx->state) &&
-      turbo_agent_state_review_note(ctx->state)) {
-    const char *parent_note = turbo_agent_state_review_note(ctx->state);
-    const char *executor_note = turbo_agent_state_review_note(executor_state);
-    if (!executor_note || strcmp(executor_note, parent_note) != 0) {
-      if (turbo_agent_state_request_review(executor_state, parent_note) != 0) {
-        return -1;
-      }
-    }
-    if (turbo_agent_state_set_review_approved(executor_state, 1) != 0) {
-      return -1;
-    }
-  }
-  rc = turbo_agent_tool_node(&temp_ctx, agent);
-  if (temp_ctx.stop) {
-    const char *note = turbo_agent_state_review_note(executor_state);
-    if (turbo_agent_state_review_required(executor_state) &&
-        !turbo_agent_state_review_approved(executor_state) && note &&
-        turbo_agent_state_request_review(ctx->state, note) != 0) {
-      return -1;
-    }
-    if (ctx->current_node) {
-      turbo_graph_ctx_set_next(ctx, ctx->current_node);
-    }
-    turbo_graph_ctx_stop(ctx);
-  } else if (rc == 0) {
-    rc = turbo_agent_append_last_substate_event(ctx->state, "executor_event_versions",
-                                                executor_state);
-  } else {
-    turbo_agent_copy_model_error(ctx->state, executor_state);
-    turbo_agent_copy_guardrail_rejection(ctx->state, executor_state);
+  return turbo_agent_nested_tool_node(ctx, agent, executor_state, "executor_event_versions");
+}
+
+int turbo_agent_planner_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+  turbo_agent_t *agent = (turbo_agent_t *)user_data;
+  json_value_t *planner_state;
+
+  if (!ctx || !ctx->state || !agent) {
+    return -1;
   }
 
-  return rc;
+  planner_state = turbo_agent_state_ensure_versioned_substate(
+      ctx->state, "planner_state_versions", "planner_input_versions", "planner_event_versions");
+  if (!planner_state) {
+    return turbo_agent_tool_node(ctx, agent);
+  }
+
+  return turbo_agent_nested_tool_node(ctx, agent, planner_state, "planner_event_versions");
 }
 
 int turbo_agent_plan_advance_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {

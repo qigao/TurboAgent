@@ -1833,33 +1833,33 @@ int turbo_vector_store_tool_graph(json_value_t **out_graph_json) {
   return 0;
 }
 
-static int turbo_vector_bind_set_string(turbo_runtime_data_bind_value_t *object,
+static int turbo_vector_json_value_set_string(json_value_t *object,
                                         const char *key, const char *value) {
-  turbo_runtime_data_bind_value_t *field =
-      turbo_runtime_data_bind_value_create_string(value ? value : "");
+  json_value_t *field =
+      turbo_json_create_string(value ? value : "");
 
   if (!field) {
     return -1;
   }
-  if (turbo_runtime_data_bind_object_set(object, key, field) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(field);
+  if (turbo_runtime_json_object_set(object, key, field) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field);
     return -1;
   }
   return 0;
 }
 
-static int turbo_vector_bind_set_bool(turbo_runtime_data_bind_value_t *object,
+static int turbo_vector_json_value_set_bool(json_value_t *object,
                                       const char *key, int value) {
-  turbo_runtime_data_bind_value_t *field =
-      turbo_runtime_data_bind_value_create_bool(value ? 1 : 0);
+  json_value_t *field =
+      turbo_json_create_bool(value ? 1 : 0);
 
   if (!field) {
     return -1;
   }
-  if (turbo_runtime_data_bind_object_set(object, key, field) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(field);
+  if (turbo_runtime_json_object_set(object, key, field) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field);
     return -1;
   }
   return 0;
@@ -1939,9 +1939,9 @@ static int turbo_vector_stats_json(turbo_vector_store_tool_binding_t *binding,
   return 0;
 }
 
-static int turbo_vector_search_tool_bind(
-    const turbo_runtime_data_bind_value_t *arguments,
-    turbo_runtime_data_bind_value_t **out_result, void *user_data) {
+static int turbo_vector_search_tool_json_value(
+    const json_value_t *arguments,
+    json_value_t **out_result, void *user_data) {
   turbo_vector_store_tool_binding_t *binding =
       (turbo_vector_store_tool_binding_t *)user_data;
   const char *query;
@@ -1949,21 +1949,21 @@ static int turbo_vector_search_tool_bind(
   const char *uri_prefix;
   int64_t limit;
   json_value_t *results_json = NULL;
-  turbo_runtime_data_bind_value_t *results_bind = NULL;
-  turbo_runtime_data_bind_value_t *result = NULL;
+  json_value_t *results_json_value = NULL;
+  json_value_t *result = NULL;
 
   if (!binding || !arguments || !out_result) {
     return -1;
   }
   *out_result = NULL;
-  query = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(arguments, "query"));
-  kind = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(arguments, "kind"));
-  uri_prefix = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(arguments, "uri_prefix"));
-  limit = turbo_runtime_data_bind_value_as_int64(
-      turbo_runtime_data_bind_object_get(arguments, "limit"), 8);
+  query = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(arguments, "query"));
+  kind = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(arguments, "kind"));
+  uri_prefix = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(arguments, "uri_prefix"));
+  limit = turbo_runtime_json_value_as_int64(
+      turbo_json_object_get(arguments, "limit"), 8);
   if (!query || !query[0] || limit < 0) {
     return -1;
   }
@@ -1971,26 +1971,26 @@ static int turbo_vector_search_tool_bind(
                                &results_json) != 0) {
     return -1;
   }
-  results_bind = turbo_runtime_data_bind_value_from_json(results_json);
+  results_json_value = turbo_json_clone(results_json);
   turbo_free_json(&results_json);
-  result = turbo_runtime_data_bind_value_create_object();
-  if (!result || !results_bind ||
-      turbo_vector_bind_set_bool(result, "ok", 1) != 0 ||
-      turbo_vector_bind_set_string(result, "summary",
+  result = turbo_json_create_object();
+  if (!result || !results_json_value ||
+      turbo_vector_json_value_set_bool(result, "ok", 1) != 0 ||
+      turbo_vector_json_value_set_string(result, "summary",
                                    "vector search completed") != 0 ||
-      turbo_runtime_data_bind_object_set(result, "results", results_bind) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(results_bind);
-    turbo_runtime_data_bind_value_destroy(result);
+      turbo_runtime_json_object_set(result, "results", results_json_value) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(results_json_value);
+    turbo_runtime_json_destroy(result);
     return -1;
   }
   *out_result = result;
   return 0;
 }
 
-static int turbo_vector_build_context_tool_bind(
-    const turbo_runtime_data_bind_value_t *arguments,
-    turbo_runtime_data_bind_value_t **out_result, void *user_data) {
+static int turbo_vector_build_context_tool_json_value(
+    const json_value_t *arguments,
+    json_value_t **out_result, void *user_data) {
   turbo_vector_store_tool_binding_t *binding =
       (turbo_vector_store_tool_binding_t *)user_data;
   const char *query;
@@ -1998,21 +1998,21 @@ static int turbo_vector_build_context_tool_bind(
   const char *uri_prefix;
   int64_t limit;
   json_value_t *context_json = NULL;
-  turbo_runtime_data_bind_value_t *context_bind = NULL;
-  turbo_runtime_data_bind_value_t *result = NULL;
+  json_value_t *context_json_value = NULL;
+  json_value_t *result = NULL;
 
   if (!binding || !arguments || !out_result) {
     return -1;
   }
   *out_result = NULL;
-  query = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(arguments, "query"));
-  kind = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(arguments, "kind"));
-  uri_prefix = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(arguments, "uri_prefix"));
-  limit = turbo_runtime_data_bind_value_as_int64(
-      turbo_runtime_data_bind_object_get(arguments, "limit"), 8);
+  query = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(arguments, "query"));
+  kind = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(arguments, "kind"));
+  uri_prefix = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(arguments, "uri_prefix"));
+  limit = turbo_runtime_json_value_as_int64(
+      turbo_json_object_get(arguments, "limit"), 8);
   if (!query || !query[0] || limit < 0) {
     return -1;
   }
@@ -2020,31 +2020,31 @@ static int turbo_vector_build_context_tool_bind(
                                       (size_t)limit, &context_json) != 0) {
     return -1;
   }
-  context_bind = turbo_runtime_data_bind_value_from_json(context_json);
+  context_json_value = turbo_json_clone(context_json);
   turbo_free_json(&context_json);
-  result = turbo_runtime_data_bind_value_create_object();
-  if (!result || !context_bind ||
-      turbo_vector_bind_set_bool(result, "ok", 1) != 0 ||
-      turbo_vector_bind_set_string(result, "summary",
+  result = turbo_json_create_object();
+  if (!result || !context_json_value ||
+      turbo_vector_json_value_set_bool(result, "ok", 1) != 0 ||
+      turbo_vector_json_value_set_string(result, "summary",
                                    "vector context built") != 0 ||
-      turbo_runtime_data_bind_object_set(result, "context", context_bind) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(context_bind);
-    turbo_runtime_data_bind_value_destroy(result);
+      turbo_runtime_json_object_set(result, "context", context_json_value) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(context_json_value);
+    turbo_runtime_json_destroy(result);
     return -1;
   }
   *out_result = result;
   return 0;
 }
 
-static int turbo_vector_stats_tool_bind(
-    const turbo_runtime_data_bind_value_t *arguments,
-    turbo_runtime_data_bind_value_t **out_result, void *user_data) {
+static int turbo_vector_stats_tool_json_value(
+    const json_value_t *arguments,
+    json_value_t **out_result, void *user_data) {
   turbo_vector_store_tool_binding_t *binding =
       (turbo_vector_store_tool_binding_t *)user_data;
   json_value_t *stats_json = NULL;
-  turbo_runtime_data_bind_value_t *stats_bind = NULL;
-  turbo_runtime_data_bind_value_t *result = NULL;
+  json_value_t *stats_json_value = NULL;
+  json_value_t *result = NULL;
 
   (void)arguments;
   if (!binding || !out_result) {
@@ -2054,29 +2054,29 @@ static int turbo_vector_stats_tool_bind(
   if (turbo_vector_stats_json(binding, &stats_json) != 0) {
     return -1;
   }
-  stats_bind = turbo_runtime_data_bind_value_from_json(stats_json);
+  stats_json_value = turbo_json_clone(stats_json);
   turbo_free_json(&stats_json);
-  result = turbo_runtime_data_bind_value_create_object();
-  if (!result || !stats_bind ||
-      turbo_vector_bind_set_bool(result, "ok", 1) != 0 ||
-      turbo_vector_bind_set_string(result, "summary",
+  result = turbo_json_create_object();
+  if (!result || !stats_json_value ||
+      turbo_vector_json_value_set_bool(result, "ok", 1) != 0 ||
+      turbo_vector_json_value_set_string(result, "summary",
                                    "vector stats loaded") != 0 ||
-      turbo_runtime_data_bind_object_set(result, "stats", stats_bind) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(stats_bind);
-    turbo_runtime_data_bind_value_destroy(result);
+      turbo_runtime_json_object_set(result, "stats", stats_json_value) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(stats_json_value);
+    turbo_runtime_json_destroy(result);
     return -1;
   }
   *out_result = result;
   return 0;
 }
 
-static int turbo_vector_tool_graph_tool_bind(
-    const turbo_runtime_data_bind_value_t *arguments,
-    turbo_runtime_data_bind_value_t **out_result, void *user_data) {
+static int turbo_vector_tool_graph_tool_json_value(
+    const json_value_t *arguments,
+    json_value_t **out_result, void *user_data) {
   json_value_t *graph_json = NULL;
-  turbo_runtime_data_bind_value_t *graph_bind = NULL;
-  turbo_runtime_data_bind_value_t *result = NULL;
+  json_value_t *graph_json_value = NULL;
+  json_value_t *result = NULL;
 
   (void)arguments;
   (void)user_data;
@@ -2087,17 +2087,17 @@ static int turbo_vector_tool_graph_tool_bind(
   if (turbo_vector_store_tool_graph(&graph_json) != 0) {
     return -1;
   }
-  graph_bind = turbo_runtime_data_bind_value_from_json(graph_json);
+  graph_json_value = turbo_json_clone(graph_json);
   turbo_free_json(&graph_json);
-  result = turbo_runtime_data_bind_value_create_object();
-  if (!result || !graph_bind ||
-      turbo_vector_bind_set_bool(result, "ok", 1) != 0 ||
-      turbo_vector_bind_set_string(result, "summary",
+  result = turbo_json_create_object();
+  if (!result || !graph_json_value ||
+      turbo_vector_json_value_set_bool(result, "ok", 1) != 0 ||
+      turbo_vector_json_value_set_string(result, "summary",
                                    "vector tool graph loaded") != 0 ||
-      turbo_runtime_data_bind_object_set(result, "graph", graph_bind) !=
-          TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(graph_bind);
-    turbo_runtime_data_bind_value_destroy(result);
+      turbo_runtime_json_object_set(result, "graph", graph_json_value) !=
+          TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(graph_json_value);
+    turbo_runtime_json_destroy(result);
     return -1;
   }
   *out_result = result;
@@ -2106,17 +2106,17 @@ static int turbo_vector_tool_graph_tool_bind(
 
 static int turbo_vector_tool_json_handler(
     const char *arguments_json, char **out_output,
-    int (*bind_handler)(const turbo_runtime_data_bind_value_t *,
-                        turbo_runtime_data_bind_value_t **, void *),
+    int (*json_value_handler)(const json_value_t *,
+                        json_value_t **, void *),
     void *user_data) {
   json_value_t *args_json = NULL;
   json_value_t *result_json = NULL;
-  turbo_runtime_data_bind_value_t *args = NULL;
-  turbo_runtime_data_bind_value_t *result = NULL;
+  json_value_t *args = NULL;
+  json_value_t *result = NULL;
   char *serialized = NULL;
   int rc;
 
-  if (!out_output || !bind_handler) {
+  if (!out_output || !json_value_handler) {
     return -1;
   }
   *out_output = NULL;
@@ -2126,19 +2126,19 @@ static int turbo_vector_tool_json_handler(
       !args_json) {
     return -1;
   }
-  args = turbo_runtime_data_bind_value_from_json(args_json);
+  args = turbo_json_clone(args_json);
   turbo_free_json(&args_json);
   if (!args) {
     return -1;
   }
-  rc = bind_handler(args, &result, user_data);
-  turbo_runtime_data_bind_value_destroy(args);
+  rc = json_value_handler(args, &result, user_data);
+  turbo_runtime_json_destroy(args);
   if (rc != 0 || !result) {
-    turbo_runtime_data_bind_value_destroy(result);
+    turbo_runtime_json_destroy(result);
     return -1;
   }
-  result_json = turbo_runtime_data_bind_value_to_json(result);
-  turbo_runtime_data_bind_value_destroy(result);
+  result_json = turbo_json_clone(result);
+  turbo_runtime_json_destroy(result);
   if (!result_json) {
     return -1;
   }
@@ -2154,7 +2154,7 @@ static int turbo_vector_tool_json_handler(
 static int turbo_vector_search_tool_json(const char *arguments_json,
                                          char **out_output, void *user_data) {
   return turbo_vector_tool_json_handler(arguments_json, out_output,
-                                        turbo_vector_search_tool_bind,
+                                        turbo_vector_search_tool_json_value,
                                         user_data);
 }
 
@@ -2162,14 +2162,14 @@ static int turbo_vector_build_context_tool_json(const char *arguments_json,
                                                 char **out_output,
                                                 void *user_data) {
   return turbo_vector_tool_json_handler(arguments_json, out_output,
-                                        turbo_vector_build_context_tool_bind,
+                                        turbo_vector_build_context_tool_json_value,
                                         user_data);
 }
 
 static int turbo_vector_stats_tool_json(const char *arguments_json,
                                         char **out_output, void *user_data) {
   return turbo_vector_tool_json_handler(arguments_json, out_output,
-                                        turbo_vector_stats_tool_bind,
+                                        turbo_vector_stats_tool_json_value,
                                         user_data);
 }
 
@@ -2177,7 +2177,7 @@ static int turbo_vector_tool_graph_tool_json(const char *arguments_json,
                                              char **out_output,
                                              void *user_data) {
   return turbo_vector_tool_json_handler(arguments_json, out_output,
-                                        turbo_vector_tool_graph_tool_bind,
+                                        turbo_vector_tool_graph_tool_json_value,
                                         user_data);
 }
 
@@ -2514,7 +2514,7 @@ int turbo_vector_store_add_tools(turbo_tool_registry_t *registry,
   definition.parameters_json = query_schema;
   definition.strict = 1;
   definition.handler = turbo_vector_search_tool_json;
-  definition.bind_handler = turbo_vector_search_tool_bind;
+  definition.json_value_handler = turbo_vector_search_tool_json_value;
   definition.user_data = binding;
   if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
     return -1;
@@ -2527,7 +2527,7 @@ int turbo_vector_store_add_tools(turbo_tool_registry_t *registry,
   definition.parameters_json = query_schema;
   definition.strict = 1;
   definition.handler = turbo_vector_build_context_tool_json;
-  definition.bind_handler = turbo_vector_build_context_tool_bind;
+  definition.json_value_handler = turbo_vector_build_context_tool_json_value;
   definition.user_data = binding;
   if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
     return -1;
@@ -2539,7 +2539,7 @@ int turbo_vector_store_add_tools(turbo_tool_registry_t *registry,
   definition.parameters_json = empty_schema;
   definition.strict = 1;
   definition.handler = turbo_vector_stats_tool_json;
-  definition.bind_handler = turbo_vector_stats_tool_bind;
+  definition.json_value_handler = turbo_vector_stats_tool_json_value;
   definition.user_data = binding;
   if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
     return -1;
@@ -2552,7 +2552,7 @@ int turbo_vector_store_add_tools(turbo_tool_registry_t *registry,
   definition.parameters_json = empty_schema;
   definition.strict = 1;
   definition.handler = turbo_vector_tool_graph_tool_json;
-  definition.bind_handler = turbo_vector_tool_graph_tool_bind;
+  definition.json_value_handler = turbo_vector_tool_graph_tool_json_value;
   definition.user_data = binding;
   if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
     return -1;

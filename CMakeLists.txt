@@ -49,8 +49,11 @@ include(CmakeUtils)
 
 find_package(OpenSSL REQUIRED)
 find_package(base64 CONFIG REQUIRED)
+find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBOUTILS_ROOT}")
+find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
 find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}") 
 find_package(TurboHttp CONFIG REQUIRED PATHS "${TURBOHTTP_ROOT}")
+find_package(TurboWasm CONFIG REQUIRED PATHS "${TURBOWASM_ROOT}")
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(STC REQUIRED IMPORTED_TARGET stc)
@@ -59,14 +62,38 @@ pkg_check_modules(STC REQUIRED IMPORTED_TARGET stc)
 add_subdirectory(tools)
 include(FindTools)
 add_subdirectory(vendor)
-add_subdirectory(wasm3)
+add_subdirectory(runtime_core)
 add_subdirectory(runtime_data)
 add_subdirectory(runtime_tools)
+
+if(ENABLE_CODING_TOOLS)
+  add_subdirectory(coding_tools)
+endif()
 
 if(ENABLE_LANGCHAIN)
   add_subdirectory(langchain)
 endif()
-add_subdirectory(runtime_codec)
 add_subdirectory(llm_sandbox)
 # Package Configuration
 include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
+set(TURBO_AGENT_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/TurboAgent")
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TurboAgentConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/TurboAgentConfig.cmake"
+  INSTALL_DESTINATION "${TURBO_AGENT_INSTALL_CMAKEDIR}")
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/TurboAgentConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion)
+
+install(
+  EXPORT TurboAgentTargets
+  FILE TurboAgentTargets.cmake
+  NAMESPACE TurboAgent::
+  DESTINATION "${TURBO_AGENT_INSTALL_CMAKEDIR}")
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/TurboAgentConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/TurboAgentConfigVersion.cmake"
+  DESTINATION "${TURBO_AGENT_INSTALL_CMAKEDIR}")

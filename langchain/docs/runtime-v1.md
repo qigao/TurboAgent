@@ -41,19 +41,19 @@ Core entry points:
 - `turbo_agent_runtime_destroy(...)`
 - `turbo_agent_runtime_store_memory_create(...)`
 - `turbo_agent_runtime_store_file_create(...)`
-- `turbo_agent_runtime_start_bind_graph(...)`
-- `turbo_agent_runtime_resume_bind_graph(...)`
-- `turbo_agent_runtime_fork_bind_graph(...)`
+- `turbo_agent_runtime_start_json_value_graph(...)`
+- `turbo_agent_runtime_resume_json_value_graph(...)`
+- `turbo_agent_runtime_fork_json_value_graph(...)`
 - `turbo_agent_runtime_get_thread(...)`
 - `turbo_agent_runtime_get_run(...)`
 - `turbo_agent_runtime_get_checkpoint(...)`
-- `turbo_agent_runtime_get_thread_state_bind(...)`
-- `turbo_agent_runtime_get_run_state_bind(...)`
-- `turbo_agent_runtime_get_checkpoint_state_bind(...)`
+- `turbo_agent_runtime_get_thread_state_json_value(...)`
+- `turbo_agent_runtime_get_run_state_json_value(...)`
+- `turbo_agent_runtime_get_checkpoint_state_json_value(...)`
 - `turbo_agent_runtime_list_runs(...)`
 - `turbo_agent_runtime_list_checkpoints(...)`
-- `turbo_agent_runtime_load_history_events_bind(...)`
-- `turbo_agent_runtime_apply_command_bind(...)`
+- `turbo_agent_runtime_load_history_events_json_value(...)`
+- `turbo_agent_runtime_apply_command_json_value(...)`
 
 ## Data model
 
@@ -129,14 +129,14 @@ Do not mix them. They solve different problems.
 
 ### Start
 
-`start_bind_graph(...)`:
+`start_json_value_graph(...)`:
 
 - creates or reuses one `thread`
 - creates one new `run`
 - executes one graph segment
 - returns:
   - summary JSON
-  - resulting bind-native state
+  - resulting TurboParser JSON-native state
 
 If the graph completes, the run is persisted as `completed`.
 
@@ -145,7 +145,7 @@ checkpoint record is written.
 
 ### Resume
 
-`resume_bind_graph(...)`:
+`resume_json_value_graph(...)`:
 
 - loads one persisted checkpoint
 - optionally replaces checkpoint state with `state_override`
@@ -155,7 +155,7 @@ This is the general interrupt recovery path. No special command DSL is needed.
 
 ### Fork
 
-`fork_bind_graph(...)`:
+`fork_json_value_graph(...)`:
 
 - loads one old checkpoint
 - starts one new `run_id`
@@ -167,7 +167,7 @@ Use this when you want to branch history instead of continuing the same run.
 
 ## History
 
-`load_history_events_bind(...)` walks the persisted checkpoint chain and
+`load_history_events_json_value(...)` walks the persisted checkpoint chain and
 rebuilds segment events in chronological order.
 
 That means:
@@ -186,12 +186,12 @@ You may load history by:
 `Runtime V1` now also exposes host-facing state access without forcing the host
 to parse checkpoint JSON manually.
 
-- `get_checkpoint_state_bind(...)` loads the serialized checkpoint state
-- `get_run_state_bind(...)` loads the latest persisted run state
-- `get_thread_state_bind(...)` resolves the latest run on the thread and loads
+- `get_checkpoint_state_json_value(...)` loads the serialized checkpoint state
+- `get_run_state_json_value(...)` loads the latest persisted run state
+- `get_thread_state_json_value(...)` resolves the latest run on the thread and loads
   its state
 
-These entry points stay on the bind-native value boundary, so hosts do not
+These entry points stay on the TurboParser JSON-native value boundary, so hosts do not
 need to adopt the JSON DOM as their application state model.
 
 ## Command apply
@@ -199,10 +199,10 @@ need to adopt the JSON DOM as their application state model.
 `Runtime V1` still uses `state_override` as the resume/fork primitive, but the
 runtime now also ships one minimal command helper:
 
-- `apply_command_bind(...)`
+- `apply_command_json_value(...)`
 
 That helper reads one persisted checkpoint state, applies one canonical
-host-facing command, and returns a fresh bind-native `state_override`.
+host-facing command, and returns a fresh TurboParser JSON-native `state_override`.
 
 The first supported commands are:
 
@@ -217,11 +217,11 @@ The first supported commands are:
 
 1. Build a graph that can interrupt.
 2. Create a runtime with a memory or file store.
-3. Start one run with bind-native state.
+3. Start one run with TurboParser JSON-native state.
 4. If status is `interrupted`, load the checkpoint record.
 5. Inspect `control_snapshot` and `workflow_snapshot`.
 6. Build a fresh state override with `turbo_agent_state_*`, or ask the runtime
-   to build one through `apply_command_bind(...)`.
+   to build one through `apply_command_json_value(...)`.
 7. Resume the checkpoint, or fork it into a new run.
 
 ## Example targets
@@ -243,7 +243,7 @@ Two examples are wired into CMake.
 - `get_checkpoint(...)`
 - `list_runs(...)`
 - `list_checkpoints(...)`
-- `load_history_events_bind(...)`
+- `load_history_events_json_value(...)`
 
 The examples are also registered as smoke tests, so their printed output is now
 part of the runtime contract instead of an untested demo.

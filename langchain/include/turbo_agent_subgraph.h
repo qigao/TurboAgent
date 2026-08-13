@@ -20,7 +20,7 @@ typedef struct turbo_agent_subgraph_node_config_s {
 } turbo_agent_subgraph_node_config_t;
 
 /**
- * @brief Execute one child graph as a bind-native graph node.
+ * @brief Execute one child graph as a TurboParser JSON-native graph node.
  *
  * The node starts `config->subgraph` through `config->runtime`, using the
  * current parent runtime execution context as lineage metadata. It writes one

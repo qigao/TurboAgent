@@ -4,7 +4,7 @@
 #include <platform.h>
 
 #include "turbo_parser.h"
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,10 +25,10 @@ CXX_C_API size_t turbo_agent_state_schema_version(void);
 CXX_C_API json_value_t *turbo_agent_state_create(void);
 
 /**
- * @brief Create append-only agent state as a runtime data-bind value tree.
+ * @brief Create append-only agent state as a TurboParser JSON value tree.
  * @return State object owned by caller.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *turbo_agent_state_create_bind(void);
+CXX_C_API json_value_t *turbo_agent_state_create_json_value(void);
 
 /**
  * @brief Return the schema version stored on a state object.
@@ -99,29 +99,29 @@ CXX_C_API const json_value_t *turbo_agent_state_trace_event_at(const json_value_
                                                                       size_t index);
 
 /**
- * @brief Return the captured trace event array as a bind-native clone.
+ * @brief Return the captured trace event array as a TurboParser JSON-native clone.
  * @param state Agent state.
- * @return Bind-native array owned by caller, or NULL when absent.
+ * @return JsonValue-native array owned by caller, or NULL when absent.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_trace_events_bind(const turbo_runtime_data_bind_value_t *state);
+CXX_C_API json_value_t *
+turbo_agent_state_trace_events_json_value(const json_value_t *state);
 
 /**
- * @brief Append one canonical bind-native trace event into `state.trace_events`.
- * @param state Agent state as a bind-native object.
+ * @brief Append one canonical TurboParser JSON-native trace event into `state.trace_events`.
+ * @param state Agent state as a TurboParser JSON-native object.
  * @param event Canonical trace event.
  * @return 0 on success.
  */
-CXX_C_API int turbo_agent_state_add_trace_event_bind(
-    turbo_runtime_data_bind_value_t *state, const turbo_runtime_data_bind_value_t *event);
+CXX_C_API int turbo_agent_state_add_trace_event_json_value(
+    json_value_t *state, const json_value_t *event);
 
 /**
- * @brief Capture one canonical bind-native trace event through the standard sink callback.
+ * @brief Capture one canonical TurboParser JSON-native trace event through the standard sink callback.
  * @param event Canonical trace event.
- * @param user_data Agent state as a bind-native object.
+ * @param user_data Agent state as a TurboParser JSON-native object.
  */
-CXX_C_API void turbo_agent_state_capture_trace_event_bind(
-    const turbo_runtime_data_bind_value_t *event, void *user_data);
+CXX_C_API void turbo_agent_state_capture_trace_event_json_value(
+    const json_value_t *event, void *user_data);
 
 /**
  * @brief Store JSON text under `state.memory.<key>`.
@@ -375,12 +375,12 @@ CXX_C_API const char *turbo_agent_state_failure_reason(const json_value_t *state
 CXX_C_API json_value_t *turbo_agent_state_control_snapshot(const json_value_t *state);
 
 /**
- * @brief Build a control snapshot from a runtime data-bind state boundary.
- * @param state Agent state as a runtime data-bind object.
- * @return Runtime data-bind snapshot owned by caller, or NULL on failure.
+ * @brief Build a control snapshot from a TurboParser JSON state boundary.
+ * @param state Agent state as a TurboParser JSON object.
+ * @return TurboParser JSON snapshot owned by caller, or NULL on failure.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_control_snapshot_bind(const turbo_runtime_data_bind_value_t *state);
+CXX_C_API json_value_t *
+turbo_agent_state_control_snapshot_json_value(const json_value_t *state);
 
 /**
  * @brief Build a stable workflow snapshot from runtime state.
@@ -396,12 +396,12 @@ turbo_agent_state_control_snapshot_bind(const turbo_runtime_data_bind_value_t *s
 CXX_C_API json_value_t *turbo_agent_state_workflow_snapshot(const json_value_t *state);
 
 /**
- * @brief Build a workflow snapshot from a runtime data-bind state boundary.
- * @param state Agent state as a runtime data-bind object.
- * @return Runtime data-bind snapshot owned by caller, or NULL on failure.
+ * @brief Build a workflow snapshot from a TurboParser JSON state boundary.
+ * @param state Agent state as a TurboParser JSON object.
+ * @return TurboParser JSON snapshot owned by caller, or NULL on failure.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_workflow_snapshot_bind(const turbo_runtime_data_bind_value_t *state);
+CXX_C_API json_value_t *
+turbo_agent_state_workflow_snapshot_json_value(const json_value_t *state);
 
 /**
  * @brief Set the current final answer text explicitly.
@@ -632,23 +632,23 @@ CXX_C_API const json_value_t *
 turbo_agent_state_planner_event_version_at(const json_value_t *state, size_t index);
 
 /**
- * @brief Return one planner event history version as a bind-native clone.
- * @param state Agent state or workflow snapshot as a bind-native object.
+ * @brief Return one planner event history version as a TurboParser JSON-native clone.
+ * @param state Agent state or workflow snapshot as a TurboParser JSON-native object.
  * @param index Zero-based version index.
- * @return Bind-native array owned by caller, or NULL when absent.
+ * @return JsonValue-native array owned by caller, or NULL when absent.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_planner_event_version_bind(const turbo_runtime_data_bind_value_t *state,
+CXX_C_API json_value_t *
+turbo_agent_state_planner_event_version_json_value(const json_value_t *state,
                                                     size_t index);
 
 /**
- * @brief Return the latest planner event history version as a bind-native clone.
- * @param state Agent state or workflow snapshot as a bind-native object.
- * @return Bind-native array owned by caller, or NULL when absent.
+ * @brief Return the latest planner event history version as a TurboParser JSON-native clone.
+ * @param state Agent state or workflow snapshot as a TurboParser JSON-native object.
+ * @return JsonValue-native array owned by caller, or NULL when absent.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_latest_planner_event_version_bind(
-    const turbo_runtime_data_bind_value_t *state);
+CXX_C_API json_value_t *
+turbo_agent_state_latest_planner_event_version_json_value(
+    const json_value_t *state);
 
 /**
  * @brief Return the executor event history versions array.
@@ -675,23 +675,23 @@ CXX_C_API const json_value_t *
 turbo_agent_state_executor_event_version_at(const json_value_t *state, size_t index);
 
 /**
- * @brief Return one executor event history version as a bind-native clone.
- * @param state Agent state or workflow snapshot as a bind-native object.
+ * @brief Return one executor event history version as a TurboParser JSON-native clone.
+ * @param state Agent state or workflow snapshot as a TurboParser JSON-native object.
  * @param index Zero-based version index.
- * @return Bind-native array owned by caller, or NULL when absent.
+ * @return JsonValue-native array owned by caller, or NULL when absent.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_executor_event_version_bind(const turbo_runtime_data_bind_value_t *state,
+CXX_C_API json_value_t *
+turbo_agent_state_executor_event_version_json_value(const json_value_t *state,
                                                      size_t index);
 
 /**
- * @brief Return the latest executor event history version as a bind-native clone.
- * @param state Agent state or workflow snapshot as a bind-native object.
- * @return Bind-native array owned by caller, or NULL when absent.
+ * @brief Return the latest executor event history version as a TurboParser JSON-native clone.
+ * @param state Agent state or workflow snapshot as a TurboParser JSON-native object.
+ * @return JsonValue-native array owned by caller, or NULL when absent.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_latest_executor_event_version_bind(
-    const turbo_runtime_data_bind_value_t *state);
+CXX_C_API json_value_t *
+turbo_agent_state_latest_executor_event_version_json_value(
+    const json_value_t *state);
 
 /**
  * @brief Return the completed plan-step summary array.
@@ -701,12 +701,12 @@ turbo_agent_state_latest_executor_event_version_bind(
 CXX_C_API const json_value_t *turbo_agent_state_completed_steps(const json_value_t *state);
 
 /**
- * @brief Return the completed plan-step summary array as a bind-native clone.
- * @param state Agent state or workflow snapshot as a bind-native object.
- * @return Bind-native array owned by caller, or NULL when absent.
+ * @brief Return the completed plan-step summary array as a TurboParser JSON-native clone.
+ * @param state Agent state or workflow snapshot as a TurboParser JSON-native object.
+ * @return JsonValue-native array owned by caller, or NULL when absent.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_completed_steps_bind(const turbo_runtime_data_bind_value_t *state);
+CXX_C_API json_value_t *
+turbo_agent_state_completed_steps_json_value(const json_value_t *state);
 
 /**
  * @brief Return the number of completed plan steps.
@@ -725,22 +725,22 @@ CXX_C_API const json_value_t *turbo_agent_state_completed_step_at(const json_val
                                                                          size_t index);
 
 /**
- * @brief Return one completed plan-step summary as a bind-native clone.
- * @param state Agent state or workflow snapshot as a bind-native object.
+ * @brief Return one completed plan-step summary as a TurboParser JSON-native clone.
+ * @param state Agent state or workflow snapshot as a TurboParser JSON-native object.
  * @param index Zero-based completed-step index.
- * @return Bind-native object owned by caller, or NULL when absent.
+ * @return JsonValue-native object owned by caller, or NULL when absent.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_completed_step_bind(const turbo_runtime_data_bind_value_t *state,
+CXX_C_API json_value_t *
+turbo_agent_state_completed_step_json_value(const json_value_t *state,
                                              size_t index);
 
 /**
- * @brief Return the latest completed plan-step summary as a bind-native clone.
- * @param state Agent state or workflow snapshot as a bind-native object.
- * @return Bind-native object owned by caller, or NULL when absent.
+ * @brief Return the latest completed plan-step summary as a TurboParser JSON-native clone.
+ * @param state Agent state or workflow snapshot as a TurboParser JSON-native object.
+ * @return JsonValue-native object owned by caller, or NULL when absent.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *
-turbo_agent_state_latest_completed_step_bind(const turbo_runtime_data_bind_value_t *state);
+CXX_C_API json_value_t *
+turbo_agent_state_latest_completed_step_json_value(const json_value_t *state);
 
 /**
  * @brief Record the latest model-call failure details.

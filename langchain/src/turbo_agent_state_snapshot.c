@@ -1,7 +1,7 @@
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
 #include "turbo_agent_state_core_internal.h"
 #include "turbo_agent_state_flow_domain_internal.h"
-#include "turbo_agent_state_bind_internal.h"
+#include "turbo_agent_state_json_value_internal.h"
 #include "turbo_agent_state_memory_internal.h"
 #include "turbo_agent_state_snapshot_internal.h"
 #include "turbo_agent_event_internal.h"
@@ -9,15 +9,15 @@
 
 #include <stdlib.h>
 
-static json_value_t *turbo_agent_state_snapshot_bind_value_to_json_object(
-    const turbo_runtime_data_bind_value_t *state) {
+static json_value_t *turbo_agent_state_snapshot_to_json_object(
+    const json_value_t *state) {
   json_value_t *json_state;
 
   if (!state) {
     return NULL;
   }
 
-  json_state = turbo_runtime_data_bind_value_to_json(state);
+  json_state = turbo_json_clone(state);
   if (!json_state) {
     return NULL;
   }
@@ -276,11 +276,11 @@ json_value_t *turbo_agent_state_control_snapshot_impl(const json_value_t *state)
   return snapshot;
 }
 
-turbo_runtime_data_bind_value_t *
-turbo_agent_state_control_snapshot_bind_impl(const turbo_runtime_data_bind_value_t *state) {
-  json_value_t *json_state = turbo_agent_state_snapshot_bind_value_to_json_object(state);
+json_value_t *
+turbo_agent_state_control_snapshot_json_value_impl(const json_value_t *state) {
+  json_value_t *json_state = turbo_agent_state_snapshot_to_json_object(state);
   json_value_t *snapshot;
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   if (!json_state) {
     return NULL;
@@ -292,7 +292,7 @@ turbo_agent_state_control_snapshot_bind_impl(const turbo_runtime_data_bind_value
     return NULL;
   }
 
-  bound = turbo_runtime_data_bind_value_from_json(snapshot);
+  bound = turbo_json_clone(snapshot);
   turbo_free_json(&snapshot);
   return bound;
 }
@@ -465,11 +465,11 @@ json_value_t *turbo_agent_state_workflow_snapshot_impl(const json_value_t *state
   return snapshot;
 }
 
-turbo_runtime_data_bind_value_t *
-turbo_agent_state_workflow_snapshot_bind_impl(const turbo_runtime_data_bind_value_t *state) {
-  json_value_t *json_state = turbo_agent_state_snapshot_bind_value_to_json_object(state);
+json_value_t *
+turbo_agent_state_workflow_snapshot_json_value_impl(const json_value_t *state) {
+  json_value_t *json_state = turbo_agent_state_snapshot_to_json_object(state);
   json_value_t *snapshot;
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   if (!json_state) {
     return NULL;
@@ -481,7 +481,7 @@ turbo_agent_state_workflow_snapshot_bind_impl(const turbo_runtime_data_bind_valu
     return NULL;
   }
 
-  bound = turbo_runtime_data_bind_value_from_json(snapshot);
+  bound = turbo_json_clone(snapshot);
   turbo_free_json(&snapshot);
   return bound;
 }

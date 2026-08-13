@@ -41,28 +41,28 @@ CXX_C_API const json_value_t *turbo_agent_request_responses_input_source(
 
 CXX_C_API json_value_t *
 turbo_agent_request_build_responses_input_messages(const json_value_t *input_source) {
-  turbo_runtime_data_bind_value_t *messages_bind;
+  json_value_t *messages_json_value;
   json_value_t *wire_messages;
 
   if (!input_source) {
     return NULL;
   }
 
-  messages_bind = turbo_runtime_data_bind_value_from_json(input_source);
-  if (!messages_bind) {
+  messages_json_value = turbo_json_clone(input_source);
+  if (!messages_json_value) {
     return NULL;
   }
 
   wire_messages = turbo_model_provider_messages_to_wire_json(
-      turbo_model_provider_openai_responses(), messages_bind, NULL);
-  turbo_runtime_data_bind_value_destroy(messages_bind);
+      turbo_model_provider_openai_responses(), messages_json_value, NULL);
+  turbo_runtime_json_destroy(messages_json_value);
   return wire_messages;
 }
 
 CXX_C_API json_value_t *turbo_agent_request_build_chat_messages(const turbo_agent_t *agent,
                                                                 const json_value_t *state) {
   json_value_t *canonical_messages;
-  turbo_runtime_data_bind_value_t *messages_bind;
+  json_value_t *messages_json_value;
   json_value_t *wire_messages;
 
   canonical_messages = turbo_agent_request_build_canonical_messages(agent, state);
@@ -70,15 +70,15 @@ CXX_C_API json_value_t *turbo_agent_request_build_chat_messages(const turbo_agen
     return NULL;
   }
 
-  messages_bind = turbo_runtime_data_bind_value_from_json(canonical_messages);
+  messages_json_value = turbo_json_clone(canonical_messages);
   turbo_free_json(&canonical_messages);
-  if (!messages_bind) {
+  if (!messages_json_value) {
     return NULL;
   }
 
   wire_messages = turbo_model_provider_messages_to_wire_json(
-      turbo_model_provider_openai_chat_completions(), messages_bind, NULL);
-  turbo_runtime_data_bind_value_destroy(messages_bind);
+      turbo_model_provider_openai_chat_completions(), messages_json_value, NULL);
+  turbo_runtime_json_destroy(messages_json_value);
   return wire_messages;
 }
 
@@ -87,7 +87,7 @@ CXX_C_API int turbo_agent_request_build_anthropic_wire_messages(const turbo_agen
                                                                 json_value_t **out_messages,
                                                                 char **out_system) {
   json_value_t *canonical_messages;
-  turbo_runtime_data_bind_value_t *messages_bind;
+  json_value_t *messages_json_value;
 
   if (!out_messages) {
     return -1;
@@ -103,14 +103,14 @@ CXX_C_API int turbo_agent_request_build_anthropic_wire_messages(const turbo_agen
     return -1;
   }
 
-  messages_bind = turbo_runtime_data_bind_value_from_json(canonical_messages);
+  messages_json_value = turbo_json_clone(canonical_messages);
   turbo_free_json(&canonical_messages);
-  if (!messages_bind) {
+  if (!messages_json_value) {
     return -1;
   }
 
   *out_messages = turbo_model_provider_messages_to_wire_json(
-      turbo_model_provider_anthropic_messages(), messages_bind, out_system);
-  turbo_runtime_data_bind_value_destroy(messages_bind);
+      turbo_model_provider_anthropic_messages(), messages_json_value, out_system);
+  turbo_runtime_json_destroy(messages_json_value);
   return *out_messages ? 0 : -1;
 }

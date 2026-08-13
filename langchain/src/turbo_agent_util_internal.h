@@ -3,7 +3,7 @@
 
 #include <platform.h>
 #include <turbo_str.h>
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,16 +15,16 @@ extern "C" {
 /* String Utilities */
 CXX_C_API tstr_t turbo_agent_util_strdup(const char *src);
 
-/* Data Bind Utilities */
-CXX_C_API int turbo_agent_util_bind_object_set_string(
-    turbo_runtime_data_bind_value_t *object, const char *key, const char *value);
+/* Data JsonValue Utilities */
+CXX_C_API int turbo_agent_util_json_value_object_set_string(
+    json_value_t *object, const char *key, const char *value);
 
-CXX_C_API int turbo_agent_util_bind_object_set_int64(
-    turbo_runtime_data_bind_value_t *object, const char *key, int64_t value);
+CXX_C_API int turbo_agent_util_json_value_object_set_int64(
+    json_value_t *object, const char *key, int64_t value);
 
-CXX_C_API int turbo_agent_util_bind_object_set_clone(
-    turbo_runtime_data_bind_value_t *object, const char *key,
-    const turbo_runtime_data_bind_value_t *value);
+CXX_C_API int turbo_agent_util_json_value_object_set_clone(
+    json_value_t *object, const char *key,
+    const json_value_t *value);
 
 /* Observability Utilities */
 CXX_C_API const char *turbo_agent_util_observer_type_for_trace_name(const char *name);

@@ -39,7 +39,7 @@
   },
   "thread_command_fork_request": {
     "id": "req-thread-fork",
-    "method": "runtime.forkThreadCommandBindGraph",
+    "method": "runtime.forkThreadCommandJsonValueGraph",
     "params": {
       "graph_name": "remote-skeleton",
       "thread_id": "remote-thread-2",
@@ -61,7 +61,7 @@
   },
   "thread_command_resume_request": {
     "id": "req-thread-resume",
-    "method": "runtime.resumeThreadCommandBindGraph",
+    "method": "runtime.resumeThreadCommandJsonValueGraph",
     "params": {
       "graph_name": "remote-skeleton",
       "thread_id": "remote-thread-2",
@@ -83,7 +83,7 @@
   },
   "thread_state_resume_request": {
     "id": "req-thread-resume-state",
-    "method": "runtime.resumeThreadBindGraph",
+    "method": "runtime.resumeThreadJsonValueGraph",
     "params": {
       "graph_name": "remote-skeleton",
       "thread_id": "remote-thread-3",
@@ -105,7 +105,7 @@
   },
   "thread_state_fork_request": {
     "id": "req-thread-fork-state",
-    "method": "runtime.forkThreadBindGraph",
+    "method": "runtime.forkThreadJsonValueGraph",
     "params": {
       "graph_name": "remote-skeleton",
       "thread_id": "remote-thread-4",
@@ -127,7 +127,7 @@
   },
   "thread_state_patch_resume_request": {
     "id": "req-thread-resume-patch",
-    "method": "runtime.resumeThreadStatePatchBindGraph",
+    "method": "runtime.resumeThreadStatePatchJsonValueGraph",
     "params": {
       "graph_name": "remote-skeleton",
       "thread_id": "remote-thread-5",
@@ -149,7 +149,7 @@
   },
   "thread_state_patch_fork_request": {
     "id": "req-thread-fork-patch",
-    "method": "runtime.forkThreadStatePatchBindGraph",
+    "method": "runtime.forkThreadStatePatchJsonValueGraph",
     "params": {
       "graph_name": "remote-skeleton",
       "thread_id": "remote-thread-6",

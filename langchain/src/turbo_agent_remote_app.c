@@ -93,21 +93,21 @@ CXX_C_API int turbo_agent_remote_app_get_startup_diagnostics(
       app->session, app->graph_name, out_diagnostics_json);
 }
 
-CXX_C_API int turbo_agent_remote_app_start_bind_graph(
-    turbo_agent_remote_app_t *app, const turbo_runtime_data_bind_value_t *state,
+CXX_C_API int turbo_agent_remote_app_start_json_value_graph(
+    turbo_agent_remote_app_t *app, const json_value_t *state,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   if (!app || !app->session || !app->graph_name) {
     return -1;
   }
-  return turbo_agent_remote_session_start_bind_graph(app->session, app->graph_name, state,
+  return turbo_agent_remote_session_start_json_value_graph(app->session, app->graph_name, state,
                                                      options, out_summary_json, out_state);
 }
 
 CXX_C_API int turbo_agent_remote_app_start_text(
     turbo_agent_remote_app_t *app, const char *user_text,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   if (!app || !app->session || !app->graph_name) {
     return -1;
   }
@@ -116,9 +116,9 @@ CXX_C_API int turbo_agent_remote_app_start_text(
 }
 
 CXX_C_API int turbo_agent_remote_app_start_messages(
-    turbo_agent_remote_app_t *app, const turbo_runtime_data_bind_value_t *messages,
+    turbo_agent_remote_app_t *app, const json_value_t *messages,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   if (!app || !app->session || !app->graph_name) {
     return -1;
   }
@@ -126,28 +126,28 @@ CXX_C_API int turbo_agent_remote_app_start_messages(
                                                    options, out_summary_json, out_state);
 }
 
-CXX_C_API int turbo_agent_remote_app_resume_bind_graph(
+CXX_C_API int turbo_agent_remote_app_resume_json_value_graph(
     turbo_agent_remote_app_t *app, const char *checkpoint_id,
-    const turbo_runtime_data_bind_value_t *state_override,
+    const json_value_t *state_override,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   if (!app || !app->session || !app->graph_name) {
     return -1;
   }
-  return turbo_agent_remote_session_resume_bind_graph(app->session, app->graph_name,
+  return turbo_agent_remote_session_resume_json_value_graph(app->session, app->graph_name,
                                                       checkpoint_id, state_override, options,
                                                       out_summary_json, out_state);
 }
 
-CXX_C_API int turbo_agent_remote_app_fork_bind_graph(
+CXX_C_API int turbo_agent_remote_app_fork_json_value_graph(
     turbo_agent_remote_app_t *app, const char *checkpoint_id,
-    const turbo_runtime_data_bind_value_t *state_override,
+    const json_value_t *state_override,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   if (!app || !app->session || !app->graph_name) {
     return -1;
   }
-  return turbo_agent_remote_session_fork_bind_graph(app->session, app->graph_name, checkpoint_id,
+  return turbo_agent_remote_session_fork_json_value_graph(app->session, app->graph_name, checkpoint_id,
                                                     state_override, options, out_summary_json,
                                                     out_state);
 }
@@ -163,7 +163,7 @@ CXX_C_API int turbo_agent_remote_app_invoke_text(
 }
 
 CXX_C_API int turbo_agent_remote_app_invoke_messages_text(
-    turbo_agent_remote_app_t *app, const turbo_runtime_data_bind_value_t *messages,
+    turbo_agent_remote_app_t *app, const json_value_t *messages,
     const turbo_graph_run_options_t *options, char **out_text, json_value_t **out_summary_json) {
   if (!app || !app->session || !app->graph_name) {
     return -1;
@@ -184,7 +184,7 @@ CXX_C_API int turbo_agent_remote_app_invoke_json(
 }
 
 CXX_C_API int turbo_agent_remote_app_invoke_messages_json(
-    turbo_agent_remote_app_t *app, const turbo_runtime_data_bind_value_t *messages,
+    turbo_agent_remote_app_t *app, const json_value_t *messages,
     const turbo_graph_run_options_t *options, json_value_t **out_json,
     json_value_t **out_summary_json) {
   if (!app || !app->session || !app->graph_name) {
@@ -194,12 +194,12 @@ CXX_C_API int turbo_agent_remote_app_invoke_messages_json(
                                                          options, out_json, out_summary_json);
 }
 
-CXX_C_API int turbo_agent_remote_app_get_thread_state_bind(
-    turbo_agent_remote_app_t *app, turbo_runtime_data_bind_value_t **out_state) {
+CXX_C_API int turbo_agent_remote_app_get_thread_state_json_value(
+    turbo_agent_remote_app_t *app, json_value_t **out_state) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_get_thread_state_bind(app->session, out_state);
+  return turbo_agent_remote_session_get_thread_state_json_value(app->session, out_state);
 }
 
 CXX_C_API int turbo_agent_remote_app_memory_delete_record(
@@ -308,46 +308,46 @@ CXX_C_API int turbo_agent_remote_app_get_observability_index(
   return turbo_agent_remote_session_get_observability_index(app->session, out_index_json);
 }
 
-CXX_C_API int turbo_agent_remote_app_get_thread_timeline_bind(
-    turbo_agent_remote_app_t *app, turbo_runtime_data_bind_value_t **out_timeline) {
+CXX_C_API int turbo_agent_remote_app_get_thread_timeline_json_value(
+    turbo_agent_remote_app_t *app, json_value_t **out_timeline) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_get_thread_timeline_bind(app->session, out_timeline);
+  return turbo_agent_remote_session_get_thread_timeline_json_value(app->session, out_timeline);
 }
 
-CXX_C_API int turbo_agent_remote_app_load_thread_history_events_bind(
-    turbo_agent_remote_app_t *app, turbo_runtime_data_bind_value_t **out_events) {
+CXX_C_API int turbo_agent_remote_app_load_thread_history_events_json_value(
+    turbo_agent_remote_app_t *app, json_value_t **out_events) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_load_thread_history_events_bind(app->session, out_events);
+  return turbo_agent_remote_session_load_thread_history_events_json_value(app->session, out_events);
 }
 
-CXX_C_API int turbo_agent_remote_app_replay_thread_history_bind(
-    turbo_agent_remote_app_t *app, turbo_event_sink_bind_fn event_sink,
+CXX_C_API int turbo_agent_remote_app_replay_thread_history_json_value(
+    turbo_agent_remote_app_t *app, turbo_event_sink_json_value_fn event_sink,
     void *event_sink_user_data) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_replay_thread_history_bind(app->session, event_sink,
+  return turbo_agent_remote_session_replay_thread_history_json_value(app->session, event_sink,
                                                                event_sink_user_data);
 }
 
-CXX_C_API int turbo_agent_remote_app_observe_thread_history_bind(
-    turbo_agent_remote_app_t *app, const turbo_agent_observer_bind_sink_t *sink) {
+CXX_C_API int turbo_agent_remote_app_observe_thread_history_json_value(
+    turbo_agent_remote_app_t *app, const turbo_agent_observer_json_value_sink_t *sink) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_observe_thread_history_bind(app->session, sink);
+  return turbo_agent_remote_session_observe_thread_history_json_value(app->session, sink);
 }
 
-CXX_C_API int turbo_agent_remote_app_get_thread_trace_events_bind(
-    turbo_agent_remote_app_t *app, turbo_runtime_data_bind_value_t **out_events) {
+CXX_C_API int turbo_agent_remote_app_get_thread_trace_events_json_value(
+    turbo_agent_remote_app_t *app, json_value_t **out_events) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_get_thread_trace_events_bind(app->session, out_events);
+  return turbo_agent_remote_session_get_thread_trace_events_json_value(app->session, out_events);
 }
 
 CXX_C_API int turbo_agent_remote_app_get_branch_tree(
@@ -437,13 +437,13 @@ CXX_C_API int turbo_agent_remote_app_get_child_checkpoint_context(
                                                                  out_context_json);
 }
 
-CXX_C_API int turbo_agent_remote_app_get_child_thread_timeline_bind(
+CXX_C_API int turbo_agent_remote_app_get_child_thread_timeline_json_value(
     turbo_agent_remote_app_t *app, const json_value_t *output_item,
-    turbo_runtime_data_bind_value_t **out_timeline) {
+    json_value_t **out_timeline) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_get_child_thread_timeline_bind(app->session, output_item,
+  return turbo_agent_remote_session_get_child_thread_timeline_json_value(app->session, output_item,
                                                                    out_timeline);
 }
 
@@ -467,23 +467,23 @@ CXX_C_API int turbo_agent_remote_app_list_child_checkpoints(
                                                            out_checkpoints_json);
 }
 
-CXX_C_API int turbo_agent_remote_app_load_child_history_events_bind(
+CXX_C_API int turbo_agent_remote_app_load_child_history_events_json_value(
     turbo_agent_remote_app_t *app, const json_value_t *output_item,
-    turbo_runtime_data_bind_value_t **out_events) {
+    json_value_t **out_events) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_load_child_history_events_bind(app->session, output_item,
+  return turbo_agent_remote_session_load_child_history_events_json_value(app->session, output_item,
                                                                    out_events);
 }
 
-CXX_C_API int turbo_agent_remote_app_get_child_trace_events_bind(
+CXX_C_API int turbo_agent_remote_app_get_child_trace_events_json_value(
     turbo_agent_remote_app_t *app, const json_value_t *output_item,
-    turbo_runtime_data_bind_value_t **out_events) {
+    json_value_t **out_events) {
   if (!app || !app->session) {
     return -1;
   }
-  return turbo_agent_remote_session_get_child_trace_events_bind(app->session, output_item,
+  return turbo_agent_remote_session_get_child_trace_events_json_value(app->session, output_item,
                                                                 out_events);
 }
 
@@ -516,24 +516,24 @@ CXX_C_API int turbo_agent_remote_app_get_child_multi_agent_inspect(
                                                                   out_inspect_json);
 }
 
-CXX_C_API int turbo_agent_remote_app_resume_thread_command_bind(
-    turbo_agent_remote_app_t *app, const turbo_runtime_data_bind_value_t *command,
+CXX_C_API int turbo_agent_remote_app_resume_thread_command_json_value(
+    turbo_agent_remote_app_t *app, const json_value_t *command,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   if (!app || !app->session || !app->graph_name) {
     return -1;
   }
-  return turbo_agent_remote_session_resume_thread_command_bind(
+  return turbo_agent_remote_session_resume_thread_command_json_value(
       app->session, app->graph_name, command, options, out_summary_json, out_state);
 }
 
-CXX_C_API int turbo_agent_remote_app_fork_thread_command_bind(
-    turbo_agent_remote_app_t *app, const turbo_runtime_data_bind_value_t *command,
+CXX_C_API int turbo_agent_remote_app_fork_thread_command_json_value(
+    turbo_agent_remote_app_t *app, const json_value_t *command,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state) {
+    json_value_t **out_state) {
   if (!app || !app->session || !app->graph_name) {
     return -1;
   }
-  return turbo_agent_remote_session_fork_thread_command_bind(
+  return turbo_agent_remote_session_fork_thread_command_json_value(
       app->session, app->graph_name, command, options, out_summary_json, out_state);
 }

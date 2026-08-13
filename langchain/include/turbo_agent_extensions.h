@@ -66,14 +66,14 @@ typedef struct turbo_agent_trace_sink_s {
   turbo_agent_trace_user_data_free_fn user_data_free;
 } turbo_agent_trace_sink_t;
 
-typedef void (*turbo_agent_trace_bind_fn)(
-    turbo_agent_t *agent, const turbo_runtime_data_bind_value_t *event, void *user_data);
+typedef void (*turbo_agent_trace_json_value_fn)(
+    turbo_agent_t *agent, const json_value_t *event, void *user_data);
 
-typedef struct turbo_agent_trace_bind_sink_s {
-  turbo_agent_trace_bind_fn callback;
+typedef struct turbo_agent_trace_json_value_sink_s {
+  turbo_agent_trace_json_value_fn callback;
   void *user_data;
   turbo_agent_trace_user_data_free_fn user_data_free;
-} turbo_agent_trace_bind_sink_t;
+} turbo_agent_trace_json_value_sink_t;
 
 typedef int (*turbo_agent_store_get_fn)(void *user_data, const char *key,
                                                char **out_value_json);
@@ -155,10 +155,10 @@ CXX_C_API int turbo_agent_add_trace_sink(turbo_agent_t *agent,
                                                 const turbo_agent_trace_sink_t *sink);
 
 /**
- * @brief Register one bind-native trace sink on an agent.
+ * @brief Register one TurboParser JSON-native trace sink on an agent.
  */
-CXX_C_API int turbo_agent_add_trace_bind_sink(
-    turbo_agent_t *agent, const turbo_agent_trace_bind_sink_t *sink);
+CXX_C_API int turbo_agent_add_trace_json_value_sink(
+    turbo_agent_t *agent, const turbo_agent_trace_json_value_sink_t *sink);
 
 /**
  * @brief Enable or disable automatic trace history capture into runtime state.

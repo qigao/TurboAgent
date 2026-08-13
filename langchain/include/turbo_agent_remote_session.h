@@ -69,10 +69,10 @@ CXX_C_API int turbo_agent_remote_session_get_startup_diagnostics(
 /**
  * @brief Start one remote graph run and update cached session ids.
  */
-CXX_C_API int turbo_agent_remote_session_start_bind_graph(
+CXX_C_API int turbo_agent_remote_session_start_json_value_graph(
     turbo_agent_remote_session_t *session, const char *graph_name,
-    const turbo_runtime_data_bind_value_t *state, const turbo_graph_run_options_t *options,
-    json_value_t **out_summary_json, turbo_runtime_data_bind_value_t **out_state);
+    const json_value_t *state, const turbo_graph_run_options_t *options,
+    json_value_t **out_summary_json, json_value_t **out_state);
 
 /**
  * @brief Start one remote graph run from one optional user text message.
@@ -80,15 +80,15 @@ CXX_C_API int turbo_agent_remote_session_start_bind_graph(
 CXX_C_API int turbo_agent_remote_session_start_text(
     turbo_agent_remote_session_t *session, const char *graph_name, const char *user_text,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
 /**
  * @brief Start one remote graph run from canonical prompt messages.
  */
 CXX_C_API int turbo_agent_remote_session_start_messages(
     turbo_agent_remote_session_t *session, const char *graph_name,
-    const turbo_runtime_data_bind_value_t *messages, const turbo_graph_run_options_t *options,
-    json_value_t **out_summary_json, turbo_runtime_data_bind_value_t **out_state);
+    const json_value_t *messages, const turbo_graph_run_options_t *options,
+    json_value_t **out_summary_json, json_value_t **out_state);
 
 /**
  * @brief Resume one remote graph run and update cached session ids.
@@ -96,11 +96,11 @@ CXX_C_API int turbo_agent_remote_session_start_messages(
  * When `checkpoint_id` is NULL or empty, the session falls back to its cached
  * checkpoint id.
  */
-CXX_C_API int turbo_agent_remote_session_resume_bind_graph(
+CXX_C_API int turbo_agent_remote_session_resume_json_value_graph(
     turbo_agent_remote_session_t *session, const char *graph_name, const char *checkpoint_id,
-    const turbo_runtime_data_bind_value_t *state_override,
+    const json_value_t *state_override,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
 /**
  * @brief Fork one remote graph run and update cached session ids.
@@ -108,11 +108,11 @@ CXX_C_API int turbo_agent_remote_session_resume_bind_graph(
  * When `checkpoint_id` is NULL or empty, the session falls back to its cached
  * checkpoint id.
  */
-CXX_C_API int turbo_agent_remote_session_fork_bind_graph(
+CXX_C_API int turbo_agent_remote_session_fork_json_value_graph(
     turbo_agent_remote_session_t *session, const char *graph_name, const char *checkpoint_id,
-    const turbo_runtime_data_bind_value_t *state_override,
+    const json_value_t *state_override,
     const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
-    turbo_runtime_data_bind_value_t **out_state);
+    json_value_t **out_state);
 
 /**
  * @brief Start one remote graph run from user text and return the final answer text.
@@ -130,7 +130,7 @@ CXX_C_API int turbo_agent_remote_session_invoke_text(
  */
 CXX_C_API int turbo_agent_remote_session_invoke_messages_text(
     turbo_agent_remote_session_t *session, const char *graph_name,
-    const turbo_runtime_data_bind_value_t *messages, const turbo_graph_run_options_t *options,
+    const json_value_t *messages, const turbo_graph_run_options_t *options,
     char **out_text, json_value_t **out_summary_json);
 
 /**
@@ -146,14 +146,14 @@ CXX_C_API int turbo_agent_remote_session_invoke_json(
  */
 CXX_C_API int turbo_agent_remote_session_invoke_messages_json(
     turbo_agent_remote_session_t *session, const char *graph_name,
-    const turbo_runtime_data_bind_value_t *messages, const turbo_graph_run_options_t *options,
+    const json_value_t *messages, const turbo_graph_run_options_t *options,
     json_value_t **out_json, json_value_t **out_summary_json);
 
 /**
  * @brief Load the session thread's latest persisted state through the remote runtime.
  */
-CXX_C_API int turbo_agent_remote_session_get_thread_state_bind(
-    turbo_agent_remote_session_t *session, turbo_runtime_data_bind_value_t **out_state);
+CXX_C_API int turbo_agent_remote_session_get_thread_state_json_value(
+    turbo_agent_remote_session_t *session, json_value_t **out_state);
 
 /**
  * @brief Delete one canonical memory record through the remote runtime.
@@ -238,25 +238,25 @@ CXX_C_API int turbo_agent_remote_session_get_observability_index(
     turbo_agent_remote_session_t *session, json_value_t **out_index_json);
 
 /**
- * @brief Load one bind-native thread timeline snapshot from the remote runtime.
+ * @brief Load one TurboParser JSON-native thread timeline snapshot from the remote runtime.
  */
-CXX_C_API int turbo_agent_remote_session_get_thread_timeline_bind(
-    turbo_agent_remote_session_t *session, turbo_runtime_data_bind_value_t **out_timeline);
+CXX_C_API int turbo_agent_remote_session_get_thread_timeline_json_value(
+    turbo_agent_remote_session_t *session, json_value_t **out_timeline);
 
 /**
- * @brief Load one bind-native history event array for the current remote thread.
+ * @brief Load one TurboParser JSON-native history event array for the current remote thread.
  *
  * This derives `history_events` from the existing thread timeline snapshot and
  * returns one owned clone, so callers do not borrow timeline internals.
  */
-CXX_C_API int turbo_agent_remote_session_load_thread_history_events_bind(
-    turbo_agent_remote_session_t *session, turbo_runtime_data_bind_value_t **out_events);
+CXX_C_API int turbo_agent_remote_session_load_thread_history_events_json_value(
+    turbo_agent_remote_session_t *session, json_value_t **out_events);
 
 /**
  * @brief Replay the current remote thread's durable history events through one sink.
  */
-CXX_C_API int turbo_agent_remote_session_replay_thread_history_bind(
-    turbo_agent_remote_session_t *session, turbo_event_sink_bind_fn event_sink,
+CXX_C_API int turbo_agent_remote_session_replay_thread_history_json_value(
+    turbo_agent_remote_session_t *session, turbo_event_sink_json_value_fn event_sink,
     void *event_sink_user_data);
 
 /**
@@ -265,17 +265,17 @@ CXX_C_API int turbo_agent_remote_session_replay_thread_history_bind(
  * This reuses the existing remote observability facts and emits the same
  * observer event shape as the local runtime/session wrappers.
  */
-CXX_C_API int turbo_agent_remote_session_observe_thread_history_bind(
-    turbo_agent_remote_session_t *session, const turbo_agent_observer_bind_sink_t *sink);
+CXX_C_API int turbo_agent_remote_session_observe_thread_history_json_value(
+    turbo_agent_remote_session_t *session, const turbo_agent_observer_json_value_sink_t *sink);
 
 /**
- * @brief Load one bind-native trace event array for the current remote thread.
+ * @brief Load one TurboParser JSON-native trace event array for the current remote thread.
  *
  * This derives `trace_events` from the existing observability bundle and
  * returns one owned bind tree.
  */
-CXX_C_API int turbo_agent_remote_session_get_thread_trace_events_bind(
-    turbo_agent_remote_session_t *session, turbo_runtime_data_bind_value_t **out_events);
+CXX_C_API int turbo_agent_remote_session_get_thread_trace_events_json_value(
+    turbo_agent_remote_session_t *session, json_value_t **out_events);
 
 /**
  * @brief Load one branch tree snapshot from the remote runtime.
@@ -347,9 +347,9 @@ CXX_C_API int turbo_agent_remote_session_get_child_checkpoint_context(
 /**
  * @brief Load one child thread timeline referenced by a parent tool-result item.
  */
-CXX_C_API int turbo_agent_remote_session_get_child_thread_timeline_bind(
+CXX_C_API int turbo_agent_remote_session_get_child_thread_timeline_json_value(
     turbo_agent_remote_session_t *session, const json_value_t *output_item,
-    turbo_runtime_data_bind_value_t **out_timeline);
+    json_value_t **out_timeline);
 
 /**
  * @brief Load one child branch tree referenced by a parent tool-result item.
@@ -370,18 +370,18 @@ CXX_C_API int turbo_agent_remote_session_list_child_checkpoints(
  *
  * Prefers `child_checkpoint_id` when present, else falls back to `child_run_id`.
  */
-CXX_C_API int turbo_agent_remote_session_load_child_history_events_bind(
+CXX_C_API int turbo_agent_remote_session_load_child_history_events_json_value(
     turbo_agent_remote_session_t *session, const json_value_t *output_item,
-    turbo_runtime_data_bind_value_t **out_events);
+    json_value_t **out_events);
 
 /**
  * @brief Load child trace events referenced by a parent tool-result item.
  *
  * Prefers `child_checkpoint_id` when present, else falls back to `child_run_id`.
  */
-CXX_C_API int turbo_agent_remote_session_get_child_trace_events_bind(
+CXX_C_API int turbo_agent_remote_session_get_child_trace_events_json_value(
     turbo_agent_remote_session_t *session, const json_value_t *output_item,
-    turbo_runtime_data_bind_value_t **out_events);
+    json_value_t **out_events);
 
 /**
  * @brief Build one child inspect bundle from a parent tool-result output item.
@@ -407,18 +407,18 @@ CXX_C_API int turbo_agent_remote_session_get_child_multi_agent_inspect(
 /**
  * @brief Apply one command to the session thread and resume the configured remote graph.
  */
-CXX_C_API int turbo_agent_remote_session_resume_thread_command_bind(
+CXX_C_API int turbo_agent_remote_session_resume_thread_command_json_value(
     turbo_agent_remote_session_t *session, const char *graph_name,
-    const turbo_runtime_data_bind_value_t *command, const turbo_graph_run_options_t *options,
-    json_value_t **out_summary_json, turbo_runtime_data_bind_value_t **out_state);
+    const json_value_t *command, const turbo_graph_run_options_t *options,
+    json_value_t **out_summary_json, json_value_t **out_state);
 
 /**
  * @brief Apply one command to the session thread and fork the configured remote graph.
  */
-CXX_C_API int turbo_agent_remote_session_fork_thread_command_bind(
+CXX_C_API int turbo_agent_remote_session_fork_thread_command_json_value(
     turbo_agent_remote_session_t *session, const char *graph_name,
-    const turbo_runtime_data_bind_value_t *command, const turbo_graph_run_options_t *options,
-    json_value_t **out_summary_json, turbo_runtime_data_bind_value_t **out_state);
+    const json_value_t *command, const turbo_graph_run_options_t *options,
+    json_value_t **out_summary_json, json_value_t **out_state);
 
 #ifdef __cplusplus
 }

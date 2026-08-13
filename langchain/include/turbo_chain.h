@@ -4,7 +4,7 @@
 #include <platform.h>
 #include <turbo_parser.h>
 
-#include "turbo_runtime_data_bind.h"
+#include "turbo_runtime_json.h"
 #include "turbo_event.h"
 #include "turbo_event_log.h"
 #include "turbo_model.h"
@@ -30,16 +30,16 @@ typedef enum {
 typedef void (*turbo_chain_user_data_free_fn)(void *user_data);
 
 typedef int (*turbo_chain_step_fn)(turbo_chain_exec_ctx_t *ctx, void *user_data);
-typedef int (*turbo_chain_bind_step_fn)(turbo_chain_exec_ctx_t *ctx, void *user_data);
+typedef int (*turbo_chain_json_value_step_fn)(turbo_chain_exec_ctx_t *ctx, void *user_data);
 
 struct turbo_chain_exec_ctx_s {
   turbo_chain_t *chain;
   json_value_t *state;
-  turbo_runtime_data_bind_value_t *bind_state;
+  json_value_t *json_value_state;
   size_t step;
   const char *step_name;
   int stop;
-  turbo_event_sink_bind_fn event_sink;
+  turbo_event_sink_json_value_fn event_sink;
   void *event_sink_user_data;
 };
 
@@ -70,16 +70,16 @@ turbo_chain_add_step(turbo_chain_t *chain, const char *name, turbo_chain_step_fn
                      void *user_data, turbo_chain_user_data_free_fn user_data_free);
 
 /**
- * @brief Add a bind-native custom step callback to the chain.
+ * @brief Add a TurboParser JSON-native custom step callback to the chain.
  * @param chain Chain handle.
  * @param name Unique step name.
- * @param fn Bind step callback.
+ * @param fn JsonValue step callback.
  * @param user_data Opaque step user data.
  * @param user_data_free Optional destructor for user_data.
  * @return Status code.
  */
 CXX_C_API turbo_chain_status_t
-turbo_chain_add_bind_step(turbo_chain_t *chain, const char *name, turbo_chain_bind_step_fn fn,
+turbo_chain_add_json_value_step(turbo_chain_t *chain, const char *name, turbo_chain_json_value_step_fn fn,
                           void *user_data, turbo_chain_user_data_free_fn user_data_free);
 
 /**
@@ -128,32 +128,32 @@ turbo_chain_add_tool_step(turbo_chain_t *chain, const char *name,
 CXX_C_API turbo_chain_status_t turbo_chain_run(turbo_chain_t *chain, json_value_t *state);
 
 /**
- * @brief Execute all steps against a runtime data-bind state boundary.
+ * @brief Execute all steps against a TurboParser JSON state boundary.
  * @param chain Chain handle.
  * @param state Optional input state tree. NULL creates a standard empty state.
  * @param out_state Output runtime state tree owned by caller.
  * @return Status code.
  */
 CXX_C_API turbo_chain_status_t
-turbo_chain_run_bind(turbo_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-                     turbo_runtime_data_bind_value_t **out_state);
+turbo_chain_run_json_value(turbo_chain_t *chain, const json_value_t *state,
+                     json_value_t **out_state);
 
 /**
- * @brief Execute all steps against a runtime data-bind state boundary and emit canonical events.
+ * @brief Execute all steps against a TurboParser JSON state boundary and emit canonical events.
  * @param chain Chain handle.
  * @param state Optional input state tree. NULL creates a standard empty state.
- * @param event_sink Event callback receiving canonical bind-native events.
+ * @param event_sink Event callback receiving canonical TurboParser JSON-native events.
  * @param event_sink_user_data Opaque pointer passed to event_sink.
  * @param out_state Output runtime state tree owned by caller.
  * @return Status code.
  */
-CXX_C_API turbo_chain_status_t turbo_chain_run_bind_stream(
-    turbo_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-    turbo_event_sink_bind_fn event_sink, void *event_sink_user_data,
-    turbo_runtime_data_bind_value_t **out_state);
+CXX_C_API turbo_chain_status_t turbo_chain_run_json_value_stream(
+    turbo_chain_t *chain, const json_value_t *state,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    json_value_t **out_state);
 
 /**
- * @brief Execute all steps against a runtime data-bind boundary and capture canonical events.
+ * @brief Execute all steps against a TurboParser JSON boundary and capture canonical events.
  * @param chain Chain handle.
  * @param state Optional input state tree. NULL creates a standard empty state.
  * @param log Event log reset and filled for this run.
@@ -161,8 +161,8 @@ CXX_C_API turbo_chain_status_t turbo_chain_run_bind_stream(
  * @return Status code.
  */
 CXX_C_API turbo_chain_status_t
-turbo_chain_run_bind_log(turbo_chain_t *chain, const turbo_runtime_data_bind_value_t *state,
-                         turbo_event_log_t *log, turbo_runtime_data_bind_value_t **out_state);
+turbo_chain_run_json_value_log(turbo_chain_t *chain, const json_value_t *state,
+                         turbo_event_log_t *log, json_value_t **out_state);
 
 /**
  * @brief Stop chain execution successfully from inside a custom step.
@@ -177,10 +177,10 @@ CXX_C_API void turbo_chain_ctx_stop(turbo_chain_exec_ctx_t *ctx);
 CXX_C_API json_value_t *turbo_chain_state_create(void);
 
 /**
- * @brief Create an empty chain state as a runtime data-bind value tree.
+ * @brief Create an empty chain state as a TurboParser JSON value tree.
  * @return State object or NULL on allocation failure.
  */
-CXX_C_API turbo_runtime_data_bind_value_t *turbo_chain_state_create_bind(void);
+CXX_C_API json_value_t *turbo_chain_state_create_json_value(void);
 
 /**
  * @brief Ensure and return the `input` object in chain state.

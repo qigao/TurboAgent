@@ -1,6 +1,7 @@
 #include "tinytest.h"
 #include "turbo_event_log.h"
 #include "turbo_graph.h"
+#include "turbo_runtime_control.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -24,6 +25,11 @@ typedef struct {
   char last_payload[64];
 } graph_event_capture_t;
 
+typedef struct {
+  turbo_cancel_source_t *source;
+  const char *value;
+} cancel_node_payload_t;
+
 static const string_payload_t s_router_payload = {"router"};
 static const string_payload_t s_tool_payload = {"tool"};
 static const string_payload_t s_done_payload = {"done"};
@@ -46,35 +52,57 @@ static int write_phase_node_alt(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   return 0;
 }
 
-static int write_phase_bind_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+static int write_phase_json_value_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   string_payload_t *payload = (string_payload_t *)user_data;
   char key[64];
-  turbo_runtime_data_bind_value_t *value;
+  json_value_t *value;
 
   snprintf(key, sizeof(key), "visited_%s", payload->value);
   check_not_null(ctx);
-  check_not_null(ctx->bind_state);
-  value = turbo_runtime_data_bind_value_create_bool(1);
+  check_not_null(ctx->json_value_state);
+  value = turbo_json_create_bool(1);
   check_not_null(value);
-  return turbo_runtime_data_bind_object_set(ctx->bind_state, key, value) ==
-                 TURBO_RUNTIME_DATA_BIND_OK
+  return turbo_runtime_json_object_set(ctx->json_value_state, key, value) ==
+                 TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
 }
 
-static int write_error_bind_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
-  turbo_runtime_data_bind_value_t *value;
+static int write_error_json_value_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+  json_value_t *value;
 
   (void)user_data;
   check_not_null(ctx);
-  check_not_null(ctx->bind_state);
-  value = turbo_runtime_data_bind_value_create_bool(1);
+  check_not_null(ctx->json_value_state);
+  value = turbo_json_create_bool(1);
   check_not_null(value);
-  if (turbo_runtime_data_bind_object_set(ctx->bind_state, "error_recorded", value) !=
-      TURBO_RUNTIME_DATA_BIND_OK) {
-    turbo_runtime_data_bind_value_destroy(value);
+  if (turbo_runtime_json_object_set(ctx->json_value_state, "error_recorded", value) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(value);
   }
   return -1;
+}
+
+static int cancel_after_write_json_value_node(turbo_graph_exec_ctx_t *ctx,
+                                              void *user_data) {
+  cancel_node_payload_t *payload = (cancel_node_payload_t *)user_data;
+  char key[64];
+  json_value_t *value;
+
+  snprintf(key, sizeof(key), "visited_%s", payload->value);
+  value = turbo_json_create_bool(1);
+  if (!value) {
+    return -1;
+  }
+  if (turbo_runtime_json_object_set(ctx->json_value_state, key, value) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(value);
+    return -1;
+  }
+  return turbo_cancel_source_cancel(payload->source, TURBO_CANCEL_USER) ==
+                 TURBO_OK
+             ? 0
+             : -1;
 }
 
 static int router_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
@@ -109,14 +137,14 @@ static int predicate_mode_equals(const turbo_graph_exec_ctx_t *ctx, void *user_d
   return strcmp(mode, expected) == 0;
 }
 
-static int predicate_mode_equals_bind(const turbo_graph_exec_ctx_t *ctx, void *user_data) {
+static int predicate_mode_equals_json_value(const turbo_graph_exec_ctx_t *ctx, void *user_data) {
   const char *expected = (const char *)user_data;
   const char *mode;
 
   check_not_null(ctx);
-  check_not_null(ctx->bind_state);
-  mode = turbo_runtime_data_bind_value_as_string(
-      turbo_runtime_data_bind_object_get(ctx->bind_state, "mode"));
+  check_not_null(ctx->json_value_state);
+  mode = turbo_runtime_json_value_as_string(
+      turbo_json_object_get(ctx->json_value_state, "mode"));
   if (!mode) {
     return 0;
   }
@@ -156,7 +184,7 @@ static void capture_checkpoint_copy(const turbo_graph_checkpoint_t *checkpoint, 
   turbo_json_serialize_free(serialized);
 }
 
-static void capture_graph_event(const turbo_runtime_data_bind_value_t *event, void *user_data) {
+static void capture_graph_event(const json_value_t *event, void *user_data) {
   graph_event_capture_t *capture = (graph_event_capture_t *)user_data;
   const char *name;
   const char *detail;
@@ -164,11 +192,11 @@ static void capture_graph_event(const turbo_runtime_data_bind_value_t *event, vo
 
   check_not_null(event);
   check_not_null(capture);
-  name = turbo_runtime_data_bind_value_as_string(turbo_runtime_data_bind_object_get(event, "name"));
+  name = turbo_runtime_json_value_as_string(turbo_json_object_get(event, "name"));
   detail =
-      turbo_runtime_data_bind_value_as_string(turbo_runtime_data_bind_object_get(event, "detail"));
+      turbo_runtime_json_value_as_string(turbo_json_object_get(event, "detail"));
   payload =
-      turbo_runtime_data_bind_value_as_string(turbo_runtime_data_bind_object_get(event, "payload"));
+      turbo_runtime_json_value_as_string(turbo_json_object_get(event, "payload"));
   capture->count++;
   if (name && strcmp(name, "graph.node") == 0) {
     capture->node_events++;
@@ -349,10 +377,158 @@ spec("turbo graph runtime") {
       turbo_graph_destroy(graph);
     }
 
-    it("should run through a runtime data-bind state boundary") {
+    it("should checkpoint before the first node when already cancelled") {
+      turbo_graph_t *graph = turbo_graph_create("agent-cancelled");
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *result_state = NULL;
+      turbo_graph_run_result_t result = {0};
+      turbo_graph_run_options_t options = {0};
+      turbo_cancel_source_t *source = NULL;
+      turbo_cancel_token_t *token = NULL;
+      checkpoint_capture_t capture = {0};
+      string_payload_t start = {"start"};
+
+      check_not_null(graph);
+      check_not_null(state);
+      check_int_eq(turbo_graph_add_json_value_node(
+                       graph, "start", write_phase_json_value_node, &start),
+                   TURBO_GRAPH_EXEC_OK);
+      check_int_eq(turbo_graph_set_entry(graph, "start"),
+                   TURBO_GRAPH_EXEC_OK);
+      check_int_eq(turbo_cancel_source_create(NULL, &source), TURBO_OK);
+      check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
+      check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER),
+                   TURBO_OK);
+
+      options.checkpoint_cb = capture_checkpoint;
+      options.checkpoint_user_data = &capture;
+      check_int_eq(turbo_graph_run_json_value_stream_controlled(
+                       graph, state, &options, token, NULL, NULL, &result,
+                       &result_state),
+                   TURBO_GRAPH_EXEC_CANCELLED);
+      check_int_eq(result.status, TURBO_GRAPH_EXEC_CANCELLED);
+      check_null(result.last_node);
+      check_str_eq(result.next_node, "start");
+      check_size_eq(result.steps, 0);
+      check_int_eq(capture.count, 1);
+      check_false(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result_state, "visited_start"), 0));
+
+      turbo_json_serialize_free(capture.serialized);
+      turbo_cancel_token_release(token);
+      turbo_cancel_source_destroy(source);
+      turbo_runtime_json_destroy(result_state);
+      turbo_runtime_json_destroy(state);
+      turbo_graph_destroy(graph);
+    }
+
+    it("should stop after a routed checkpoint and resume with a fresh token") {
+      turbo_graph_t *graph = turbo_graph_create("agent-cancel-resume");
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *cancelled_state = NULL;
+      json_value_t *resumed_state = NULL;
+      turbo_graph_run_result_t cancelled_result = {0};
+      turbo_graph_run_result_t resumed_result = {0};
+      turbo_graph_run_options_t options = {0};
+      turbo_graph_checkpoint_t *checkpoint = NULL;
+      turbo_cancel_source_t *source = NULL;
+      turbo_cancel_token_t *token = NULL;
+      cancel_node_payload_t start = {0};
+      string_payload_t end = {"end"};
+
+      check_not_null(graph);
+      check_not_null(state);
+      check_int_eq(turbo_cancel_source_create(NULL, &source), TURBO_OK);
+      check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
+      start.source = source;
+      start.value = "start";
+
+      check_int_eq(turbo_graph_add_json_value_node(
+                       graph, "start", cancel_after_write_json_value_node,
+                       &start),
+                   TURBO_GRAPH_EXEC_OK);
+      check_int_eq(turbo_graph_add_json_value_node(
+                       graph, "end", write_phase_json_value_node, &end),
+                   TURBO_GRAPH_EXEC_OK);
+      check_int_eq(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
+                   TURBO_GRAPH_EXEC_OK);
+      check_int_eq(turbo_graph_set_entry(graph, "start"),
+                   TURBO_GRAPH_EXEC_OK);
+
+      options.checkpoint_cb = capture_checkpoint_copy;
+      options.checkpoint_user_data = &checkpoint;
+      check_int_eq(turbo_graph_run_json_value_stream_controlled(
+                       graph, state, &options, token, NULL, NULL,
+                       &cancelled_result, &cancelled_state),
+                   TURBO_GRAPH_EXEC_CANCELLED);
+      check_str_eq(cancelled_result.last_node, "start");
+      check_str_eq(cancelled_result.next_node, "end");
+      check_size_eq(cancelled_result.steps, 1);
+      check_not_null(checkpoint);
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(cancelled_state, "visited_start"), 0));
+      check_false(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(cancelled_state, "visited_end"), 0));
+
+      check_int_eq(turbo_graph_run_checkpoint_json_value(
+                       graph, checkpoint, NULL, &resumed_result,
+                       &resumed_state),
+                   TURBO_GRAPH_EXEC_OK);
+      check_str_eq(resumed_result.last_node, "end");
+      check_size_eq(resumed_result.steps, 2);
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(resumed_state, "visited_end"), 0));
+
+      turbo_graph_checkpoint_destroy(checkpoint);
+      turbo_cancel_token_release(token);
+      turbo_cancel_source_destroy(source);
+      turbo_runtime_json_destroy(resumed_state);
+      turbo_runtime_json_destroy(cancelled_state);
+      turbo_runtime_json_destroy(state);
+      turbo_graph_destroy(graph);
+    }
+
+    it("should distinguish an expired deadline from explicit cancellation") {
+      turbo_graph_t *graph = turbo_graph_create("agent-deadline");
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *result_state = NULL;
+      turbo_graph_run_result_t result = {0};
+      turbo_cancel_source_config_t config = {
+          sizeof(config), TURBO_RUNTIME_CONTROL_ABI_VERSION,
+          turbo_monotonic_ms(), NULL, NULL};
+      turbo_cancel_source_t *source = NULL;
+      turbo_cancel_token_t *token = NULL;
+      string_payload_t start = {"start"};
+
+      check_not_null(graph);
+      check_not_null(state);
+      check_int_eq(turbo_graph_add_json_value_node(
+                       graph, "start", write_phase_json_value_node, &start),
+                   TURBO_GRAPH_EXEC_OK);
+      check_int_eq(turbo_graph_set_entry(graph, "start"),
+                   TURBO_GRAPH_EXEC_OK);
+      check_int_eq(turbo_cancel_source_create(&config, &source), TURBO_OK);
+      check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
+
+      check_int_eq(turbo_graph_run_json_value_stream_controlled(
+                       graph, state, NULL, token, NULL, NULL, &result,
+                       &result_state),
+                   TURBO_GRAPH_EXEC_DEADLINE);
+      check_int_eq(result.status, TURBO_GRAPH_EXEC_DEADLINE);
+      check_str_eq(result.next_node, "start");
+      check_int_eq(turbo_cancel_token_reason(token), TURBO_CANCEL_DEADLINE);
+
+      turbo_cancel_token_release(token);
+      turbo_cancel_source_destroy(source);
+      turbo_runtime_json_destroy(result_state);
+      turbo_runtime_json_destroy(state);
+      turbo_graph_destroy(graph);
+    }
+
+    it("should run through a TurboParser JSON state boundary") {
       turbo_graph_t *graph = turbo_graph_create("agent-bind");
-      turbo_runtime_data_bind_value_t *state = turbo_runtime_data_bind_value_create_object();
-      turbo_runtime_data_bind_value_t *result_state = NULL;
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *result_state = NULL;
       turbo_graph_run_result_t result = {0};
       string_payload_t start = {"start"};
       string_payload_t end = {"end"};
@@ -367,63 +543,63 @@ spec("turbo graph runtime") {
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run_bind(graph, state, NULL, &result, &result_state),
+      check_int_eq(turbo_graph_run_json_value(graph, state, NULL, &result, &result_state),
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(result.status, TURBO_GRAPH_EXEC_OK);
-      check_true(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(result_state, "visited_end"), 0));
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result_state, "visited_end"), 0));
 
-      turbo_runtime_data_bind_value_destroy(result_state);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result_state);
+      turbo_runtime_json_destroy(state);
       turbo_graph_destroy(graph);
     }
 
-    it("should run bind-native nodes and predicates without json bridge") {
-      turbo_graph_t *graph = turbo_graph_create("agent-bind-native");
-      turbo_runtime_data_bind_value_t *state = turbo_runtime_data_bind_value_create_object();
-      turbo_runtime_data_bind_value_t *mode = turbo_runtime_data_bind_value_create_string("tool");
-      turbo_runtime_data_bind_value_t *result_state = NULL;
+    it("should run TurboParser JSON-native nodes and predicates without json bridge") {
+      turbo_graph_t *graph = turbo_graph_create("agent-json-native");
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *mode = turbo_json_create_string("tool");
+      json_value_t *result_state = NULL;
       turbo_graph_run_result_t result = {0};
 
       check_not_null(graph);
       check_not_null(state);
       check_not_null(mode);
-      check_int_eq(turbo_runtime_data_bind_object_set(state, "mode", mode),
-                   TURBO_RUNTIME_DATA_BIND_OK);
+      check_int_eq(turbo_runtime_json_object_set(state, "mode", mode),
+                   TURBO_RUNTIME_JSON_OK);
 
-      check_int_eq(turbo_graph_add_bind_node(graph, "router", write_phase_bind_node,
+      check_int_eq(turbo_graph_add_json_value_node(graph, "router", write_phase_json_value_node,
                                              (void *)&s_router_payload),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_node(graph, "tool", write_phase_bind_node,
+      check_int_eq(turbo_graph_add_json_value_node(graph, "tool", write_phase_json_value_node,
                                              (void *)&s_tool_payload),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_node(graph, "done", write_phase_bind_node,
+      check_int_eq(turbo_graph_add_json_value_node(graph, "done", write_phase_json_value_node,
                                              (void *)&s_done_payload),
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(
-          turbo_graph_add_bind_edge(graph, "router", "tool", predicate_mode_equals_bind, "tool"),
+          turbo_graph_add_json_value_edge(graph, "router", "tool", predicate_mode_equals_json_value, "tool"),
           TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_edge(graph, "router", "done", NULL, NULL),
+      check_int_eq(turbo_graph_add_json_value_edge(graph, "router", "done", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(turbo_graph_set_entry(graph, "router"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run_bind(graph, state, NULL, &result, &result_state),
+      check_int_eq(turbo_graph_run_json_value(graph, state, NULL, &result, &result_state),
                    TURBO_GRAPH_EXEC_OK);
       check_str_eq(result.last_node, "tool");
-      check_true(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(result_state, "visited_tool"), 0));
-      check_true(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(result_state, "visited_router"), 0));
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result_state, "visited_tool"), 0));
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result_state, "visited_router"), 0));
 
-      turbo_runtime_data_bind_value_destroy(result_state);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result_state);
+      turbo_runtime_json_destroy(state);
       turbo_graph_destroy(graph);
     }
 
-    it("should emit canonical trace events while running a bind-native graph") {
+    it("should emit canonical trace events while running a TurboParser JSON-native graph") {
       turbo_graph_t *graph = turbo_graph_create("agent-bind-stream");
-      turbo_runtime_data_bind_value_t *state = turbo_runtime_data_bind_value_create_object();
-      turbo_runtime_data_bind_value_t *result_state = NULL;
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *result_state = NULL;
       turbo_graph_run_result_t result = {0};
       graph_event_capture_t capture = {0};
       string_payload_t start = {"start"};
@@ -431,16 +607,16 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_bind_node(graph, "start", write_phase_bind_node, &start),
+      check_int_eq(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_node(graph, "end", write_phase_bind_node, &end),
+      check_int_eq(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_edge(graph, "start", "end", NULL, NULL),
+      check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       check_int_eq(
-          turbo_graph_run_bind_stream(graph, state, NULL, capture_graph_event, &capture, &result,
+          turbo_graph_run_json_value_stream(graph, state, NULL, capture_graph_event, &capture, &result,
                                       &result_state),
           TURBO_GRAPH_EXEC_OK);
       check_not_null(result_state);
@@ -451,40 +627,40 @@ spec("turbo graph runtime") {
       check_str_eq(capture.last_detail, "complete");
       check_str_eq(capture.last_payload, "end");
 
-      turbo_runtime_data_bind_value_destroy(result_state);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result_state);
+      turbo_runtime_json_destroy(state);
       turbo_graph_destroy(graph);
     }
 
-    it("should return bind-native state written by a failing node") {
+    it("should return TurboParser JSON-native state written by a failing node") {
       turbo_graph_t *graph = turbo_graph_create("agent-bind-error-state");
-      turbo_runtime_data_bind_value_t *state = turbo_runtime_data_bind_value_create_object();
-      turbo_runtime_data_bind_value_t *result_state = NULL;
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *result_state = NULL;
       turbo_graph_run_result_t result = {0};
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_bind_node(graph, "error", write_error_bind_node, NULL),
+      check_int_eq(turbo_graph_add_json_value_node(graph, "error", write_error_json_value_node, NULL),
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(turbo_graph_set_entry(graph, "error"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run_bind_stream(graph, state, NULL, NULL, NULL, &result,
+      check_int_eq(turbo_graph_run_json_value_stream(graph, state, NULL, NULL, NULL, &result,
                                                &result_state),
                    TURBO_GRAPH_EXEC_ERROR);
       check_not_null(result_state);
       check_int_eq(result.status, TURBO_GRAPH_EXEC_ERROR);
-      check_true(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(result_state, "error_recorded"), 0));
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result_state, "error_recorded"), 0));
 
-      turbo_runtime_data_bind_value_destroy(result_state);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(result_state);
+      turbo_runtime_json_destroy(state);
       turbo_graph_destroy(graph);
     }
 
-    it("should resume a bind-native graph from checkpoint and continue the event log") {
+    it("should resume a TurboParser JSON-native graph from checkpoint and continue the event log") {
       turbo_graph_t *graph = turbo_graph_create("agent-bind-resume");
-      turbo_runtime_data_bind_value_t *state = turbo_runtime_data_bind_value_create_object();
-      turbo_runtime_data_bind_value_t *result_state = NULL;
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *result_state = NULL;
       turbo_graph_checkpoint_t *checkpoint = NULL;
       turbo_graph_run_options_t options = {0};
       turbo_graph_run_result_t result = {0};
@@ -494,20 +670,20 @@ spec("turbo graph runtime") {
       string_payload_t start = {"start"};
       string_payload_t middle = {"middle"};
       string_payload_t end = {"end"};
-      const turbo_runtime_data_bind_value_t *last_event;
+      const json_value_t *last_event;
 
       check_not_null(graph);
       check_not_null(state);
       check_not_null(log);
-      check_int_eq(turbo_graph_add_bind_node(graph, "start", write_phase_bind_node, &start),
+      check_int_eq(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_node(graph, "middle", write_phase_bind_node, &middle),
+      check_int_eq(turbo_graph_add_json_value_node(graph, "middle", write_phase_json_value_node, &middle),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_node(graph, "end", write_phase_bind_node, &end),
+      check_int_eq(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_edge(graph, "start", "middle", NULL, NULL),
+      check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "middle", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_bind_edge(graph, "middle", "end", NULL, NULL),
+      check_int_eq(turbo_graph_add_json_value_edge(graph, "middle", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
@@ -516,7 +692,7 @@ spec("turbo graph runtime") {
       options.checkpoint_cb = capture_checkpoint_copy;
       options.checkpoint_user_data = &checkpoint;
 
-      check_int_eq(turbo_graph_run_bind_stream(graph, state, &options, turbo_event_log_capture_bind,
+      check_int_eq(turbo_graph_run_json_value_stream(graph, state, &options, turbo_event_log_capture_json_value,
                                                log, &result, &result_state),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
       check_not_null(checkpoint);
@@ -524,44 +700,44 @@ spec("turbo graph runtime") {
       check_int_eq(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
       check_str_eq(turbo_graph_checkpoint_next_node(checkpoint), "end");
       check_size_eq(turbo_graph_checkpoint_steps(checkpoint), 2);
-      check_true(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(result_state, "visited_middle"), 0));
-      check_false(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(result_state, "visited_end"), 0));
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result_state, "visited_middle"), 0));
+      check_false(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result_state, "visited_end"), 0));
       check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
       check_int_eq((int)turbo_event_log_size(log), 6);
 
-      turbo_runtime_data_bind_value_destroy(result_state);
+      turbo_runtime_json_destroy(result_state);
       result_state = NULL;
 
-      check_int_eq(turbo_graph_run_checkpoint_bind_stream(graph, checkpoint, NULL,
-                                                          turbo_event_log_capture_bind, log,
+      check_int_eq(turbo_graph_run_checkpoint_json_value_stream(graph, checkpoint, NULL,
+                                                          turbo_event_log_capture_json_value, log,
                                                           &resumed, &result_state),
                    TURBO_GRAPH_EXEC_OK);
       check_not_null(result_state);
       check_int_eq(resumed.status, TURBO_GRAPH_EXEC_OK);
       check_str_eq(resumed.last_node, "end");
-      check_true(turbo_runtime_data_bind_value_as_bool(
-          turbo_runtime_data_bind_object_get(result_state, "visited_end"), 0));
+      check_true(turbo_runtime_json_value_as_bool(
+          turbo_json_object_get(result_state, "visited_end"), 0));
       check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
       check_int_eq((int)turbo_event_log_size(log), 9);
 
       last_event = turbo_event_log_get(log, turbo_event_log_size(log) - 1);
       check_not_null(last_event);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(last_event, "name")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(last_event, "name")),
                    "graph.route");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(last_event, "detail")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(last_event, "detail")),
                    "complete");
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(last_event, "payload")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(last_event, "payload")),
                    "end");
 
-      turbo_runtime_data_bind_value_destroy(result_state);
+      turbo_runtime_json_destroy(result_state);
       turbo_event_log_destroy(log);
       turbo_graph_checkpoint_destroy(checkpoint);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(state);
       turbo_graph_destroy(graph);
     }
   }
@@ -753,28 +929,28 @@ spec("turbo graph runtime") {
       check_null(parsed);
     }
 
-    it("should create and read checkpoints through runtime data bind") {
-      turbo_runtime_data_bind_value_t *state = turbo_runtime_data_bind_value_create_object();
-      turbo_runtime_data_bind_value_t *phase = turbo_runtime_data_bind_value_create_string("tool");
-      turbo_runtime_data_bind_value_t *bound = NULL;
+    it("should create and read checkpoints through TurboParser JSON") {
+      json_value_t *state = turbo_json_create_object();
+      json_value_t *phase = turbo_json_create_string("tool");
+      json_value_t *bound = NULL;
       turbo_graph_checkpoint_t *checkpoint = NULL;
 
       check_not_null(state);
       check_not_null(phase);
-      check_int_eq(turbo_runtime_data_bind_object_set(state, "phase", phase),
-                   TURBO_RUNTIME_DATA_BIND_OK);
-      check_int_eq(turbo_graph_checkpoint_create_bind("tool_node", 3, state, &checkpoint),
+      check_int_eq(turbo_runtime_json_object_set(state, "phase", phase),
+                   TURBO_RUNTIME_JSON_OK);
+      check_int_eq(turbo_graph_checkpoint_create_json_value("tool_node", 3, state, &checkpoint),
                    TURBO_GRAPH_EXEC_OK);
 
-      bound = turbo_graph_checkpoint_state_bind(checkpoint);
+      bound = turbo_graph_checkpoint_state_json_value(checkpoint);
       check_not_null(bound);
-      check_str_eq(turbo_runtime_data_bind_value_as_string(
-                       turbo_runtime_data_bind_object_get(bound, "phase")),
+      check_str_eq(turbo_runtime_json_value_as_string(
+                       turbo_json_object_get(bound, "phase")),
                    "tool");
 
-      turbo_runtime_data_bind_value_destroy(bound);
+      turbo_runtime_json_destroy(bound);
       turbo_graph_checkpoint_destroy(checkpoint);
-      turbo_runtime_data_bind_value_destroy(state);
+      turbo_runtime_json_destroy(state);
     }
 
     it("should interrupt before a node and emit a resumable checkpoint") {

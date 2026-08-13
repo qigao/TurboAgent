@@ -1,4 +1,4 @@
-# TurboNet CMake Utilities
+# TurboAgent CMake Utilities
 
 function(cmake_config_target target_name)
     set(options NO_INSTALL)
@@ -39,10 +39,10 @@ function(cmake_config_target target_name)
         # Standard installation logic
         if(target_type STREQUAL "INTERFACE_LIBRARY")
             install(TARGETS ${target_name}
-                EXPORT TurboNetTargets)
+                EXPORT TurboAgentTargets)
         else()
             install(TARGETS ${target_name}
-                EXPORT TurboNetTargets
+                EXPORT TurboAgentTargets
                 LIBRARY DESTINATION lib
                 ARCHIVE DESTINATION lib
                 RUNTIME DESTINATION bin)

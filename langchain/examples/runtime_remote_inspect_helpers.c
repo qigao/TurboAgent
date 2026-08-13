@@ -42,18 +42,18 @@ static const char *runtime_remote_example_text(const char *text) {
   return text ? text : "(null)";
 }
 
-static int runtime_remote_example_write_bool_bind_node(turbo_graph_exec_ctx_t *ctx,
+static int runtime_remote_example_write_bool_json_value_node(turbo_graph_exec_ctx_t *ctx,
                                                        void *user_data) {
   runtime_remote_example_bool_write_t *write =
       (runtime_remote_example_bool_write_t *)user_data;
-  turbo_runtime_data_bind_value_t *value;
+  json_value_t *value;
 
-  value = turbo_runtime_data_bind_value_create_bool(write->value);
+  value = turbo_json_create_bool(write->value);
   if (!value) {
     return -1;
   }
-  return turbo_runtime_data_bind_object_set(ctx->bind_state, write->key, value) ==
-                 TURBO_RUNTIME_DATA_BIND_OK
+  return turbo_runtime_json_object_set(ctx->json_value_state, write->key, value) ==
+                 TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
 }
@@ -87,11 +87,11 @@ static turbo_graph_t *runtime_remote_example_create_graph(void) {
   if (!graph) {
     return NULL;
   }
-  if (turbo_graph_add_bind_node(graph, "start", runtime_remote_example_write_bool_bind_node,
+  if (turbo_graph_add_json_value_node(graph, "start", runtime_remote_example_write_bool_json_value_node,
                                 &start) != TURBO_GRAPH_EXEC_OK ||
       turbo_graph_add_node(graph, "end", runtime_remote_example_finalize_node,
                            (void *)final_output) != TURBO_GRAPH_EXEC_OK ||
-      turbo_graph_add_bind_edge(graph, "start", "end", NULL, NULL) !=
+      turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL) !=
           TURBO_GRAPH_EXEC_OK ||
       turbo_graph_set_entry(graph, "start") != TURBO_GRAPH_EXEC_OK) {
     turbo_graph_destroy(graph);
@@ -100,9 +100,9 @@ static turbo_graph_t *runtime_remote_example_create_graph(void) {
   return graph;
 }
 
-static turbo_runtime_data_bind_value_t *runtime_remote_example_create_state_bind(void) {
+static json_value_t *runtime_remote_example_create_state_json_value(void) {
   json_value_t *state = turbo_agent_state_create();
-  turbo_runtime_data_bind_value_t *bound;
+  json_value_t *bound;
 
   if (!state) {
     return NULL;
@@ -114,7 +114,7 @@ static turbo_runtime_data_bind_value_t *runtime_remote_example_create_state_bind
     turbo_free_json(&state);
     return NULL;
   }
-  bound = turbo_runtime_data_bind_value_from_json(state);
+  bound = turbo_json_clone(state);
   turbo_free_json(&state);
   return bound;
 }
@@ -235,8 +235,8 @@ static void runtime_remote_example_coro(coro_t *co, void *arg) {
   turbo_agent_remote_session_config_t session_config = {0};
   turbo_agent_remote_session_config_t app_session_config = {0};
   turbo_agent_remote_app_config_t app_config = {0};
-  turbo_runtime_data_bind_value_t *input_state = NULL;
-  turbo_runtime_data_bind_value_t *result_state = NULL;
+  json_value_t *input_state = NULL;
+  json_value_t *result_state = NULL;
   json_value_t *summary_json = NULL;
   json_value_t *error_json = NULL;
   json_value_t *output_item = NULL;
@@ -311,16 +311,16 @@ static void runtime_remote_example_coro(coro_t *co, void *arg) {
 
   interrupt_options.interrupt_before_nodes = interrupt_before_end;
   interrupt_options.interrupt_before_count = 1;
-  input_state = runtime_remote_example_create_state_bind();
+  input_state = runtime_remote_example_create_state_json_value();
   if (!input_state) {
     fprintf(stderr, "failed to create input state\n");
     goto cleanup;
   }
-  if (turbo_agent_runtime_remote_client_start_bind_graph(
+  if (turbo_agent_runtime_remote_client_start_json_value_graph(
           state->client, "remote-inspect", input_state, &interrupt_options,
           "thr_remote_example", &summary_json, &result_state, &error_json) != 0 ||
       !summary_json || !result_state || error_json) {
-    fprintf(stderr, "remote client start_bind_graph failed\n");
+    fprintf(stderr, "remote client start_json_value_graph failed\n");
     goto cleanup;
   }
 
@@ -394,8 +394,8 @@ cleanup:
   turbo_free_json(&output_item);
   turbo_free_json(&summary_json);
   turbo_free_json(&error_json);
-  turbo_runtime_data_bind_value_destroy(result_state);
-  turbo_runtime_data_bind_value_destroy(input_state);
+  turbo_runtime_json_destroy(result_state);
+  turbo_runtime_json_destroy(input_state);
   coro_sleep(state->coro_ctx, 50);
   if (state->server) {
     state->server_stopped = 1;

@@ -801,7 +801,8 @@ Wasm guest 只代理受能力限制的工具实现：
 
 ```text
 Agent workflow
-  -> policy/review
+  -> registry capability metadata + Agent policy
+  -> approval/guardrail
   -> tool executor
   -> Wasm tool runtime
   -> capability broker
@@ -846,7 +847,8 @@ host input/output 的拒绝路径。更强的进程级故障隔离仍可作为�
 文档变成执行事实源。因此选择显式 `WasmToolPack`：宿主逐个提供 module 配置和已收紧的
 TurboWasm policy，pack 只负责验证、加载、组合、容量限制与确定性销毁。
 
-- 架构：`WasmToolPack -> RuntimeTools v2 registry adapter -> TurboWasm runtime`。
+- 架构：`WasmToolPack -> RuntimeTools v3 registry adapter -> TurboWasm runtime`。v3
+  metadata 自动携带 `runtime_tools`，投影与组合不得丢失；执行器在副作用前再次检查。
 - 状态归属：pack 独占统一 registry；每个 registry binding 持有 runtime 引用；skill 和
   workspace selection 只借用/投影 registry，不拥有 VM。
 - 失败语义：module 的所有工具必须原子加入；重复名称、容量不足、ABI/schema/policy

@@ -38,6 +38,13 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_add(turbo_tool_registry_t *reg
 CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v2(
     turbo_tool_registry_t *registry, const turbo_tool_definition_v2_t *definition);
 
+/**
+ * @brief Add a versioned tool definition with execution and capability policy.
+ * @return INVALID_ARGUMENT for invalid metadata or unsupported ABI.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v3(
+    turbo_tool_registry_t *registry, const turbo_tool_definition_v3_t *definition);
+
 /** @brief Remove one tool and release its registry-owned resources. */
 CXX_C_API turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *registry,
                                                          const char *name);
@@ -65,6 +72,27 @@ turbo_tool_registry_get_execution_policy(const turbo_tool_registry_t *registry, 
                                          turbo_tool_execution_policy_t *out_policy);
 
 /**
+ * @brief Read required host-policy capabilities by tool name.
+ *
+ * The returned array and strings are borrowed from the registry and remain
+ * valid until that tool is removed or the registry is destroyed. A legacy
+ * tool has zero explicit requirements; policy-aware Agent execution treats it
+ * as requiring `custom_tools`.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_get_required_capabilities(
+    const turbo_tool_registry_t *registry, const char *name, const char *const **out_capabilities,
+    size_t *out_count);
+
+/**
+ * @brief Add one required capability to an existing tool.
+ *
+ * This control-plane operation copies `capability`. Adding an existing value
+ * is idempotent. The registry must be quiescent while metadata is changed.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_require_capability(
+    turbo_tool_registry_t *registry, const char *name, const char *capability);
+
+/**
  * @brief Build a non-owning projection containing only the named tools.
  *
  * Tool definitions and schemas are copied, while callback user data remains
@@ -76,9 +104,22 @@ turbo_tool_registry_get_execution_policy(const turbo_tool_registry_t *registry, 
  * Names must be exact registry names and unique. An empty name list produces
  * an empty registry. On failure, `out_projection` is set to NULL.
  */
-CXX_C_API turbo_tool_status_t turbo_tool_registry_project(
-    const turbo_tool_registry_t *source, const char *const *names, size_t name_count,
-    turbo_tool_registry_t **out_projection);
+CXX_C_API turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *source,
+                                                          const char *const *names,
+                                                          size_t name_count,
+                                                          turbo_tool_registry_t **out_projection);
+
+/**
+ * Build one non-owning registry from every definition in ordered sources.
+ *
+ * Definitions and schemas are copied; callback user data remains borrowed.
+ * Every source and callback dependency must outlive the returned registry and
+ * must not be mutated or refreshed while it is in use. Duplicate tool names
+ * fail atomically. An empty source list creates an empty registry.
+ */
+CXX_C_API turbo_tool_status_t
+turbo_tool_registry_compose(const turbo_tool_registry_t *const *sources, size_t source_count,
+                            turbo_tool_registry_t **out_composite);
 
 /**
  * @brief Execute a tool by name.

@@ -786,16 +786,50 @@ turbo_agent_workspace_capability_from_text(const char *text,
   return 0;
 }
 
-static turbo_agent_policy_capability_t
-turbo_agent_workspace_tool_capability(const turbo_agent_workspace_t *workspace, const char *name) {
+static turbo_agent_workspace_status_t
+turbo_agent_workspace_check_capability(turbo_agent_workspace_t *workspace,
+                                       turbo_agent_policy_capability_t capability,
+                                       const char *detail);
+
+static turbo_agent_workspace_status_t
+turbo_agent_workspace_check_tool_capabilities(turbo_agent_workspace_t *workspace,
+                                              const turbo_tool_registry_t *source_registry,
+                                              const char *name) {
+  const char *const *required_capabilities = NULL;
+  size_t required_capability_count = 0;
   size_t index;
+  int matched = 0;
   for (index = 0; index < turbo_vec_size(&workspace->tool_capabilities); ++index) {
     const turbo_agent_workspace_tool_capability_entry_t *entry =
         (const turbo_agent_workspace_tool_capability_entry_t *)turbo_vec_at_const(
             &workspace->tool_capabilities, index);
-    if (entry && strcmp(entry->tool_name, name) == 0) return entry->capability;
+    turbo_agent_workspace_status_t status;
+    if (!entry || strcmp(entry->tool_name, name) != 0) continue;
+    matched = 1;
+    status = turbo_agent_workspace_check_capability(workspace, entry->capability, name);
+    if (status != TURBO_AGENT_WORKSPACE_OK) return status;
   }
-  return TURBO_AGENT_POLICY_CAPABILITY_CUSTOM_TOOLS;
+  if (source_registry &&
+      turbo_tool_registry_get_required_capabilities(source_registry, name, &required_capabilities,
+                                                    &required_capability_count) == TURBO_TOOL_OK &&
+      required_capability_count > 0) {
+    for (index = 0; index < required_capability_count; ++index) {
+      turbo_agent_policy_capability_t capability;
+      if (turbo_agent_policy_capability_from_name(required_capabilities[index], &capability) != 0) {
+        turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,
+                                        "unknown tool capability", name);
+        return TURBO_AGENT_WORKSPACE_PARSE_ERROR;
+      }
+      if (turbo_agent_workspace_check_capability(workspace, capability, name) !=
+          TURBO_AGENT_WORKSPACE_OK) {
+        return TURBO_AGENT_WORKSPACE_CAPABILITY_DENIED;
+      }
+    }
+    return TURBO_AGENT_WORKSPACE_OK;
+  }
+  return matched ? TURBO_AGENT_WORKSPACE_OK
+                 : turbo_agent_workspace_check_capability(
+                       workspace, TURBO_AGENT_POLICY_CAPABILITY_CUSTOM_TOOLS, name);
 }
 
 static turbo_agent_workspace_status_t
@@ -811,8 +845,9 @@ turbo_agent_workspace_check_capability(turbo_agent_workspace_t *workspace,
 }
 
 static turbo_agent_workspace_status_t
-turbo_agent_workspace_add_selected_tool(turbo_agent_workspace_t *workspace, turbo_vec_t *tool_names,
-                                        const char *tool_name) {
+turbo_agent_workspace_add_selected_tool(turbo_agent_workspace_t *workspace,
+                                        const turbo_tool_registry_t *source_registry,
+                                        turbo_vec_t *tool_names, const char *tool_name) {
   turbo_agent_workspace_status_t status;
   if (turbo_agent_workspace_string_vec_contains(tool_names, tool_name))
     return TURBO_AGENT_WORKSPACE_OK;
@@ -821,13 +856,59 @@ turbo_agent_workspace_add_selected_tool(turbo_agent_workspace_t *workspace, turb
                                     "tool projection", "tool count exceeded");
     return TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED;
   }
-  status = turbo_agent_workspace_check_capability(
-      workspace, turbo_agent_workspace_tool_capability(workspace, tool_name), tool_name);
+  status = turbo_agent_workspace_check_tool_capabilities(workspace, source_registry, tool_name);
   if (status != TURBO_AGENT_WORKSPACE_OK) return status;
   if (turbo_agent_workspace_string_vec_push(tool_names, tool_name, 1) != 0) {
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY,
                                     "tool projection", "allocation failed");
     return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
+  }
+  return TURBO_AGENT_WORKSPACE_OK;
+}
+
+static turbo_agent_workspace_status_t
+turbo_agent_workspace_bind_projected_capabilities(turbo_agent_workspace_t *workspace,
+                                                  turbo_agent_workspace_selection_t *selection) {
+  size_t mapping_index;
+  size_t tool_index;
+  for (mapping_index = 0; mapping_index < turbo_vec_size(&workspace->tool_capabilities);
+       ++mapping_index) {
+    const turbo_agent_workspace_tool_capability_entry_t *entry =
+        (const turbo_agent_workspace_tool_capability_entry_t *)turbo_vec_at_const(
+            &workspace->tool_capabilities, mapping_index);
+    const char *capability_name;
+    turbo_tool_status_t tool_status;
+    if (!entry ||
+        !turbo_agent_workspace_string_vec_contains(&selection->tool_names, entry->tool_name)) {
+      continue;
+    }
+    capability_name = turbo_agent_policy_capability_name(entry->capability);
+    if (!capability_name) {
+      turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,
+                                      "unknown capability", entry->tool_name);
+      return TURBO_AGENT_WORKSPACE_PARSE_ERROR;
+    }
+    tool_status =
+        turbo_tool_registry_require_capability(selection->tools, entry->tool_name, capability_name);
+    if (tool_status != TURBO_TOOL_OK) {
+      turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY,
+                                      "tool capability metadata", entry->tool_name);
+      return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
+    }
+  }
+  for (tool_index = 0; tool_index < turbo_vec_size(&selection->tool_names); ++tool_index) {
+    char *const *tool_name = (char *const *)turbo_vec_at(&selection->tool_names, tool_index);
+    const char *reason = NULL;
+    if (turbo_agent_policy_check_tool(&workspace->policy, selection->tools, *tool_name, &reason) ==
+        TURBO_AGENT_POLICY_ALLOW) {
+      continue;
+    }
+    turbo_agent_workspace_set_error(workspace,
+                                    reason && strcmp(reason, "unknown_tool_capability") == 0
+                                        ? TURBO_AGENT_WORKSPACE_PARSE_ERROR
+                                        : TURBO_AGENT_WORKSPACE_CAPABILITY_DENIED,
+                                    reason ? reason : "capability denied", *tool_name);
+    return workspace->last_status;
   }
   return TURBO_AGENT_WORKSPACE_OK;
 }
@@ -927,7 +1008,8 @@ turbo_agent_workspace_create(const turbo_agent_workspace_config_t *config,
       const turbo_agent_workspace_tool_capability_entry_t *existing =
           (const turbo_agent_workspace_tool_capability_entry_t *)turbo_vec_at_const(
               &workspace->tool_capabilities, previous);
-      if (existing && strcmp(existing->tool_name, source->tool_name) == 0) {
+      if (existing && strcmp(existing->tool_name, source->tool_name) == 0 &&
+          existing->capability == source->capability) {
         turbo_agent_workspace_destroy(workspace);
         return TURBO_AGENT_WORKSPACE_INVALID_ARGUMENT;
       }
@@ -1051,7 +1133,8 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
   }
   for (index = 0; index < turbo_vec_size(&workspace->always_tools); ++index) {
     char *const *tool = (char *const *)turbo_vec_at(&workspace->always_tools, index);
-    status = turbo_agent_workspace_add_selected_tool(workspace, &selection->tool_names, *tool);
+    status = turbo_agent_workspace_add_selected_tool(workspace, source_registry,
+                                                     &selection->tool_names, *tool);
     if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
   }
   for (index = 0; index < turbo_vec_size(&selected); ++index) {
@@ -1073,7 +1156,8 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
     }
     for (item = 0; item < turbo_vec_size(&skill->tools); ++item) {
       char *const *tool = (char *const *)turbo_vec_at(&skill->tools, item);
-      status = turbo_agent_workspace_add_selected_tool(workspace, &selection->tool_names, *tool);
+      status = turbo_agent_workspace_add_selected_tool(workspace, source_registry,
+                                                       &selection->tool_names, *tool);
       if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
     }
     status = turbo_agent_workspace_append_bounded(
@@ -1123,6 +1207,8 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
       status = workspace->last_status;
       goto cleanup;
     }
+    status = turbo_agent_workspace_bind_projected_capabilities(workspace, selection);
+    if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
   } else {
     selection->tools = turbo_tool_registry_create();
     if (!selection->tools) {
@@ -1213,8 +1299,9 @@ turbo_agent_t *turbo_agent_create_for_workspace(const turbo_agent_config_t *conf
   effective.instructions = selection->instructions;
   effective.tool_registry = selection->tools;
   agent = turbo_agent_create(&effective);
-  if (!agent || turbo_agent_attach_owned_resource(
-                    agent, selection, turbo_agent_workspace_selection_free_resource) != 0) {
+  if (!agent || turbo_agent_set_tool_policy(agent, &workspace->policy) != 0 ||
+      turbo_agent_attach_owned_resource(agent, selection,
+                                        turbo_agent_workspace_selection_free_resource) != 0) {
     turbo_agent_destroy(agent);
     turbo_agent_workspace_selection_destroy(selection);
     return NULL;

@@ -1,0 +1,11 @@
+#ifndef TURBO_AGENT_HARNESS_SERVER_INTERNAL_H
+#define TURBO_AGENT_HARNESS_SERVER_INTERNAL_H
+
+#include "turbo_agent_harness_server.h"
+
+turbo_agent_harness_connection_t *
+turbo_agent_harness_connection_retain_internal(turbo_agent_harness_connection_t *connection);
+
+void turbo_agent_harness_connection_release_internal(turbo_agent_harness_connection_t *connection);
+
+#endif

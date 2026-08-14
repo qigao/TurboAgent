@@ -199,4 +199,110 @@ spec("turbo agent workspace") {
     check_int_eq(tt_remove_tree(root), 0);
     free(root);
   }
+
+  it("should require every capability mapped to one network runtime tool") {
+    char *root = tt_make_temp_dir("turbo_workspace_multi_capability");
+    const char *always_tool = "mcp_demo_search";
+    turbo_agent_workspace_tool_capability_t capabilities[] = {
+        {"mcp_demo_search", TURBO_AGENT_POLICY_CAPABILITY_RUNTIME_TOOLS},
+        {"mcp_demo_search", TURBO_AGENT_POLICY_CAPABILITY_NETWORK}};
+    turbo_tool_definition_t tool = {"mcp_demo_search",
+                                    "Search",
+                                    "{\"type\":\"object\"}",
+                                    NULL,
+                                    1,
+                                    workspace_echo_tool,
+                                    NULL,
+                                    NULL,
+                                    NULL};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_workspace_config_t config;
+    turbo_agent_workspace_t *workspace = NULL;
+    turbo_agent_workspace_selection_t *selection = NULL;
+    const char *const *required_capabilities = NULL;
+    size_t required_capability_count = 0;
+
+    check_not_null(root);
+    check_not_null(registry);
+    check_int_eq(turbo_tool_registry_add(registry, &tool), TURBO_TOOL_OK);
+    policy.allow_runtime_tools = 1;
+    policy.allow_network = 0;
+    turbo_agent_workspace_config_init(&config);
+    config.workspace_root = root;
+    config.policy = &policy;
+    config.always_tools = &always_tool;
+    config.always_tool_count = 1;
+    config.tool_capabilities = capabilities;
+    config.tool_capability_count = 2;
+    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_int_eq(
+        turbo_agent_workspace_prepare(workspace, "search remotely", registry, NULL, &selection),
+        TURBO_AGENT_WORKSPACE_CAPABILITY_DENIED);
+    check_null(selection);
+    turbo_agent_workspace_destroy(workspace);
+    workspace = NULL;
+
+    policy.allow_network = 1;
+    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_int_eq(
+        turbo_agent_workspace_prepare(workspace, "search remotely", registry, NULL, &selection),
+        TURBO_AGENT_WORKSPACE_OK);
+    check_not_null(selection);
+    check_size_eq(turbo_agent_workspace_selection_tool_count(selection), 1);
+    check_int_eq(turbo_tool_registry_get_required_capabilities(
+                     turbo_agent_workspace_selection_tools(selection), "mcp_demo_search",
+                     &required_capabilities, &required_capability_count),
+                 TURBO_TOOL_OK);
+    check_size_eq(required_capability_count, 2);
+    check_str_eq(required_capabilities[0], "runtime_tools");
+    check_str_eq(required_capabilities[1], "network");
+
+    turbo_agent_workspace_selection_destroy(selection);
+    turbo_agent_workspace_destroy(workspace);
+    turbo_tool_registry_destroy(registry);
+    check_int_eq(tt_remove_tree(root), 0);
+    free(root);
+  }
+
+  it("should honor source registry capabilities without duplicate workspace mapping") {
+    char *root = tt_make_temp_dir("turbo_workspace_registry_capability");
+    const char *always_tool = "runtime.echo";
+    const char *required[] = {"runtime_tools"};
+    turbo_tool_definition_v3_t tool = {
+        sizeof(turbo_tool_definition_v3_t),
+        TURBO_TOOL_DEFINITION_V3_ABI_VERSION,
+        {"runtime.echo", "Echo", "{\"type\":\"object\"}", NULL, 1, workspace_echo_tool, NULL, NULL,
+         NULL},
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE},
+        required,
+        1};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_workspace_config_t config;
+    turbo_agent_workspace_t *workspace = NULL;
+    turbo_agent_workspace_selection_t *selection = NULL;
+
+    check_not_null(root);
+    check_not_null(registry);
+    check_int_eq(turbo_tool_registry_add_v3(registry, &tool), TURBO_TOOL_OK);
+    policy.allow_custom_tools = 0;
+    policy.allow_runtime_tools = 1;
+    turbo_agent_workspace_config_init(&config);
+    config.workspace_root = root;
+    config.policy = &policy;
+    config.always_tools = &always_tool;
+    config.always_tool_count = 1;
+    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_int_eq(
+        turbo_agent_workspace_prepare(workspace, "use runtime", registry, NULL, &selection),
+        TURBO_AGENT_WORKSPACE_OK);
+    check_not_null(selection);
+
+    turbo_agent_workspace_selection_destroy(selection);
+    turbo_agent_workspace_destroy(workspace);
+    turbo_tool_registry_destroy(registry);
+    check_int_eq(tt_remove_tree(root), 0);
+    free(root);
+  }
 }

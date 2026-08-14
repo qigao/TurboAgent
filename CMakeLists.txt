@@ -65,6 +65,11 @@ add_subdirectory(vendor)
 add_subdirectory(runtime_core)
 add_subdirectory(runtime_data)
 add_subdirectory(runtime_tools)
+add_subdirectory(mcp_tools)
+
+if(ENABLE_CODEX_BRIDGE)
+  add_subdirectory(codex_bridge)
+endif()
 
 if(ENABLE_CODING_TOOLS)
   add_subdirectory(coding_tools)

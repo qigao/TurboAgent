@@ -46,6 +46,14 @@ target_link_libraries(
 # Use the utility to configure common settings (Folder, Version, etc.)
 cmake_config_target(langchain FOLDER "LangChain" EXPORT_NAME LangChain
                     ALIAS TurboAgent::LangChain)
+
+# Harness is an additive host-facing facade implemented by LangChain. Keep it
+# as an interface target so consumers can depend on the narrower capability
+# name without introducing a second runtime binary or duplicated state owner.
+add_library(turbo_agent_harness INTERFACE)
+target_link_libraries(turbo_agent_harness INTERFACE langchain)
+cmake_config_target(turbo_agent_harness FOLDER "LangChain" EXPORT_NAME Harness
+                    ALIAS TurboAgent::Harness)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 

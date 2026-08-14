@@ -40,6 +40,7 @@ UX, and product-specific orchestration remain outside it.
 
 - `turbo_langchain`
 - `TurboNet::LangChain`
+- `TurboAgent::Harness`（嵌入式 Harness 与 transport-neutral Harness Server）
 
 Compatibility targets kept for existing users:
 
@@ -53,6 +54,13 @@ For a one-shot include, use:
 ```c
 #include "turbo_langchain.h"
 ```
+
+`turbo_agent_harness.h` 提供单 App/Session 的异步宿主适配层；
+`turbo_agent_harness_server.h` 在其上提供 initialize、thread/turn、事件重放与审批控制协议。
+`turbo_agent_harness_transport.h` 提供共用有序 writer 的 JSON-lines Adapter，可由 stdio 或
+WebSocket 宿主驱动；事件仅在完整 frame 写入成功后确认。
+设计、状态归属和背压契约见 [Harness adapter](docs/harness-adapter.md) 与
+[Harness Server](docs/harness-server.md)。
 
 Or include only the narrower headers you need, such as `turbo_graph.h` or
 `turbo_agent.h`. Retry/transport v2 and executor configuration are also available
@@ -136,6 +144,10 @@ The Agent surface is layered from low to high as:
 - `turbo_agent_memory_store.h` for namespaced long-term memory records
 - `turbo_agent_extensions.h` for optional middleware, trace, store,
   guardrail, and runnable helpers
+- `turbo_agent_policy.h` for capability policy and the copied per-Agent tool
+  policy enforced before registry callbacks
+- `turbo_agent_tool_executor.h` for bounded worker, queue, batch, argument,
+  and output limits; registry v3 capability metadata is rechecked here
 - `turbo_agent_state.h` for state inspection and mutation
 - `turbo_agent_sse.h` for SSE aggregation helpers
 - `turbo_agent_graph.h` for graph nodes and predicates

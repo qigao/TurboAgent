@@ -1,12 +1,12 @@
 #include "turbo_agent_policy.h"
 
+#include "turbo_tool_registry.h"
+
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
-static int turbo_policy_is_path_separator(char ch) {
-  return ch == '/' || ch == '\\';
-}
+static int turbo_policy_is_path_separator(char ch) { return ch == '/' || ch == '\\'; }
 
 static char turbo_policy_normalize_path_char(char ch) {
   if (turbo_policy_is_path_separator(ch)) {
@@ -24,8 +24,7 @@ static int turbo_policy_component_eq(const char *text, size_t len, const char *v
   return strlen(value) == len && strncmp(text, value, len) == 0;
 }
 
-static int turbo_policy_last_component_is_parent(const char *path, size_t out,
-                                                 size_t root_len) {
+static int turbo_policy_last_component_is_parent(const char *path, size_t out, size_t root_len) {
   size_t start;
 
   if (!path || out <= root_len) {
@@ -220,8 +219,7 @@ int turbo_agent_policy_validate_path(const turbo_agent_policy_t *policy, const c
   return rc;
 }
 
-static int turbo_policy_ascii_contains_case_insensitive(const char *text,
-                                                        const char *pattern) {
+static int turbo_policy_ascii_contains_case_insensitive(const char *text, const char *pattern) {
   size_t pattern_len;
   size_t i;
 
@@ -236,8 +234,7 @@ static int turbo_policy_ascii_contains_case_insensitive(const char *text,
   for (i = 0; text[i] != '\0'; ++i) {
     size_t j = 0;
     while (j < pattern_len && text[i + j] != '\0' &&
-           tolower((unsigned char)text[i + j]) ==
-               tolower((unsigned char)pattern[j])) {
+           tolower((unsigned char)text[i + j]) == tolower((unsigned char)pattern[j])) {
       j++;
     }
     if (j == pattern_len) {
@@ -249,8 +246,8 @@ static int turbo_policy_ascii_contains_case_insensitive(const char *text,
 }
 
 int turbo_agent_policy_is_dangerous_command(const char *command) {
-  static const char *patterns[] = {
-      "rm -rf", "del /s", "format", "git reset --hard", "git clean -fd", NULL};
+  static const char *patterns[] = {"rm -rf",           "del /s",        "format",
+                                   "git reset --hard", "git clean -fd", NULL};
   size_t i;
 
   if (!command) {
@@ -342,6 +339,85 @@ int turbo_agent_policy_allows_capability(const turbo_agent_policy_t *policy,
     }
     return 0;
   }
+}
+
+const char *turbo_agent_policy_capability_name(turbo_agent_policy_capability_t capability) {
+  switch (capability) {
+  case TURBO_AGENT_POLICY_CAPABILITY_CUSTOM_TOOLS:
+    return "custom_tools";
+  case TURBO_AGENT_POLICY_CAPABILITY_RUNTIME_TOOLS:
+    return "runtime_tools";
+  case TURBO_AGENT_POLICY_CAPABILITY_DELEGATE:
+    return "delegate";
+  case TURBO_AGENT_POLICY_CAPABILITY_NETWORK:
+    return "network";
+  case TURBO_AGENT_POLICY_CAPABILITY_SHELL:
+    return "shell";
+  case TURBO_AGENT_POLICY_CAPABILITY_PATCH:
+    return "patch";
+  case TURBO_AGENT_POLICY_CAPABILITY_OUTSIDE_WORKSPACE:
+    return "outside_workspace";
+  default:
+    return NULL;
+  }
+}
+
+int turbo_agent_policy_capability_from_name(const char *name,
+                                            turbo_agent_policy_capability_t *out_capability) {
+  turbo_agent_policy_capability_t capability;
+  if (!name || !out_capability) return -1;
+  for (capability = TURBO_AGENT_POLICY_CAPABILITY_CUSTOM_TOOLS;
+       capability <= TURBO_AGENT_POLICY_CAPABILITY_OUTSIDE_WORKSPACE;
+       capability = (turbo_agent_policy_capability_t)(capability + 1)) {
+    const char *candidate = turbo_agent_policy_capability_name(capability);
+    if (candidate && strcmp(candidate, name) == 0) {
+      *out_capability = capability;
+      return 0;
+    }
+  }
+  if (strcmp(name, "wasm") == 0) {
+    *out_capability = TURBO_AGENT_POLICY_CAPABILITY_RUNTIME_TOOLS;
+    return 0;
+  }
+  return -1;
+}
+
+turbo_agent_policy_decision_t turbo_agent_policy_check_tool(const turbo_agent_policy_t *policy,
+                                                            const turbo_tool_registry_t *registry,
+                                                            const char *tool_name,
+                                                            const char **out_reason) {
+  const char *const *required_capabilities = NULL;
+  size_t required_capability_count = 0;
+  size_t index;
+  if (out_reason) *out_reason = NULL;
+  if (!registry || !tool_name ||
+      turbo_tool_registry_get_required_capabilities(registry, tool_name, &required_capabilities,
+                                                    &required_capability_count) != TURBO_TOOL_OK) {
+    if (out_reason) *out_reason = "tool_not_found";
+    return TURBO_AGENT_POLICY_DENY;
+  }
+  if (required_capability_count == 0) {
+    const char *reason = NULL;
+    if (turbo_agent_policy_allows_capability(policy, TURBO_AGENT_POLICY_CAPABILITY_CUSTOM_TOOLS,
+                                             &reason)) {
+      return TURBO_AGENT_POLICY_ALLOW;
+    }
+    if (out_reason) *out_reason = reason;
+    return TURBO_AGENT_POLICY_DENY;
+  }
+  for (index = 0; index < required_capability_count; ++index) {
+    turbo_agent_policy_capability_t capability;
+    const char *reason = NULL;
+    if (turbo_agent_policy_capability_from_name(required_capabilities[index], &capability) != 0) {
+      if (out_reason) *out_reason = "unknown_tool_capability";
+      return TURBO_AGENT_POLICY_DENY;
+    }
+    if (!turbo_agent_policy_allows_capability(policy, capability, &reason)) {
+      if (out_reason) *out_reason = reason;
+      return TURBO_AGENT_POLICY_DENY;
+    }
+  }
+  return TURBO_AGENT_POLICY_ALLOW;
 }
 
 turbo_agent_policy_decision_t

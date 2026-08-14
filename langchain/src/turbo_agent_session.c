@@ -6,6 +6,7 @@
 #include "turbo_agent_inbox_internal.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_agent_runtime_internal.h"
+#include "turbo_agent_session_internal.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_util_internal.h"
 #include "turbo_agent_workflow.h"
@@ -951,6 +952,7 @@ static int turbo_agent_session_run_follow_ups(turbo_agent_session_t *session, tu
                                               const turbo_graph_run_options_t *options,
                                               turbo_event_sink_json_value_fn event_sink,
                                               void *event_sink_user_data,
+                                              turbo_cancel_token_t *cancel_token,
                                               json_value_t **summary_slot,
                                               json_value_t **out_state) {
   size_t follow_up_count;
@@ -987,8 +989,12 @@ static int turbo_agent_session_run_follow_ups(turbo_agent_session_t *session, tu
     if (turbo_agent_session_has_parent_link(session, &parent_link)) {
       exec_options.parent_link = &parent_link;
     }
-    run_rc = turbo_agent_runtime_exec_start(session->runtime, graph, *out_state, options,
-                                            &exec_options, &next_summary, &next_state);
+    run_rc = cancel_token
+                 ? turbo_agent_runtime_exec_start_controlled(
+                       session->runtime, graph, *out_state, options, &exec_options,
+                       cancel_token, &next_summary, &next_state)
+                 : turbo_agent_runtime_exec_start(session->runtime, graph, *out_state, options,
+                                                  &exec_options, &next_summary, &next_state);
     if (run_rc != TURBO_OK) {
       turbo_runtime_json_destroy(next_state);
       turbo_runtime_json_destroy(next_summary);
@@ -1232,6 +1238,85 @@ CXX_C_API int turbo_agent_session_inbox_configure(turbo_agent_session_t *session
     session->agent->before_turn_user_data = session;
   }
   return TURBO_OK;
+}
+
+int turbo_agent_session_prepare_start_options_internal(
+    turbo_agent_session_t *session, turbo_event_sink_json_value_fn event_sink,
+    void *event_sink_user_data, turbo_agent_runtime_parent_link_t *parent_link,
+    turbo_agent_runtime_exec_options_t *out_options) {
+  if (!session || !session->runtime || !parent_link || !out_options) {
+    return TURBO_EINVAL;
+  }
+  memset(parent_link, 0, sizeof(*parent_link));
+  memset(out_options, 0, sizeof(*out_options));
+  out_options->thread_id = session->thread_id;
+  out_options->event_sink = event_sink;
+  out_options->event_sink_user_data = event_sink_user_data;
+  if (turbo_agent_session_has_parent_link(session, parent_link)) {
+    out_options->parent_link = parent_link;
+  }
+  return TURBO_OK;
+}
+
+int turbo_agent_session_prepare_resume_options_internal(
+    turbo_agent_session_t *session,
+    const turbo_agent_session_exec_options_t *session_options,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    turbo_agent_runtime_exec_options_t *out_options) {
+  if (!session || !session->runtime || !session_options || !out_options) {
+    return TURBO_EINVAL;
+  }
+  if (session_options->scope != TURBO_SESSION_SCOPE_CHECKPOINT &&
+      session_options->scope != TURBO_SESSION_SCOPE_THREAD) {
+    return TURBO_EINVAL;
+  }
+  if (session_options->input_kind != TURBO_SESSION_INPUT_OVERRIDE &&
+      session_options->input_kind != TURBO_SESSION_INPUT_PATCH &&
+      session_options->input_kind != TURBO_SESSION_INPUT_COMMAND) {
+    return TURBO_EINVAL;
+  }
+
+  memset(out_options, 0, sizeof(*out_options));
+  out_options->scope = (turbo_agent_runtime_scope_t)session_options->scope;
+  out_options->input_kind = (turbo_agent_runtime_input_kind_t)session_options->input_kind;
+  if (out_options->scope == TURBO_RUNTIME_SCOPE_THREAD) {
+    if (!session->thread_id || !session->thread_id[0]) {
+      return TURBO_EINVAL;
+    }
+    out_options->thread_id = session->thread_id;
+  } else {
+    out_options->checkpoint_id = turbo_agent_session_resolve_checkpoint_id(
+        session, session_options->checkpoint_id);
+    if (!out_options->checkpoint_id || !out_options->checkpoint_id[0]) {
+      return TURBO_EINVAL;
+    }
+  }
+  out_options->event_sink = event_sink;
+  out_options->event_sink_user_data = event_sink_user_data;
+  return TURBO_OK;
+}
+
+int turbo_agent_session_complete_execution_internal(
+    turbo_agent_session_t *session, turbo_graph_t *graph,
+    const turbo_graph_run_options_t *graph_options,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
+    turbo_cancel_token_t *cancel_token, json_value_t **summary,
+    json_value_t **state) {
+  int rc;
+
+  if (!session || !graph || !summary || !*summary || !state || !*state) {
+    return TURBO_EINVAL;
+  }
+  rc = turbo_agent_session_capture_summary(session, *summary);
+  if (rc == TURBO_OK && session->inbox) {
+    rc = turbo_agent_inbox_commit_bound_claim(session->inbox);
+  }
+  if (rc == TURBO_OK && session->inbox) {
+    rc = turbo_agent_session_run_follow_ups(
+        session, graph, graph_options, event_sink, event_sink_user_data,
+        cancel_token, summary, state);
+  }
+  return rc;
 }
 
 CXX_C_API int turbo_agent_session_context_configure(
@@ -2495,7 +2580,7 @@ CXX_C_API int turbo_agent_session_start_graph(
   }
   if (rc == 0 && session->inbox) {
     rc = turbo_agent_session_run_follow_ups(session, graph, options, event_sink,
-                                            event_sink_user_data, summary_slot, out_state);
+                                            event_sink_user_data, NULL, summary_slot, out_state);
   }
   if (!out_summary_json) {
     turbo_free_json(&local_summary_json);
@@ -2547,7 +2632,7 @@ CXX_C_API int turbo_agent_session_resume_graph(
   }
   if (rc == 0 && session->inbox) {
     rc = turbo_agent_session_run_follow_ups(session, graph, options, event_sink,
-                                            event_sink_user_data, summary_slot, out_state);
+                                            event_sink_user_data, NULL, summary_slot, out_state);
   }
   if (!out_summary_json) {
     turbo_free_json(&local_summary_json);
@@ -2601,7 +2686,7 @@ CXX_C_API int turbo_agent_session_fork_graph(turbo_agent_session_t *session, tur
   }
   if (rc == 0 && session->inbox) {
     rc = turbo_agent_session_run_follow_ups(session, graph, options, event_sink,
-                                            event_sink_user_data, summary_slot, out_state);
+                                            event_sink_user_data, NULL, summary_slot, out_state);
   }
   if (!out_summary_json) {
     turbo_free_json(&local_summary_json);

@@ -44,6 +44,9 @@ typedef enum turbo_agent_workspace_status_e {
  *
  * The policy and string/array values are copied during create. The workspace
  * object is single-threaded; selections are immutable after prepare.
+ * Repeat a tool_name with different capabilities when a tool requires all of
+ * them (for example runtime_tools plus network for an MCP-backed tool). Exact
+ * duplicate tool/capability pairs are rejected.
  */
 typedef struct turbo_agent_workspace_config_s {
   size_t struct_size;

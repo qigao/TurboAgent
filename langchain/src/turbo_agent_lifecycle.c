@@ -1,11 +1,12 @@
-#include "turbo_agent_core_internal.h"
 #include "turbo_agent_config_internal.h"
-#include "turbo_agent_transport_internal.h"
+#include "turbo_agent_core_internal.h"
 #include "turbo_agent_lifecycle_internal.h"
+#include "turbo_agent_policy.h"
 #include "turbo_agent_tool_executor_internal.h"
+#include "turbo_agent_transport_internal.h"
 
-#include "http_client.h"
 #include "CoroNet/turbo_coro_context.h"
+#include "http_client.h"
 #include "turbo_action_tool.h"
 #include "turbo_tool_registry.h"
 
@@ -38,9 +39,8 @@ static void turbo_agent_take_owned_tool_registry(turbo_agent_t *agent,
   agent->owns_tool_registry = tool_registry ? 1 : 0;
 }
 
-CXX_C_API int turbo_agent_attach_owned_resource(
-    turbo_agent_t *agent, void *resource,
-    turbo_agent_owned_resource_free_fn free_resource) {
+CXX_C_API int turbo_agent_attach_owned_resource(turbo_agent_t *agent, void *resource,
+                                                turbo_agent_owned_resource_free_fn free_resource) {
   if (!agent || !resource || !free_resource) {
     return -1;
   }
@@ -72,6 +72,8 @@ static void turbo_agent_release_owned_resources(turbo_agent_t *agent) {
   }
   turbo_agent_tool_executor_destroy(agent->tool_executor);
   agent->tool_executor = NULL;
+  tstr_free(agent->tool_policy_workspace_root);
+  agent->tool_policy_workspace_root = NULL;
   if (agent->owned_resource_free) {
     agent->owned_resource_free(agent->owned_resource);
   }
@@ -125,8 +127,9 @@ static void turbo_agent_free_strings(turbo_agent_t *agent) {
   turbo_agent_clear_last_stream_sse(agent);
 }
 
-static turbo_agent_t *turbo_agent_create_with_owned_tool_registry(
-    const turbo_agent_config_t *config, turbo_tool_registry_t *tool_registry) {
+static turbo_agent_t *
+turbo_agent_create_with_owned_tool_registry(const turbo_agent_config_t *config,
+                                            turbo_tool_registry_t *tool_registry) {
   turbo_agent_config_t bridged_config;
   turbo_agent_t *agent;
 
@@ -163,6 +166,8 @@ CXX_C_API turbo_agent_t *turbo_agent_create(const turbo_agent_config_t *config) 
     return NULL;
   }
 
+  agent->tool_policy = turbo_agent_policy_default();
+
   provider = turbo_agent_resolve_provider(config->provider, config->api_mode, &agent->api_mode);
   turbo_agent_retry_policy_init(&agent->retry_policy);
   if (turbo_agent_apply_core_config(agent, config, provider) != 0) {
@@ -184,8 +189,24 @@ CXX_C_API turbo_agent_t *turbo_agent_create(const turbo_agent_config_t *config) 
   return agent;
 }
 
-CXX_C_API const turbo_tool_registry_t *
-turbo_agent_tool_registry(const turbo_agent_t *agent) {
+CXX_C_API int turbo_agent_set_tool_policy(turbo_agent_t *agent,
+                                          const turbo_agent_policy_t *policy) {
+  turbo_agent_policy_t replacement;
+  char *workspace_root = NULL;
+  if (!agent) return -1;
+  replacement = policy ? *policy : turbo_agent_policy_default();
+  if (replacement.workspace_root) {
+    workspace_root = tstr_dup(replacement.workspace_root);
+    if (!workspace_root) return -1;
+  }
+  tstr_free(agent->tool_policy_workspace_root);
+  agent->tool_policy_workspace_root = workspace_root;
+  replacement.workspace_root = workspace_root;
+  agent->tool_policy = replacement;
+  return 0;
+}
+
+CXX_C_API const turbo_tool_registry_t *turbo_agent_tool_registry(const turbo_agent_t *agent) {
   return agent ? agent->tool_registry : NULL;
 }
 
@@ -193,9 +214,9 @@ CXX_C_API size_t turbo_agent_tool_count(const turbo_agent_t *agent) {
   return turbo_tool_registry_count(turbo_agent_tool_registry(agent));
 }
 
-CXX_C_API turbo_agent_t *turbo_agent_create_with_action_tools(
-    const turbo_agent_config_t *config,
-    const turbo_action_tool_registry_t *action_tool_registry) {
+CXX_C_API turbo_agent_t *
+turbo_agent_create_with_action_tools(const turbo_agent_config_t *config,
+                                     const turbo_action_tool_registry_t *action_tool_registry) {
   turbo_tool_registry_t *tool_registry;
 
   if (!config || !action_tool_registry) {

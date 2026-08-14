@@ -80,6 +80,51 @@ spec("turbo tool runtime") {
     turbo_tool_registry_destroy(registry);
   }
 
+  it("should preserve required capabilities across projection and composition") {
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    turbo_tool_registry_t *composite = NULL;
+    const turbo_tool_registry_t *sources[1];
+    const char *names[] = {"remote"};
+    const char *required[] = {"runtime_tools", "network"};
+    const char *const *observed = NULL;
+    size_t observed_count = 0;
+    turbo_tool_definition_v3_t definition = {
+        sizeof(turbo_tool_definition_v3_t),
+        TURBO_TOOL_DEFINITION_V3_ABI_VERSION,
+        {"remote", "Remote", "{\"type\":\"object\"}", NULL, 1, test_echo_tool,
+         test_echo_tool_json_value, NULL, NULL},
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE},
+        required,
+        2};
+
+    check_not_null(source);
+    check_int_eq(turbo_tool_registry_add_v3(source, &definition), TURBO_TOOL_OK);
+    check_int_eq(
+        turbo_tool_registry_get_required_capabilities(source, "remote", &observed, &observed_count),
+        TURBO_TOOL_OK);
+    check_size_eq(observed_count, 2);
+    check_str_eq(observed[0], "runtime_tools");
+    check_str_eq(observed[1], "network");
+    check_int_eq(turbo_tool_registry_require_capability(source, "remote", "network"),
+                 TURBO_TOOL_OK);
+    check_int_eq(turbo_tool_registry_project(source, names, 1, &projection), TURBO_TOOL_OK);
+    check_int_eq(turbo_tool_registry_get_required_capabilities(projection, "remote", &observed,
+                                                               &observed_count),
+                 TURBO_TOOL_OK);
+    check_size_eq(observed_count, 2);
+    sources[0] = projection;
+    check_int_eq(turbo_tool_registry_compose(sources, 1, &composite), TURBO_TOOL_OK);
+    check_int_eq(turbo_tool_registry_get_required_capabilities(composite, "remote", &observed,
+                                                               &observed_count),
+                 TURBO_TOOL_OK);
+    check_size_eq(observed_count, 2);
+
+    turbo_tool_registry_destroy(composite);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+  }
+
   it("should build an ordered non-owning registry projection") {
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_registry_t *projection = NULL;
@@ -106,6 +151,36 @@ spec("turbo tool runtime") {
                  TURBO_TOOL_NOT_FOUND);
     check_null(projection);
     turbo_tool_registry_destroy(registry);
+  }
+
+  it("should compose ordered borrowed registries and reject name collisions") {
+    turbo_tool_registry_t *first = turbo_tool_registry_create();
+    turbo_tool_registry_t *second = turbo_tool_registry_create();
+    turbo_tool_registry_t *composite = NULL;
+    const turbo_tool_registry_t *sources[] = {first, second};
+    turbo_tool_definition_t first_tool = {
+        "first", "First", "{\"type\":\"object\"}", NULL, 1, test_echo_tool, NULL, NULL, NULL};
+    turbo_tool_definition_t second_tool = {
+        "second", "Second", "{\"type\":\"object\"}", NULL, 1, test_echo_tool, NULL, NULL, NULL};
+
+    check_not_null(first);
+    check_not_null(second);
+    check_int_eq(turbo_tool_registry_add(first, &first_tool), TURBO_TOOL_OK);
+    check_int_eq(turbo_tool_registry_add(second, &second_tool), TURBO_TOOL_OK);
+    check_int_eq(turbo_tool_registry_compose(sources, 2, &composite), TURBO_TOOL_OK);
+    check_not_null(composite);
+    check_size_eq(turbo_tool_registry_count(composite), 2);
+    turbo_tool_registry_destroy(composite);
+    composite = NULL;
+
+    second_tool.name = "first";
+    check_int_eq(turbo_tool_registry_remove(second, "second"), TURBO_TOOL_OK);
+    check_int_eq(turbo_tool_registry_add(second, &second_tool), TURBO_TOOL_OK);
+    check_int_eq(turbo_tool_registry_compose(sources, 2, &composite), TURBO_TOOL_DUPLICATE);
+    check_null(composite);
+
+    turbo_tool_registry_destroy(second);
+    turbo_tool_registry_destroy(first);
   }
 
   it("should bridge native callback tools through a runtime") {
@@ -200,6 +275,8 @@ spec("turbo tool runtime") {
     turbo_tool_execution_policy_t second_policy = {TURBO_TOOL_EXECUTION_SEQUENTIAL,
                                                    TURBO_TOOL_IDEMPOTENCY_READ_ONLY};
     turbo_tool_execution_policy_t observed = {0};
+    const char *const *required_capabilities = NULL;
+    size_t required_capability_count = 0;
     char *output = NULL;
 
     check_not_null(first_runtime);
@@ -220,6 +297,12 @@ spec("turbo tool runtime") {
         TURBO_TOOL_OK);
     check_int_eq(observed.mode, TURBO_TOOL_EXECUTION_EXCLUSIVE);
     check_int_eq(observed.idempotency, TURBO_TOOL_IDEMPOTENCY_KEYED);
+    check_int_eq(turbo_tool_registry_get_required_capabilities(registry, "first_runtime_tool",
+                                                               &required_capabilities,
+                                                               &required_capability_count),
+                 TURBO_TOOL_OK);
+    check_size_eq(required_capability_count, 1);
+    check_str_eq(required_capabilities[0], "runtime_tools");
     check_int_eq(
         turbo_tool_registry_execute(registry, "second_runtime_tool", "{\"ok\":2}", &output),
         TURBO_TOOL_OK);

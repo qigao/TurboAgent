@@ -17,7 +17,8 @@ The workspace layer has four responsibilities:
 3. Select skills using explicit `triggers`, `$skill-name`, or
    `#skills/<filename>` references.
 4. Validate declared capabilities and tool names before building a non-owning,
-   ordered registry projection for one task.
+   ordered registry projection for one task. Required capabilities remain on
+   the projected registry and are checked again at dispatch time.
 
 This separation prevents Markdown content from acquiring process, filesystem,
 network, plugin, or Wasm authority merely by being present in a workspace.
@@ -65,14 +66,18 @@ errors, not silently ignored extensions.
 ## Capability policy
 
 Skill `capabilities` are checked against `turbo_agent_policy_t`. Tool-specific
-classification is configured with
-`turbo_agent_workspace_tool_capability_t`; unclassified tools require
-`CUSTOM_TOOLS`. This avoids guessing authority from a tool name.
+classification may come from versioned registry metadata or be augmented with
+`turbo_agent_workspace_tool_capability_t`. Requirements are combined with AND
+semantics. Legacy tools without metadata require `custom_tools`; unknown
+metadata fails closed. This avoids guessing authority from a tool name.
 
-Capability approval and actual invocation remain separate boundaries. The
-workspace layer decides whether a tool may be exposed to the model; the normal
-tool executor and action policy still control invocation, cancellation,
-backpressure, and side effects.
+The workspace layer first decides whether a tool may be exposed to the model.
+Before any callback or `started` journal record, the Agent tool executor checks
+the same registry metadata against its copied policy. Middleware, review,
+guardrails, cancellation, backpressure, output limits, result trace, and
+journal commit remain in the normal Agent workflow. Direct
+`turbo_tool_registry_execute*()` calls are intentionally low-level host APIs
+and do not represent Agent execution.
 
 ## Workflow tool availability
 
@@ -105,13 +110,15 @@ never scans a directory and never loads a module named only by Markdown.
 
 The two policy layers have different jobs:
 
-- `turbo_agent_policy_t` controls whether a selected skill may expose a Wasm
-  tool to an agent (`allow_runtime_tools` and per-tool capability mapping).
+- `turbo_agent_policy_t` controls whether a selected skill may expose and
+  execute a Wasm tool (`allow_runtime_tools`). `WasmToolPack` registrations
+  carry the `runtime_tools` requirement automatically.
 - `turbo_wasm_policy_t` is cloned into the VM and enforces the module root,
   imported capabilities, linear-memory limit, call budget, and App I/O limits.
 
-Use `turbo_wasm_tool_pack_registry()` as the workspace source registry and map
-its sensitive names to `TURBO_AGENT_POLICY_CAPABILITY_RUNTIME_TOOLS`. Destroy
+Use `turbo_wasm_tool_pack_registry()` as the workspace source registry. Add
+workspace mappings only for extra host requirements not already declared by
+the pack. Destroy
 all workspace selections and agents before destroying the pack. Module
 registration is atomic; duplicate names, exhausted pack capacity, empty tool
 catalogs, or invalid execution policy leave existing tools unchanged. Current
@@ -185,8 +192,12 @@ It does not contain file contents, tool arguments, credentials, or model data.
 ## Compatibility and migration
 
 Existing agents that assign `turbo_agent_config_t.tool_registry` directly are
-unchanged. Existing tools registered through `turbo_tool_registry_add()` retain
-their sequential execution policy. Applications adopt the workspace layer by:
+unchanged under the default policy. Existing tools registered through
+`turbo_tool_registry_add()` retain their sequential execution policy and are
+classified as `custom_tools` by Agent execution. New registries can use
+`turbo_tool_registry_add_v3()` for explicit capability metadata; hosts can call
+`turbo_agent_set_tool_policy()` to restrict a directly-created agent.
+Applications adopt the workspace layer by:
 
 1. Creating and populating their source tool registry as before.
 2. Initializing `turbo_agent_workspace_config_t` and setting an absolute
@@ -206,3 +217,18 @@ TinyTest coverage includes hierarchical instruction ordering, TurboParser YAML
 frontmatter, explicit trigger selection, ordered tool projection, agent-owned
 selection lifetime, missing-tool failure, and policy denial. Registry tests
 also cover successful projection and missing-name rejection.
+
+## MCP and multiple resident packs
+
+`McpToolPack` keeps MCP HTTP, authentication and protocol state in the host.
+After refreshing it, combine its registry with resident Wasm or native packs
+using `turbo_tool_registry_compose()`. The composite borrows callback state;
+destroy the Agent and composite before refreshing or destroying any source.
+
+One tool may require more than one Agent capability. Registry metadata and
+repeated names in `tool_capabilities` are merged, and all requirements must be
+allowed. `McpToolPack` registers both `runtime_tools` and `network`;
+`WasmToolPack` registers `runtime_tools`. Add `network` to a Wasm tool at the
+workspace layer when its TurboWasm policy grants HTTP.
+Skills remain Markdown `SKILL.md` files and declare the matching capabilities
+in YAML frontmatter, for example `capabilities: [runtime_tools, network]`.

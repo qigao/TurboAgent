@@ -60,6 +60,7 @@ static void turbo_agent_tool_executions_destroy(turbo_agent_tool_execution_t *ca
 }
 
 static int turbo_agent_tool_calls_preflight(const turbo_tool_registry_t *registry,
+                                            const turbo_agent_policy_t *policy,
                                             const json_value_t *tool_calls,
                                             turbo_agent_tool_execution_t *calls, size_t count) {
   size_t index;
@@ -82,6 +83,11 @@ static int turbo_agent_tool_calls_preflight(const turbo_tool_registry_t *registr
       continue;
     }
     if (calls[index].status != TURBO_TOOL_OK) return TURBO_EPROTO;
+    if (turbo_agent_policy_check_tool(policy, registry, calls[index].tool_name,
+                                      &calls[index].policy_reason) != TURBO_AGENT_POLICY_ALLOW) {
+      calls[index].status = TURBO_TOOL_ERROR;
+      calls[index].replayed = 1;
+    }
   }
   return TURBO_OK;
 }
@@ -117,8 +123,8 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     turbo_agent_state_set_model_error(ctx->state, "tool", "failed to allocate tool batch");
     return -1;
   }
-  if (turbo_agent_tool_calls_preflight(agent->tool_registry, tool_calls, calls, count) !=
-      TURBO_OK) {
+  if (turbo_agent_tool_calls_preflight(agent->tool_registry, &agent->tool_policy, tool_calls, calls,
+                                       count) != TURBO_OK) {
     turbo_agent_state_set_model_error(ctx->state, "tool", "malformed pending tool call record");
     goto cleanup;
   }
@@ -133,6 +139,21 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     turbo_agent_execution_context_t tool_context = saved_context;
     char *mutable_arguments;
     char *guardrail_reason = NULL;
+    if (calls[index].policy_reason) {
+      turbo_agent_state_set_guardrail_rejection(ctx->state, "tool_policy",
+                                                calls[index].policy_reason);
+      guardrail_rejected = 1;
+      turbo_agent_emit_trace(agent, ctx->state, TURBO_AGENT_TRACE_GUARDRAIL_REJECTED, "tool_policy",
+                             calls[index].policy_reason, calls[index].tool_name, -1);
+      calls[index].output =
+          turbo_agent_format_tool_error(calls[index].tool_name, calls[index].policy_reason);
+      if (!calls[index].output) {
+        turbo_agent_state_set_model_error(ctx->state, "tool_policy",
+                                          "failed to format policy error payload");
+        goto cleanup;
+      }
+      continue;
+    }
     if (calls[index].replayed) continue;
     tool_context.tool_call_id = calls[index].call_id;
     tool_context.tool_name = calls[index].tool_name;
@@ -204,7 +225,8 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
 
   rc = turbo_agent_tool_executor_execute(agent->tool_executor, saved_context.runtime,
                                          saved_context.cancel_token, saved_context.thread_id,
-                                         saved_context.run_id, agent->tool_registry, calls, count);
+                                         saved_context.run_id, agent->tool_registry,
+                                         &agent->tool_policy, calls, count);
   if (rc != TURBO_OK) {
     turbo_agent_state_set_model_error(ctx->state, "tool_executor",
                                       "tool batch planning or dispatch failed");

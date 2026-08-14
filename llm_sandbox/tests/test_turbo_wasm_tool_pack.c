@@ -64,6 +64,8 @@ spec("TurboWasm tool pack") {
     turbo_wasm_tool_pack_t *pack;
     turbo_wasm_policy_t *policy = test_pack_policy_create(LLM_SANDBOX_WASM_TOOL_WASM_PATH);
     turbo_tool_execution_policy_t observed = {0};
+    const char *const *required_capabilities = NULL;
+    size_t required_capability_count = 0;
     char module_name[TURBO_FS_MAX_PATH];
     char *output = NULL;
 
@@ -84,6 +86,12 @@ spec("TurboWasm tool pack") {
                  TURBO_TOOL_OK);
     check_int_eq(observed.mode, TURBO_TOOL_EXECUTION_EXCLUSIVE);
     check_int_eq(observed.idempotency, TURBO_TOOL_IDEMPOTENCY_READ_ONLY);
+    check_int_eq(turbo_tool_registry_get_required_capabilities(turbo_wasm_tool_pack_registry(pack),
+                                                               "echo_json", &required_capabilities,
+                                                               &required_capability_count),
+                 TURBO_TOOL_OK);
+    check_size_eq(required_capability_count, 1);
+    check_str_eq(required_capabilities[0], "runtime_tools");
 
     check_int_eq(turbo_wasm_tool_pack_add_module(pack, &module_config), TURBO_TOOL_DUPLICATE);
     check_size_eq(turbo_wasm_tool_pack_module_count(pack), 1);

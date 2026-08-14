@@ -55,6 +55,8 @@ typedef struct {
   void *user_data;
   turbo_tool_user_data_free_fn user_data_free;
   turbo_tool_execution_policy_t execution_policy;
+  char **required_capabilities;
+  size_t required_capability_count;
 } turbo_tool_entry_t;
 
 struct turbo_tool_registry_s {
@@ -160,6 +162,13 @@ static void turbo_tool_registry_free_entry(turbo_tool_entry_t *entry) {
   if (entry->user_data_free) {
     entry->user_data_free(entry->user_data);
   }
+  if (entry->required_capabilities) {
+    size_t index;
+    for (index = 0; index < entry->required_capability_count; ++index) {
+      free(entry->required_capabilities[index]);
+    }
+    free(entry->required_capabilities);
+  }
   memset(entry, 0, sizeof(*entry));
 }
 
@@ -191,18 +200,33 @@ static int turbo_tool_execution_policy_valid(const turbo_tool_execution_policy_t
          policy->idempotency <= TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
 }
 
-static turbo_tool_status_t
-turbo_tool_registry_add_with_policy(turbo_tool_registry_t *registry,
-                                    const turbo_tool_definition_t *definition,
-                                    const turbo_tool_execution_policy_t *execution_policy) {
+static turbo_tool_status_t turbo_tool_registry_add_with_policy(
+    turbo_tool_registry_t *registry, const turbo_tool_definition_t *definition,
+    const turbo_tool_execution_policy_t *execution_policy, const char *const *required_capabilities,
+    size_t required_capability_count) {
   turbo_tool_status_t status;
   turbo_tool_entry_t *entry;
+  size_t capability_index;
 
   if (!registry || !definition || !definition->name || !definition->description ||
       (!definition->parameters_json && !definition->parameters_schema) ||
       (!definition->handler && !definition->json_value_handler) ||
-      !turbo_tool_execution_policy_valid(execution_policy)) {
+      !turbo_tool_execution_policy_valid(execution_policy) ||
+      (required_capability_count > 0 && !required_capabilities)) {
     return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+  for (capability_index = 0; capability_index < required_capability_count; ++capability_index) {
+    size_t previous;
+    if (!required_capabilities[capability_index] ||
+        required_capabilities[capability_index][0] == '\0') {
+      return TURBO_TOOL_INVALID_ARGUMENT;
+    }
+    for (previous = 0; previous < capability_index; ++previous) {
+      if (strcmp(required_capabilities[previous], required_capabilities[capability_index]) == 0) {
+        return TURBO_TOOL_INVALID_ARGUMENT;
+      }
+    }
   }
 
   if (turbo_tool_registry_find(registry, definition->name)) {
@@ -228,8 +252,21 @@ turbo_tool_registry_add_with_policy(turbo_tool_registry_t *registry,
       definition->parameters_schema
           ? turbo_tool_registry_clone_json_value(definition->parameters_schema)
           : NULL;
+  if (required_capability_count > 0) {
+    entry->required_capabilities =
+        (char **)calloc(required_capability_count, sizeof(*entry->required_capabilities));
+    if (entry->required_capabilities) {
+      for (capability_index = 0; capability_index < required_capability_count; ++capability_index) {
+        entry->required_capabilities[capability_index] =
+            turbo_tool_strdup(required_capabilities[capability_index]);
+        if (!entry->required_capabilities[capability_index]) break;
+        ++entry->required_capability_count;
+      }
+    }
+  }
   if (!entry->name || !entry->description || !entry->parameters_json ||
-      (definition->parameters_schema && !entry->parameters_schema)) {
+      (definition->parameters_schema && !entry->parameters_schema) ||
+      entry->required_capability_count != required_capability_count) {
     turbo_tool_registry_free_entry(entry);
     memset(entry, 0, sizeof(*entry));
     return TURBO_TOOL_OUT_OF_MEMORY;
@@ -249,7 +286,7 @@ turbo_tool_status_t turbo_tool_registry_add(turbo_tool_registry_t *registry,
                                             const turbo_tool_definition_t *definition) {
   const turbo_tool_execution_policy_t legacy_policy = {TURBO_TOOL_EXECUTION_SEQUENTIAL,
                                                        TURBO_TOOL_IDEMPOTENCY_NONE};
-  return turbo_tool_registry_add_with_policy(registry, definition, &legacy_policy);
+  return turbo_tool_registry_add_with_policy(registry, definition, &legacy_policy, NULL, 0);
 }
 
 turbo_tool_status_t turbo_tool_registry_add_v2(turbo_tool_registry_t *registry,
@@ -259,7 +296,18 @@ turbo_tool_status_t turbo_tool_registry_add_v2(turbo_tool_registry_t *registry,
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
   return turbo_tool_registry_add_with_policy(registry, &definition->definition,
-                                             &definition->execution_policy);
+                                             &definition->execution_policy, NULL, 0);
+}
+
+turbo_tool_status_t turbo_tool_registry_add_v3(turbo_tool_registry_t *registry,
+                                               const turbo_tool_definition_v3_t *definition) {
+  if (!definition || definition->struct_size < sizeof(*definition) ||
+      definition->abi_version != TURBO_TOOL_DEFINITION_V3_ABI_VERSION) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  return turbo_tool_registry_add_with_policy(
+      registry, &definition->definition, &definition->execution_policy,
+      definition->required_capabilities, definition->required_capability_count);
 }
 
 turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *registry, const char *name) {
@@ -321,6 +369,50 @@ turbo_tool_registry_get_execution_policy(const turbo_tool_registry_t *registry, 
   return TURBO_TOOL_OK;
 }
 
+turbo_tool_status_t turbo_tool_registry_get_required_capabilities(
+    const turbo_tool_registry_t *registry, const char *name, const char *const **out_capabilities,
+    size_t *out_count) {
+  const turbo_tool_entry_t *entry;
+  if (!registry || !name || !out_capabilities || !out_count) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  *out_capabilities = NULL;
+  *out_count = 0;
+  entry = turbo_tool_registry_find(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+  *out_capabilities = (const char *const *)entry->required_capabilities;
+  *out_count = entry->required_capability_count;
+  return TURBO_TOOL_OK;
+}
+
+turbo_tool_status_t turbo_tool_registry_require_capability(turbo_tool_registry_t *registry,
+                                                           const char *name,
+                                                           const char *capability) {
+  turbo_tool_entry_t *entry;
+  char **resized;
+  char *copy;
+  size_t index;
+  if (!registry || !name || !capability || capability[0] == '\0') {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  entry = (turbo_tool_entry_t *)turbo_tool_registry_find(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+  for (index = 0; index < entry->required_capability_count; ++index) {
+    if (strcmp(entry->required_capabilities[index], capability) == 0) return TURBO_TOOL_OK;
+  }
+  copy = turbo_tool_strdup(capability);
+  if (!copy) return TURBO_TOOL_OUT_OF_MEMORY;
+  resized = (char **)realloc(entry->required_capabilities,
+                             (entry->required_capability_count + 1) * sizeof(*resized));
+  if (!resized) {
+    free(copy);
+    return TURBO_TOOL_OUT_OF_MEMORY;
+  }
+  entry->required_capabilities = resized;
+  entry->required_capabilities[entry->required_capability_count++] = copy;
+  return TURBO_TOOL_OK;
+}
+
 turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *source,
                                                 const char *const *names, size_t name_count,
                                                 turbo_tool_registry_t **out_projection) {
@@ -339,7 +431,7 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
 
   for (name_index = 0; name_index < name_count; ++name_index) {
     const turbo_tool_entry_t *entry;
-    turbo_tool_definition_v2_t definition;
+    turbo_tool_definition_v3_t definition;
     turbo_tool_status_t status;
     size_t previous;
 
@@ -368,7 +460,7 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
 
     memset(&definition, 0, sizeof(definition));
     definition.struct_size = sizeof(definition);
-    definition.abi_version = TURBO_TOOL_DEFINITION_V2_ABI_VERSION;
+    definition.abi_version = TURBO_TOOL_DEFINITION_V3_ABI_VERSION;
     definition.definition.name = entry->name;
     definition.definition.description = entry->description;
     definition.definition.parameters_json = entry->parameters_json;
@@ -379,8 +471,10 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
     definition.definition.user_data = entry->user_data;
     definition.definition.user_data_free = NULL;
     definition.execution_policy = entry->execution_policy;
+    definition.required_capabilities = (const char *const *)entry->required_capabilities;
+    definition.required_capability_count = entry->required_capability_count;
 
-    status = turbo_tool_registry_add_v2(projection, &definition);
+    status = turbo_tool_registry_add_v3(projection, &definition);
     if (status != TURBO_TOOL_OK) {
       turbo_tool_registry_destroy(projection);
       return status;
@@ -388,6 +482,54 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
   }
 
   *out_projection = projection;
+  return TURBO_TOOL_OK;
+}
+
+turbo_tool_status_t turbo_tool_registry_compose(const turbo_tool_registry_t *const *sources,
+                                                size_t source_count,
+                                                turbo_tool_registry_t **out_composite) {
+  turbo_tool_registry_t *composite;
+  size_t source_index;
+
+  if (!out_composite || (source_count > 0 && !sources)) return TURBO_TOOL_INVALID_ARGUMENT;
+  *out_composite = NULL;
+  composite = turbo_tool_registry_create();
+  if (!composite) return TURBO_TOOL_OUT_OF_MEMORY;
+
+  for (source_index = 0; source_index < source_count; ++source_index) {
+    size_t tool_index;
+    if (!sources[source_index]) {
+      turbo_tool_registry_destroy(composite);
+      return TURBO_TOOL_INVALID_ARGUMENT;
+    }
+    for (tool_index = 0; tool_index < turbo_tool_registry_count(sources[source_index]);
+         ++tool_index) {
+      turbo_tool_definition_v3_t definition;
+      turbo_tool_status_t status;
+      memset(&definition, 0, sizeof(definition));
+      definition.struct_size = sizeof(definition);
+      definition.abi_version = TURBO_TOOL_DEFINITION_V3_ABI_VERSION;
+      status = turbo_tool_registry_get_definition(sources[source_index], tool_index,
+                                                  &definition.definition);
+      if (status != TURBO_TOOL_OK) {
+        turbo_tool_registry_destroy(composite);
+        return status;
+      }
+      definition.definition.user_data_free = NULL;
+      status = turbo_tool_registry_get_execution_policy(
+          sources[source_index], definition.definition.name, &definition.execution_policy);
+      if (status == TURBO_TOOL_OK)
+        status = turbo_tool_registry_get_required_capabilities(
+            sources[source_index], definition.definition.name, &definition.required_capabilities,
+            &definition.required_capability_count);
+      if (status == TURBO_TOOL_OK) status = turbo_tool_registry_add_v3(composite, &definition);
+      if (status != TURBO_TOOL_OK) {
+        turbo_tool_registry_destroy(composite);
+        return status;
+      }
+    }
+  }
+  *out_composite = composite;
   return TURBO_TOOL_OK;
 }
 

@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const char *const turbo_tool_runtime_required_capabilities[] = {"runtime_tools"};
+
 static char *turbo_tool_runtime_strdup(const char *src) {
   size_t len;
   char *copy;
@@ -291,7 +293,7 @@ turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_reg
   for (index = 0; index < tool_count; ++index) {
     turbo_tool_runtime_tool_t tool = {0};
     turbo_tool_runtime_bridge_entry_t *entry;
-    turbo_tool_definition_v2_t definition = {0};
+    turbo_tool_definition_v3_t definition = {0};
     turbo_tool_status_t status = turbo_tool_runtime_get_tool(runtime, index, &tool);
     if (status != TURBO_TOOL_OK) {
       turbo_tool_runtime_rollback_registry(runtime, registry, index);
@@ -312,7 +314,7 @@ turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_reg
     }
 
     definition.struct_size = sizeof(definition);
-    definition.abi_version = TURBO_TOOL_DEFINITION_V2_ABI_VERSION;
+    definition.abi_version = TURBO_TOOL_DEFINITION_V3_ABI_VERSION;
     definition.definition.name = tool.name;
     definition.definition.description = tool.description;
     definition.definition.parameters_json = tool.parameters_json;
@@ -323,8 +325,11 @@ turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_reg
     definition.definition.user_data = entry;
     definition.definition.user_data_free = turbo_tool_runtime_bridge_entry_destroy;
     definition.execution_policy = *execution_policy;
+    definition.required_capabilities = turbo_tool_runtime_required_capabilities;
+    definition.required_capability_count = sizeof(turbo_tool_runtime_required_capabilities) /
+                                           sizeof(turbo_tool_runtime_required_capabilities[0]);
 
-    status = turbo_tool_registry_add_v2(registry, &definition);
+    status = turbo_tool_registry_add_v3(registry, &definition);
     if (status != TURBO_TOOL_OK) {
       turbo_tool_runtime_bridge_entry_destroy(entry);
       turbo_tool_runtime_rollback_registry(runtime, registry, index);

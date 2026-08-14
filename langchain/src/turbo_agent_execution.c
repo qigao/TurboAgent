@@ -1,5 +1,7 @@
 #include "turbo_agent_execution.h"
 
+#include "turbo_agent_execution_internal.h"
+
 #include "turbo_agent_util_internal.h"
 
 #include <stdatomic.h>
@@ -35,6 +37,7 @@ struct turbo_agent_execution_s {
   turbo_agent_runtime_parent_link_t parent_link;
   turbo_cancel_source_t *cancel_source;
   turbo_cancel_token_t *cancel_token;
+  turbo_agent_execution_hooks_t hooks;
   json_value_t *summary;
   json_value_t *state;
 };
@@ -269,6 +272,12 @@ static void turbo_agent_execution_worker(void *arg) {
         &execution->runtime_options, execution->cancel_token, &summary, &state);
   }
 
+  if (rc == TURBO_OK && execution->hooks.complete) {
+    rc = execution->hooks.complete(execution->hooks.user_data, execution->graph,
+                                   &execution->graph_options, execution->cancel_token,
+                                   &summary, &state);
+  }
+
   turbo_mutex_lock(&execution->mutex);
   execution->operation_rc = rc;
   execution->summary = summary;
@@ -277,6 +286,9 @@ static void turbo_agent_execution_worker(void *arg) {
       rc == 0 ? turbo_agent_execution_status_from_summary(summary) : TURBO_AGENT_EXECUTION_FAILED;
   turbo_cond_broadcast(&execution->changed);
   turbo_mutex_unlock(&execution->mutex);
+  if (execution->hooks.terminal) {
+    execution->hooks.terminal(execution->hooks.user_data, execution);
+  }
   turbo_agent_execution_release(execution);
 }
 
@@ -292,6 +304,7 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
                                         const turbo_graph_run_options_t *graph_options,
                                         const turbo_agent_runtime_exec_options_t *runtime_options,
                                         const turbo_agent_execution_options_t *execution_options,
+                                        const turbo_agent_execution_hooks_t *hooks,
                                         turbo_agent_execution_t **out_execution) {
   turbo_agent_execution_t *execution = NULL;
   turbo_cancel_source_config_t cancel_config = {sizeof(cancel_config),
@@ -318,6 +331,9 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
   execution->operation_rc = TURBO_EBUSY;
   execution->runtime = runtime;
   execution->graph = graph;
+  if (hooks) {
+    execution->hooks = *hooks;
+  }
   turbo_mutex_init(&execution->mutex);
   turbo_cond_init(&execution->changed);
   if (!execution->mutex || !execution->changed) {
@@ -380,7 +396,7 @@ int turbo_agent_execution_start(turbo_threadpool_t *executor, turbo_agent_runtim
                                 const turbo_agent_execution_options_t *execution_options,
                                 turbo_agent_execution_t **out_execution) {
   return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_START, executor, runtime, graph, state,
-                                      graph_options, runtime_options, execution_options,
+                                      graph_options, runtime_options, execution_options, NULL,
                                       out_execution);
 }
 
@@ -397,7 +413,7 @@ int turbo_agent_execution_resume(turbo_threadpool_t *executor, turbo_agent_runti
     return TURBO_EINVAL;
   }
   return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_RESUME, executor, runtime, graph, input,
-                                      graph_options, runtime_options, execution_options,
+                                      graph_options, runtime_options, execution_options, NULL,
                                       out_execution);
 }
 
@@ -414,7 +430,58 @@ int turbo_agent_execution_fork(turbo_threadpool_t *executor, turbo_agent_runtime
     return TURBO_EINVAL;
   }
   return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_FORK, executor, runtime, graph, input,
-                                      graph_options, runtime_options, execution_options,
+                                      graph_options, runtime_options, execution_options, NULL,
+                                      out_execution);
+}
+
+int turbo_agent_execution_start_internal(
+    turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+    turbo_graph_t *graph, const json_value_t *state,
+    const turbo_graph_run_options_t *graph_options,
+    const turbo_agent_runtime_exec_options_t *runtime_options,
+    const turbo_agent_execution_options_t *execution_options,
+    const turbo_agent_execution_hooks_t *hooks,
+    turbo_agent_execution_t **out_execution) {
+  return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_START, executor, runtime, graph, state,
+                                      graph_options, runtime_options, execution_options, hooks,
+                                      out_execution);
+}
+
+int turbo_agent_execution_resume_internal(
+    turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+    turbo_graph_t *graph, const json_value_t *input,
+    const turbo_graph_run_options_t *graph_options,
+    const turbo_agent_runtime_exec_options_t *runtime_options,
+    const turbo_agent_execution_options_t *execution_options,
+    const turbo_agent_execution_hooks_t *hooks,
+    turbo_agent_execution_t **out_execution) {
+  if (!runtime_options) {
+    if (out_execution) {
+      *out_execution = NULL;
+    }
+    return TURBO_EINVAL;
+  }
+  return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_RESUME, executor, runtime, graph, input,
+                                      graph_options, runtime_options, execution_options, hooks,
+                                      out_execution);
+}
+
+int turbo_agent_execution_fork_internal(
+    turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+    turbo_graph_t *graph, const json_value_t *input,
+    const turbo_graph_run_options_t *graph_options,
+    const turbo_agent_runtime_exec_options_t *runtime_options,
+    const turbo_agent_execution_options_t *execution_options,
+    const turbo_agent_execution_hooks_t *hooks,
+    turbo_agent_execution_t **out_execution) {
+  if (!runtime_options) {
+    if (out_execution) {
+      *out_execution = NULL;
+    }
+    return TURBO_EINVAL;
+  }
+  return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_FORK, executor, runtime, graph, input,
+                                      graph_options, runtime_options, execution_options, hooks,
                                       out_execution);
 }
 

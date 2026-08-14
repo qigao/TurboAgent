@@ -2,6 +2,7 @@
 #define TURBO_AGENT_CORE_INTERNAL_H
 
 #include "turbo_agent.h"
+#include "turbo_agent_policy.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,8 @@ struct turbo_agent_s {
   coro_context_t *http_context;
   turbo_tool_registry_t *tool_registry;
   turbo_agent_tool_executor_t *tool_executor;
+  turbo_agent_policy_t tool_policy;
+  char *tool_policy_workspace_root;
   turbo_agent_transport_fn transport_fn;
   void *transport_user_data;
   turbo_agent_transport_v2_fn transport_v2;

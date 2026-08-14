@@ -74,6 +74,24 @@ typedef struct turbo_tool_definition_v2_s {
   turbo_tool_execution_policy_t execution_policy;
 } turbo_tool_definition_v2_t;
 
+#define TURBO_TOOL_DEFINITION_V3_ABI_VERSION 3u
+
+/**
+ * Versioned tool metadata with host-policy capability requirements.
+ *
+ * Capability names are copied by the registry. RuntimeTools deliberately does
+ * not interpret them; the policy-aware Agent boundary is responsible for
+ * rejecting unknown or denied capabilities before invoking the callback.
+ */
+typedef struct turbo_tool_definition_v3_s {
+  size_t struct_size;
+  unsigned int abi_version;
+  turbo_tool_definition_t definition;
+  turbo_tool_execution_policy_t execution_policy;
+  const char *const *required_capabilities;
+  size_t required_capability_count;
+} turbo_tool_definition_v3_t;
+
 #ifdef __cplusplus
 }
 #endif

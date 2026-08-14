@@ -376,6 +376,7 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
                                       const turbo_cancel_token_t *cancel_token,
                                       const char *thread_id, const char *run_id,
                                       const turbo_tool_registry_t *registry,
+                                      const turbo_agent_policy_t *policy,
                                       turbo_agent_tool_execution_t *calls, size_t call_count) {
   turbo_agent_execution_context_t base_context = {0};
   size_t index;
@@ -390,6 +391,26 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
       return TURBO_EMSGSIZE;
   }
   turbo_mutex_lock(&executor->batch_mutex);
+  for (index = 0; index < call_count; ++index) {
+    const char *reason = NULL;
+    const char *const *required_capabilities = NULL;
+    size_t required_capability_count = 0;
+    if (calls[index].status == TURBO_TOOL_NOT_FOUND) continue;
+    rc = turbo_tool_registry_get_required_capabilities(
+        registry, calls[index].tool_name, &required_capabilities, &required_capability_count);
+    if (rc != TURBO_TOOL_OK) {
+      calls[index].status = TURBO_TOOL_ERROR;
+      calls[index].replayed = 1;
+      calls[index].policy_reason = "tool_capability_metadata_unavailable";
+      continue;
+    }
+    if (turbo_agent_policy_check_tool(policy, registry, calls[index].tool_name, &reason) !=
+        TURBO_AGENT_POLICY_ALLOW) {
+      calls[index].status = TURBO_TOOL_ERROR;
+      calls[index].replayed = 1;
+      calls[index].policy_reason = reason ? reason : "tool_policy_denied";
+    }
+  }
   for (index = 0; index < call_count; ++index) {
     if (calls[index].replayed) continue;
     rc = turbo_agent_tool_prepare_journal(executor, runtime, thread_id, run_id, &calls[index]);

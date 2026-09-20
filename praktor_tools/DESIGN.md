@@ -13,6 +13,8 @@ select arbitrary executable workflow files.
 ## Selected boundary
 
 Each host-reviewed YAML workflow is registered as one ordinary TurboAgent tool.
+Registration requires an existing absolute regular file and rejects symlinks,
+so missing/indirect entry workflows fail fast before agent execution.
 
 ```text
 TurboAgent policy / review

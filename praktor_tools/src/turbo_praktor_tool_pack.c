@@ -283,6 +283,7 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
     const turbo_praktor_workflow_config_t *config) {
   turbo_praktor_binding_t *binding;
   turbo_tool_definition_v3_t definition;
+  turbo_fs_stat_t metadata;
   const char **capabilities = NULL;
   size_t capability_count = 0;
   turbo_tool_status_t status;
@@ -293,6 +294,8 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
       !config->description || !config->description[0] ||
       !config->workflow_path || !config->workflow_path[0] ||
       !turbo_fs_path_is_absolute(config->workflow_path) ||
+      turbo_fs_lstat(config->workflow_path, &metadata) != 0 ||
+      metadata.is_symlink || !metadata.is_file ||
       !turbo_praktor_schema_valid(config->parameters_json) ||
       (config->strict != 0 && config->strict != 1) ||
       !turbo_praktor_execution_policy_valid(&config->execution_policy)) {

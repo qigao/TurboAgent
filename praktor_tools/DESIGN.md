@@ -91,7 +91,9 @@ newly registered Praktor workflow from silently bypassing TurboAgent policy
 simply because the host forgot to classify its YAML effects.
 
 A host may replace the additional list only after reviewing the workflow and
-its transitive reusable workflows.
+its transitive reusable workflows. When capabilities are narrowed, those files
+must remain immutable to the agent for the lifetime of the registration; the
+pack fixes the path and policy metadata, not the bytes behind a mutable path.
 
 ## Failure semantics
 

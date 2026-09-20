@@ -77,7 +77,7 @@ CXX_C_API turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
     turbo_praktor_tool_pack_t *pack,
     const turbo_praktor_workflow_config_t *config);
 
-/** Borrowed registry. Destroy dependent agents/projections before the pack. */
+/** Borrowed registry. Do not mutate or destroy it; destroy dependent agents/projections before the pack. */
 CXX_C_API turbo_tool_registry_t *
 turbo_praktor_tool_pack_registry(turbo_praktor_tool_pack_t *pack);
 

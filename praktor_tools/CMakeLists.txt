@@ -29,6 +29,7 @@ if(BUILD_TESTS)
     ${TEST_SOURCES}
     LIBS
     praktor_tools
+    TurboUtils::Core
     TurboUtils::TinyTest
     INCLUDES
     include

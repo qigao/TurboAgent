@@ -75,7 +75,10 @@ the additional capability list only after reviewing the registered YAML and its
 transitive `uses` workflows.
 
 An agent cannot override the registered path or capability metadata through
-tool arguments.
+tool arguments. If a host narrows the default capability set, the registered
+YAML and every transitive `uses` dependency must also be immutable to the agent
+for the lifetime of the registration; otherwise a post-review file replacement
+would invalidate the host's capability classification.
 
 ## Result semantics
 

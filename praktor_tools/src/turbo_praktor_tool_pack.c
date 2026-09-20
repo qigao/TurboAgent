@@ -302,24 +302,33 @@ void turbo_praktor_tool_pack_destroy(turbo_praktor_tool_pack_t *pack) {
 static turbo_tool_status_t turbo_praktor_effective_capabilities(
     const turbo_praktor_workflow_config_t *config,
     const char ***out_capabilities, size_t *out_count) {
+  const char *const *requested;
+  size_t requested_count;
   const char **capabilities;
   size_t index;
   size_t count = 1;
-  if (!out_capabilities || !out_count ||
-      !turbo_praktor_capabilities_valid(config->required_capabilities,
-                                         config->required_capability_count)) {
+
+  if (!config || !out_capabilities || !out_count) return TURBO_TOOL_INVALID_ARGUMENT;
+  requested = config->required_capabilities;
+  requested_count = config->required_capability_count;
+  if (!requested && requested_count == 0) {
+    requested = turbo_praktor_default_capabilities;
+    requested_count = sizeof(turbo_praktor_default_capabilities) /
+                      sizeof(turbo_praktor_default_capabilities[0]);
+  }
+  if (!turbo_praktor_capabilities_valid(requested, requested_count)) {
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
-  for (index = 0; index < config->required_capability_count; ++index) {
-    if (strcmp(config->required_capabilities[index], "runtime_tools") != 0) ++count;
+  for (index = 0; index < requested_count; ++index) {
+    if (strcmp(requested[index], "runtime_tools") != 0) ++count;
   }
   capabilities = (const char **)calloc(count, sizeof(*capabilities));
   if (!capabilities) return TURBO_TOOL_OUT_OF_MEMORY;
   capabilities[0] = "runtime_tools";
   count = 1;
-  for (index = 0; index < config->required_capability_count; ++index) {
-    if (strcmp(config->required_capabilities[index], "runtime_tools") == 0) continue;
-    capabilities[count++] = config->required_capabilities[index];
+  for (index = 0; index < requested_count; ++index) {
+    if (strcmp(requested[index], "runtime_tools") == 0) continue;
+    capabilities[count++] = requested[index];
   }
   *out_capabilities = capabilities;
   *out_count = count;

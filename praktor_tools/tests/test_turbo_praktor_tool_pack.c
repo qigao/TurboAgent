@@ -141,6 +141,8 @@ spec("Praktor workflow tool pack") {
     json_value_t *tasks;
     json_value_t *inspect;
     json_value_t *outputs;
+    char *string_output = NULL;
+    json_value_t *string_result = NULL;
 
     check_not_null(workspace);
     check_int_eq(praktor_test_write_workflow(workspace, workflow_path, sizeof(workflow_path)), 0);
@@ -167,8 +169,21 @@ spec("Praktor workflow tool pack") {
     outputs = turbo_json_object_get(inspect, "outputs");
     check_int_eq((int)turbo_json_get_double(outputs, "count", -1.0), 7);
 
+    check_int_eq(turbo_tool_registry_execute(
+                     turbo_praktor_tool_pack_registry(pack), "praktor_inspect",
+                     "{\"payload\":{\"name\":\"demo\",\"count\":7}}",
+                     &string_output),
+                 TURBO_TOOL_OK);
+    check_not_null(string_output);
+    check_int_eq(turbo_parse_json((const uint8_t *)string_output, strlen(string_output),
+                                  &string_result),
+                 0);
+    check_str_eq(turbo_json_get_string(string_result, "workflow_status"), "success");
+
     turbo_free_json(&arguments);
     turbo_free_json(&result);
+    turbo_free_json(&string_result);
+    free(string_output);
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
     free(workspace);

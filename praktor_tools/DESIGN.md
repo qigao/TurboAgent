@@ -70,9 +70,18 @@ pack creation.
 The default execution policy is `EXCLUSIVE + NONE`. Hosts may explicitly
 select another existing TurboAgent execution policy for a reviewed workflow.
 
-The pack has no queue or worker pool of its own. Bounded scheduling,
-cancellation boundaries, and tool journaling remain owned by TurboAgent's
-existing tool executor.
+The pack has no queue or worker pool of its own. Bounded scheduling and tool
+journaling remain owned by TurboAgent's existing tool executor.
+
+TurboAgent currently checks cancellation/deadline before entering a tool
+callback, while the Praktor C ABI exposes only synchronous execution and accepts
+no cancel token/deadline. Therefore a running Praktor workflow cannot currently
+be preempted by TurboAgent. Workflow-internal timeouts remain the execution
+bound until Praktor adds a cancellable/deadline-aware ABI.
+
+The adapter registers both the string callback used by TurboAgent's Agent Tool
+Executor and the JSON-native registry callback. They share one execution core
+so result/error semantics do not diverge.
 
 ## Capacity and result bounds
 

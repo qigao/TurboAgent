@@ -35,7 +35,13 @@ mandatory dependency:
 ```
 
 When enabled, configuration fails fast if `find_package(Praktor CONFIG REQUIRED)`
-cannot resolve the installed package.
+cannot resolve the installed package. Praktor's transitive CMake dependencies
+(Salts, SaltsUtils, and TurboScript) must also be discoverable, typically through
+their installed prefixes / `CMAKE_PREFIX_PATH`.
+
+At runtime, the platform loader must be able to resolve the Praktor shared
+library and its runtime dependencies (for example through `PATH` on Windows or
+the deployment's normal loader/rpath configuration on Unix-like systems).
 
 ## Register a workflow
 

@@ -43,8 +43,10 @@ typedef struct turbo_praktor_workflow_config_s {
    * Additional host-policy requirements.
    *
    * runtime_tools is always required. Defaults are deliberately conservative:
-   * network, shell, patch, and outside_workspace. A host may replace this list
-   * only after reviewing the registered workflow's effects.
+   * network, shell, patch, and outside_workspace. NULL + zero also resolves to
+   * these defaults, so a zero-initialized config does not silently reduce
+   * policy. A host may replace this list only after reviewing the registered
+   * workflow's effects; use an explicit {"runtime_tools"} list for runtime-only.
    */
   const char *const *required_capabilities;
   size_t required_capability_count;

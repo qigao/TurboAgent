@@ -53,6 +53,30 @@ static int praktor_test_write_workflow(const char *workspace, char *out_path,
   return turbo_fs_write_file(out_path, &buffer);
 }
 
+static int praktor_test_write_failing_workflow(const char *workspace, char *out_path,
+                                               size_t out_size) {
+  static const char yaml[] =
+      "tasks:\n"
+      "  - name: fail_expected\n"
+      "    script: |\n"
+      "      fail(\"expected failure\");\n";
+  turbo_fs_buf_t buffer = turbo_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (turbo_fs_path_join(out_path, out_size, workspace, "failure.yml") != 0) return -1;
+  return turbo_fs_write_file(out_path, &buffer);
+}
+
+static int praktor_test_write_named_workflow(const char *workspace, const char *name,
+                                             char *out_path, size_t out_size) {
+  static const char yaml[] =
+      "tasks:\n"
+      "  - name: ok\n"
+      "    script: |\n"
+      "      ctx.output(\"ok\", true);\n";
+  turbo_fs_buf_t buffer = turbo_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (turbo_fs_path_join(out_path, out_size, workspace, name) != 0) return -1;
+  return turbo_fs_write_file(out_path, &buffer);
+}
+
 static void praktor_test_cleanup(const char *workspace, const char *workflow_path) {
   if (workflow_path && workflow_path[0]) turbo_fs_unlink(workflow_path);
   if (workspace) turbo_fs_rmdir(workspace);
@@ -152,7 +176,7 @@ spec("Praktor workflow tool pack") {
 
   it("returns workflow failure as structured tool output") {
     char *workspace = praktor_test_workspace();
-    char missing_path[TURBO_FS_MAX_PATH] = {0};
+    char workflow_path[TURBO_FS_MAX_PATH] = {0};
     turbo_praktor_tool_pack_config_t pack_config;
     turbo_praktor_workflow_config_t workflow_config;
     turbo_praktor_tool_pack_t *pack;
@@ -160,18 +184,19 @@ spec("Praktor workflow tool pack") {
     json_value_t *result = NULL;
 
     check_not_null(workspace);
-    check_int_eq(turbo_fs_path_join(missing_path, sizeof(missing_path), workspace, "missing.yml"),
+    check_int_eq(praktor_test_write_failing_workflow(
+                     workspace, workflow_path, sizeof(workflow_path)),
                  0);
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
     turbo_praktor_workflow_config_init(&workflow_config);
-    workflow_config.tool_name = "praktor_missing";
-    workflow_config.description = "Run a missing workflow for failure-contract testing.";
-    workflow_config.workflow_path = missing_path;
+    workflow_config.tool_name = "praktor_failure";
+    workflow_config.description = "Run a workflow that fails by design.";
+    workflow_config.workflow_path = workflow_path;
     check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
     check_int_eq(turbo_tool_registry_execute_json_value(
-                     turbo_praktor_tool_pack_registry(pack), "praktor_missing",
+                     turbo_praktor_tool_pack_registry(pack), "praktor_failure",
                      arguments, &result),
                  TURBO_TOOL_OK);
     check_str_eq(turbo_json_get_string(result, "workflow_status"), "failed");
@@ -180,7 +205,7 @@ spec("Praktor workflow tool pack") {
     turbo_runtime_json_destroy(arguments);
     turbo_free_json(&result);
     turbo_praktor_tool_pack_destroy(pack);
-    praktor_test_cleanup(workspace, NULL);
+    praktor_test_cleanup(workspace, workflow_path);
     free(workspace);
   }
 
@@ -230,8 +255,12 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_t *pack;
 
     check_not_null(workspace);
-    check_int_eq(turbo_fs_path_join(first_path, sizeof(first_path), workspace, "one.yml"), 0);
-    check_int_eq(turbo_fs_path_join(second_path, sizeof(second_path), workspace, "two.yml"), 0);
+    check_int_eq(praktor_test_write_named_workflow(
+                     workspace, "one.yml", first_path, sizeof(first_path)),
+                 0);
+    check_int_eq(praktor_test_write_named_workflow(
+                     workspace, "two.yml", second_path, sizeof(second_path)),
+                 0);
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack_config.max_workflows = 1;
     pack = turbo_praktor_tool_pack_create(&pack_config);
@@ -252,8 +281,6 @@ spec("Praktor workflow tool pack") {
                  TURBO_TOOL_BACKPRESSURE);
 
     turbo_praktor_tool_pack_destroy(pack);
-    praktor_test_cleanup(workspace, NULL);
-    free(workspace);
 
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
@@ -264,6 +291,10 @@ spec("Praktor workflow tool pack") {
     check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
                  TURBO_TOOL_DUPLICATE);
     turbo_praktor_tool_pack_destroy(pack);
+    turbo_fs_unlink(first_path);
+    turbo_fs_unlink(second_path);
+    praktor_test_cleanup(workspace, NULL);
+    free(workspace);
   }
 
   it("allows an explicitly reviewed workflow to narrow default capabilities") {
@@ -277,7 +308,9 @@ spec("Praktor workflow tool pack") {
     size_t capability_count = 0;
 
     check_not_null(workspace);
-    check_int_eq(turbo_fs_path_join(workflow_path, sizeof(workflow_path), workspace, "net.yml"), 0);
+    check_int_eq(praktor_test_write_named_workflow(
+                     workspace, "net.yml", workflow_path, sizeof(workflow_path)),
+                 0);
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
@@ -297,7 +330,7 @@ spec("Praktor workflow tool pack") {
     check_str_eq(capabilities[1], "network");
 
     turbo_praktor_tool_pack_destroy(pack);
-    praktor_test_cleanup(workspace, NULL);
+    praktor_test_cleanup(workspace, workflow_path);
     free(workspace);
   }
 }

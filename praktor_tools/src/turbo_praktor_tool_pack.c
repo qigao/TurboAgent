@@ -35,7 +35,6 @@ struct turbo_praktor_tool_pack_s {
 static int turbo_praktor_api_valid(const praktor_api *api) {
   return api && api->struct_size >= sizeof(*api) &&
          api->abi_major == PRAKTOR_ABI_MAJOR &&
-         api->abi_minor >= PRAKTOR_ABI_MINOR &&
          (api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0 &&
          api->execute_workflow && api->release_json;
 }

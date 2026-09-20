@@ -187,7 +187,7 @@ static int turbo_praktor_execute_text(turbo_praktor_binding_t *binding,
   rc = turbo_praktor_copy_text(serialized, serialized_size, out_output);
 
 cleanup:
-  turbo_json_serialize_free(serialized);
+  if (serialized) turbo_json_serialize_free(serialized);
   turbo_free_json(&parsed);
   binding->api->release_json(&output);
   return rc;

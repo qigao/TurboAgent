@@ -33,7 +33,7 @@ typedef struct turbo_praktor_workflow_config_s {
   const char *tool_name;
   /** Human-facing tool description copied by the registry. */
   const char *description;
-  /** Absolute, host-registered path to one trusted Praktor YAML workflow. */
+  /** Absolute path to one existing regular, non-symlink Praktor YAML workflow. */
   const char *workflow_path;
   /** JSON object schema for workflow inputs. NULL accepts any object. */
   const char *parameters_json;
@@ -69,8 +69,9 @@ CXX_C_API void turbo_praktor_tool_pack_destroy(turbo_praktor_tool_pack_t *pack);
 /**
  * Register one trusted workflow as one TurboAgent tool.
  *
- * workflow_path must be absolute and is copied into the pack-owned binding.
- * The model sees only tool_name, description, parameters_json, and later the
+ * workflow_path must be an existing regular non-symlink file and is copied
+ * into the pack-owned binding. The model sees only tool_name, description,
+ * parameters_json, and later the
  * canonical workflow result. Duplicate names and capacity failures are atomic.
  */
 CXX_C_API turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(

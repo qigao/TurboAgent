@@ -124,4 +124,8 @@ TurboAgent builds therefore remain unchanged. Enabling it requires an installed
 Praktor CMake package and links the adapter privately to `Praktor::Praktor`.
 
 No existing TurboAgent public ABI, runtime record, protocol, or tool changes.
+When the optional module is built into an installed TurboAgent package, the
+generated package config conditionally resolves Praktor before importing
+TurboAgent targets; default builds add no Praktor package dependency.
+
 Rollback is disabling the option and removing Praktor tool-pack registration.

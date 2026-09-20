@@ -97,9 +97,10 @@ resource limits.
 Every registered workflow always requires `runtime_tools`.
 
 The default additional requirements are deliberately conservative:
-`network`, `shell`, `patch`, and `outside_workspace`. This prevents a
-newly registered Praktor workflow from silently bypassing TurboAgent policy
-simply because the host forgot to classify its YAML effects.
+`network`, `shell`, `patch`, and `outside_workspace`. NULL/zero also
+resolves to this set, so zero-initialized configuration cannot silently reduce
+requirements. This prevents a newly registered Praktor workflow from bypassing
+TurboAgent policy simply because the host forgot to classify its YAML effects.
 
 A host may replace the additional list only after reviewing the workflow and
 its transitive reusable workflows. When capabilities are narrowed, those files

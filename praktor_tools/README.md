@@ -39,6 +39,11 @@ cannot resolve the installed package. Praktor's transitive CMake dependencies
 (Salts, SaltsUtils, and TurboScript) must also be discoverable, typically through
 their installed prefixes / `CMAKE_PREFIX_PATH`.
 
+When TurboAgent itself is installed with `ENABLE_PRAKTOR_TOOLS=ON`, its
+generated package config conditionally calls `find_dependency(Praktor CONFIG)`
+before loading exported targets. Default builds keep Praktor completely
+optional.
+
 At runtime, the platform loader must be able to resolve the Praktor shared
 library and its runtime dependencies (for example through `PATH` on Windows or
 the deployment's normal loader/rpath configuration on Unix-like systems).

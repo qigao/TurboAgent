@@ -19,8 +19,10 @@ LLM / TurboAgent Harness
        YAML DAG
 ```
 
-The model never supplies a workflow path. The host registers an absolute path,
-input schema, execution policy, and policy capabilities before the agent starts.
+The model never supplies a workflow path. The host registers an existing
+absolute regular, non-symlink YAML file, input schema, execution policy, and
+policy capabilities before the agent starts. Invalid paths fail during
+registration rather than on the first model invocation.
 
 ## Build
 

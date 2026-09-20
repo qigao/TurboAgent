@@ -308,6 +308,7 @@ turbo_tool_status_t turbo_tool_registry_execute_json_value(
              : TURBO_TOOL_ERROR;
 }
 
+#ifndef TURBO_PRAKTOR_CONTRACT_USE_REAL_PRAKTOR
 static int32_t mock_praktor_execute(
     const praktor_execute_request *request, praktor_owned_json *output,
     praktor_error *error) {
@@ -334,3 +335,5 @@ const praktor_api *praktor_get_api(void) {
       PRAKTOR_CAPABILITY_JSON_WORKFLOW, mock_praktor_execute, mock_praktor_release};
   return &api;
 }
+
+#endif

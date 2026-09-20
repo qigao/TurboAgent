@@ -126,6 +126,25 @@ spec("Praktor workflow tool pack") {
     check_str_eq(capabilities[4], "outside_workspace");
 
     turbo_praktor_tool_pack_destroy(pack);
+
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    workflow_config.required_capabilities = NULL;
+    workflow_config.required_capability_count = 0;
+    workflow_config.tool_name = "praktor_zero_caps";
+    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_int_eq(turbo_tool_registry_get_required_capabilities(
+                     turbo_praktor_tool_pack_registry(pack), "praktor_zero_caps",
+                     &capabilities, &capability_count),
+                 TURBO_TOOL_OK);
+    check_size_eq(capability_count, 5);
+    check_str_eq(capabilities[0], "runtime_tools");
+    check_str_eq(capabilities[1], "network");
+    check_str_eq(capabilities[2], "shell");
+    check_str_eq(capabilities[3], "patch");
+    check_str_eq(capabilities[4], "outside_workspace");
+
+    turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
     free(workspace);
   }

@@ -273,6 +273,15 @@ spec("Praktor workflow tool pack") {
     check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
                  TURBO_TOOL_INVALID_ARGUMENT);
 
+    {
+      char missing_path[TURBO_FS_MAX_PATH] = {0};
+      check_int_eq(turbo_fs_path_join(missing_path, sizeof(missing_path), workspace, "missing.yml"),
+                   0);
+      workflow_config.workflow_path = missing_path;
+      check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                   TURBO_TOOL_INVALID_ARGUMENT);
+    }
+
     workflow_config.workflow_path = first_path;
     check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
     workflow_config.tool_name = "praktor_two";

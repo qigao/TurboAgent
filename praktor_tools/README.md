@@ -89,4 +89,17 @@ object to the model. A workflow failure therefore remains inspectable through
 `workflow_status`, task states, outputs, and `error` instead of being reduced
 to a generic tool failure.
 
+The pack implements both TurboAgent's string tool callback (the path used by the
+Agent Tool Executor) and the JSON-native registry callback. Both use the same
+Praktor execution core and result contract.
+
 Adapter failures such as an oversized or malformed result remain tool errors.
+
+## Cancellation and deadlines
+
+The current Praktor ABI is synchronous and does not accept a TurboAgent cancel
+token or deadline. TurboAgent can reject a cancelled tool before the callback
+starts, but it cannot preempt a Praktor workflow already running inside the
+callback. Long-running workflows must currently use Praktor's own bounded
+timeouts/retry limits. End-to-end cancellation requires a future cancellable
+Praktor execution ABI.

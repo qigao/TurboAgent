@@ -78,9 +78,12 @@ The default workflow configuration requires:
 - `outside_workspace`
 
 This is intentionally conservative because a Praktor workflow can contain
-commands, HTTP/file operations, scripts, and native calls. A host may replace
-the additional capability list only after reviewing the registered YAML and its
-transitive `uses` workflows.
+commands, HTTP/file operations, scripts, and native calls. A NULL/zero
+capability list also resolves to these defaults, so zero-initializing the
+configuration cannot silently drop policy requirements. A host may replace the
+additional capability list only after reviewing the registered YAML and its
+transitive `uses` workflows. To request only `runtime_tools`, provide that
+capability explicitly.
 
 An agent cannot override the registered path or capability metadata through
 tool arguments. If a host narrows the default capability set, the registered

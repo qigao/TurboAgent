@@ -8,5 +8,9 @@ find_dependency(TurboHttp CONFIG)
 find_dependency(TurboWasm CONFIG)
 find_dependency(unofficial-sqlite3 CONFIG)
 
+if("@ENABLE_PRAKTOR_TOOLS@" STREQUAL "ON")
+  find_dependency(Praktor CONFIG)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/TurboAgentTargets.cmake")
 check_required_components(TurboAgent)

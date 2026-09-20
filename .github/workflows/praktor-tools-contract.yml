@@ -1,0 +1,31 @@
+name: Praktor Tools Contract
+
+on:
+  pull_request:
+    paths:
+      - "praktor_tools/**"
+      - "CMakeLists.txt"
+      - "CMakeOptions.cmake"
+      - "cmake/TurboAgentConfig.cmake.in"
+      - ".github/workflows/praktor-tools-contract.yml"
+  push:
+    branches:
+      - "feat/praktor-tool-pack"
+    paths:
+      - "praktor_tools/**"
+      - "CMakeLists.txt"
+      - "CMakeOptions.cmake"
+      - "cmake/TurboAgentConfig.cmake.in"
+      - ".github/workflows/praktor-tools-contract.yml"
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile contract smoke
+        run: |
+          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror             -Ipraktor_tools/include             -Ipraktor_tools/tests/contract/include             praktor_tools/src/turbo_praktor_tool_pack.c             praktor_tools/tests/contract/mock_runtime.c             praktor_tools/tests/contract/smoke.c             -o /tmp/praktor-tools-contract
+      - name: Run contract smoke
+        run: /tmp/praktor-tools-contract

@@ -12,8 +12,8 @@ target_include_directories(
   codex_bridge PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                       $<INSTALL_INTERFACE:include>)
 target_link_libraries(codex_bridge PUBLIC TurboAgent::RuntimeTools
-                                          TurboParser::Parser
-                                          TurboUtils::Core)
+                                          Salts::JsonParser
+                                          Salts::Core)
 
 cmake_config_target(codex_bridge FOLDER "Codex Bridge" EXPORT_NAME CodexBridge
                     ALIAS TurboAgent::CodexBridge)
@@ -21,6 +21,6 @@ cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION
 
 if(BUILD_TESTS)
   file(GLOB TEST_SOURCES "tests/test_*.c")
-  cmake_add_test(SOURCES ${TEST_SOURCES} LIBS codex_bridge TurboUtils::TinyTest
+  cmake_add_test(SOURCES ${TEST_SOURCES} LIBS codex_bridge Salts::TinyTest
                  INCLUDES include FOLDER "Codex Bridge/tests")
 endif()

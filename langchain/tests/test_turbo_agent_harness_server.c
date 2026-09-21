@@ -318,7 +318,7 @@ static int harness_server_wait_for_events(turbo_agent_harness_connection_t *conn
   return next_method == method_count;
 }
 
-static tstr_t harness_server_wait_for_approval(turbo_agent_harness_connection_t *connection,
+static tstr harness_server_wait_for_approval(turbo_agent_harness_connection_t *connection,
                                                uint64_t *inout_sequence) {
   size_t attempt;
   for (attempt = 0; attempt < 100000; ++attempt) {
@@ -328,7 +328,7 @@ static tstr_t harness_server_wait_for_approval(turbo_agent_harness_connection_t 
     const json_value_t *events;
     const json_value_t *next_json;
     uint64_t next;
-    tstr_t request_id = NULL;
+    tstr request_id = NULL;
     size_t index;
     turbo_json_object_set_number(params, "afterSequence", (double)*inout_sequence);
     response = harness_server_rpc(connection, 500 + (int)(attempt % 1000), "event/replay", params);
@@ -381,8 +381,8 @@ spec("turbo agent harness server") {
     const json_value_t *result;
     const json_value_t *thread_json;
     const json_value_t *turn_json;
-    tstr_t thread_id;
-    tstr_t turn_id;
+    tstr thread_id;
+    tstr turn_id;
     uint64_t sequence = 0;
 
     check_not_null(pool);
@@ -446,8 +446,8 @@ spec("turbo agent harness server") {
     turbo_agent_harness_connection_t *observer;
     json_value_t *response;
     json_value_t *params;
-    tstr_t thread_id;
-    tstr_t turn_id;
+    tstr thread_id;
+    tstr turn_id;
     uint64_t sequence = 0;
 
     atomic_init(&gate.entered, 0);
@@ -549,9 +549,9 @@ spec("turbo agent harness server") {
     json_value_t *params;
     json_value_t *interrupts;
     const json_value_t *turn_json;
-    tstr_t thread_id;
-    tstr_t turn_id;
-    tstr_t request_id;
+    tstr thread_id;
+    tstr turn_id;
+    tstr request_id;
     uint64_t sequence = 0;
 
     harness_server_ready(connection);
@@ -699,8 +699,8 @@ spec("turbo agent harness server") {
     json_value_t *response;
     json_value_t *params;
     const json_value_t *turn_json;
-    tstr_t thread_id;
-    tstr_t turn_id;
+    tstr thread_id;
+    tstr turn_id;
 
     atomic_init(&gate.entered, 0);
     atomic_init(&gate.open, 0);

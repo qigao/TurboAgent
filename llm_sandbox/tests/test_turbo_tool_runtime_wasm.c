@@ -1,3 +1,4 @@
+#include <turbo_runtime_json.h>
 #include "tinytest.h"
 #include "turbo_fs.h"
 #include "turbo_tool_runtime_wasm.h"
@@ -77,19 +78,19 @@ spec("TurboWasm tool sandbox") {
     check_int_eq(turbo_tool_runtime_get_tool(runtime, 0, &tool), TURBO_TOOL_OK);
     check_str_eq(tool.name, "echo_json");
     check_str_eq(
-        turbo_runtime_json_value_as_string(turbo_json_object_get(tool.parameters_schema, "type")),
+        turbo_runtime_json_value_as_string(json_object_get(tool.parameters_schema, "type")),
         "object");
     check_int_eq(turbo_tool_runtime_invoke(runtime, "echo_json", "{\"wasm\":true}", &output),
                  TURBO_TOOL_OK);
     check_str_eq(output, "{\"wasm\":true}");
 
-    arguments = turbo_json_create_object();
+    arguments = json_create_object();
     check_not_null(arguments);
-    check_int_eq(turbo_runtime_json_object_set(arguments, "wasm", turbo_json_create_bool(1)),
+    check_int_eq(turbo_runtime_json_object_set(arguments, "wasm", json_create_bool(1)),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "echo_json", arguments, &result),
                  TURBO_TOOL_OK);
-    check_true(turbo_runtime_json_value_as_bool(turbo_json_object_get(result, "wasm"), 0));
+    check_true(turbo_runtime_json_value_as_bool(json_object_get(result, "wasm"), 0));
 
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(arguments);

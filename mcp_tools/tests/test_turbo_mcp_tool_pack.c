@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <turbo_parser.h>
+#include <turbo_runtime_json.h>
 
 typedef enum test_mcp_mode_e {
   TEST_MCP_JSON = 0,
@@ -46,17 +46,17 @@ static int test_mcp_post(void *user_data, const char *endpoint, const char *cons
   int is_sse_response = 0;
 
   if (!transport || !endpoint || strcmp(endpoint, "https://mcp.example.test/api") || !body ||
-      !body_len || !response || turbo_parse_json(body, body_len, &request) != 0 || !request) {
-    turbo_free_json(&request);
+      !body_len || !response || turbo_runtime_json_parse(body, body_len, &request) != 0 || !request) {
+    turbo_runtime_json_reset(&request);
     return -1;
   }
-  id = turbo_json_object_get(request, "id");
-  params = turbo_json_object_get(request, "params");
-  method = turbo_json_get_string(request, "method");
-  number_text = turbo_json_number_text(id, &number_length);
+  id = json_object_get(request, "id");
+  params = json_object_get(request, "params");
+  method = json_get_string(request, "method");
+  number_text = json_number_text(id, &number_length);
   if (!id || !params || !method || !number_text || !number_length ||
-      number_length >= sizeof(id_text) || !turbo_json_object_get(params, "_meta")) {
-    turbo_free_json(&request);
+      number_length >= sizeof(id_text) || !json_object_get(params, "_meta")) {
+    turbo_runtime_json_reset(&request);
     return -1;
   }
   memcpy(id_text, number_text, number_length);
@@ -69,7 +69,7 @@ static int test_mcp_post(void *user_data, const char *endpoint, const char *cons
                                : test_has_header(headers, header_count, "Mcp-Method: tools/call");
 
   if (transport->mode == TEST_MCP_FAIL) {
-    turbo_free_json(&request);
+    turbo_runtime_json_reset(&request);
     return -1;
   }
   if (is_list) {
@@ -113,10 +113,10 @@ static int test_mcp_post(void *user_data, const char *endpoint, const char *cons
                       id_text);
     response->content_type = "application/json";
   } else {
-    turbo_free_json(&request);
+    turbo_runtime_json_reset(&request);
     return -1;
   }
-  turbo_free_json(&request);
+  turbo_runtime_json_reset(&request);
   if (length < 0 || (size_t)length >= sizeof(transport->response)) return -1;
   memset(response, 0, sizeof(*response));
   response->status_code = 200;
@@ -177,7 +177,7 @@ spec("MCP tool pack") {
     check_str_eq(required_capabilities[1], "network");
     check_true(transport.saw_protocol_version);
     check_true(transport.saw_method);
-    check_int_eq(turbo_parse_json((const uint8_t *)"{\"region\":\"Hello, 世界\",\"routing\":{"
+    check_int_eq(turbo_runtime_json_parse((const uint8_t *)"{\"region\":\"Hello, 世界\",\"routing\":{"
                                                    "\"shard\":42,\"enabled\":true},\"value\":7}",
                                   strlen("{\"region\":\"Hello, 世界\",\"routing\":{"
                                          "\"shard\":42,\"enabled\":true},\"value\":7}"),
@@ -186,15 +186,15 @@ spec("MCP tool pack") {
     check_int_eq(turbo_tool_registry_execute_json_value(turbo_mcp_tool_pack_registry(pack),
                                                         "mcp_demo_echo_remote", arguments, &result),
                  TURBO_TOOL_OK);
-    structured = turbo_json_object_get(result, "structuredContent");
+    structured = json_object_get(result, "structuredContent");
     check_not_null(structured);
-    check_true(turbo_json_get_bool(structured, "ok", false));
+    check_true(json_get_bool(structured, "ok", false));
     check_true(transport.saw_name);
     check_true(transport.saw_parameter);
     check_true(transport.saw_nested_parameters);
 
-    turbo_free_json(&result);
-    turbo_free_json(&arguments);
+    turbo_runtime_json_reset(&result);
+    turbo_runtime_json_reset(&arguments);
     turbo_mcp_tool_pack_destroy(pack);
   }
 

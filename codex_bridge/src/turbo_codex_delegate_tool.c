@@ -52,10 +52,10 @@ static int turbo_codex_delegate_execute(const json_value_t *arguments,
   int rc;
   if (out_result) *out_result = NULL;
   if (!binding || !binding->client || !arguments ||
-      turbo_json_type(arguments) != TURBO_JSON_OBJECT || !out_result) {
+      json_type(arguments) != JSON_OBJECT || !out_result) {
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
-  task = turbo_json_get_string(arguments, "task");
+  task = json_get_string(arguments, "task");
   if (!task || !task[0]) return TURBO_TOOL_INVALID_ARGUMENT;
   turbo_codex_run_options_init(&options);
   options.model = binding->model;
@@ -72,15 +72,15 @@ static int turbo_codex_delegate_execute(const json_value_t *arguments,
     turbo_runtime_json_destroy(turn);
     return turbo_codex_tool_status(rc);
   }
-  result = turbo_json_create_object();
+  result = json_create_object();
   if (!result) {
     rc = TURBO_TOOL_OUT_OF_MEMORY;
     goto cleanup;
   }
-  turbo_json_object_set_string(result, "threadId", thread_id);
-  turbo_json_object_set_string(result, "turnId", turn_id);
-  turbo_json_object_set_string(result, "text", text ? text : "");
-  if (!turbo_json_object_add_checked(result, "turn", turn)) {
+  json_object_set_string(result, "threadId", thread_id);
+  json_object_set_string(result, "turnId", turn_id);
+  json_object_set_string(result, "text", text ? text : "");
+  if (!json_object_add_checked(result, "turn", turn)) {
     rc = TURBO_TOOL_OUT_OF_MEMORY;
     goto cleanup;
   }

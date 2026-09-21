@@ -158,7 +158,7 @@ void turbo_mcp_client_destroy(turbo_mcp_client_t *client) {
 static int turbo_mcp_json_add_owned(json_value_t *object, const char *key,
                                     json_value_t **value) {
   if (!object || !key || !value || !*value ||
-      !turbo_json_object_add_checked(object, key, *value)) {
+      !json_object_add_checked(object, key, *value)) {
     return -1;
   }
   *value = NULL;
@@ -171,21 +171,21 @@ static int turbo_mcp_add_request_meta(turbo_mcp_client_t *client, json_value_t *
   json_value_t *capabilities = NULL;
   json_value_t *value = NULL;
 
-  if (!client || !params || turbo_json_type(params) != TURBO_JSON_OBJECT ||
-      turbo_json_object_get(params, "_meta")) {
+  if (!client || !params || json_type(params) != JSON_OBJECT ||
+      json_object_get(params, "_meta")) {
     return -1;
   }
-  meta = turbo_json_create_object();
-  info = turbo_json_create_object();
-  capabilities = turbo_json_create_object();
-  value = turbo_json_create_string(TURBO_MCP_PROTOCOL_VERSION);
+  meta = json_create_object();
+  info = json_create_object();
+  capabilities = json_create_object();
+  value = json_create_string(TURBO_MCP_PROTOCOL_VERSION);
   if (!meta || !info || !capabilities || !value ||
       turbo_mcp_json_add_owned(meta, "io.modelcontextprotocol/protocolVersion", &value) != 0) {
     goto fail;
   }
-  value = turbo_json_create_string(client->client_name);
+  value = json_create_string(client->client_name);
   if (!value || turbo_mcp_json_add_owned(info, "name", &value) != 0) goto fail;
-  value = turbo_json_create_string(client->client_version);
+  value = json_create_string(client->client_version);
   if (!value || turbo_mcp_json_add_owned(info, "version", &value) != 0 ||
       turbo_mcp_json_add_owned(meta, "io.modelcontextprotocol/clientInfo", &info) != 0 ||
       turbo_mcp_json_add_owned(meta, "io.modelcontextprotocol/clientCapabilities",
@@ -196,10 +196,10 @@ static int turbo_mcp_add_request_meta(turbo_mcp_client_t *client, json_value_t *
   return 0;
 
 fail:
-  turbo_free_json(&value);
-  turbo_free_json(&meta);
-  turbo_free_json(&info);
-  turbo_free_json(&capabilities);
+  turbo_runtime_json_reset(&value);
+  turbo_runtime_json_reset(&meta);
+  turbo_runtime_json_reset(&info);
+  turbo_runtime_json_reset(&capabilities);
   return -1;
 }
 
@@ -264,28 +264,28 @@ static int turbo_mcp_response_matches(const json_value_t *root, uint64_t request
   const char *number_text;
   char expected[32];
 
-  if (!root || turbo_json_type(root) != TURBO_JSON_OBJECT) return 0;
-  version = turbo_json_get_string(root, "jsonrpc");
-  id = turbo_json_object_get(root, "id");
+  if (!root || json_type(root) != JSON_OBJECT) return 0;
+  version = json_get_string(root, "jsonrpc");
+  id = json_object_get(root, "id");
   if (!version || strcmp(version, "2.0") != 0 || !id ||
-      turbo_json_type(id) != TURBO_JSON_NUMBER) {
+      json_type(id) != JSON_NUMBER) {
     return 0;
   }
-  number_text = turbo_json_number_text(id, &number_length);
+  number_text = json_number_text(id, &number_length);
   snprintf(expected, sizeof(expected), "%llu", (unsigned long long)request_id);
   if (!number_text || strlen(expected) != number_length ||
       memcmp(number_text, expected, number_length) != 0) {
     return 0;
   }
-  error = turbo_json_object_get(root, "error");
-  result = turbo_json_object_get(root, "result");
+  error = json_object_get(root, "error");
+  result = json_object_get(root, "result");
   if (error) {
-    message = turbo_json_type(error) == TURBO_JSON_OBJECT
-                  ? turbo_json_object_get(error, "message")
+    message = json_type(error) == JSON_OBJECT
+                  ? json_object_get(error, "message")
                   : NULL;
     turbo_mcp_client_set_error(
-        client, message && turbo_json_type(message) == TURBO_JSON_STRING
-                    ? turbo_json_string(message)
+        client, message && json_type(message) == JSON_STRING
+                    ? json_string(message)
                     : "MCP JSON-RPC error");
     return -1;
   }
@@ -293,7 +293,7 @@ static int turbo_mcp_response_matches(const json_value_t *root, uint64_t request
     turbo_mcp_client_set_error(client, "MCP JSON-RPC response has neither result nor error");
     return -1;
   }
-  *out_result = turbo_json_clone(result);
+  *out_result = json_clone(result);
   if (!*out_result) {
     turbo_mcp_client_set_error(client, "out of memory cloning MCP result");
     return -1;
@@ -306,13 +306,13 @@ static turbo_tool_status_t turbo_mcp_parse_json_response(
     uint64_t request_id, json_value_t **out_result) {
   json_value_t *root = NULL;
   int match;
-  if (!body || !body_len || turbo_parse_json(body, body_len, &root) != 0 || !root) {
+  if (!body || !body_len || turbo_runtime_json_parse(body, body_len, &root) != 0 || !root) {
     turbo_mcp_client_set_error(client, "invalid MCP JSON response");
-    turbo_free_json(&root);
+    turbo_runtime_json_reset(&root);
     return TURBO_TOOL_ERROR;
   }
   match = turbo_mcp_response_matches(root, request_id, out_result, client);
-  turbo_free_json(&root);
+  turbo_runtime_json_reset(&root);
   if (match == 1) return TURBO_TOOL_OK;
   if (match == 0) turbo_mcp_client_set_error(client, "MCP JSON-RPC response id mismatch");
   return TURBO_TOOL_ERROR;
@@ -337,10 +337,10 @@ static turbo_tool_status_t turbo_mcp_parse_sse_response(
     if (line_len == 0 || offset > body_len) {
       if (tstr_len(event_data)) {
         json_value_t *event = NULL;
-        if (turbo_parse_json((const uint8_t *)event_data, tstr_len(event_data), &event) == 0 &&
+        if (turbo_runtime_json_parse((const uint8_t *)event_data, tstr_len(event_data), &event) == 0 &&
             event) {
           int match = turbo_mcp_response_matches(event, request_id, out_result, client);
-          turbo_free_json(&event);
+          turbo_runtime_json_reset(&event);
           if (match == 1) {
             status = TURBO_TOOL_OK;
             break;
@@ -395,46 +395,46 @@ turbo_tool_status_t turbo_mcp_client_request(
   turbo_tool_status_t status = TURBO_TOOL_ERROR;
 
   if (!out_result) {
-    turbo_free_json(&params);
+    turbo_runtime_json_reset(&params);
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
   *out_result = NULL;
   if (!client || !method || !method[0] || !params ||
-      turbo_json_type(params) != TURBO_JSON_OBJECT ||
+      json_type(params) != JSON_OBJECT ||
       (parameter_header_count && !parameter_headers) ||
       parameter_header_count > client->max_headers - 4) {
-    turbo_free_json(&params);
+    turbo_runtime_json_reset(&params);
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
   client->last_error[0] = '\0';
   if (client->next_request_id == 0 || client->next_request_id > (uint64_t)INT64_MAX) {
-    turbo_free_json(&params);
+    turbo_runtime_json_reset(&params);
     turbo_mcp_client_set_error(client, "MCP request id space exhausted");
     return TURBO_TOOL_ERROR;
   }
   request_id = client->next_request_id++;
   if (turbo_mcp_add_request_meta(client, params) != 0) {
-    turbo_free_json(&params);
+    turbo_runtime_json_reset(&params);
     return TURBO_TOOL_OUT_OF_MEMORY;
   }
 
-  request = turbo_json_create_object();
-  field = turbo_json_create_string("2.0");
+  request = json_create_object();
+  field = json_create_string("2.0");
   if (!request || !field || turbo_mcp_json_add_owned(request, "jsonrpc", &field) != 0) {
     goto request_oom;
   }
-  field = turbo_json_create_uint64(request_id);
+  field = json_create_uint64(request_id);
   if (!field || turbo_mcp_json_add_owned(request, "id", &field) != 0) goto request_oom;
-  field = turbo_json_create_string(method);
+  field = json_create_string(method);
   if (!field || turbo_mcp_json_add_owned(request, "method", &field) != 0 ||
       turbo_mcp_json_add_owned(request, "params", &params) != 0) {
     goto request_oom;
   }
-  request_json = turbo_json_serialize(request, &request_json_len);
-  turbo_free_json(&request);
+  request_json = json_serialize(request, &request_json_len);
+  turbo_runtime_json_reset(&request);
   if (!request_json) return TURBO_TOOL_OUT_OF_MEMORY;
   if (request_json_len > client->max_request_bytes) {
-    turbo_json_serialize_free(request_json);
+    json_serialize_free(request_json);
     turbo_mcp_client_set_error(client, "MCP request exceeds configured byte limit");
     return TURBO_TOOL_OUTPUT_LIMIT;
   }
@@ -518,12 +518,12 @@ cleanup:
   tstr_free(method_header);
   tstr_free(name_value);
   tstr_free(name_header);
-  turbo_json_serialize_free(request_json);
+  json_serialize_free(request_json);
   return status;
 
 request_oom:
-  turbo_free_json(&field);
-  turbo_free_json(&request);
-  turbo_free_json(&params);
+  turbo_runtime_json_reset(&field);
+  turbo_runtime_json_reset(&request);
+  turbo_runtime_json_reset(&params);
   return TURBO_TOOL_OUT_OF_MEMORY;
 }

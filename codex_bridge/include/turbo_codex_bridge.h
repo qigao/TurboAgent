@@ -3,7 +3,7 @@
 
 #include <platform.h>
 #include <turbo_error.h>
-#include <turbo_parser.h>
+#include <turbo_runtime_json.h>
 
 #include "turbo_tool_registry.h"
 

@@ -1,3 +1,4 @@
+#include <turbo_runtime_json.h>
 #include "turbo_coding_tools.h"
 
 #include <turbo_fs.h>
@@ -117,34 +118,34 @@ static char *turbo_coding_resolve_path(const turbo_coding_binding_t *binding,
 }
 
 static json_value_t *turbo_coding_result(int ok, const char *status, const char *summary) {
-  json_value_t *result = turbo_json_create_object();
-  json_value_t *artifacts = turbo_json_create_array();
-  json_value_t *metrics = turbo_json_create_object();
+  json_value_t *result = json_create_object();
+  json_value_t *artifacts = json_create_array();
+  json_value_t *metrics = json_create_object();
   if (!result || !artifacts || !metrics) {
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(artifacts);
     turbo_runtime_json_destroy(metrics);
     return NULL;
   }
-  turbo_json_object_set_bool(result, "ok", ok);
-  turbo_json_object_set_string(result, "status", status);
-  turbo_json_object_set_number(result, "exit_code", ok ? 0 : -1);
-  turbo_json_object_set_string(result, "summary", summary);
-  turbo_json_object_set_string(result, "stdout", "");
-  turbo_json_object_set_string(result, "stderr", "");
-  turbo_json_object_set_bool(result, "truncated", 0);
-  turbo_json_object_set_bool(result, "retryable", 0);
-  turbo_json_object_add(result, "artifacts", artifacts);
-  turbo_json_object_set_number(metrics, "duration_ms", 0);
-  turbo_json_object_set_number(metrics, "output_bytes", 0);
-  turbo_json_object_add(result, "metrics", metrics);
+  json_object_set_bool(result, "ok", ok);
+  json_object_set_string(result, "status", status);
+  json_object_set_number(result, "exit_code", ok ? 0 : -1);
+  json_object_set_string(result, "summary", summary);
+  json_object_set_string(result, "stdout", "");
+  json_object_set_string(result, "stderr", "");
+  json_object_set_bool(result, "truncated", 0);
+  json_object_set_bool(result, "retryable", 0);
+  json_object_add(result, "artifacts", artifacts);
+  json_object_set_number(metrics, "duration_ms", 0);
+  json_object_set_number(metrics, "output_bytes", 0);
+  json_object_add(result, "metrics", metrics);
   return result;
 }
 
 static int turbo_coding_fs_read_json(const json_value_t *arguments, json_value_t **out_result,
                                      void *user_data) {
   turbo_coding_binding_t *binding = (turbo_coding_binding_t *)user_data;
-  const char *path = turbo_json_get_string(arguments, "path");
+  const char *path = json_get_string(arguments, "path");
   turbo_fs_stat_t metadata;
   turbo_fs_buf_t buffer = {0};
   json_value_t *result;
@@ -180,9 +181,9 @@ static int turbo_coding_fs_read_json(const json_value_t *arguments, json_value_t
     turbo_fs_buf_free(&buffer);
     return -1;
   }
-  turbo_json_object_set_string(result, "path", path);
-  turbo_json_object_set_string(result, "content", content);
-  turbo_json_object_set_number(turbo_json_object_get(result, "metrics"), "output_bytes",
+  json_object_set_string(result, "path", path);
+  json_object_set_string(result, "content", content);
+  json_object_set_number(json_object_get(result, "metrics"), "output_bytes",
                                (double)buffer.len);
   free(resolved);
   free(content);
@@ -207,7 +208,7 @@ static const char *turbo_coding_dirent_type(turbo_fs_dirent_type_t type) {
 static int turbo_coding_fs_list_json(const json_value_t *arguments, json_value_t **out_result,
                                      void *user_data) {
   turbo_coding_binding_t *binding = (turbo_coding_binding_t *)user_data;
-  const char *path = turbo_json_get_string(arguments, "path");
+  const char *path = json_get_string(arguments, "path");
   turbo_fs_dir_t *directory = NULL;
   turbo_fs_dirent_t entry;
   json_value_t *result = NULL;
@@ -223,28 +224,28 @@ static int turbo_coding_fs_list_json(const json_value_t *arguments, json_value_t
     return *out_result ? 0 : -1;
   }
   result = turbo_coding_result(1, "completed", "directory listing completed");
-  entries = turbo_json_create_array();
+  entries = json_create_array();
   if (!result || !entries) goto fail;
   while ((read_status = turbo_fs_readdir(directory, &entry)) > 0) {
     json_value_t *item;
     size_t name_length = strlen(entry.name);
     if (count >= binding->max_list_entries ||
         name_length > binding->max_result_bytes - output_bytes) {
-      turbo_json_object_set_bool(result, "truncated", 1);
+      json_object_set_bool(result, "truncated", 1);
       break;
     }
-    item = turbo_json_create_object();
+    item = json_create_object();
     if (!item) goto fail;
-    turbo_json_object_set_string(item, "name", entry.name);
-    turbo_json_object_set_string(item, "type", turbo_coding_dirent_type(entry.type));
-    turbo_json_array_add(entries, item);
+    json_object_set_string(item, "name", entry.name);
+    json_object_set_string(item, "type", turbo_coding_dirent_type(entry.type));
+    json_array_add(entries, item);
     output_bytes += name_length;
     ++count;
   }
   if (read_status < 0) goto fail;
-  turbo_json_object_add(result, "entries", entries);
+  json_object_add(result, "entries", entries);
   entries = NULL;
-  turbo_json_object_set_number(turbo_json_object_get(result, "metrics"), "output_bytes",
+  json_object_set_number(json_object_get(result, "metrics"), "output_bytes",
                                (double)output_bytes);
   turbo_fs_closedir(directory);
   free(resolved);
@@ -265,7 +266,7 @@ static int turbo_coding_json_bridge(const char *arguments_json, char **out_outpu
   int rc;
   *out_output = NULL;
   if (!arguments_json ||
-      turbo_parse_json((const uint8_t *)arguments_json, strlen(arguments_json), &arguments) != 0)
+      turbo_runtime_json_parse((const uint8_t *)arguments_json, strlen(arguments_json), &arguments) != 0)
     return -1;
   rc = handler(arguments, &result, user_data);
   turbo_runtime_json_destroy(arguments);
@@ -273,7 +274,7 @@ static int turbo_coding_json_bridge(const char *arguments_json, char **out_outpu
     turbo_runtime_json_destroy(result);
     return -1;
   }
-  *out_output = turbo_json_serialize(result, NULL);
+  *out_output = json_serialize(result, NULL);
   turbo_runtime_json_destroy(result);
   return *out_output ? 0 : -1;
 }

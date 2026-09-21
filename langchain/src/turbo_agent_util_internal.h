@@ -2,7 +2,7 @@
 #define TURBO_AGENT_UTIL_INTERNAL_H
 
 #include <platform.h>
-#include <turbo_str.h>
+#include <tstr.h>
 #include "turbo_runtime_json.h"
 
 #include <stddef.h>

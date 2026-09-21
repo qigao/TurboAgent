@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <tstr.h>
+#include <salts/clock.h>
 #include <salts/thread.h>
 
 #if defined(_WIN32)
@@ -170,7 +171,7 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
   rc = turbo_codex_stdio_take_line(stdio_transport, out_line);
   if (rc != SALTS_ENOENT) return rc;
   if (timeout_ms != UINT64_MAX) {
-    uint64_t now = turbo_monotonic_ms();
+    uint64_t now = salts_monotonic_ms();
     deadline = timeout_ms > UINT64_MAX - now ? UINT64_MAX : now + timeout_ms;
   }
   for (;;) {
@@ -193,7 +194,7 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
     if (WaitForSingleObject(stdio_transport->process, 0) == WAIT_OBJECT_0) {
       return tstr_len(stdio_transport->input) ? SALTS_EPROTO : SALTS_ESHUTDOWN;
     }
-    if (timeout_ms == 0 || (deadline != UINT64_MAX && turbo_monotonic_ms() >= deadline)) {
+    if (timeout_ms == 0 || (deadline != UINT64_MAX && salts_monotonic_ms() >= deadline)) {
       return SALTS_ETIMEDOUT;
     }
     salts_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
@@ -264,16 +265,16 @@ static void turbo_codex_stdio_close_impl(void *user_data) {
     stdio_transport->input_write = -1;
   }
   if (stdio_transport->process > 0) {
-    deadline = turbo_monotonic_ms() + TURBO_CODEX_STDIO_CLOSE_TIMEOUT_MS;
+    deadline = salts_monotonic_ms() + TURBO_CODEX_STDIO_CLOSE_TIMEOUT_MS;
     while (waitpid(stdio_transport->process, &status, WNOHANG) == 0 &&
-           turbo_monotonic_ms() < deadline) {
+           salts_monotonic_ms() < deadline) {
       salts_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
     }
     if (waitpid(stdio_transport->process, &status, WNOHANG) == 0) {
       kill(stdio_transport->process, SIGTERM);
-      deadline = turbo_monotonic_ms() + TURBO_CODEX_STDIO_CLOSE_TIMEOUT_MS;
+      deadline = salts_monotonic_ms() + TURBO_CODEX_STDIO_CLOSE_TIMEOUT_MS;
       while (waitpid(stdio_transport->process, &status, WNOHANG) == 0 &&
-             turbo_monotonic_ms() < deadline) {
+             salts_monotonic_ms() < deadline) {
         salts_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
       }
       if (waitpid(stdio_transport->process, &status, WNOHANG) == 0) {
@@ -329,7 +330,7 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
   rc = turbo_codex_stdio_take_line(stdio_transport, out_line);
   if (rc != SALTS_ENOENT) return rc;
   if (timeout_ms != UINT64_MAX) {
-    uint64_t now = turbo_monotonic_ms();
+    uint64_t now = salts_monotonic_ms();
     deadline = timeout_ms > UINT64_MAX - now ? UINT64_MAX : now + timeout_ms;
   }
   for (;;) {
@@ -344,7 +345,7 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
     selected = select(stdio_transport->output_read + 1, &read_set, NULL, NULL, timeout_ptr);
     if (selected < 0 && errno == EINTR) {
       if (deadline != UINT64_MAX) {
-        uint64_t now = turbo_monotonic_ms();
+        uint64_t now = salts_monotonic_ms();
         if (now >= deadline) return SALTS_ETIMEDOUT;
         remaining = deadline - now;
       }
@@ -364,7 +365,7 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
       if (rc != SALTS_ENOENT) return rc;
     }
     if (deadline != UINT64_MAX) {
-      uint64_t now = turbo_monotonic_ms();
+      uint64_t now = salts_monotonic_ms();
       if (now >= deadline) return SALTS_ETIMEDOUT;
       remaining = deadline - now;
     }

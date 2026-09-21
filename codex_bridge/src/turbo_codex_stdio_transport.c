@@ -26,7 +26,7 @@ enum {
 
 typedef struct turbo_codex_stdio_s {
   size_t max_line_bytes;
-  tstr_t input;
+  tstr input;
   int closed;
 #if defined(_WIN32)
   HANDLE process;
@@ -80,7 +80,7 @@ static int turbo_codex_stdio_take_line(turbo_codex_stdio_t *stdio_transport, cha
 
 static int turbo_codex_stdio_append(turbo_codex_stdio_t *stdio_transport,
                                     const uint8_t *data, size_t length) {
-  tstr_t appended;
+  tstr appended;
   if (!stdio_transport || (!data && length)) return SALTS_EINVAL;
   if (length > stdio_transport->max_line_bytes + 1 ||
       tstr_len(stdio_transport->input) > stdio_transport->max_line_bytes + 1 - length) {
@@ -207,7 +207,7 @@ static int turbo_codex_stdio_start(const turbo_codex_stdio_transport_config_t *c
   PROCESS_INFORMATION process;
   HANDLE child_input_read = NULL;
   HANDLE child_output_write = NULL;
-  tstr_t command = NULL;
+  tstr command = NULL;
   BOOL created;
   int use_shell;
   int rc = SALTS_EIO;

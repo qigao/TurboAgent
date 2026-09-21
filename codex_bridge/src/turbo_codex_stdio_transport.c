@@ -54,46 +54,46 @@ static int turbo_codex_stdio_take_line(turbo_codex_stdio_t *stdio_transport, cha
   size_t consumed;
   size_t remaining;
   char *line;
-  if (!stdio_transport || !out_line) return TURBO_EINVAL;
+  if (!stdio_transport || !out_line) return SALTS_EINVAL;
   *out_line = NULL;
-  if (!stdio_transport->input) return TURBO_ENOENT;
+  if (!stdio_transport->input) return SALTS_ENOENT;
   newline = (char *)memchr(stdio_transport->input, '\n', tstr_len(stdio_transport->input));
-  if (!newline) return TURBO_ENOENT;
+  if (!newline) return SALTS_ENOENT;
   line_length = (size_t)(newline - stdio_transport->input);
   if (line_length && stdio_transport->input[line_length - 1] == '\r') --line_length;
-  if (line_length > stdio_transport->max_line_bytes) return TURBO_EMSGSIZE;
+  if (line_length > stdio_transport->max_line_bytes) return SALTS_EMSGSIZE;
   line = (char *)malloc(line_length + 1);
-  if (!line) return TURBO_ENOMEM;
+  if (!line) return SALTS_ENOMEM;
   memcpy(line, stdio_transport->input, line_length);
   line[line_length] = '\0';
   consumed = (size_t)(newline - stdio_transport->input) + 1;
   remaining = tstr_len(stdio_transport->input) - consumed;
   memmove(stdio_transport->input, stdio_transport->input + consumed, remaining);
   stdio_transport->input[remaining] = '\0';
-  if (tstr_set_len_checked(stdio_transport->input, remaining) != TURBO_OK) {
+  if (tstr_set_len_checked(stdio_transport->input, remaining) != SALTS_OK) {
     free(line);
-    return TURBO_EIO;
+    return SALTS_EIO;
   }
   *out_line = line;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_codex_stdio_append(turbo_codex_stdio_t *stdio_transport,
                                     const uint8_t *data, size_t length) {
   tstr_t appended;
-  if (!stdio_transport || (!data && length)) return TURBO_EINVAL;
+  if (!stdio_transport || (!data && length)) return SALTS_EINVAL;
   if (length > stdio_transport->max_line_bytes + 1 ||
       tstr_len(stdio_transport->input) > stdio_transport->max_line_bytes + 1 - length) {
-    return TURBO_EMSGSIZE;
+    return SALTS_EMSGSIZE;
   }
   appended = tstr_cat_len(stdio_transport->input, (const char *)data, length);
-  if (!appended) return TURBO_ENOMEM;
+  if (!appended) return SALTS_ENOMEM;
   stdio_transport->input = appended;
   if (tstr_len(stdio_transport->input) > stdio_transport->max_line_bytes &&
       !memchr(stdio_transport->input, '\n', tstr_len(stdio_transport->input))) {
-    return TURBO_EMSGSIZE;
+    return SALTS_EMSGSIZE;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 #if defined(_WIN32)
@@ -146,18 +146,18 @@ static int turbo_codex_stdio_write_impl(const uint8_t *frame, size_t frame_size,
   size_t offset = 0;
   if (!stdio_transport || stdio_transport->closed || !frame || !frame_size ||
       frame[frame_size - 1] != '\n') {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   while (offset < frame_size) {
     DWORD written = 0;
     DWORD request = (DWORD)((frame_size - offset) > MAXDWORD ? MAXDWORD : frame_size - offset);
     if (!WriteFile(stdio_transport->input_write, frame + offset, request, &written, NULL) ||
         !written) {
-      return TURBO_ESHUTDOWN;
+      return SALTS_ESHUTDOWN;
     }
     offset += written;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, void *user_data) {
@@ -165,10 +165,10 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
   uint64_t deadline = UINT64_MAX;
   uint8_t chunk[TURBO_CODEX_STDIO_READ_CHUNK_BYTES];
   int rc;
-  if (!stdio_transport || !out_line || stdio_transport->closed) return TURBO_EINVAL;
+  if (!stdio_transport || !out_line || stdio_transport->closed) return SALTS_EINVAL;
   *out_line = NULL;
   rc = turbo_codex_stdio_take_line(stdio_transport, out_line);
-  if (rc != TURBO_ENOENT) return rc;
+  if (rc != SALTS_ENOENT) return rc;
   if (timeout_ms != UINT64_MAX) {
     uint64_t now = turbo_monotonic_ms();
     deadline = timeout_ms > UINT64_MAX - now ? UINT64_MAX : now + timeout_ms;
@@ -176,25 +176,25 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
   for (;;) {
     DWORD available = 0;
     if (!PeekNamedPipe(stdio_transport->output_read, NULL, 0, NULL, &available, NULL)) {
-      return GetLastError() == ERROR_BROKEN_PIPE ? TURBO_ESHUTDOWN : TURBO_EIO;
+      return GetLastError() == ERROR_BROKEN_PIPE ? SALTS_ESHUTDOWN : SALTS_EIO;
     }
     if (available) {
       DWORD read_size = 0;
       DWORD request = available > sizeof(chunk) ? (DWORD)sizeof(chunk) : available;
       if (!ReadFile(stdio_transport->output_read, chunk, request, &read_size, NULL) || !read_size) {
-        return TURBO_ESHUTDOWN;
+        return SALTS_ESHUTDOWN;
       }
       rc = turbo_codex_stdio_append(stdio_transport, chunk, read_size);
-      if (rc != TURBO_OK) return rc;
+      if (rc != SALTS_OK) return rc;
       rc = turbo_codex_stdio_take_line(stdio_transport, out_line);
-      if (rc != TURBO_ENOENT) return rc;
+      if (rc != SALTS_ENOENT) return rc;
       continue;
     }
     if (WaitForSingleObject(stdio_transport->process, 0) == WAIT_OBJECT_0) {
-      return tstr_len(stdio_transport->input) ? TURBO_EPROTO : TURBO_ESHUTDOWN;
+      return tstr_len(stdio_transport->input) ? SALTS_EPROTO : SALTS_ESHUTDOWN;
     }
     if (timeout_ms == 0 || (deadline != UINT64_MAX && turbo_monotonic_ms() >= deadline)) {
-      return TURBO_ETIMEDOUT;
+      return SALTS_ETIMEDOUT;
     }
     turbo_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
   }
@@ -210,8 +210,8 @@ static int turbo_codex_stdio_start(const turbo_codex_stdio_transport_config_t *c
   tstr_t command = NULL;
   BOOL created;
   int use_shell;
-  int rc = TURBO_EIO;
-  if (!turbo_codex_windows_command_safe(config->codex_executable)) return TURBO_EINVAL;
+  int rc = SALTS_EIO;
+  if (!turbo_codex_windows_command_safe(config->codex_executable)) return SALTS_EINVAL;
   memset(&attributes, 0, sizeof(attributes));
   attributes.nLength = sizeof(attributes);
   attributes.bInheritHandle = TRUE;
@@ -233,7 +233,7 @@ static int turbo_codex_stdio_start(const turbo_codex_stdio_transport_config_t *c
   if (command) command = tstr_cat(command, config->codex_executable);
   if (command) command = tstr_cat(command, use_shell ? "\" app-server --stdio\"" : "\" app-server --stdio");
   if (!command) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   created = CreateProcessA(use_shell ? NULL : config->codex_executable, command, NULL, NULL, TRUE,
@@ -241,13 +241,13 @@ static int turbo_codex_stdio_start(const turbo_codex_stdio_transport_config_t *c
   if (!created) goto cleanup;
   CloseHandle(process.hThread);
   stdio_transport->process = process.hProcess;
-  rc = TURBO_OK;
+  rc = SALTS_OK;
 
 cleanup:
   if (child_input_read) CloseHandle(child_input_read);
   if (child_output_write) CloseHandle(child_output_write);
   tstr_free(command);
-  if (rc != TURBO_OK) turbo_codex_stdio_close_impl(stdio_transport);
+  if (rc != SALTS_OK) turbo_codex_stdio_close_impl(stdio_transport);
   return rc;
 }
 
@@ -303,15 +303,15 @@ static int turbo_codex_stdio_write_impl(const uint8_t *frame, size_t frame_size,
   size_t offset = 0;
   if (!stdio_transport || stdio_transport->closed || !frame || !frame_size ||
       frame[frame_size - 1] != '\n') {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   while (offset < frame_size) {
     ssize_t written = write(stdio_transport->input_write, frame + offset, frame_size - offset);
     if (written < 0 && errno == EINTR) continue;
-    if (written <= 0) return TURBO_ESHUTDOWN;
+    if (written <= 0) return SALTS_ESHUTDOWN;
     offset += (size_t)written;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, void *user_data) {
@@ -324,10 +324,10 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
   uint64_t deadline = UINT64_MAX;
   int selected;
   int rc;
-  if (!stdio_transport || !out_line || stdio_transport->closed) return TURBO_EINVAL;
+  if (!stdio_transport || !out_line || stdio_transport->closed) return SALTS_EINVAL;
   *out_line = NULL;
   rc = turbo_codex_stdio_take_line(stdio_transport, out_line);
-  if (rc != TURBO_ENOENT) return rc;
+  if (rc != SALTS_ENOENT) return rc;
   if (timeout_ms != UINT64_MAX) {
     uint64_t now = turbo_monotonic_ms();
     deadline = timeout_ms > UINT64_MAX - now ? UINT64_MAX : now + timeout_ms;
@@ -345,27 +345,27 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
     if (selected < 0 && errno == EINTR) {
       if (deadline != UINT64_MAX) {
         uint64_t now = turbo_monotonic_ms();
-        if (now >= deadline) return TURBO_ETIMEDOUT;
+        if (now >= deadline) return SALTS_ETIMEDOUT;
         remaining = deadline - now;
       }
       continue;
     }
-    if (selected < 0) return TURBO_EIO;
-    if (selected == 0) return TURBO_ETIMEDOUT;
+    if (selected < 0) return SALTS_EIO;
+    if (selected == 0) return SALTS_ETIMEDOUT;
     {
       ssize_t read_size = read(stdio_transport->output_read, chunk, sizeof(chunk));
       if (read_size < 0 && errno == EINTR) continue;
       if (read_size <= 0) {
-        return tstr_len(stdio_transport->input) ? TURBO_EPROTO : TURBO_ESHUTDOWN;
+        return tstr_len(stdio_transport->input) ? SALTS_EPROTO : SALTS_ESHUTDOWN;
       }
       rc = turbo_codex_stdio_append(stdio_transport, chunk, (size_t)read_size);
-      if (rc != TURBO_OK) return rc;
+      if (rc != SALTS_OK) return rc;
       rc = turbo_codex_stdio_take_line(stdio_transport, out_line);
-      if (rc != TURBO_ENOENT) return rc;
+      if (rc != SALTS_ENOENT) return rc;
     }
     if (deadline != UINT64_MAX) {
       uint64_t now = turbo_monotonic_ms();
-      if (now >= deadline) return TURBO_ETIMEDOUT;
+      if (now >= deadline) return SALTS_ETIMEDOUT;
       remaining = deadline - now;
     }
   }
@@ -381,7 +381,7 @@ static int turbo_codex_stdio_start(const turbo_codex_stdio_transport_config_t *c
     if (input_pipe[1] >= 0) close(input_pipe[1]);
     if (output_pipe[0] >= 0) close(output_pipe[0]);
     if (output_pipe[1] >= 0) close(output_pipe[1]);
-    return TURBO_EIO;
+    return SALTS_EIO;
   }
   child = fork();
   if (child < 0) {
@@ -389,7 +389,7 @@ static int turbo_codex_stdio_start(const turbo_codex_stdio_transport_config_t *c
     close(input_pipe[1]);
     close(output_pipe[0]);
     close(output_pipe[1]);
-    return TURBO_EIO;
+    return SALTS_EIO;
   }
   if (child == 0) {
     (void)dup2(input_pipe[0], STDIN_FILENO);
@@ -408,7 +408,7 @@ static int turbo_codex_stdio_start(const turbo_codex_stdio_transport_config_t *c
   stdio_transport->process = child;
   stdio_transport->input_write = input_pipe[1];
   stdio_transport->output_read = output_pipe[0];
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 #endif
@@ -418,14 +418,14 @@ int turbo_codex_stdio_transport_create(const turbo_codex_stdio_transport_config_
 #if defined(__ANDROID__)
   (void)config;
   if (out_transport) memset(out_transport, 0, sizeof(*out_transport));
-  return TURBO_ENOTSUP;
+  return SALTS_ENOTSUP;
 #else
   turbo_codex_stdio_transport_config_t defaults;
   const turbo_codex_stdio_transport_config_t *effective = config;
   turbo_codex_stdio_t *stdio_transport;
   int rc;
   if (out_transport) memset(out_transport, 0, sizeof(*out_transport));
-  if (!out_transport) return TURBO_EINVAL;
+  if (!out_transport) return SALTS_EINVAL;
   if (!effective) {
     turbo_codex_stdio_transport_config_init(&defaults);
     effective = &defaults;
@@ -434,10 +434,10 @@ int turbo_codex_stdio_transport_create(const turbo_codex_stdio_transport_config_
       effective->abi_version != TURBO_CODEX_STDIO_TRANSPORT_ABI_VERSION ||
       !effective->codex_executable || !effective->codex_executable[0] ||
       !effective->max_line_bytes) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   stdio_transport = (turbo_codex_stdio_t *)calloc(1, sizeof(*stdio_transport));
-  if (!stdio_transport) return TURBO_ENOMEM;
+  if (!stdio_transport) return SALTS_ENOMEM;
   stdio_transport->max_line_bytes = effective->max_line_bytes;
   stdio_transport->input = tstr_new();
 #if !defined(_WIN32)
@@ -447,10 +447,10 @@ int turbo_codex_stdio_transport_create(const turbo_codex_stdio_transport_config_
 #endif
   if (!stdio_transport->input) {
     free(stdio_transport);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = turbo_codex_stdio_start(effective, stdio_transport);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_codex_stdio_free_impl(stdio_transport);
     return rc;
   }
@@ -461,6 +461,6 @@ int turbo_codex_stdio_transport_create(const turbo_codex_stdio_transport_config_
   out_transport->close = turbo_codex_stdio_close_impl;
   out_transport->user_data = stdio_transport;
   out_transport->user_data_free = turbo_codex_stdio_free_impl;
-  return TURBO_OK;
+  return SALTS_OK;
 #endif
 }

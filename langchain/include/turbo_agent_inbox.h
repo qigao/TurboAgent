@@ -55,7 +55,7 @@ CXX_C_API int turbo_agent_session_inbox_configure(turbo_agent_session_t *session
  * non-blocking. On success, out_inbox_id receives a malloc-owned string that
  * the caller releases with free(). The message must be an object containing
  * role="user" and non-empty string content. Queue saturation returns
- * TURBO_EBUSY.
+ * SALTS_EBUSY.
  */
 CXX_C_API int turbo_agent_session_enqueue(turbo_agent_session_t *session,
                                           turbo_agent_inbox_kind_t kind,

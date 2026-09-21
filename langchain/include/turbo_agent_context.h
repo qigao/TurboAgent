@@ -70,13 +70,13 @@ CXX_C_API int turbo_agent_session_context_configure(turbo_agent_session_t *sessi
 /**
  * @brief Force one compaction at a quiescent session safe point.
  *
- * Full durable history is unchanged. Returns TURBO_ENOENT when no complete
+ * Full durable history is unchanged. Returns SALTS_ENOENT when no complete
  * atomic event segment is eligible for compaction.
  */
 CXX_C_API int turbo_agent_session_context_compact(turbo_agent_session_t *session,
                                                   const json_value_t *state);
 
-/** Return the active committed context head, or TURBO_ENOENT when absent. */
+/** Return the active committed context head, or SALTS_ENOENT when absent. */
 CXX_C_API int turbo_agent_session_context_status(turbo_agent_session_t *session,
                                                  json_value_t **out_status);
 

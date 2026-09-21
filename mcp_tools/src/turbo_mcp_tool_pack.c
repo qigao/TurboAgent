@@ -221,7 +221,7 @@ static int turbo_mcp_collect_header(turbo_mcp_tool_binding_t *tool,
   else
     return 1;
   binding.name = tstr_dup(name);
-  if (!binding.name || turbo_vec_init_bytes(&binding.path, sizeof(tstr), _Alignof(tstr), SIZE_MAX) != STL_OK) {
+  if (!binding.name || vec_init_bytes(&binding.path, sizeof(tstr), _Alignof(tstr), SIZE_MAX) != STL_OK) {
     turbo_mcp_header_binding_destroy(&binding);
     return -1;
   }
@@ -379,7 +379,7 @@ static int turbo_mcp_tool_invoke(const json_value_t *arguments,
 
   if (!binding || !binding->pack || !out_result ||
       (arguments && json_type(arguments) != JSON_OBJECT) ||
-      turbo_vec_init_bytes(&headers, sizeof(tstr), _Alignof(tstr), SIZE_MAX) != STL_OK) {
+      vec_init_bytes(&headers, sizeof(tstr), _Alignof(tstr), SIZE_MAX) != STL_OK) {
     return -1;
   }
   *out_result = NULL;
@@ -454,8 +454,8 @@ static turbo_tool_status_t turbo_mcp_register_remote_tool(
   }
   description = json_get_string(remote_tool, "description");
   binding = (turbo_mcp_tool_binding_t *)calloc(1, sizeof(*binding));
-  if (!binding || turbo_vec_init_bytes(&binding->headers, sizeof(turbo_mcp_header_binding_t), _Alignof(turbo_mcp_header_binding_t), SIZE_MAX) != STL_OK ||
-      turbo_vec_init_bytes(&path, sizeof(const char *), _Alignof(const char *), SIZE_MAX) != STL_OK) {
+  if (!binding || vec_init_bytes(&binding->headers, sizeof(turbo_mcp_header_binding_t), _Alignof(turbo_mcp_header_binding_t), SIZE_MAX) != STL_OK ||
+      vec_init_bytes(&path, sizeof(const char *), _Alignof(const char *), SIZE_MAX) != STL_OK) {
     turbo_mcp_tool_binding_destroy(binding);
     return TURBO_TOOL_OUT_OF_MEMORY;
   }

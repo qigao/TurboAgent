@@ -3,7 +3,7 @@
 
 #include "tinytest.h"
 #include "turbo_event.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_runtime_json.h"
 
 #include <stdio.h>

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 typedef struct test_codex_transport_s {
   char *messages[32];

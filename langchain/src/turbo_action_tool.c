@@ -98,8 +98,8 @@ static int turbo_action_tool_bridge_handler(const char *arguments_json, char **o
 
   *out_output = NULL;
   if (!arguments_json || arguments_json[0] == '\0') {
-    args = turbo_json_create_object();
-  } else if (turbo_parse_json((const uint8_t *)arguments_json, strlen(arguments_json), &args) != 0) {
+    args = json_create_object();
+  } else if (((args = json_parse((const char *)((const uint8_t *)arguments_json), (strlen(arguments_json)))) ? 0 : -1) != 0) {
     return -1;
   }
 
@@ -110,15 +110,15 @@ static int turbo_action_tool_bridge_handler(const char *arguments_json, char **o
   status = bridge->handler(args, &result, bridge->handler_user_data) == 0
                ? TURBO_ACTION_TOOL_OK
                : TURBO_ACTION_TOOL_ERROR;
-  turbo_free_json(&args);
+  json_free(args); args = NULL;
   if (status != TURBO_ACTION_TOOL_OK || !result ||
       turbo_action_result_validate(result) != 0) {
-    turbo_free_json(&result);
+    json_free(result); result = NULL;
     return -1;
   }
 
-  output = turbo_json_serialize(result, &output_len);
-  turbo_free_json(&result);
+  output = json_serialize(result, &output_len);
+  json_free(result); result = NULL;
   if (!output) {
     return -1;
   }
@@ -141,12 +141,12 @@ static int turbo_action_tool_bridge_json_value_handler(
 
   *out_result = NULL;
   if (arguments) {
-    args = turbo_json_clone(arguments);
+    args = json_clone(arguments);
     if (!args) {
       return -1;
     }
   } else {
-    args = turbo_json_create_object();
+    args = json_create_object();
     if (!args) {
       return -1;
     }
@@ -155,15 +155,15 @@ static int turbo_action_tool_bridge_json_value_handler(
   status = bridge->handler(args, &result, bridge->handler_user_data) == 0
                ? TURBO_ACTION_TOOL_OK
                : TURBO_ACTION_TOOL_ERROR;
-  turbo_free_json(&args);
+  json_free(args); args = NULL;
   if (status != TURBO_ACTION_TOOL_OK || !result ||
       turbo_action_result_validate(result) != 0) {
-    turbo_free_json(&result);
+    json_free(result); result = NULL;
     return -1;
   }
 
-  *out_result = turbo_json_clone(result);
-  turbo_free_json(&result);
+  *out_result = json_clone(result);
+  json_free(result); result = NULL;
   return *out_result ? 0 : -1;
 }
 
@@ -288,10 +288,10 @@ turbo_action_tool_registry_build_openai_chat_tools(const turbo_action_tool_regis
   size_t i;
 
   if (!registry) {
-    return turbo_json_create_array();
+    return json_create_array();
   }
 
-  tools = turbo_json_create_array();
+  tools = json_create_array();
   if (!tools) {
     return NULL;
   }
@@ -302,10 +302,10 @@ turbo_action_tool_registry_build_openai_chat_tools(const turbo_action_tool_regis
         registry->entries[i].parameters_json, 1, 0);
 
     if (!tool) {
-      turbo_free_json(&tools);
+      json_free(tools); tools = NULL;
       return NULL;
     }
-    turbo_json_array_add(tools, tool);
+    json_array_add(tools, tool);
   }
 
   return tools;
@@ -365,62 +365,62 @@ turbo_action_tool_registry_build_tool_registry_bridge(
 }
 
 json_value_t *turbo_action_result_create(int ok, const char *summary) {
-  json_value_t *result = turbo_json_create_object();
-  json_value_t *changed_files = turbo_json_create_array();
-  json_value_t *artifacts = turbo_json_create_array();
+  json_value_t *result = json_create_object();
+  json_value_t *changed_files = json_create_array();
+  json_value_t *artifacts = json_create_array();
 
   if (!result || !changed_files || !artifacts) {
-    turbo_free_json(&result);
-    turbo_free_json(&changed_files);
-    turbo_free_json(&artifacts);
+    json_free(result); result = NULL;
+    json_free(changed_files); changed_files = NULL;
+    json_free(artifacts); artifacts = NULL;
     return NULL;
   }
 
-  turbo_json_object_set_bool(result, "ok", ok ? true : false);
-  turbo_json_object_set_string(result, "summary", summary ? summary : "");
-  turbo_json_object_set_string(result, "stdout", "");
-  turbo_json_object_set_string(result, "stderr", "");
-  turbo_json_object_set_number(result, "exit_code", 0);
-  turbo_json_object_add(result, "changed_files", changed_files);
-  turbo_json_object_add(result, "artifacts", artifacts);
-  turbo_json_object_set_bool(result, "retryable", false);
+  json_object_set_bool(result, "ok", ok ? true : false);
+  json_object_set_string(result, "summary", summary ? summary : "");
+  json_object_set_string(result, "stdout", "");
+  json_object_set_string(result, "stderr", "");
+  json_object_set_number(result, "exit_code", 0);
+  json_object_add(result, "changed_files", changed_files);
+  json_object_add(result, "artifacts", artifacts);
+  json_object_set_bool(result, "retryable", false);
   return result;
 }
 
 int turbo_action_result_set_command_fields(json_value_t *result, int exit_code,
                                            const char *stdout_text, const char *stderr_text) {
-  if (!result || turbo_json_type(result) != TURBO_JSON_OBJECT) {
+  if (!result || json_type(result) != JSON_OBJECT) {
     return -1;
   }
 
-  turbo_json_object_set_number(result, "exit_code", exit_code);
-  turbo_json_object_set_string(result, "stdout", stdout_text ? stdout_text : "");
-  turbo_json_object_set_string(result, "stderr", stderr_text ? stderr_text : "");
+  json_object_set_number(result, "exit_code", exit_code);
+  json_object_set_string(result, "stdout", stdout_text ? stdout_text : "");
+  json_object_set_string(result, "stderr", stderr_text ? stderr_text : "");
   return 0;
 }
 
 int turbo_action_result_add_changed_file(json_value_t *result, const char *path) {
   json_value_t *changed_files;
 
-  if (!result || turbo_json_type(result) != TURBO_JSON_OBJECT || !path) {
+  if (!result || json_type(result) != JSON_OBJECT || !path) {
     return -1;
   }
 
-  changed_files = turbo_json_object_get(result, "changed_files");
-  if (!changed_files || turbo_json_type(changed_files) != TURBO_JSON_ARRAY) {
+  changed_files = json_object_get(result, "changed_files");
+  if (!changed_files || json_type(changed_files) != JSON_ARRAY) {
     return -1;
   }
 
-  turbo_json_array_add(changed_files, turbo_json_create_string(path));
+  json_array_add(changed_files, json_create_string(path));
   return 0;
 }
 
 int turbo_action_result_set_retryable(json_value_t *result, int retryable) {
-  if (!result || turbo_json_type(result) != TURBO_JSON_OBJECT) {
+  if (!result || json_type(result) != JSON_OBJECT) {
     return -1;
   }
 
-  turbo_json_object_set_bool(result, "retryable", retryable ? true : false);
+  json_object_set_bool(result, "retryable", retryable ? true : false);
   return 0;
 }
 
@@ -428,20 +428,20 @@ int turbo_action_result_validate(const json_value_t *result) {
   const json_value_t *changed_files;
   const json_value_t *artifacts;
 
-  if (!result || turbo_json_type(result) != TURBO_JSON_OBJECT) {
+  if (!result || json_type(result) != JSON_OBJECT) {
     return -1;
   }
 
-  if (!turbo_json_object_get(result, "ok") || !turbo_json_object_get(result, "summary") ||
-      !turbo_json_object_get(result, "stdout") || !turbo_json_object_get(result, "stderr") ||
-      !turbo_json_object_get(result, "exit_code") || !turbo_json_object_get(result, "retryable")) {
+  if (!json_object_get(result, "ok") || !json_object_get(result, "summary") ||
+      !json_object_get(result, "stdout") || !json_object_get(result, "stderr") ||
+      !json_object_get(result, "exit_code") || !json_object_get(result, "retryable")) {
     return -1;
   }
 
-  changed_files = turbo_json_object_get(result, "changed_files");
-  artifacts = turbo_json_object_get(result, "artifacts");
-  if (!changed_files || turbo_json_type(changed_files) != TURBO_JSON_ARRAY || !artifacts ||
-      turbo_json_type(artifacts) != TURBO_JSON_ARRAY) {
+  changed_files = json_object_get(result, "changed_files");
+  artifacts = json_object_get(result, "artifacts");
+  if (!changed_files || json_type(changed_files) != JSON_ARRAY || !artifacts ||
+      json_type(artifacts) != JSON_ARRAY) {
     return -1;
   }
 

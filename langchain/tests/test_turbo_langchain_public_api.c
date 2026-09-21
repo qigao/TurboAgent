@@ -509,12 +509,8 @@ spec("turbo langchain public api") {
         (void *)turbo_agent_remote_app_resume_thread_command_json_value;
     void *agent_remote_app_fork_thread_command =
         (void *)turbo_agent_remote_app_fork_thread_command_json_value;
-    void *agent_runtime_remote_iris_create =
-        (void *)turbo_agent_runtime_remote_iris_create;
-    void *agent_runtime_remote_iris_destroy =
-        (void *)turbo_agent_runtime_remote_iris_destroy;
-    void *agent_runtime_remote_iris_mount =
-        (void *)turbo_agent_runtime_remote_iris_mount;
+    void *agent_runtime_remote_chttp_mount =
+        (void *)turbo_agent_runtime_remote_chttp_mount;
 #if 0
     void *agent_runtime_store_memory = (void *)turbo_agent_runtime_store_memory_create;
     void *agent_runtime_store_file = (void *)turbo_agent_runtime_store_file_create;
@@ -1594,9 +1590,7 @@ spec("turbo langchain public api") {
     check_not_null(agent_remote_app_get_child_multi_agent_inspect);
     check_not_null(agent_remote_app_resume_thread_command);
     check_not_null(agent_remote_app_fork_thread_command);
-    check_not_null(agent_runtime_remote_iris_create);
-    check_not_null(agent_runtime_remote_iris_destroy);
-    check_not_null(agent_runtime_remote_iris_mount);
+    check_not_null(agent_runtime_remote_chttp_mount);
 #if 0
     check_not_null(agent_runtime_store_memory);
     check_not_null(agent_runtime_store_file);

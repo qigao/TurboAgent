@@ -15,7 +15,7 @@ typedef enum turbo_agent_harness_operation_e {
 
 struct turbo_agent_harness_s {
   atomic_size_t ref_count;
-  turbo_mutex_t mutex;
+  salts_mutex_t mutex;
   turbo_agent_app_t *app;
   turbo_threadpool_t *executor;
   turbo_agent_execution_t *active_execution;
@@ -73,14 +73,14 @@ turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_conf
     return NULL;
   }
   atomic_init(&harness->ref_count, 1);
-  turbo_mutex_init(&harness->mutex);
+  salts_mutex_init(&harness->mutex);
   if (!harness->mutex) {
     free(harness);
     return NULL;
   }
   harness->app = turbo_agent_app_create(config->app_config);
   if (!harness->app) {
-    turbo_mutex_destroy(&harness->mutex);
+    salts_mutex_destroy(&harness->mutex);
     free(harness);
     return NULL;
   }
@@ -116,7 +116,7 @@ void turbo_agent_harness_release(turbo_agent_harness_t *harness) {
   atomic_thread_fence(memory_order_acquire);
   turbo_agent_execution_release(harness->active_execution);
   turbo_agent_app_destroy(harness->app);
-  turbo_mutex_destroy(&harness->mutex);
+  salts_mutex_destroy(&harness->mutex);
   free(harness);
 }
 
@@ -248,14 +248,14 @@ static void turbo_agent_harness_terminal(void *user_data,
     return;
   }
   harness = execution->harness;
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   if (harness->active_execution == agent_execution) {
     active = harness->active_execution;
     harness->active_execution = NULL;
   } else {
     execution->terminal_before_publish = 1;
   }
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
   turbo_agent_execution_release(active);
   turbo_agent_harness_execution_release(execution);
 }
@@ -265,7 +265,7 @@ static int turbo_agent_harness_begin_submit(turbo_agent_harness_t *harness) {
   turbo_agent_execution_t *terminal = NULL;
   turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_QUEUED;
 
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   if (harness->active_execution &&
       turbo_agent_execution_get_status(harness->active_execution, &status) == SALTS_OK &&
       status >= TURBO_AGENT_EXECUTION_COMPLETED) {
@@ -277,15 +277,15 @@ static int turbo_agent_harness_begin_submit(turbo_agent_harness_t *harness) {
   } else {
     harness->submitting = 1;
   }
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
   turbo_agent_execution_release(terminal);
   return rc;
 }
 
 static void turbo_agent_harness_end_failed_submit(turbo_agent_harness_t *harness) {
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   harness->submitting = 0;
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
 }
 
 static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
@@ -388,22 +388,22 @@ static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
     rc = SALTS_ERANGE;
     goto fail_running_execution;
   }
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   harness->submitting = 0;
   if (!execution->terminal_before_publish) {
     harness->active_execution = active_ref;
     active_ref = NULL;
   }
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
   turbo_agent_execution_release(active_ref);
 
   *out_execution = execution;
   return SALTS_OK;
 
 fail_running_execution:
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   harness->submitting = 0;
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
   turbo_agent_harness_execution_release(execution);
   return rc;
 

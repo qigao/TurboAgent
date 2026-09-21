@@ -5,7 +5,7 @@
 #include "CoroNet/turbo_coro_context.h"
 #include "http_client.h"
 #include "turbo_model_provider.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 #include <string.h>

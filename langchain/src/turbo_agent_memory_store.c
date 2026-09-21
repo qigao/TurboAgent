@@ -2,7 +2,7 @@
 
 #include "turbo_agent_util_internal.h"
 #include <json_parser.h>
-#include <turbo_fs.h>
+#include <salts_fs.h>
 
 #include <limits.h>
 #include <stdint.h>
@@ -85,15 +85,15 @@ static int turbo_agent_memory_record_matches_query(const json_value_t *record, c
                                                    const char *text_substring);
 
 static int turbo_agent_memory_ensure_dir(const char *path) {
-  turbo_fs_stat_t stat;
+  salts_fs_stat_t stat;
 
   if (!path || path[0] == '\0') {
     return -1;
   }
-  if (turbo_fs_mkdir(path, 0777) == 0) {
+  if (salts_fs_mkdir(path, 0777) == 0) {
     return 0;
   }
-  if (turbo_fs_stat(path, &stat) == 0 && stat.is_directory) {
+  if (salts_fs_stat(path, &stat) == 0 && stat.is_directory) {
     return 0;
   }
   return -1;
@@ -149,60 +149,60 @@ static int turbo_agent_memory_write_text_file(const char *path, const char *cont
     goto cleanup;
   }
 
-  file = turbo_fs_open(temp_path, TURBO_FS_O_WRONLY | TURBO_FS_O_CREAT | TURBO_FS_O_TRUNC,
-                       TURBO_FS_DEFAULT_MODE);
+  file = salts_fs_open(temp_path, SALTS_FS_O_WRONLY | SALTS_FS_O_CREAT | SALTS_FS_O_TRUNC,
+                       SALTS_FS_DEFAULT_MODE);
   if (file == TURBO_INVALID_FILE) {
     goto cleanup;
   }
-  if (len > 0 && turbo_fs_write(file, content, len) != (int)len) {
+  if (len > 0 && salts_fs_write(file, content, len) != (int)len) {
     goto cleanup;
   }
-  if (turbo_fs_fsync(file) != 0) {
+  if (salts_fs_fsync(file) != 0) {
     goto cleanup;
   }
-  if (turbo_fs_close(file) != 0) {
+  if (salts_fs_close(file) != 0) {
     file = TURBO_INVALID_FILE;
     goto cleanup;
   }
   file = TURBO_INVALID_FILE;
-  if (turbo_fs_rename(temp_path, path) != 0) {
+  if (salts_fs_rename(temp_path, path) != 0) {
     goto cleanup;
   }
   status = 0;
 
 cleanup:
   if (file != TURBO_INVALID_FILE) {
-    turbo_fs_close(file);
+    salts_fs_close(file);
   }
   if (status != 0) {
-    turbo_fs_unlink(temp_path);
+    salts_fs_unlink(temp_path);
   }
   free(temp_path);
   return status;
 }
 
 static int turbo_agent_memory_read_text_file(const char *path, char **out_content) {
-  turbo_fs_buf_t file_buffer = {0};
+  salts_fs_buf_t file_buffer = {0};
   char *buffer;
 
   if (!path || !out_content) {
     return -1;
   }
   *out_content = NULL;
-  if (turbo_fs_read_file(path, &file_buffer) != 0 || file_buffer.len == SIZE_MAX) {
-    turbo_fs_buf_free(&file_buffer);
+  if (salts_fs_read_file(path, &file_buffer) != 0 || file_buffer.len == SIZE_MAX) {
+    salts_fs_buf_free(&file_buffer);
     return -1;
   }
   buffer = (char *)malloc(file_buffer.len + 1);
   if (!buffer) {
-    turbo_fs_buf_free(&file_buffer);
+    salts_fs_buf_free(&file_buffer);
     return -1;
   }
   if (file_buffer.len > 0) {
     memcpy(buffer, file_buffer.base, file_buffer.len);
   }
   buffer[file_buffer.len] = '\0';
-  turbo_fs_buf_free(&file_buffer);
+  salts_fs_buf_free(&file_buffer);
   *out_content = buffer;
   return 0;
 }

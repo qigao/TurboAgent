@@ -1,7 +1,7 @@
 #ifndef TURBO_MODEL_PROVIDER_H
 #define TURBO_MODEL_PROVIDER_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 #include <http_client/http.h>
 
 #include <json_parser.h>

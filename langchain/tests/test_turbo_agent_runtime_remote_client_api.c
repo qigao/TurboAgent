@@ -10,7 +10,7 @@
 #include "turbo_agent_runtime_remote_iris.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_test_support.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 #include <stdio.h>

@@ -125,7 +125,15 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF
+          for attempt in 1 2 3 4 5; do
+            if cmake --preset linux-dev-user               -DENABLE_SANITIZER_ADDRESS=OFF               -DENABLE_SANITIZER_UNDEFINED=OFF; then
+              break
+            fi
+            test "$attempt" -lt 5
+            rm -f build/linux-gcc-debug/CMakeCache.txt
+            sleep $((attempt * 5))
+          done
+          test -f build/linux-gcc-debug/CMakeCache.txt
           cmake --build build/linux-gcc-debug --target install -j2
           package="$RUNNER_TEMP/salts-project/external/pkgs/salts/debug"
           test -f "$package/lib/cmake/Salts/SaltsConfig.cmake"

@@ -13,6 +13,7 @@ target_include_directories(
                    $<INSTALL_INTERFACE:include>)
 target_link_libraries(mcp_tools PUBLIC TurboAgent::RuntimeTools
                                        Salts::JsonParser
+                                       Salts::UriParser
                                        CHttp::Client)
 
 cmake_config_target(mcp_tools FOLDER "MCP Tools" EXPORT_NAME McpTools

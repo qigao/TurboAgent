@@ -1,8 +1,7 @@
 #ifndef TURBO_CODEX_BRIDGE_H
 #define TURBO_CODEX_BRIDGE_H
 
-#include <platform.h>
-#include <turbo_error.h>
+#include <turbo_agent_api.h>
 #include <json_parser.h>
 
 #include "turbo_tool_registry.h"

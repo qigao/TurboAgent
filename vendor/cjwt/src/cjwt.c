@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2017-2022 Comcast Cable Communications Management, LLC
 // SPDX-License-Identifier: Apache-2.0
 
-#include <turbo_parser.h>
+#include <json_parser.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -15,17 +15,7 @@
 
 static json_value_t *cjwt_parse_json(const char *text, size_t len)
 {
-    json_value_t *json = NULL;
-
-    if (!text) {
-        return NULL;
-    }
-
-    if (turbo_parse_json((const uint8_t *)text, len, &json) != 0) {
-        return NULL;
-    }
-
-    return json;
+    return text ? json_parse(text, len) : NULL;
 }
 
 static bool is_known_key(const char *key, const char *const *known, size_t count)
@@ -38,33 +28,33 @@ static bool is_known_key(const char *key, const char *const *known, size_t count
 
 static json_value_t *collect_private_keys(const json_value_t *src, const char *const *skip, size_t skip_count)
 {
-    size_t n = turbo_json_object_size(src);
+    size_t n = json_object_size(src);
     json_value_t *dst = NULL;
 
     for (size_t i = 0; i < n; i++) {
-        const char *k = turbo_json_object_key(src, i);
+        const char *k = json_object_key(src, i);
         if (is_known_key(k, skip, skip_count)) continue;
 
-        if (!dst) dst = turbo_json_create_object();
+        if (!dst) dst = json_create_object();
 
-        json_value_t *v = turbo_json_object_value(src, i);
-        turbo_json_type_t t = turbo_json_type(v);
-        if (t == TURBO_JSON_STRING) {
-            turbo_json_object_set_string(dst, k, turbo_json_string(v));
-        } else if (t == TURBO_JSON_NUMBER) {
-            turbo_json_object_set_number(dst, k, turbo_json_number(v));
-        } else if (t == TURBO_JSON_BOOL) {
-            turbo_json_object_set_bool(dst, k, turbo_json_bool(v));
-        } else if (t == TURBO_JSON_NULL) {
-            turbo_json_object_set_null(dst, k);
+        json_value_t *v = json_object_value(src, i);
+        json_type_t t = json_type(v);
+        if (t == JSON_STRING) {
+            json_object_set_string(dst, k, json_string(v));
+        } else if (t == JSON_NUMBER) {
+            json_object_set_number(dst, k, json_number(v));
+        } else if (t == JSON_BOOL) {
+            json_object_set_bool(dst, k, json_bool(v));
+        } else if (t == JSON_NULL) {
+            json_object_set_null(dst, k);
         } else {
             /* For nested objects/arrays, serialize then re-parse to deep-copy */
             size_t slen = 0;
-            char *s = turbo_json_serialize(v, &slen);
+            char *s = json_serialize(v, &slen);
             if (s) {
                 json_value_t *copy = cjwt_parse_json(s, slen);
-                if (copy) turbo_json_object_add(dst, k, copy);
-                turbo_json_serialize_free(s);
+                if (copy) json_object_add(dst, k, copy);
+                json_serialize_free(s);
             }
         }
     }
@@ -73,26 +63,26 @@ static json_value_t *collect_private_keys(const json_value_t *src, const char *c
 
 static void copy_json_object_into(json_value_t *dst, const json_value_t *src)
 {
-    size_t n = turbo_json_object_size(src);
+    size_t n = json_object_size(src);
     for (size_t i = 0; i < n; i++) {
-        const char *k = turbo_json_object_key(src, i);
-        json_value_t *v = turbo_json_object_value(src, i);
-        turbo_json_type_t t = turbo_json_type(v);
-        if (t == TURBO_JSON_STRING) {
-            turbo_json_object_set_string(dst, k, turbo_json_string(v));
-        } else if (t == TURBO_JSON_NUMBER) {
-            turbo_json_object_set_number(dst, k, turbo_json_number(v));
-        } else if (t == TURBO_JSON_BOOL) {
-            turbo_json_object_set_bool(dst, k, turbo_json_bool(v));
-        } else if (t == TURBO_JSON_NULL) {
-            turbo_json_object_set_null(dst, k);
+        const char *k = json_object_key(src, i);
+        json_value_t *v = json_object_value(src, i);
+        json_type_t t = json_type(v);
+        if (t == JSON_STRING) {
+            json_object_set_string(dst, k, json_string(v));
+        } else if (t == JSON_NUMBER) {
+            json_object_set_number(dst, k, json_number(v));
+        } else if (t == JSON_BOOL) {
+            json_object_set_bool(dst, k, json_bool(v));
+        } else if (t == JSON_NULL) {
+            json_object_set_null(dst, k);
         } else {
             size_t slen = 0;
-            char *s = turbo_json_serialize(v, &slen);
+            char *s = json_serialize(v, &slen);
             if (s) {
                 json_value_t *copy = cjwt_parse_json(s, slen);
-                if (copy) turbo_json_object_add(dst, k, copy);
-                turbo_json_serialize_free(s);
+                if (copy) json_object_add(dst, k, copy);
+                json_serialize_free(s);
             }
         }
     }
@@ -213,14 +203,14 @@ const char *enc_to_string(cjwt_enc_t enc)
 
 static cjwt_code_t process_string(const json_value_t *json, const char *name, char **dest)
 {
-    json_value_t *val = turbo_json_object_get(json, name);
+    json_value_t *val = json_object_get(json, name);
 
     if (val) {
-        if (turbo_json_type(val) != TURBO_JSON_STRING) {
+        if (json_type(val) != JSON_STRING) {
             return CJWTE_PAYLOAD_EXPECTED_STRING;
         }
 
-        *dest = cjwt_strdup(turbo_json_string(val));
+        *dest = cjwt_strdup(json_string(val));
         if (!(*dest)) {
             return CJWTE_OUT_OF_MEMORY;
         }
@@ -231,16 +221,16 @@ static cjwt_code_t process_string(const json_value_t *json, const char *name, ch
 
 static cjwt_code_t process_time(const json_value_t *json, const char *name, int64_t **dest)
 {
-    json_value_t *val = turbo_json_object_get(json, name);
+    json_value_t *val = json_object_get(json, name);
 
     if (val) {
-        if (turbo_json_type(val) == TURBO_JSON_NUMBER) {
+        if (json_type(val) == JSON_NUMBER) {
             *dest = malloc(sizeof(int64_t));
             if (!(*dest)) {
                 return CJWTE_OUT_OF_MEMORY;
             }
 
-            **dest = (int64_t)turbo_json_number(val);
+            **dest = (int64_t)json_number(val);
         } else {
             return CJWTE_PAYLOAD_EXPECTED_NUMBER;
         }
@@ -251,14 +241,14 @@ static cjwt_code_t process_time(const json_value_t *json, const char *name, int6
 
 static cjwt_code_t process_aud(const json_value_t *json, cjwt_t *cjwt)
 {
-    json_value_t *aud = turbo_json_object_get(json, "aud");
+    json_value_t *aud = json_object_get(json, "aud");
 
     if (!aud) {
         return CJWTE_OK;
     }
 
-    if (turbo_json_type(aud) == TURBO_JSON_ARRAY) {
-        cjwt->aud.count = (int)turbo_json_array_size(aud);
+    if (json_type(aud) == JSON_ARRAY) {
+        cjwt->aud.count = (int)json_array_size(aud);
         cjwt->aud.names = calloc(cjwt->aud.count, sizeof(char *));
 
         if (!cjwt->aud.names) {
@@ -266,18 +256,18 @@ static cjwt_code_t process_aud(const json_value_t *json, cjwt_t *cjwt)
         }
 
         for (int i = 0; i < cjwt->aud.count; i++) {
-            json_value_t *tmp = turbo_json_array_get(aud, i);
+            json_value_t *tmp = json_array_get(aud, i);
 
-            if (turbo_json_type(tmp) != TURBO_JSON_STRING) {
+            if (json_type(tmp) != JSON_STRING) {
                 return CJWTE_PAYLOAD_EXPECTED_STRING;
             }
 
-            cjwt->aud.names[i] = cjwt_strdup(turbo_json_string(tmp));
+            cjwt->aud.names[i] = cjwt_strdup(json_string(tmp));
             if (!cjwt->aud.names[i]) {
                 return CJWTE_OUT_OF_MEMORY;
             }
         }
-    } else if (turbo_json_type(aud) == TURBO_JSON_STRING) {
+    } else if (json_type(aud) == JSON_STRING) {
         cjwt->aud.count = 1;
         cjwt->aud.names = calloc(cjwt->aud.count, sizeof(char *));
 
@@ -285,7 +275,7 @@ static cjwt_code_t process_aud(const json_value_t *json, cjwt_t *cjwt)
             return CJWTE_OUT_OF_MEMORY;
         }
 
-        cjwt->aud.names[0] = cjwt_strdup(turbo_json_string(aud));
+        cjwt->aud.names[0] = cjwt_strdup(json_string(aud));
         if (!cjwt->aud.names[0]) {
             return CJWTE_OUT_OF_MEMORY;
         }
@@ -313,7 +303,7 @@ static cjwt_code_t process_payload_from_json(cjwt_t *cjwt, json_value_t *json)
 
     cjwt->private_claims = collect_private_keys(json, public_claims,
                                                  sizeof(public_claims) / sizeof(public_claims[0]));
-    turbo_free_json(&json);
+    json_free(json);
     return rv;
 }
 
@@ -349,16 +339,16 @@ static cjwt_code_t process_header_json(cjwt_t *cjwt, uint32_t options,
     static const char *const handled_keys[] = { "alg", "enc", "typ", "kid" };
 
     cjwt_code_t rv   = CJWTE_OK;
-    json_value_t *alg = turbo_json_object_get(json, "alg");
+    json_value_t *alg = json_object_get(json, "alg");
     if (!alg) {
         return CJWTE_HEADER_MISSING_ALG;
     }
 
-    if (turbo_json_type(alg) != TURBO_JSON_STRING) {
+    if (json_type(alg) != JSON_STRING) {
         return CJWTE_HEADER_UNSUPPORTED_ALG;
     }
 
-    if (0 != alg_to_enum(turbo_json_string(alg), &cjwt->header.alg)) {
+    if (0 != alg_to_enum(json_string(alg), &cjwt->header.alg)) {
         return CJWTE_HEADER_UNSUPPORTED_ALG;
     }
 
@@ -378,13 +368,13 @@ static cjwt_code_t process_header_json(cjwt_t *cjwt, uint32_t options,
         }
     }
 
-    json_value_t *typ = turbo_json_object_get(json, "typ");
+    json_value_t *typ = json_object_get(json, "typ");
     if (typ && (0 == (OPT_ALLOW_ANY_TYP & options))) {
-        if (turbo_json_type(typ) != TURBO_JSON_STRING) {
+        if (json_type(typ) != JSON_STRING) {
             return CJWTE_HEADER_UNSUPPORTED_TYP;
         }
 
-        const char *s = turbo_json_string(typ);
+        const char *s = json_string(typ);
         if ((('J' != s[0]) && ('j' != s[0]))
             || (('W' != s[1]) && ('w' != s[1]))
             || (('T' != s[2]) && ('t' != s[2]))
@@ -399,23 +389,23 @@ static cjwt_code_t process_header_json(cjwt_t *cjwt, uint32_t options,
         return rv;
     }
 
-    json_value_t *enc = turbo_json_object_get(json, "enc");
+    json_value_t *enc = json_object_get(json, "enc");
     if (enc) {
-        if (turbo_json_type(enc) != TURBO_JSON_STRING || 0 != enc_to_enum(turbo_json_string(enc), &cjwt->header.enc)) {
+        if (json_type(enc) != JSON_STRING || 0 != enc_to_enum(json_string(enc), &cjwt->header.enc)) {
             return CJWTE_HEADER_UNSUPPORTED_ALG;
         }
     } else if (cjwt->header.alg >= alg_rsa_oaep) {
         return CJWTE_HEADER_UNSUPPORTED_ALG;
     }
 
-    if ((NULL != turbo_json_object_get(json, "jku"))
-        || (NULL != turbo_json_object_get(json, "jwk"))
-        || (NULL != turbo_json_object_get(json, "x5u"))
-        || (NULL != turbo_json_object_get(json, "x5c"))
-        || (NULL != turbo_json_object_get(json, "x5t"))
-        || (NULL != turbo_json_object_get(json, "x5ts256"))
-        || (NULL != turbo_json_object_get(json, "cty"))
-        || (NULL != turbo_json_object_get(json, "crit")))
+    if ((NULL != json_object_get(json, "jku"))
+        || (NULL != json_object_get(json, "jwk"))
+        || (NULL != json_object_get(json, "x5u"))
+        || (NULL != json_object_get(json, "x5c"))
+        || (NULL != json_object_get(json, "x5t"))
+        || (NULL != json_object_get(json, "x5ts256"))
+        || (NULL != json_object_get(json, "cty"))
+        || (NULL != json_object_get(json, "crit")))
     {
         return CJWTE_HEADER_UNSUPPORTED_UNKNOWN;
     }
@@ -449,7 +439,7 @@ static cjwt_code_t process_header(cjwt_t *cjwt, uint32_t options,
 
     rv = process_header_json(cjwt, options, json);
 
-    turbo_free_json(&json);
+    json_free(json);
     free(decoded);
 
     return rv;
@@ -651,7 +641,7 @@ void cjwt_destroy(cjwt_t *jwt)
 {
     if (jwt) {
         if (jwt->header.kid) free(jwt->header.kid);
-        turbo_free_json(&jwt->header.private_headers);
+        json_free(jwt->header.private_headers);
 
         if (jwt->iss) free(jwt->iss);
         if (jwt->sub) free(jwt->sub);
@@ -667,7 +657,7 @@ void cjwt_destroy(cjwt_t *jwt)
         }
 
         if (jwt->aud.names) free(jwt->aud.names);
-        turbo_free_json(&jwt->private_claims);
+        json_free(jwt->private_claims);
 
         free(jwt);
     }
@@ -711,17 +701,17 @@ cjwt_code_t cjwt_alg_string_to_enum(const char *s, size_t len, cjwt_alg_t *alg)
 
 static json_value_t *construct_header_json(const cjwt_t *jwt)
 {
-    json_value_t *header = turbo_json_create_object();
+    json_value_t *header = json_create_object();
     if (!header) return NULL;
 
-    turbo_json_object_set_string(header, "alg", alg_to_string(jwt->header.alg));
+    json_object_set_string(header, "alg", alg_to_string(jwt->header.alg));
     if (jwt->header.enc != enc_unknown) {
-        turbo_json_object_set_string(header, "enc", enc_to_string(jwt->header.enc));
+        json_object_set_string(header, "enc", enc_to_string(jwt->header.enc));
     }
-    turbo_json_object_set_string(header, "typ", "JWT");
+    json_object_set_string(header, "typ", "JWT");
 
     if (jwt->header.kid) {
-        turbo_json_object_set_string(header, "kid", jwt->header.kid);
+        json_object_set_string(header, "kid", jwt->header.kid);
     }
 
     if (jwt->header.private_headers) {
@@ -732,25 +722,25 @@ static json_value_t *construct_header_json(const cjwt_t *jwt)
 
 static json_value_t *construct_payload_json(const cjwt_t *jwt)
 {
-    json_value_t *payload = turbo_json_create_object();
+    json_value_t *payload = json_create_object();
     if (!payload) return NULL;
 
-    if (jwt->iss) turbo_json_object_set_string(payload, "iss", jwt->iss);
-    if (jwt->sub) turbo_json_object_set_string(payload, "sub", jwt->sub);
-    if (jwt->jti) turbo_json_object_set_string(payload, "jti", jwt->jti);
-    if (jwt->exp) turbo_json_object_set_number(payload, "exp", (double) *jwt->exp);
-    if (jwt->nbf) turbo_json_object_set_number(payload, "nbf", (double) *jwt->nbf);
-    if (jwt->iat) turbo_json_object_set_number(payload, "iat", (double) *jwt->iat);
+    if (jwt->iss) json_object_set_string(payload, "iss", jwt->iss);
+    if (jwt->sub) json_object_set_string(payload, "sub", jwt->sub);
+    if (jwt->jti) json_object_set_string(payload, "jti", jwt->jti);
+    if (jwt->exp) json_object_set_number(payload, "exp", (double) *jwt->exp);
+    if (jwt->nbf) json_object_set_number(payload, "nbf", (double) *jwt->nbf);
+    if (jwt->iat) json_object_set_number(payload, "iat", (double) *jwt->iat);
 
     if (jwt->aud.count > 0) {
         if (jwt->aud.count == 1) {
-            turbo_json_object_set_string(payload, "aud", jwt->aud.names[0]);
+            json_object_set_string(payload, "aud", jwt->aud.names[0]);
         } else {
-            json_value_t *auds = turbo_json_create_array();
+            json_value_t *auds = json_create_array();
             for (int i = 0; i < jwt->aud.count; i++) {
-                turbo_json_array_add(auds, turbo_json_create_string(jwt->aud.names[i]));
+                json_array_add(auds, json_create_string(jwt->aud.names[i]));
             }
-            turbo_json_object_add(payload, "aud", auds);
+            json_object_add(payload, "aud", auds);
         }
     }
 
@@ -783,8 +773,8 @@ cjwt_code_t cjwt_encode(const cjwt_t *jwt, const uint8_t *key, size_t key_len, c
     p_json = construct_payload_json(jwt);
     if (!h_json || !p_json) { rv = CJWTE_OUT_OF_MEMORY; goto cleanup; }
 
-    h_str = turbo_json_serialize(h_json, NULL);
-    p_str = turbo_json_serialize(p_json, NULL);
+    h_str = json_serialize(h_json, NULL);
+    p_str = json_serialize(p_json, NULL);
     if (!h_str || !p_str) { rv = CJWTE_OUT_OF_MEMORY; goto cleanup; }
 
     h_b64 = b64url_encode_with_alloc((const uint8_t *)h_str, strlen(h_str), NULL);
@@ -820,10 +810,10 @@ cjwt_code_t cjwt_encode(const cjwt_t *jwt, const uint8_t *key, size_t key_len, c
     }
 
 cleanup:
-    turbo_free_json(&h_json);
-    turbo_free_json(&p_json);
-    if (h_str) turbo_json_serialize_free(h_str);
-    if (p_str) turbo_json_serialize_free(p_str);
+    json_free(h_json);
+    json_free(p_json);
+    if (h_str) json_serialize_free(h_str);
+    if (p_str) json_serialize_free(p_str);
     if (h_b64) free(h_b64);
     if (p_b64) free(p_b64);
     if (full_data) free(full_data);
@@ -854,9 +844,9 @@ cjwt_code_t cjwt_jwk_parse(const char *json_str, cjwt_jwk_t **jwk)
     if (!json) return CJWTE_HEADER_INVALID_JSON;
 
     out = calloc(1, sizeof(cjwt_jwk_t));
-    if (!out) { turbo_free_json(&json); return CJWTE_OUT_OF_MEMORY; }
+    if (!out) { json_free(json); return CJWTE_OUT_OF_MEMORY; }
 
-    const char *kty = turbo_json_get_string(json, "kty");
+    const char *kty = json_get_string(json, "kty");
     if (kty) {
         out->kty = string_to_kty(kty);
     }
@@ -867,7 +857,7 @@ cjwt_code_t cjwt_jwk_parse(const char *json_str, cjwt_jwk_t **jwk)
 
     if (rv != CJWTE_OK) {
         cjwt_jwk_destroy(out);
-        turbo_free_json(&json);
+        json_free(json);
         return rv;
     }
 
@@ -883,7 +873,7 @@ void cjwt_jwk_destroy(cjwt_jwk_t *jwk)
         if (jwk->kid) free(jwk->kid);
         if (jwk->use) free(jwk->use);
         if (jwk->alg) free(jwk->alg);
-        turbo_free_json(&jwk->key_json);
+        json_free(jwk->key_json);
         free(jwk);
     }
 }
@@ -899,29 +889,29 @@ cjwt_code_t cjwt_jwks_parse(const char *json_str, cjwt_jwks_t **jwks)
     json = cjwt_parse_json(json_str, strlen(json_str));
     if (!json) return CJWTE_HEADER_INVALID_JSON;
 
-    json_value_t *keys = turbo_json_object_get(json, "keys");
-    if (!keys || turbo_json_type(keys) != TURBO_JSON_ARRAY) {
-        turbo_free_json(&json);
+    json_value_t *keys = json_object_get(json, "keys");
+    if (!keys || json_type(keys) != JSON_ARRAY) {
+        json_free(json);
         return CJWTE_HEADER_INVALID_JSON;
     }
 
     out = calloc(1, sizeof(cjwt_jwks_t));
-    if (!out) { turbo_free_json(&json); return CJWTE_OUT_OF_MEMORY; }
+    if (!out) { json_free(json); return CJWTE_OUT_OF_MEMORY; }
 
-    out->count = (int)turbo_json_array_size(keys);
+    out->count = (int)json_array_size(keys);
     out->keys = calloc(out->count, sizeof(cjwt_jwk_t *));
     if (!out->keys) {
         free(out);
-        turbo_free_json(&json);
+        json_free(json);
         return CJWTE_OUT_OF_MEMORY;
     }
 
     for (int i = 0; i < out->count; i++) {
-        json_value_t *key = turbo_json_array_get(keys, i);
-        char *key_str = turbo_json_serialize(key, NULL);
+        json_value_t *key = json_array_get(keys, i);
+        char *key_str = json_serialize(key, NULL);
         if (key_str) {
             rv = cjwt_jwk_parse(key_str, &out->keys[i]);
-            turbo_json_serialize_free(key_str);
+            json_serialize_free(key_str);
             if (rv != CJWTE_OK) break;
         } else {
             rv = CJWTE_OUT_OF_MEMORY;
@@ -931,11 +921,11 @@ cjwt_code_t cjwt_jwks_parse(const char *json_str, cjwt_jwks_t **jwks)
 
     if (rv != CJWTE_OK) {
         cjwt_jwks_destroy(out);
-        turbo_free_json(&json);
+        json_free(json);
         return rv;
     }
 
-    turbo_free_json(&json);
+    json_free(json);
     *jwks = out;
     return CJWTE_OK;
 }

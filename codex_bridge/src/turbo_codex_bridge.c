@@ -147,24 +147,24 @@ static int turbo_codex_send_json(turbo_codex_client_t *client, const json_value_
   tstr_t frame = NULL;
   size_t length = 0;
   int rc;
-  if (!client || !message || client->closed) return TURBO_ESHUTDOWN;
+  if (!client || !message || client->closed) return SALTS_ESHUTDOWN;
   serialized = turbo_json_serialize(message, &length);
-  if (!serialized) return TURBO_ENOMEM;
+  if (!serialized) return SALTS_ENOMEM;
   if (length > client->max_message_bytes) {
     turbo_json_serialize_free(serialized);
     turbo_codex_set_error(client, "outbound Codex message exceeds max_message_bytes");
-    return TURBO_EMSGSIZE;
+    return SALTS_EMSGSIZE;
   }
   frame = tstr_new_len(serialized, length);
   turbo_json_serialize_free(serialized);
   if (!frame || !(frame = tstr_cat(frame, "\n"))) {
     tstr_free(frame);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = client->transport.write((const uint8_t *)frame, tstr_len(frame),
                                client->transport.user_data);
   tstr_free(frame);
-  if (rc != TURBO_OK) turbo_codex_set_error(client, "Codex transport write failed");
+  if (rc != SALTS_OK) turbo_codex_set_error(client, "Codex transport write failed");
   return rc;
 }
 
@@ -173,19 +173,19 @@ static int turbo_codex_send_notification(turbo_codex_client_t *client, const cha
   json_value_t *message = NULL;
   json_value_t *params_copy = NULL;
   int rc;
-  if (!client || !method || !method[0]) return TURBO_EINVAL;
+  if (!client || !method || !method[0]) return SALTS_EINVAL;
   message = turbo_json_create_object();
   params_copy = params ? turbo_json_clone(params) : turbo_json_create_object();
   if (!message || !params_copy) {
     turbo_runtime_json_destroy(message);
     turbo_runtime_json_destroy(params_copy);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   turbo_json_object_set_string(message, "method", method);
   if (!turbo_json_object_add_checked(message, "params", params_copy)) {
     turbo_runtime_json_destroy(params_copy);
     turbo_runtime_json_destroy(message);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = turbo_codex_send_json(client, message);
   turbo_runtime_json_destroy(message);
@@ -208,20 +208,20 @@ static int turbo_codex_send_server_response(turbo_codex_client_t *client,
     turbo_runtime_json_destroy(response);
     turbo_runtime_json_destroy(id_copy);
     turbo_runtime_json_destroy(result);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   if (!turbo_json_object_add_checked(response, "id", id_copy)) {
     turbo_runtime_json_destroy(id_copy);
     turbo_runtime_json_destroy(response);
     turbo_runtime_json_destroy(result);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   if (error_code) {
     error = turbo_json_create_object();
     if (!error) {
       turbo_runtime_json_destroy(response);
       turbo_runtime_json_destroy(result);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
     turbo_json_object_set_number(error, "code", (double)error_code);
     turbo_json_object_set_string(error, "message", error_message ? error_message : "Request failed");
@@ -229,7 +229,7 @@ static int turbo_codex_send_server_response(turbo_codex_client_t *client,
       turbo_runtime_json_destroy(error);
       turbo_runtime_json_destroy(response);
       turbo_runtime_json_destroy(result);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
     turbo_runtime_json_destroy(result);
   } else {
@@ -237,7 +237,7 @@ static int turbo_codex_send_server_response(turbo_codex_client_t *client,
     if (!result || !turbo_json_object_add_checked(response, "result", result)) {
       turbo_runtime_json_destroy(result);
       turbo_runtime_json_destroy(response);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
   }
   error_code = turbo_codex_send_json(client, response);
@@ -259,10 +259,10 @@ static int turbo_codex_handle_server_request(turbo_codex_client_t *client,
   const json_value_t *id = turbo_json_object_get(message, "id");
   json_value_t *result = NULL;
   int rc;
-  if (!id) return TURBO_EPROTO;
+  if (!id) return SALTS_EPROTO;
   if (client->server_request) {
     rc = client->server_request(method, params, &result, client->server_request_user_data);
-    if (rc == TURBO_OK && result) {
+    if (rc == SALTS_OK && result) {
       return turbo_codex_send_server_response(client, id, result, 0, NULL);
     }
     turbo_runtime_json_destroy(result);
@@ -271,7 +271,7 @@ static int turbo_codex_handle_server_request(turbo_codex_client_t *client,
   }
   if (turbo_codex_is_approval_method(method)) {
     result = turbo_json_create_object();
-    if (!result) return TURBO_ENOMEM;
+    if (!result) return SALTS_ENOMEM;
     turbo_json_object_set_string(result, "decision", "decline");
     return turbo_codex_send_server_response(client, id, result, 0, NULL);
   }
@@ -295,12 +295,12 @@ static void turbo_codex_capture_notification(turbo_codex_client_t *client, const
       size_t current_length = tstr_len(client->captured_text);
       size_t delta_length = strlen(delta);
       if (delta_length > client->max_message_bytes - current_length) {
-        client->capture_error = TURBO_EMSGSIZE;
+        client->capture_error = SALTS_EMSGSIZE;
         turbo_codex_set_error(client, "Codex agent message exceeds max_message_bytes");
       } else {
         tstr_t appended = tstr_cat_len(client->captured_text, delta, delta_length);
         if (!appended) {
-          client->capture_error = TURBO_ENOMEM;
+          client->capture_error = SALTS_ENOMEM;
           turbo_codex_set_error(client, "failed to capture Codex agent message");
         } else {
           client->captured_text = appended;
@@ -319,7 +319,7 @@ static void turbo_codex_capture_notification(turbo_codex_client_t *client, const
     turbo_runtime_json_destroy(client->completed_turn);
     client->completed_turn = turbo_json_clone(turn);
     if (!client->completed_turn) {
-      client->capture_error = TURBO_ENOMEM;
+      client->capture_error = SALTS_ENOMEM;
       turbo_codex_set_error(client, "failed to capture completed Codex turn");
     }
   }
@@ -335,7 +335,7 @@ static int turbo_codex_dispatch_incoming(turbo_codex_client_t *client, json_valu
   const json_value_t *result;
   const char *error_message;
   if (!client || !message || turbo_json_type(message) != TURBO_JSON_OBJECT || !out_matched) {
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   *out_matched = 0;
   method = turbo_json_get_string(message, "method");
@@ -347,30 +347,30 @@ static int turbo_codex_dispatch_incoming(turbo_codex_client_t *client, json_valu
     }
     turbo_codex_capture_notification(client, method, params);
     if (client->event) client->event(method, params, client->event_user_data);
-    return TURBO_OK;
+    return SALTS_OK;
   }
   if (!expected_id || !message_id || strcmp(expected_id, message_id)) {
     turbo_codex_set_error(client, "unexpected Codex response id");
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   error = turbo_json_object_get(message, "error");
   if (error) {
     error_message = turbo_json_get_string(error, "message");
     turbo_codex_set_error(client, error_message ? error_message : "Codex request failed");
     *out_matched = 1;
-    return TURBO_EIO;
+    return SALTS_EIO;
   }
   result = turbo_json_object_get(message, "result");
   if (!result) {
     turbo_codex_set_error(client, "Codex response contains neither result nor error");
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   if (out_result) {
     *out_result = turbo_json_clone(result);
-    if (!*out_result) return TURBO_ENOMEM;
+    if (!*out_result) return SALTS_ENOMEM;
   }
   *out_matched = 1;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_codex_read_message(turbo_codex_client_t *client, uint64_t timeout_ms,
@@ -378,28 +378,28 @@ static int turbo_codex_read_message(turbo_codex_client_t *client, uint64_t timeo
   char *line = NULL;
   size_t length;
   int rc;
-  if (!client || !out_message) return TURBO_EINVAL;
+  if (!client || !out_message) return SALTS_EINVAL;
   *out_message = NULL;
   rc = client->transport.read(timeout_ms, &line, client->transport.user_data);
-  if (rc != TURBO_OK) {
-    if (rc != TURBO_ETIMEDOUT) turbo_codex_set_error(client, "Codex transport read failed");
+  if (rc != SALTS_OK) {
+    if (rc != SALTS_ETIMEDOUT) turbo_codex_set_error(client, "Codex transport read failed");
     free(line);
     return rc;
   }
-  if (!line) return TURBO_EPROTO;
+  if (!line) return SALTS_EPROTO;
   length = strlen(line);
   if (!length || length > client->max_message_bytes || strchr(line, '\r') || strchr(line, '\n')) {
     free(line);
     turbo_codex_set_error(client, "invalid or oversized Codex JSONL frame");
-    return length > client->max_message_bytes ? TURBO_EMSGSIZE : TURBO_EPROTO;
+    return length > client->max_message_bytes ? SALTS_EMSGSIZE : SALTS_EPROTO;
   }
   if (turbo_parse_json((const uint8_t *)line, length, out_message) != 0 || !*out_message) {
     free(line);
     turbo_codex_set_error(client, "invalid JSON from Codex app-server");
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   free(line);
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_codex_client_request(turbo_codex_client_t *client, const char *method,
@@ -415,31 +415,31 @@ int turbo_codex_client_request(turbo_codex_client_t *client, const char *method,
   if (out_result) *out_result = NULL;
   if (!client || !method || !method[0] || client->closed ||
       (params && turbo_json_type(params) != TURBO_JSON_OBJECT)) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
-  if (!client->initialized && strcmp(method, "initialize")) return TURBO_EBUSY;
-  if (client->next_request_id == UINT64_MAX) return TURBO_ERANGE;
+  if (!client->initialized && strcmp(method, "initialize")) return SALTS_EBUSY;
+  if (client->next_request_id == UINT64_MAX) return SALTS_ERANGE;
   if (snprintf(request_id, sizeof(request_id), "turbo-%llu",
                (unsigned long long)client->next_request_id++) <= 0) {
-    return TURBO_EIO;
+    return SALTS_EIO;
   }
   request = turbo_json_create_object();
   params_copy = params ? turbo_json_clone(params) : turbo_json_create_object();
   if (!request || !params_copy) {
     turbo_runtime_json_destroy(request);
     turbo_runtime_json_destroy(params_copy);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   turbo_json_object_set_string(request, "method", method);
   turbo_json_object_set_string(request, "id", request_id);
   if (!turbo_json_object_add_checked(request, "params", params_copy)) {
     turbo_runtime_json_destroy(params_copy);
     turbo_runtime_json_destroy(request);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = turbo_codex_send_json(client, request);
   turbo_runtime_json_destroy(request);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   if (timeout_ms != UINT64_MAX) {
     uint64_t now = turbo_monotonic_ms();
     deadline = timeout_ms > UINT64_MAX - now ? UINT64_MAX : now + timeout_ms;
@@ -448,26 +448,26 @@ int turbo_codex_client_request(turbo_codex_client_t *client, const char *method,
     uint64_t remaining = UINT64_MAX;
     if (timeout_ms != UINT64_MAX) {
       uint64_t now = turbo_monotonic_ms();
-      if (now >= deadline) return TURBO_ETIMEDOUT;
+      if (now >= deadline) return SALTS_ETIMEDOUT;
       remaining = deadline - now;
     }
     rc = turbo_codex_read_message(client, remaining, &message);
-    if (rc != TURBO_OK) return rc;
+    if (rc != SALTS_OK) return rc;
     rc = turbo_codex_dispatch_incoming(client, message, request_id, out_result, &matched);
     turbo_runtime_json_destroy(message);
     message = NULL;
-    if (rc != TURBO_OK) return rc;
+    if (rc != SALTS_OK) return rc;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_codex_client_pump(turbo_codex_client_t *client, uint64_t timeout_ms) {
   json_value_t *message = NULL;
   int matched = 0;
   int rc;
-  if (!client || !client->initialized || client->closed) return TURBO_EINVAL;
+  if (!client || !client->initialized || client->closed) return SALTS_EINVAL;
   rc = turbo_codex_read_message(client, timeout_ms, &message);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   rc = turbo_codex_dispatch_incoming(client, message, NULL, NULL, &matched);
   turbo_runtime_json_destroy(message);
   return rc;
@@ -481,13 +481,13 @@ int turbo_codex_client_initialize(turbo_codex_client_t *client,
   json_value_t *initialized_params = NULL;
   int rc;
   if (out_server_info) *out_server_info = NULL;
-  if (!client || client->closed) return TURBO_EINVAL;
-  if (client->initialized) return TURBO_EALREADY;
+  if (!client || client->closed) return SALTS_EINVAL;
+  if (client->initialized) return SALTS_EALREADY;
   params = turbo_json_create_object();
   client_info = turbo_json_create_object();
   capabilities = turbo_json_create_object();
   if (!params || !client_info || !capabilities) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   turbo_json_object_set_string(client_info, "name", client->client_name);
@@ -495,27 +495,27 @@ int turbo_codex_client_initialize(turbo_codex_client_t *client,
   turbo_json_object_set_string(client_info, "version", client->client_version);
   turbo_json_object_set_bool(capabilities, "experimentalApi", client->experimental_api != 0);
   if (!turbo_json_object_add_checked(params, "clientInfo", client_info)) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   client_info = NULL;
   if (!turbo_json_object_add_checked(params, "capabilities", capabilities)) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   capabilities = NULL;
   rc = turbo_codex_client_request(client, "initialize", params,
                                   client->initialize_timeout_ms, out_server_info);
-  if (rc != TURBO_OK) goto cleanup;
+  if (rc != SALTS_OK) goto cleanup;
   client->initialized = 1;
   initialized_params = turbo_json_create_object();
   if (!initialized_params) {
     client->initialized = 0;
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   rc = turbo_codex_send_notification(client, "initialized", initialized_params);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     client->initialized = 0;
     if (out_server_info) {
       turbo_runtime_json_destroy(*out_server_info);
@@ -551,10 +551,10 @@ static uint64_t turbo_codex_remaining(uint64_t deadline) {
 
 static int turbo_codex_turn_status(const json_value_t *turn) {
   const char *status = turn ? turbo_json_get_string(turn, "status") : NULL;
-  if (!status) return TURBO_EPROTO;
-  if (!strcmp(status, "completed")) return TURBO_OK;
-  if (!strcmp(status, "interrupted")) return TURBO_ECANCELED;
-  return TURBO_EIO;
+  if (!status) return SALTS_EPROTO;
+  if (!strcmp(status, "completed")) return SALTS_OK;
+  if (!strcmp(status, "interrupted")) return SALTS_ECANCELED;
+  return SALTS_EIO;
 }
 
 int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt,
@@ -575,12 +575,12 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
   tstr_t owned_turn_id = NULL;
   uint64_t deadline;
   uint64_t remaining;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
   if (out_thread_id) *out_thread_id = NULL;
   if (out_turn_id) *out_turn_id = NULL;
   if (out_text) *out_text = NULL;
   if (out_turn) *out_turn = NULL;
-  if (!client || !prompt || !prompt[0]) return TURBO_EINVAL;
+  if (!client || !prompt || !prompt[0]) return SALTS_EINVAL;
   if (!run_options) {
     turbo_codex_run_options_init(&defaults);
     run_options = &defaults;
@@ -588,11 +588,11 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
   if (run_options->struct_size < sizeof(*run_options) ||
       run_options->abi_version != TURBO_CODEX_BRIDGE_ABI_VERSION ||
       !run_options->timeout_ms) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   if (!client->initialized) {
     rc = turbo_codex_client_initialize(client, NULL);
-    if (rc != TURBO_OK) return rc;
+    if (rc != SALTS_OK) return rc;
   }
   if (run_options->timeout_ms == UINT64_MAX) {
     deadline = UINT64_MAX;
@@ -603,12 +603,12 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
                    : now + run_options->timeout_ms;
   }
   params = turbo_json_create_object();
-  if (!params) return TURBO_ENOMEM;
+  if (!params) return SALTS_ENOMEM;
   if (run_options->thread_id && run_options->thread_id[0]) {
     turbo_json_object_set_string(params, "threadId", run_options->thread_id);
     remaining = turbo_codex_remaining(deadline);
     if (!remaining) {
-      rc = TURBO_ETIMEDOUT;
+      rc = SALTS_ETIMEDOUT;
       goto cleanup;
     }
     rc = turbo_codex_client_request(client, "thread/resume", params, remaining, &result);
@@ -628,22 +628,22 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
     turbo_json_object_set_bool(params, "ephemeral", run_options->ephemeral_thread != 0);
     remaining = turbo_codex_remaining(deadline);
     if (!remaining) {
-      rc = TURBO_ETIMEDOUT;
+      rc = SALTS_ETIMEDOUT;
       goto cleanup;
     }
     rc = turbo_codex_client_request(client, "thread/start", params, remaining, &result);
   }
-  if (rc != TURBO_OK) goto cleanup;
+  if (rc != SALTS_OK) goto cleanup;
   thread = turbo_json_object_get(result, "thread");
   thread_id = thread ? turbo_json_get_string(thread, "id") : NULL;
   if (!thread_id || !thread_id[0]) {
-    rc = TURBO_EPROTO;
+    rc = SALTS_EPROTO;
     turbo_codex_set_error(client, "Codex thread response has no thread id");
     goto cleanup;
   }
   owned_thread_id = tstr_dup(thread_id);
   if (!owned_thread_id) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   turbo_runtime_json_destroy(params);
@@ -652,19 +652,19 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
   input = turbo_json_create_array();
   input_item = turbo_json_create_object();
   if (!params || !input || !input_item) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   turbo_json_object_set_string(input_item, "type", "text");
   turbo_json_object_set_string(input_item, "text", prompt);
   if (!turbo_json_array_add_checked(input, input_item)) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   input_item = NULL;
   turbo_json_object_set_string(params, "threadId", owned_thread_id);
   if (!turbo_json_object_add_checked(params, "input", input)) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   input = NULL;
@@ -675,33 +675,33 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
   tstr_clear(client->captured_text);
   turbo_runtime_json_destroy(client->completed_turn);
   client->completed_turn = NULL;
-  client->capture_error = TURBO_OK;
+  client->capture_error = SALTS_OK;
   if (!client->capture_thread_id) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   remaining = turbo_codex_remaining(deadline);
   if (!remaining) {
-    rc = TURBO_ETIMEDOUT;
+    rc = SALTS_ETIMEDOUT;
     goto cleanup;
   }
   rc = turbo_codex_client_request(client, "turn/start", params, remaining, &result);
-  if (rc != TURBO_OK) goto cleanup;
-  if (client->capture_error != TURBO_OK) {
+  if (rc != SALTS_OK) goto cleanup;
+  if (client->capture_error != SALTS_OK) {
     rc = client->capture_error;
     goto cleanup;
   }
   turn = turbo_json_object_get(result, "turn");
   turn_id = turn ? turbo_json_get_string(turn, "id") : NULL;
   if (!turn_id || !turn_id[0]) {
-    rc = TURBO_EPROTO;
+    rc = SALTS_EPROTO;
     turbo_codex_set_error(client, "Codex turn response has no turn id");
     goto cleanup;
   }
   owned_turn_id = tstr_dup(turn_id);
   client->capture_turn_id = tstr_dup(turn_id);
   if (!owned_turn_id || !client->capture_turn_id) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   if (client->completed_turn) {
@@ -714,37 +714,37 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
   while (!client->completed_turn) {
     remaining = turbo_codex_remaining(deadline);
     if (!remaining) {
-      rc = TURBO_ETIMEDOUT;
+      rc = SALTS_ETIMEDOUT;
       goto cleanup;
     }
     rc = turbo_codex_client_pump(client, remaining);
-    if (rc != TURBO_OK) goto cleanup;
-    if (client->capture_error != TURBO_OK) {
+    if (rc != SALTS_OK) goto cleanup;
+    if (client->capture_error != SALTS_OK) {
       rc = client->capture_error;
       goto cleanup;
     }
   }
   rc = turbo_codex_turn_status(client->completed_turn);
-  if (rc != TURBO_OK) turbo_codex_set_error(client, "Codex turn did not complete successfully");
+  if (rc != SALTS_OK) turbo_codex_set_error(client, "Codex turn did not complete successfully");
   if (out_thread_id) {
     *out_thread_id = turbo_codex_strdup(owned_thread_id);
-    if (!*out_thread_id) rc = TURBO_ENOMEM;
+    if (!*out_thread_id) rc = SALTS_ENOMEM;
   }
-  if (rc == TURBO_OK && out_turn_id) {
+  if (rc == SALTS_OK && out_turn_id) {
     *out_turn_id = turbo_codex_strdup(owned_turn_id);
-    if (!*out_turn_id) rc = TURBO_ENOMEM;
+    if (!*out_turn_id) rc = SALTS_ENOMEM;
   }
-  if (rc == TURBO_OK && out_text) {
+  if (rc == SALTS_OK && out_text) {
     *out_text = turbo_codex_strdup(client->captured_text ? client->captured_text : "");
-    if (!*out_text) rc = TURBO_ENOMEM;
+    if (!*out_text) rc = SALTS_ENOMEM;
   }
-  if (rc == TURBO_OK && out_turn) {
+  if (rc == SALTS_OK && out_turn) {
     *out_turn = turbo_json_clone(client->completed_turn);
-    if (!*out_turn) rc = TURBO_ENOMEM;
+    if (!*out_turn) rc = SALTS_ENOMEM;
   }
 
 cleanup:
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     if (out_thread_id) {
       free(*out_thread_id);
       *out_thread_id = NULL;

@@ -100,7 +100,7 @@ static int cancel_after_write_json_value_node(turbo_graph_exec_ctx_t *ctx,
     return -1;
   }
   return turbo_cancel_source_cancel(payload->source, TURBO_CANCEL_USER) ==
-                 TURBO_OK
+                 SALTS_OK
              ? 0
              : -1;
 }
@@ -395,10 +395,10 @@ spec("turbo graph runtime") {
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(turbo_graph_set_entry(graph, "start"),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_cancel_source_create(NULL, &source), TURBO_OK);
-      check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
+      check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+      check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
       check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER),
-                   TURBO_OK);
+                   SALTS_OK);
 
       options.checkpoint_cb = capture_checkpoint;
       options.checkpoint_user_data = &capture;
@@ -438,8 +438,8 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_cancel_source_create(NULL, &source), TURBO_OK);
-      check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
+      check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+      check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
       start.source = source;
       start.value = "start";
 
@@ -507,8 +507,8 @@ spec("turbo graph runtime") {
                    TURBO_GRAPH_EXEC_OK);
       check_int_eq(turbo_graph_set_entry(graph, "start"),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_cancel_source_create(&config, &source), TURBO_OK);
-      check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
+      check_int_eq(turbo_cancel_source_create(&config, &source), SALTS_OK);
+      check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
 
       check_int_eq(turbo_graph_run_json_value_stream_controlled(
                        graph, state, NULL, token, NULL, NULL, &result,

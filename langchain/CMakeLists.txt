@@ -24,7 +24,6 @@ target_compile_definitions(langchain PRIVATE SHARED_CXX)
 target_include_directories(
   langchain
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-         $<BUILD_INTERFACE:${TURBOHTTP_ROOT}/include/iris>
          $<INSTALL_INTERFACE:include>)
 target_include_directories(langchain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
@@ -35,9 +34,9 @@ target_link_libraries(
          TurboAgent::RuntimeData
          TurboAgent::RuntimeTools
          Salts::JsonParser
-         TurboHttp::HttpClient
-         TurboHttp::TurboHttp
-         TurboHttp::Iris
+         Salts::UriParser
+         CHttp::Client
+         CHttp::Server
          Salts::Core
          Salts::Mustache
          unofficial::sqlite3::sqlite3

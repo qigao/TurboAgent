@@ -6,7 +6,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <turbo_str.h>
+#include <tstr.h>
 #include <salts/thread.h>
 
 typedef struct harness_server_factory_s {

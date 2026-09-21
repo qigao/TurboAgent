@@ -199,6 +199,7 @@ jobs:
         run: |
           set -euxo pipefail
           cmake --preset linux-dev-user \
+            -DCMAKE_PREFIX_PATH="/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/praktor/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/praktor/vcpkg_installed/x64-linux" \
             -DENABLE_SCRIPT_ENGINE=ON \
             -DENABLE_TESTS=OFF \
             -DENABLE_SANITIZER_ADDRESS=OFF

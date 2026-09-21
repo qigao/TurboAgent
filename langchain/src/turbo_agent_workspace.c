@@ -26,25 +26,25 @@
 #define TURBO_AGENT_WORKSPACE_ERROR_BYTES 256u
 
 typedef struct turbo_agent_skill_s {
-  tstr_t name;
-  tstr_t description;
-  tstr_t path;
-  tstr_t body;
+  tstr name;
+  tstr description;
+  tstr path;
+  tstr body;
   turbo_vec_t triggers;
   turbo_vec_t tools;
   turbo_vec_t capabilities;
 } turbo_agent_skill_t;
 
 typedef struct turbo_agent_workspace_tool_capability_entry_s {
-  tstr_t tool_name;
+  tstr tool_name;
   turbo_agent_policy_capability_t capability;
 } turbo_agent_workspace_tool_capability_entry_t;
 
 struct turbo_agent_workspace_s {
-  tstr_t workspace_root;
-  tstr_t working_directory;
-  tstr_t skills_directory;
-  tstr_t agents_filename;
+  tstr workspace_root;
+  tstr working_directory;
+  tstr skills_directory;
+  tstr agents_filename;
   turbo_vec_t always_tools;
   turbo_vec_t tool_capabilities;
   turbo_agent_policy_t policy;
@@ -55,14 +55,14 @@ struct turbo_agent_workspace_s {
   size_t max_projected_tools;
   size_t max_scan_depth;
   int skills_directory_explicit;
-  tstr_t agent_instructions;
+  tstr agent_instructions;
   turbo_vec_t skills;
   turbo_agent_workspace_status_t last_status;
   char last_error[TURBO_AGENT_WORKSPACE_ERROR_BYTES];
 };
 
 struct turbo_agent_workspace_selection_s {
-  tstr_t instructions;
+  tstr instructions;
   turbo_tool_registry_t *tools;
   turbo_vec_t skill_names;
   turbo_vec_t tool_names;
@@ -211,15 +211,15 @@ static int turbo_agent_workspace_filename_valid(const char *name) {
          !strchr(name, ':') && strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
 }
 
-static tstr_t turbo_agent_workspace_path_join(const char *base, const char *relative) {
-  tstr_t result;
+static tstr turbo_agent_workspace_path_join(const char *base, const char *relative) {
+  tstr result;
   if (!base) return NULL;
   result = tstr_dup(base);
   if (!result) return NULL;
   if (relative && relative[0] != '\0') {
     size_t len = tstr_len(result);
     if (len > 0 && result[len - 1] != '/' && result[len - 1] != '\\') {
-      tstr_t grown = tstr_cat(result, "/");
+      tstr grown = tstr_cat(result, "/");
       if (!grown) {
         tstr_free(result);
         return NULL;
@@ -227,7 +227,7 @@ static tstr_t turbo_agent_workspace_path_join(const char *base, const char *rela
       result = grown;
     }
     {
-      tstr_t grown = tstr_cat(result, relative);
+      tstr grown = tstr_cat(result, relative);
       if (!grown) {
         tstr_free(result);
         return NULL;
@@ -239,10 +239,10 @@ static tstr_t turbo_agent_workspace_path_join(const char *base, const char *rela
 }
 
 static turbo_agent_workspace_status_t
-turbo_agent_workspace_append_bounded(turbo_agent_workspace_t *workspace, tstr_t *target,
+turbo_agent_workspace_append_bounded(turbo_agent_workspace_t *workspace, tstr *target,
                                      const char *text, size_t len, size_t limit,
                                      const char *operation) {
-  tstr_t grown;
+  tstr grown;
   size_t current;
   if (!target || (!text && len > 0)) return TURBO_AGENT_WORKSPACE_INVALID_ARGUMENT;
   current = *target ? tstr_len(*target) : 0;
@@ -272,7 +272,7 @@ turbo_agent_workspace_append_bounded(turbo_agent_workspace_t *workspace, tstr_t 
 
 static turbo_agent_workspace_status_t
 turbo_agent_workspace_read_file(turbo_agent_workspace_t *workspace, const char *path, size_t limit,
-                                tstr_t *out_text) {
+                                tstr *out_text) {
   turbo_fs_stat_t metadata;
   turbo_fs_buf_t buffer = {0};
   int rc;
@@ -306,10 +306,10 @@ turbo_agent_workspace_read_file(turbo_agent_workspace_t *workspace, const char *
 }
 
 static turbo_agent_workspace_status_t
-turbo_agent_workspace_append_agents_file(turbo_agent_workspace_t *workspace, tstr_t *instructions,
+turbo_agent_workspace_append_agents_file(turbo_agent_workspace_t *workspace, tstr *instructions,
                                          const char *directory, const char *scope) {
-  tstr_t path = turbo_agent_workspace_path_join(directory, workspace->agents_filename);
-  tstr_t content = NULL;
+  tstr path = turbo_agent_workspace_path_join(directory, workspace->agents_filename);
+  tstr content = NULL;
   turbo_fs_stat_t metadata;
   turbo_agent_workspace_status_t status;
   if (!path) return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
@@ -353,8 +353,8 @@ turbo_agent_workspace_append_agents_file(turbo_agent_workspace_t *workspace, tst
 }
 
 static turbo_agent_workspace_status_t
-turbo_agent_workspace_load_agents(turbo_agent_workspace_t *workspace, tstr_t *out_instructions) {
-  tstr_t current;
+turbo_agent_workspace_load_agents(turbo_agent_workspace_t *workspace, tstr *out_instructions) {
+  tstr current;
   const char *cursor;
   const char *component;
   turbo_agent_workspace_status_t status;
@@ -376,9 +376,9 @@ turbo_agent_workspace_load_agents(turbo_agent_workspace_t *workspace, tstr_t *ou
     if (*cursor == '/' || *cursor == '\\' || *cursor == '\0') {
       size_t len = (size_t)(cursor - component);
       turbo_fs_stat_t metadata;
-      tstr_t next = tstr_dup_len(component, len);
-      tstr_t scope;
-      tstr_t grown;
+      tstr next = tstr_dup_len(component, len);
+      tstr scope;
+      tstr grown;
       if (!next) {
         tstr_free(current);
         return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
@@ -445,7 +445,7 @@ turbo_agent_workspace_scan_skill_paths(turbo_agent_workspace_t *workspace, const
     return TURBO_AGENT_WORKSPACE_IO_ERROR;
   }
   while ((read_status = turbo_fs_readdir(dir, &entry)) > 0) {
-    tstr_t path = turbo_agent_workspace_path_join(directory, entry.name);
+    tstr path = turbo_agent_workspace_path_join(directory, entry.name);
     turbo_fs_stat_t metadata;
     turbo_agent_workspace_status_t status = TURBO_AGENT_WORKSPACE_OK;
     if (!path) {
@@ -491,7 +491,7 @@ static int turbo_agent_workspace_path_compare(const void *left, const void *righ
   return strcmp(*left_path, *right_path);
 }
 
-static tstr_t turbo_agent_workspace_skill_fallback_name(const char *path) {
+static tstr turbo_agent_workspace_skill_fallback_name(const char *path) {
   char basename[TURBO_FS_MAX_PATH];
   char dirname[TURBO_FS_MAX_PATH];
   size_t len;
@@ -554,7 +554,7 @@ static int turbo_agent_workspace_copy_string_array(const json_value_t *metadata,
 static turbo_agent_workspace_status_t
 turbo_agent_workspace_parse_skill(turbo_agent_workspace_t *workspace, const char *path,
                                   turbo_agent_skill_t *out_skill) {
-  tstr_t file = NULL;
+  tstr file = NULL;
   size_t yaml_begin = 0;
   size_t yaml_len = 0;
   size_t body_begin = 0;
@@ -648,7 +648,7 @@ cleanup:
 static turbo_agent_workspace_status_t
 turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, turbo_vec_t *out_skills) {
   turbo_vec_t paths;
-  tstr_t root;
+  tstr root;
   turbo_fs_stat_t metadata;
   turbo_agent_workspace_status_t status;
   size_t index;
@@ -723,8 +723,8 @@ cleanup:
 
 static int turbo_agent_workspace_skill_matches(const turbo_agent_skill_t *skill, const char *task) {
   size_t index;
-  tstr_t marker;
-  tstr_t reference;
+  tstr marker;
+  tstr reference;
   char basename[TURBO_FS_MAX_PATH];
   if (!skill || !task || task[0] == '\0') return 0;
   marker = tstr_dup("$");
@@ -747,7 +747,7 @@ static int turbo_agent_workspace_skill_matches(const turbo_agent_skill_t *skill,
   }
   for (index = 0; index < turbo_vec_size(&skill->triggers); ++index) {
     char *const *trigger = (char *const *)turbo_vec_at((turbo_vec_t *)&skill->triggers, index);
-    tstr_t normalized;
+    tstr normalized;
     size_t pos;
     if (!trigger || !*trigger || strlen(*trigger) < 3) continue;
     if (turbo_agent_workspace_ascii_contains_ci(task, *trigger)) return 1;
@@ -1046,7 +1046,7 @@ void turbo_agent_workspace_destroy(turbo_agent_workspace_t *workspace) {
 }
 
 turbo_agent_workspace_status_t turbo_agent_workspace_refresh(turbo_agent_workspace_t *workspace) {
-  tstr_t instructions = NULL;
+  tstr instructions = NULL;
   turbo_vec_t skills;
   turbo_agent_workspace_status_t status;
   memset(&skills, 0, sizeof(skills));

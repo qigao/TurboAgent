@@ -113,6 +113,7 @@ static void turbo_agent_free_strings(turbo_agent_t *agent) {
   }
 
   tstr_free(agent->api_key);
+  tstr_free(agent->http_authorization);
   tstr_free(agent->model);
   tstr_free(agent->base_url);
   tstr_free(agent->endpoint_path);

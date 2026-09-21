@@ -1,8 +1,7 @@
 #ifndef TURBO_AGENT_EXECUTION_H
 #define TURBO_AGENT_EXECUTION_H
 
-#include <platform.h>
-#include <turbo_error.h>
+#include <turbo_agent_api.h>
 #include <turbo_thread.h>
 
 #include "turbo_agent_runtime.h"

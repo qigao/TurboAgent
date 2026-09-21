@@ -1,5 +1,5 @@
 #include "tinytest.h"
-#include "turbo_fs.h"
+#include <salts_fs.h>
 #include "turbo_wasm_tool_pack.h"
 
 #include <stdlib.h>
@@ -16,9 +16,9 @@
 
 static turbo_wasm_policy_t *test_pack_policy_create(const char *module_path) {
   turbo_wasm_policy_t *policy = turbo_wasm_policy_create();
-  char module_root[TURBO_FS_MAX_PATH];
+  char module_root[SALTS_FS_MAX_PATH];
 
-  if (!policy || turbo_fs_path_dirname(module_path, module_root, sizeof(module_root)) != 0 ||
+  if (!policy || salts_fs_path_dirname(module_path, module_root, sizeof(module_root)) != 0 ||
       turbo_wasm_policy_set_capabilities(policy, TURBO_WASM_CAP_CORE | TURBO_WASM_CAP_APP) !=
           TURBO_WASM_OK ||
       turbo_wasm_policy_set_module_root(policy, module_root) != TURBO_WASM_OK) {
@@ -32,7 +32,7 @@ static int test_pack_module_configure(turbo_wasm_tool_pack_module_config_t *conf
                                       const char *module_path, turbo_wasm_policy_t *policy,
                                       char *module_name, size_t module_name_size) {
   if (!config || !module_path || !policy || !module_name || !module_name_size ||
-      turbo_fs_path_basename(module_path, module_name, module_name_size) != 0) {
+      salts_fs_path_basename(module_path, module_name, module_name_size) != 0) {
     return -1;
   }
   turbo_wasm_tool_pack_module_config_init(config);
@@ -66,7 +66,7 @@ spec("TurboWasm tool pack") {
     turbo_tool_execution_policy_t observed = {0};
     const char *const *required_capabilities = NULL;
     size_t required_capability_count = 0;
-    char module_name[TURBO_FS_MAX_PATH];
+    char module_name[SALTS_FS_MAX_PATH];
     char *output = NULL;
 
     turbo_wasm_tool_pack_config_init(&pack_config);
@@ -115,8 +115,8 @@ spec("TurboWasm tool pack") {
     turbo_wasm_tool_pack_t *module_limited_pack;
     turbo_wasm_tool_pack_t *tool_limited_pack;
     turbo_wasm_policy_t *policy = test_pack_policy_create(LLM_SANDBOX_WASM_TOOL_WASM_PATH);
-    char first_name[TURBO_FS_MAX_PATH];
-    char second_name[TURBO_FS_MAX_PATH];
+    char first_name[SALTS_FS_MAX_PATH];
+    char second_name[SALTS_FS_MAX_PATH];
 
     check_not_null(policy);
     check_int_eq(test_pack_module_configure(&first_module, LLM_SANDBOX_WASM_TOOL_WASM_PATH, policy,
@@ -156,7 +156,7 @@ spec("TurboWasm tool pack") {
     turbo_wasm_tool_pack_module_config_t module_config;
     turbo_wasm_tool_pack_t *pack;
     turbo_wasm_policy_t *policy = test_pack_policy_create(LLM_SANDBOX_WASM_ZERO_TOOLS_WASM_PATH);
-    char module_name[TURBO_FS_MAX_PATH];
+    char module_name[SALTS_FS_MAX_PATH];
 
     turbo_wasm_tool_pack_config_init(&pack_config);
     pack = turbo_wasm_tool_pack_create(&pack_config);

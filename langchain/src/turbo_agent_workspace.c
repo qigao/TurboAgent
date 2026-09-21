@@ -2,7 +2,6 @@
 
 #include "turbo_agent_lifecycle_internal.h"
 
-#include <turbo_error.h>
 #include <salts_fs.h>
 #include <json_parser.h>
 #include <cyaml.h>

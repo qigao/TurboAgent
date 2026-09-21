@@ -1,7 +1,7 @@
 #ifndef TURBO_AGENT_RUNTIME_REMOTE_CLIENT_H
 #define TURBO_AGENT_RUNTIME_REMOTE_CLIENT_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include <http_client/http.h>
 #include "turbo_agent_memory_store.h"

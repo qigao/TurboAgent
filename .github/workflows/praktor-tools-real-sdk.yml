@@ -218,6 +218,8 @@ jobs:
             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent" \
             -DCMAKE_INSTALL_PREFIX=/opt/turboagent/debug \
             -DCMAKE_PREFIX_PATH="/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug" \
+            -DSALTS_ROOT=/opt/salts/debug \
+            -DSALTS_UTILS_ROOT=/opt/salts-utils/debug \
             -DPRAKTOR_ROOT=/opt/praktor/debug \
             -DENABLE_PRAKTOR_TOOLS=ON \
             -DENABLE_MCP_TOOLS=OFF \

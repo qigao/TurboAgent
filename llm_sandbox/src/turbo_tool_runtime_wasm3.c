@@ -1,6 +1,6 @@
 #include "turbo_tool_runtime_wasm3.h"
 
-#include "turbo_fs.h"
+#include <salts_fs.h>
 
 #include <string.h>
 
@@ -10,13 +10,13 @@ turbo_tool_runtime_wasm3_create(const turbo_tool_runtime_wasm3_config_t *config)
   turbo_wasm_execution_limits_t limits;
   turbo_wasm_policy_t *policy = NULL;
   turbo_tool_runtime_t *runtime = NULL;
-  char module_root[TURBO_FS_MAX_PATH];
-  char module_name[TURBO_FS_MAX_PATH];
+  char module_root[SALTS_FS_MAX_PATH];
+  char module_name[SALTS_FS_MAX_PATH];
 
   if (!config || !config->module_path || !config->module_path[0] || config->enable_turbonet_host ||
       config->enable_http_host || config->enable_redis_host ||
-      turbo_fs_path_dirname(config->module_path, module_root, sizeof(module_root)) != 0 ||
-      turbo_fs_path_basename(config->module_path, module_name, sizeof(module_name)) != 0)
+      salts_fs_path_dirname(config->module_path, module_root, sizeof(module_root)) != 0 ||
+      salts_fs_path_basename(config->module_path, module_name, sizeof(module_name)) != 0)
     return NULL;
   policy = turbo_wasm_policy_create();
   if (!policy ||

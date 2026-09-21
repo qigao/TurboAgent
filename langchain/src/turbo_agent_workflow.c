@@ -2,7 +2,7 @@
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
 #include "turbo_agent_state_core_internal.h"
 
-#include <turbo_str.h>
+#include <tstr.h>
 
 static const char turbo_agent_planner_tool_node_suffix[] = ".tools";
 

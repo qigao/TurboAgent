@@ -1,8 +1,7 @@
 #ifndef TURBO_AGENT_CONTEXT_H
 #define TURBO_AGENT_CONTEXT_H
 
-#include <platform.h>
-#include <turbo_error.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_runtime_json.h"
 

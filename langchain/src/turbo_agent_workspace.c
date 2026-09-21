@@ -91,7 +91,7 @@ static void turbo_agent_workspace_set_error(turbo_agent_workspace_t *workspace,
 }
 
 static int turbo_agent_workspace_vec_init(turbo_vec_t *vec, size_t elem_size) {
-  return turbo_vec_init(vec, elem_size) == TURBO_OK ? 0 : -1;
+  return turbo_vec_init(vec, elem_size) == SALTS_OK ? 0 : -1;
 }
 
 static void turbo_agent_workspace_string_vec_destroy(turbo_vec_t *vec) {
@@ -120,7 +120,7 @@ static int turbo_agent_workspace_string_vec_push(turbo_vec_t *vec, const char *t
   if (unique && turbo_agent_workspace_string_vec_contains(vec, text)) return 0;
   copy = turbo_agent_workspace_strdup(text);
   if (!copy) return -1;
-  if (turbo_vec_push(vec, &copy) != TURBO_OK) {
+  if (turbo_vec_push(vec, &copy) != SALTS_OK) {
     free(copy);
     return -1;
   }
@@ -708,7 +708,7 @@ turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, turbo_vec_
         goto cleanup;
       }
     }
-    if (turbo_vec_push(out_skills, &skill) != TURBO_OK) {
+    if (turbo_vec_push(out_skills, &skill) != SALTS_OK) {
       turbo_agent_skill_destroy(&skill);
       status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
       goto cleanup;
@@ -1017,7 +1017,7 @@ turbo_agent_workspace_create(const turbo_agent_workspace_config_t *config,
     }
     entry.tool_name = tstr_dup(source->tool_name);
     entry.capability = source->capability;
-    if (!entry.tool_name || turbo_vec_push(&workspace->tool_capabilities, &entry) != TURBO_OK) {
+    if (!entry.tool_name || turbo_vec_push(&workspace->tool_capabilities, &entry) != SALTS_OK) {
       tstr_free(entry.tool_name);
       turbo_agent_workspace_destroy(workspace);
       return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
@@ -1113,7 +1113,7 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
       status = TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED;
       goto cleanup;
     }
-    if (turbo_vec_push(&selected, &skill) != TURBO_OK ||
+    if (turbo_vec_push(&selected, &skill) != SALTS_OK ||
         turbo_agent_workspace_string_vec_push(&selection->skill_names, skill->name, 1) != 0) {
       status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
       goto cleanup;

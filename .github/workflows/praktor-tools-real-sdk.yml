@@ -217,7 +217,7 @@ jobs:
             -DVCPKG_MANIFEST_MODE=ON \
             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent" \
             -DCMAKE_INSTALL_PREFIX=/opt/turboagent/debug \
-            -DCMAKE_PREFIX_PATH="/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux" \
+            -DCMAKE_PREFIX_PATH="/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug" \
             -DPRAKTOR_ROOT=/opt/praktor/debug \
             -DENABLE_PRAKTOR_TOOLS=ON \
             -DENABLE_MCP_TOOLS=OFF \
@@ -291,7 +291,7 @@ jobs:
           }
           C
 
-          export CMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux"
+          export CMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"
           cmake -S "$consumer" -B "$consumer/build" -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \

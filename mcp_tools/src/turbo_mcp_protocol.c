@@ -605,18 +605,18 @@ turbo_tool_status_t turbo_mcp_client_request(
   if (!request || !field || turbo_mcp_json_add_owned(request, "jsonrpc", &field) != 0) {
     goto request_oom;
   }
-  field = turbo_json_create_uint64(request_id);
+  field = json_create_uint64(request_id);
   if (!field || turbo_mcp_json_add_owned(request, "id", &field) != 0) goto request_oom;
   field = json_create_string(method);
   if (!field || turbo_mcp_json_add_owned(request, "method", &field) != 0 ||
       turbo_mcp_json_add_owned(request, "params", &params) != 0) {
     goto request_oom;
   }
-  request_json = turbo_json_serialize(request, &request_json_len);
+  request_json = json_serialize(request, &request_json_len);
   turbo_free_json(&request);
   if (!request_json) return TURBO_TOOL_OUT_OF_MEMORY;
   if (request_json_len > client->max_request_bytes) {
-    turbo_json_serialize_free(request_json);
+    json_serialize_free(request_json);
     turbo_mcp_client_set_error(client, "MCP request exceeds configured byte limit");
     return TURBO_TOOL_OUTPUT_LIMIT;
   }
@@ -700,7 +700,7 @@ cleanup:
   tstr_free(method_header);
   tstr_free(name_value);
   tstr_free(name_header);
-  turbo_json_serialize_free(request_json);
+  json_serialize_free(request_json);
   return status;
 
 request_oom:

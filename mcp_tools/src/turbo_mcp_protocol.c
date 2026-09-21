@@ -25,10 +25,10 @@ typedef struct turbo_mcp_http_endpoint_s {
 } turbo_mcp_http_endpoint_t;
 
 struct turbo_mcp_client_s {
-  tstr_t endpoint;
-  tstr_t client_name;
-  tstr_t client_version;
-  tstr_t bearer_authorization;
+  tstr endpoint;
+  tstr client_name;
+  tstr client_version;
+  tstr bearer_authorization;
   chttp_client http;
   int http_initialized;
   turbo_mcp_transport_post_fn transport_post;
@@ -340,7 +340,7 @@ void turbo_mcp_client_destroy(turbo_mcp_client_t *client) {
 static int turbo_mcp_json_add_owned(json_value_t *object, const char *key,
                                     json_value_t **value) {
   if (!object || !key || !value || !*value ||
-      !turbo_json_object_add_checked(object, key, *value)) {
+      !json_object_add_checked(object, key, *value)) {
     return -1;
   }
   *value = NULL;
@@ -353,21 +353,21 @@ static int turbo_mcp_add_request_meta(turbo_mcp_client_t *client, json_value_t *
   json_value_t *capabilities = NULL;
   json_value_t *value = NULL;
 
-  if (!client || !params || turbo_json_type(params) != TURBO_JSON_OBJECT ||
-      turbo_json_object_get(params, "_meta")) {
+  if (!client || !params || json_type(params) != JSON_OBJECT ||
+      json_object_get(params, "_meta")) {
     return -1;
   }
-  meta = turbo_json_create_object();
-  info = turbo_json_create_object();
-  capabilities = turbo_json_create_object();
-  value = turbo_json_create_string(TURBO_MCP_PROTOCOL_VERSION);
+  meta = json_create_object();
+  info = json_create_object();
+  capabilities = json_create_object();
+  value = json_create_string(TURBO_MCP_PROTOCOL_VERSION);
   if (!meta || !info || !capabilities || !value ||
       turbo_mcp_json_add_owned(meta, "io.modelcontextprotocol/protocolVersion", &value) != 0) {
     goto fail;
   }
-  value = turbo_json_create_string(client->client_name);
+  value = json_create_string(client->client_name);
   if (!value || turbo_mcp_json_add_owned(info, "name", &value) != 0) goto fail;
-  value = turbo_json_create_string(client->client_version);
+  value = json_create_string(client->client_version);
   if (!value || turbo_mcp_json_add_owned(info, "version", &value) != 0 ||
       turbo_mcp_json_add_owned(meta, "io.modelcontextprotocol/clientInfo", &info) != 0 ||
       turbo_mcp_json_add_owned(meta, "io.modelcontextprotocol/clientCapabilities",
@@ -402,9 +402,9 @@ static int turbo_mcp_header_plain_safe(const char *value, size_t length) {
   return 1;
 }
 
-static tstr_t turbo_mcp_encode_header_value(const char *value, size_t length) {
+static tstr turbo_mcp_encode_header_value(const char *value, size_t length) {
   char *encoded = NULL;
-  tstr_t result;
+  tstr result;
   if (turbo_mcp_header_plain_safe(value, length)) return tstr_new_len(value, length);
   if (tn_base64_encode((const uint8_t *)value, length, &encoded) != 0 || !encoded) return NULL;
   result = tstr_dup("=?base64?");
@@ -414,9 +414,9 @@ static tstr_t turbo_mcp_encode_header_value(const char *value, size_t length) {
   return result;
 }
 
-tstr_t turbo_mcp_format_header(const char *name, const char *value, size_t value_length) {
-  tstr_t encoded;
-  tstr_t header;
+tstr turbo_mcp_format_header(const char *name, const char *value, size_t value_length) {
+  tstr encoded;
+  tstr header;
   if (!name || !name[0] || !value) return NULL;
   encoded = turbo_mcp_encode_header_value(value, value_length);
   if (!encoded) return NULL;
@@ -446,28 +446,28 @@ static int turbo_mcp_response_matches(const json_value_t *root, uint64_t request
   const char *number_text;
   char expected[32];
 
-  if (!root || turbo_json_type(root) != TURBO_JSON_OBJECT) return 0;
-  version = turbo_json_get_string(root, "jsonrpc");
-  id = turbo_json_object_get(root, "id");
+  if (!root || json_type(root) != JSON_OBJECT) return 0;
+  version = json_get_string(root, "jsonrpc");
+  id = json_object_get(root, "id");
   if (!version || strcmp(version, "2.0") != 0 || !id ||
-      turbo_json_type(id) != TURBO_JSON_NUMBER) {
+      json_type(id) != JSON_NUMBER) {
     return 0;
   }
-  number_text = turbo_json_number_text(id, &number_length);
+  number_text = json_number_text(id, &number_length);
   snprintf(expected, sizeof(expected), "%llu", (unsigned long long)request_id);
   if (!number_text || strlen(expected) != number_length ||
       memcmp(number_text, expected, number_length) != 0) {
     return 0;
   }
-  error = turbo_json_object_get(root, "error");
-  result = turbo_json_object_get(root, "result");
+  error = json_object_get(root, "error");
+  result = json_object_get(root, "result");
   if (error) {
-    message = turbo_json_type(error) == TURBO_JSON_OBJECT
-                  ? turbo_json_object_get(error, "message")
+    message = json_type(error) == JSON_OBJECT
+                  ? json_object_get(error, "message")
                   : NULL;
     turbo_mcp_client_set_error(
-        client, message && turbo_json_type(message) == TURBO_JSON_STRING
-                    ? turbo_json_string(message)
+        client, message && json_type(message) == JSON_STRING
+                    ? json_string(message)
                     : "MCP JSON-RPC error");
     return -1;
   }
@@ -475,7 +475,7 @@ static int turbo_mcp_response_matches(const json_value_t *root, uint64_t request
     turbo_mcp_client_set_error(client, "MCP JSON-RPC response has neither result nor error");
     return -1;
   }
-  *out_result = turbo_json_clone(result);
+  *out_result = json_clone(result);
   if (!*out_result) {
     turbo_mcp_client_set_error(client, "out of memory cloning MCP result");
     return -1;
@@ -504,7 +504,7 @@ static turbo_tool_status_t turbo_mcp_parse_sse_response(
     turbo_mcp_client_t *client, const uint8_t *body, size_t body_len,
     uint64_t request_id, json_value_t **out_result) {
   size_t offset = 0;
-  tstr_t event_data = tstr_new();
+  tstr event_data = tstr_new();
   turbo_tool_status_t status = TURBO_TOOL_ERROR;
   if (!event_data) return TURBO_TOOL_OUT_OF_MEMORY;
 
@@ -566,9 +566,9 @@ turbo_tool_status_t turbo_mcp_client_request(
   char *request_json = NULL;
   size_t request_json_len = 0;
   uint64_t request_id;
-  tstr_t method_header = NULL;
-  tstr_t name_value = NULL;
-  tstr_t name_header = NULL;
+  tstr method_header = NULL;
+  tstr name_value = NULL;
+  tstr name_header = NULL;
   const char **headers = NULL;
   size_t header_count = 0;
   size_t header_bytes = 0;
@@ -582,7 +582,7 @@ turbo_tool_status_t turbo_mcp_client_request(
   }
   *out_result = NULL;
   if (!client || !method || !method[0] || !params ||
-      turbo_json_type(params) != TURBO_JSON_OBJECT ||
+      json_type(params) != JSON_OBJECT ||
       (parameter_header_count && !parameter_headers) ||
       parameter_header_count > client->max_headers - 4) {
     turbo_free_json(&params);
@@ -600,14 +600,14 @@ turbo_tool_status_t turbo_mcp_client_request(
     return TURBO_TOOL_OUT_OF_MEMORY;
   }
 
-  request = turbo_json_create_object();
-  field = turbo_json_create_string("2.0");
+  request = json_create_object();
+  field = json_create_string("2.0");
   if (!request || !field || turbo_mcp_json_add_owned(request, "jsonrpc", &field) != 0) {
     goto request_oom;
   }
   field = turbo_json_create_uint64(request_id);
   if (!field || turbo_mcp_json_add_owned(request, "id", &field) != 0) goto request_oom;
-  field = turbo_json_create_string(method);
+  field = json_create_string(method);
   if (!field || turbo_mcp_json_add_owned(request, "method", &field) != 0 ||
       turbo_mcp_json_add_owned(request, "params", &params) != 0) {
     goto request_oom;

@@ -35,12 +35,12 @@ static int test_echo_tool_json_value(const json_value_t *arguments, json_value_t
     return -1;
   }
 
-  json_value = turbo_json_clone(arguments);
+  json_value = json_clone(arguments);
   if (!json_value) {
     return -1;
   }
-  result = turbo_json_clone(json_value);
-  turbo_free_json(&json_value);
+  result = json_clone(json_value);
+  json_free(json_value);
   if (!result) {
     return -1;
   }
@@ -212,17 +212,17 @@ spec("turbo tool runtime") {
     free(output);
     output = NULL;
 
-    json_value_args = turbo_json_create_object();
+    json_value_args = json_create_object();
     check_not_null(json_value_args);
     check_int_eq(
-        turbo_runtime_json_object_set(json_value_args, "bridge", turbo_json_create_int64(1)),
+        turbo_runtime_json_object_set(json_value_args, "bridge", json_create_int64(1)),
         TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "echo_json", json_value_args,
                                                       &json_value_result),
                  TURBO_TOOL_OK);
     check_not_null(json_value_result);
     check_int_eq((int)turbo_runtime_json_value_as_int64(
-                     turbo_json_object_get(json_value_result, "bridge"), 0),
+                     json_object_get(json_value_result, "bridge"), 0),
                  1);
     turbo_runtime_json_destroy(json_value_result);
     json_value_result = NULL;
@@ -238,7 +238,7 @@ spec("turbo tool runtime") {
                  TURBO_TOOL_OK);
     check_not_null(json_value_result);
     check_int_eq((int)turbo_runtime_json_value_as_int64(
-                     turbo_json_object_get(json_value_result, "bridge"), 0),
+                     json_object_get(json_value_result, "bridge"), 0),
                  1);
 
     turbo_runtime_json_destroy(json_value_result);

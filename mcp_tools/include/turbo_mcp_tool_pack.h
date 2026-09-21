@@ -46,7 +46,7 @@ typedef struct turbo_mcp_tool_pack_config_s {
   const char *server_id;
   const char *client_name;
   const char *client_version;
-  /** Optional host-owned credential copied into the default TurboHTTP client. */
+  /** Optional host-owned credential copied into the default CHTTP client. */
   const char *bearer_token;
   int64_t timeout_ms;
   size_t max_tools;

@@ -2,7 +2,7 @@
 #define TURBO_TOOL_REGISTRY_H
 
 #include <platform.h>
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 #include "turbo_tool.h"
 
@@ -140,7 +140,7 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_execute(const turbo_tool_regis
                                                           char **out_output);
 
 /**
- * @brief Execute a tool by name through the TurboParser JSON boundary.
+ * @brief Execute a tool by name through the SaltsUtils JSON boundary.
  *
  * This is direct registry execution. It does not invoke agent middleware,
  * guardrails, review gates, or policy hooks; policy-aware callers should route

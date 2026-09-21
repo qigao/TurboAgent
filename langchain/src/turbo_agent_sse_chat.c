@@ -2,7 +2,7 @@
 #include "turbo_agent_sse_json_internal.h"
 #include "turbo_agent_util_internal.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_prompt.h"
 
 #include <stdlib.h>

@@ -15,7 +15,6 @@ target_link_libraries(runtime_tools PUBLIC TurboAgent::RuntimeData Salts::JsonPa
 
 cmake_config_target(runtime_tools FOLDER "Runtime Tools" EXPORT_NAME RuntimeTools
                     ALIAS TurboAgent::RuntimeTools)
-add_library(TurboNet::RuntimeTools ALIAS runtime_tools)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 

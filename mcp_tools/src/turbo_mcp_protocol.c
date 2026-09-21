@@ -4,6 +4,7 @@
 #include "turbo_runtime_json.h"
 
 #include <limits.h>
+#include <uri_parser.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,15 +15,22 @@ enum {
 };
 
 typedef struct turbo_mcp_http_response_owner_s {
-  http_response_t *response;
-  char *content_type;
+  chttp_response response;
 } turbo_mcp_http_response_owner_t;
+
+typedef struct turbo_mcp_http_endpoint_s {
+  char connection_uri[640];
+  char authority[320];
+  char *target;
+} turbo_mcp_http_endpoint_t;
 
 struct turbo_mcp_client_s {
   tstr_t endpoint;
   tstr_t client_name;
   tstr_t client_version;
-  turbo_http_t *http;
+  tstr_t bearer_authorization;
+  chttp_client http;
+  int http_initialized;
   turbo_mcp_transport_post_fn transport_post;
   void *transport_user_data;
   size_t max_request_bytes;
@@ -30,14 +38,123 @@ struct turbo_mcp_client_s {
   size_t max_headers;
   size_t max_header_bytes;
   uint64_t next_request_id;
+  uint32_t timeout_ms;
   char last_error[TURBO_MCP_ERROR_MESSAGE_BYTES];
 };
+
+static native_io_backend_kind turbo_mcp_http_backend(void) {
+#if defined(_WIN32)
+  return NATIVE_IO_BACKEND_IOCP;
+#elif defined(__linux__)
+  return NATIVE_IO_BACKEND_EPOLL;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+  return NATIVE_IO_BACKEND_KQUEUE;
+#else
+  return (native_io_backend_kind)0;
+#endif
+}
+
+static int turbo_mcp_http_endpoint_build(const char *url, turbo_mcp_http_endpoint_t *endpoint) {
+  uri_t uri;
+  int default_port;
+  int port;
+  int is_ipv6;
+  int written;
+  const char *transport_scheme;
+  char *target;
+
+  if (!url || !endpoint) return -1;
+  memset(endpoint, 0, sizeof(*endpoint));
+  memset(&uri, 0, sizeof(uri));
+  if (!uri_parse(url, &uri) || !uri.valid || !uri.host[0] ||
+      (uri.component_flags & (URI_COMPONENT_USERINFO | URI_COMPONENT_FRAGMENT)) != 0u ||
+      (uri.overflow_flags & URI_OVERFLOW_PORT) != 0u) {
+    return -1;
+  }
+
+  if (strcmp(uri.scheme, "https") == 0) {
+    transport_scheme = "tls";
+    default_port = 443;
+  } else if (strcmp(uri.scheme, "http") == 0) {
+    transport_scheme = "tcp";
+    default_port = 80;
+  } else {
+    return -1;
+  }
+
+  port = (uri.component_flags & URI_COMPONENT_PORT) != 0u ? uri.port : default_port;
+  if (port <= 0 || port > 65535) return -1;
+  is_ipv6 = uri.host_type == URI_HOST_IPV6ADDR;
+
+  written = is_ipv6
+                ? snprintf(endpoint->connection_uri, sizeof(endpoint->connection_uri),
+                           "%s://[%s]:%d", transport_scheme, uri.host, port)
+                : snprintf(endpoint->connection_uri, sizeof(endpoint->connection_uri),
+                           "%s://%s:%d", transport_scheme, uri.host, port);
+  if (written < 0 || (size_t)written >= sizeof(endpoint->connection_uri)) return -1;
+
+  if ((uri.component_flags & URI_COMPONENT_PORT) != 0u) {
+    written = is_ipv6 ? snprintf(endpoint->authority, sizeof(endpoint->authority), "[%s]:%d",
+                                 uri.host, port)
+                      : snprintf(endpoint->authority, sizeof(endpoint->authority), "%s:%d",
+                                 uri.host, port);
+  } else {
+    written = is_ipv6 ? snprintf(endpoint->authority, sizeof(endpoint->authority), "[%s]", uri.host)
+                      : snprintf(endpoint->authority, sizeof(endpoint->authority), "%s", uri.host);
+  }
+  if (written < 0 || (size_t)written >= sizeof(endpoint->authority)) return -1;
+
+  target = tstr_dup(uri.path[0] ? uri.path : "/");
+  if (!target) return -1;
+  if ((uri.component_flags & URI_COMPONENT_QUERY) != 0u) {
+    target = tstr_cat(target, "?");
+    if (target && uri.query[0]) target = tstr_cat(target, uri.query);
+  }
+  if (!target) return -1;
+  endpoint->target = target;
+  return 0;
+}
+
+static void turbo_mcp_http_endpoint_destroy(turbo_mcp_http_endpoint_t *endpoint) {
+  if (!endpoint) return;
+  tstr_free(endpoint->target);
+  endpoint->target = NULL;
+}
+
+static chttp_client_config turbo_mcp_http_config(const turbo_mcp_client_config_t *config) {
+  const cnet_client_config network = {
+      .backend = turbo_mcp_http_backend(),
+      .connection_capacity = 2u,
+      .command_capacity = 32u,
+      .request_capacity = 32u,
+      .completion_batch_capacity = 8u,
+      .event_capacity = 32u,
+      .max_send_bytes = config->max_request_bytes + config->max_header_bytes + 8192u,
+      .receive_buffer_bytes = 128u * 1024u,
+      .connect_timeout_ms = (uint32_t)config->timeout_ms,
+      .read_timeout_ms = (uint32_t)config->timeout_ms,
+      .write_timeout_ms = (uint32_t)config->timeout_ms,
+      .tls_io_buffer_bytes = 64u * 1024u,
+      .tls_handshake_timeout_ms = (uint32_t)config->timeout_ms};
+  return (chttp_client_config){
+      .network = network,
+      .request_capacity = 2u,
+      .max_start_line_bytes = 8192u,
+      .max_header_count = config->max_headers + 1u,
+      .max_header_bytes = config->max_header_bytes + 4096u,
+      .max_request_body_bytes = config->max_request_bytes,
+      .max_response_body_bytes = config->max_response_bytes,
+      .max_informational_responses = 4u,
+      .stream_chunk_bytes = 64u * 1024u,
+      .h2_input_buffer_bytes = 128u * 1024u,
+      .h2_hpack_dynamic_table_bytes = 4096u,
+      .h2_max_settings_count = 16u};
+}
 
 static void turbo_mcp_http_response_release(void *context) {
   turbo_mcp_http_response_owner_t *owner = (turbo_mcp_http_response_owner_t *)context;
   if (!owner) return;
-  free(owner->content_type);
-  http_response_free(owner->response);
+  chttp_response_destroy(&owner->response);
   free(owner);
 }
 
@@ -51,58 +168,119 @@ const char *turbo_mcp_client_last_error(const turbo_mcp_client_t *client) {
   return client ? client->last_error : "invalid MCP client";
 }
 
+static int turbo_mcp_raw_headers(const char *const *headers, size_t header_count,
+                                 chttp_header *parsed, char **copies) {
+  size_t index;
+  for (index = 0u; index < header_count; ++index) {
+    char *colon;
+    char *value;
+    if (!headers[index]) return -1;
+    copies[index] = (char *)malloc(strlen(headers[index]) + 1u);
+    if (copies[index]) memcpy(copies[index], headers[index], strlen(headers[index]) + 1u);
+    if (!copies[index]) return -1;
+    colon = strchr(copies[index], ':');
+    if (!colon || colon == copies[index]) return -1;
+    *colon = '\0';
+    value = colon + 1;
+    while (*value == ' ' || *value == '\t') ++value;
+    parsed[index] = (chttp_header){.name = copies[index], .value = value};
+  }
+  return 0;
+}
+
+static void turbo_mcp_raw_headers_destroy(char **copies, size_t count) {
+  size_t index;
+  if (!copies) return;
+  for (index = 0u; index < count; ++index) free(copies[index]);
+}
+
 static int turbo_mcp_default_post(void *user_data, const char *endpoint,
                                   const char *const *headers, size_t header_count,
                                   const uint8_t *body, size_t body_len,
                                   turbo_mcp_transport_response_t *out_response) {
   turbo_mcp_client_t *client = (turbo_mcp_client_t *)user_data;
-  turbo_mcp_http_response_owner_t *owner;
-  http_response_t *response;
+  turbo_mcp_http_response_owner_t *owner = NULL;
+  turbo_mcp_http_endpoint_t target;
+  chttp_header *parsed = NULL;
+  char **copies = NULL;
+  chttp_options options;
+  chttp_error error = {0};
+  size_t parsed_count = header_count;
+  int status = SALTS_EINVAL;
 
-  if (!client || !client->http || !endpoint || !body || !out_response ||
-      header_count > (size_t)INT_MAX) {
+  if (!client || !client->http_initialized || !endpoint || !body || !out_response ||
+      header_count > client->max_headers) {
     return -1;
   }
   memset(out_response, 0, sizeof(*out_response));
-  response = turbo_http_request_sync(client->http, HTTP_POST, endpoint,
-                                     (const char **)headers,
-                                     (int)header_count, (const char *)body, body_len);
-  if (!response) {
-    turbo_mcp_client_set_error(client, "TurboHTTP could not allocate a response");
-    return -1;
-  }
-  if (response->error_code != HTTP_ERROR_NONE) {
-    turbo_mcp_client_set_error(client, response->error ? response->error
-                                                       : http_error_to_str(response->error_code));
-    http_response_free(response);
+  memset(&target, 0, sizeof(target));
+  if (turbo_mcp_http_endpoint_build(endpoint, &target) != 0) {
+    turbo_mcp_client_set_error(client, "invalid MCP endpoint URL");
     return -1;
   }
 
-  owner = (turbo_mcp_http_response_owner_t *)calloc(1, sizeof(*owner));
-  if (!owner) {
-    http_response_free(response);
-    turbo_mcp_client_set_error(client, "out of memory retaining MCP response");
-    return -1;
+  parsed = (chttp_header *)calloc(header_count + (client->bearer_authorization ? 1u : 0u),
+                                  sizeof(*parsed));
+  copies = (char **)calloc(header_count ? header_count : 1u, sizeof(*copies));
+  owner = (turbo_mcp_http_response_owner_t *)calloc(1u, sizeof(*owner));
+  if (!parsed || !copies || !owner ||
+      turbo_mcp_raw_headers(headers, header_count, parsed, copies) != 0) {
+    turbo_mcp_client_set_error(client, "out of memory preparing MCP HTTP request");
+    goto fail;
   }
-  owner->response = response;
-  owner->content_type = http_response_get_header(response, "Content-Type");
-  out_response->status_code = response->status_code;
-  out_response->content_type = owner->content_type;
-  out_response->body = (const uint8_t *)response->body;
-  out_response->body_len = response->body_len;
+
+  if (client->bearer_authorization) {
+    parsed[parsed_count++] =
+        (chttp_header){.name = "Authorization", .value = client->bearer_authorization};
+  }
+
+  options = (chttp_options){
+      .connection_uri = target.connection_uri,
+      .authority = target.authority,
+      .target = target.target,
+      .headers = parsed,
+      .header_count = parsed_count,
+      .body = body,
+      .body_size = body_len,
+      .timeout_ms = client->timeout_ms,
+      .protocol = CHTTP_HTTP_1_1};
+  status = chttp_post(&client->http, &options, &owner->response, &error);
+  if (status != SALTS_OK) {
+    char message[TURBO_MCP_ERROR_MESSAGE_BYTES];
+    snprintf(message, sizeof(message), "CHTTP MCP request failed: status=%d native=%d stage=%s",
+             error.status, error.native_status, error.stage ? error.stage : "(none)");
+    turbo_mcp_client_set_error(client, message);
+    goto fail;
+  }
+
+  out_response->status_code = (int)owner->response.status_code;
+  out_response->content_type = chttp_response_header(&owner->response, "Content-Type");
+  out_response->body = (const uint8_t *)owner->response.body;
+  out_response->body_len = owner->response.body_size;
   out_response->release_context = owner;
   out_response->release = turbo_mcp_http_response_release;
-  return 0;
+  owner = NULL;
+  status = SALTS_OK;
+
+fail:
+  if (owner) turbo_mcp_http_response_release(owner);
+  turbo_mcp_raw_headers_destroy(copies, header_count);
+  free(copies);
+  free(parsed);
+  turbo_mcp_http_endpoint_destroy(&target);
+  return status == SALTS_OK ? 0 : -1;
 }
 
 turbo_mcp_client_t *turbo_mcp_client_create(const turbo_mcp_client_config_t *config) {
   turbo_mcp_client_t *client;
-  turbo_http_options_t options;
+  chttp_client_config http_config;
 
   if (!config || !config->endpoint || !config->endpoint[0] || !config->client_name ||
       !config->client_name[0] || !config->client_version || !config->client_version[0] ||
       !config->max_request_bytes || !config->max_response_bytes || !config->max_headers ||
-      !config->max_header_bytes || config->timeout_ms <= 0) {
+      !config->max_header_bytes || config->timeout_ms <= 0 ||
+      config->timeout_ms > (int64_t)UINT32_MAX ||
+      config->max_request_bytes > SIZE_MAX - config->max_header_bytes - 8192u) {
     return NULL;
   }
   client = (turbo_mcp_client_t *)calloc(1, sizeof(*client));
@@ -114,33 +292,33 @@ turbo_mcp_client_t *turbo_mcp_client_create(const turbo_mcp_client_config_t *con
     turbo_mcp_client_destroy(client);
     return NULL;
   }
+  if (config->bearer_token && config->bearer_token[0]) {
+    client->bearer_authorization = tstr_dup("Bearer ");
+    if (client->bearer_authorization)
+      client->bearer_authorization = tstr_cat(client->bearer_authorization, config->bearer_token);
+    if (!client->bearer_authorization) {
+      turbo_mcp_client_destroy(client);
+      return NULL;
+    }
+  }
+
   client->max_request_bytes = config->max_request_bytes;
   client->max_response_bytes = config->max_response_bytes;
   client->max_headers = config->max_headers;
   client->max_header_bytes = config->max_header_bytes;
-  client->next_request_id = 1;
+  client->next_request_id = 1u;
+  client->timeout_ms = (uint32_t)config->timeout_ms;
   client->transport_post = config->transport_post;
   client->transport_user_data = config->transport_user_data;
   if (client->transport_post) return client;
 
-  memset(&options, 0, sizeof(options));
-  if (turbo_http_options_init(&options, sizeof(options)) != TURBO_OK) {
+  http_config = turbo_mcp_http_config(config);
+  if (http_config.network.backend == (native_io_backend_kind)0 ||
+      chttp_client_init(&client->http, &http_config) != SALTS_OK) {
     turbo_mcp_client_destroy(client);
     return NULL;
   }
-  options.timeout_ms = config->timeout_ms ? config->timeout_ms : TURBO_MCP_DEFAULT_TIMEOUT_MS;
-  options.follow_redirects = 0;
-  if (turbo_http_create_sync(&options, &client->http) != TURBO_OK || !client->http) {
-    turbo_mcp_client_destroy(client);
-    return NULL;
-  }
-  turbo_http_set_max_response_size(client->http, client->max_response_bytes);
-  turbo_http_set_max_response_header_size(client->http, client->max_header_bytes);
-  if (config->bearer_token && config->bearer_token[0] &&
-      turbo_http_set_bearer_token(client->http, config->bearer_token) != TURBO_OK) {
-    turbo_mcp_client_destroy(client);
-    return NULL;
-  }
+  client->http_initialized = 1;
   client->transport_post = turbo_mcp_default_post;
   client->transport_user_data = client;
   return client;
@@ -148,7 +326,11 @@ turbo_mcp_client_t *turbo_mcp_client_create(const turbo_mcp_client_config_t *con
 
 void turbo_mcp_client_destroy(turbo_mcp_client_t *client) {
   if (!client) return;
-  turbo_http_destroy(client->http);
+  if (client->http_initialized) {
+    (void)chttp_client_destroy(&client->http, 0u);
+    client->http_initialized = 0;
+  }
+  tstr_free(client->bearer_authorization);
   tstr_free(client->endpoint);
   tstr_free(client->client_name);
   tstr_free(client->client_version);

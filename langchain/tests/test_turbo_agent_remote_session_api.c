@@ -169,14 +169,105 @@ static void remote_session_test_server_cleanup(chttp_server *server,
   }
 }
 
+
+enum {
+  REMOTE_SESSION_TEST_CONNECTIONS = 4,
+  REMOTE_SESSION_TEST_COMMANDS = 32,
+  REMOTE_SESSION_TEST_SEND_BYTES = 64 * 1024,
+  REMOTE_SESSION_TEST_BUFFER_BYTES = 1024 * 1024,
+  REMOTE_SESSION_TEST_TIMEOUT_MS = 5000
+};
+
+static chttp_server_config remote_session_test_server_config(void) {
+  chttp_server_config config = {0};
+  config.host = "127.0.0.1";
+  config.port = 0u;
+  config.backlog = REMOTE_SESSION_TEST_CONNECTIONS;
+#if defined(_WIN32)
+  config.network.backend = NATIVE_IO_BACKEND_IOCP;
+#elif defined(__linux__)
+  config.network.backend = NATIVE_IO_BACKEND_EPOLL;
+#else
+  config.network.backend = NATIVE_IO_BACKEND_KQUEUE;
+#endif
+  config.network.connection_capacity = REMOTE_SESSION_TEST_CONNECTIONS;
+  config.network.command_capacity = REMOTE_SESSION_TEST_COMMANDS;
+  config.network.request_capacity = REMOTE_SESSION_TEST_COMMANDS;
+  config.network.completion_batch_capacity = REMOTE_SESSION_TEST_CONNECTIONS;
+  config.network.event_capacity = REMOTE_SESSION_TEST_COMMANDS;
+  config.network.max_send_bytes = REMOTE_SESSION_TEST_SEND_BYTES;
+  config.network.receive_buffer_bytes = REMOTE_SESSION_TEST_SEND_BYTES;
+  config.network.connect_timeout_ms = REMOTE_SESSION_TEST_TIMEOUT_MS;
+  config.network.read_timeout_ms = REMOTE_SESSION_TEST_TIMEOUT_MS;
+  config.network.write_timeout_ms = REMOTE_SESSION_TEST_TIMEOUT_MS;
+  config.route_capacity = 4u;
+  config.middleware_capacity = 1u;
+  config.max_route_middleware_count = 1u;
+  config.max_route_param_count = 1u;
+  config.max_route_param_bytes = 256u;
+  config.max_target_bytes = 256u;
+  config.max_header_count = 32u;
+  config.max_header_bytes = 8192u;
+  config.max_request_body_bytes = REMOTE_SESSION_TEST_SEND_BYTES;
+  config.max_response_header_count = 32u;
+  config.max_response_header_bytes = 8192u;
+  config.max_response_body_bytes = REMOTE_SESSION_TEST_SEND_BYTES;
+  config.max_buffered_response_body_bytes = REMOTE_SESSION_TEST_SEND_BYTES;
+  config.buffer_capacity_bytes = REMOTE_SESSION_TEST_BUFFER_BYTES;
+  config.poll_slice_ms = 1u;
+  return config;
+}
+
+static int remote_session_test_server_start(
+    chttp_server *server, int *initialized, int *started,
+    turbo_agent_runtime_remote_t *remote,
+    char *endpoint_url, size_t endpoint_capacity) {
+  chttp_server_config config = remote_session_test_server_config();
+  uint16_t port = 0u;
+  int written;
+  int status;
+
+  if (!server || !initialized || !started || !remote || !endpoint_url ||
+      endpoint_capacity == 0u) return -1;
+
+  status = chttp_server_init(server, &config);
+  if (status != SALTS_OK) return -1;
+  *initialized = 1;
+  status = turbo_agent_runtime_remote_chttp_mount(
+      remote, server, "/v1/runtime/jsonrpc");
+  if (status != SALTS_OK) return -1;
+  status = chttp_server_start(server);
+  if (status != SALTS_OK) return -1;
+  *started = 1;
+  status = chttp_server_port(server, &port);
+  if (status != SALTS_OK || port == 0u) return -1;
+  written = snprintf(endpoint_url, endpoint_capacity,
+                     "http://127.0.0.1:%u/v1/runtime/jsonrpc",
+                     (unsigned int)port);
+  return written > 0 && (size_t)written < endpoint_capacity ? 0 : -1;
+}
+
+static void remote_session_test_server_cleanup(
+    chttp_server *server, int *initialized, int *started) {
+  if (!server || !initialized || !started) return;
+  if (*started) {
+    (void)chttp_server_stop(server, REMOTE_SESSION_TEST_TIMEOUT_MS);
+    *started = 0;
+  }
+  if (*initialized) {
+    (void)chttp_server_destroy(server);
+    *initialized = 0;
+  }
+}
+
 static void remote_session_test_state_cleanup(remote_session_test_state_t *state) {
   if (!state) return;
   if (state->session) {
     turbo_agent_remote_session_destroy(state->session);
     state->session = NULL;
   }
-  remote_session_test_server_cleanup(&state->server, &state->server_initialized,
-                                     &state->server_started);
+  remote_session_test_server_cleanup(
+      &state->server, &state->server_initialized, &state->server_started);
   if (state->remote) {
     turbo_agent_runtime_remote_destroy(state->remote);
     state->remote = NULL;
@@ -188,8 +279,9 @@ static void remote_session_test_state_cleanup(remote_session_test_state_t *state
   state->graph = NULL;
 }
 
-static int remote_session_configure_client(
-    turbo_agent_remote_session_config_t *session_config, const char *endpoint_url) {
+static int remote_session_test_state_configure_client(
+    turbo_agent_remote_session_config_t *session_config,
+    const char *endpoint_url) {
   if (!session_config || !endpoint_url || !endpoint_url[0]) return -1;
   session_config->client_config.url = endpoint_url;
   session_config->client_config.http_client = NULL;
@@ -1141,8 +1233,8 @@ static void remote_session_memory_test_state_cleanup(
     turbo_agent_remote_session_destroy(state->session);
     state->session = NULL;
   }
-  remote_session_test_server_cleanup(&state->server, &state->server_initialized,
-                                     &state->server_started);
+  remote_session_test_server_cleanup(
+      &state->server, &state->server_initialized, &state->server_started);
   if (state->remote) {
     turbo_agent_runtime_remote_destroy(state->remote);
     state->remote = NULL;
@@ -1152,6 +1244,15 @@ static void remote_session_memory_test_state_cleanup(
     turbo_agent_runtime_destroy(state->runtime);
     state->runtime = NULL;
   }
+}
+
+static int remote_session_memory_test_state_configure_client(
+    turbo_agent_remote_session_config_t *session_config,
+    const char *endpoint_url) {
+  if (!session_config || !endpoint_url || !endpoint_url[0]) return -1;
+  session_config->client_config.url = endpoint_url;
+  session_config->client_config.http_client = NULL;
+  return 0;
 }
 
 static void remote_session_memory_test_coro(void *arg) {

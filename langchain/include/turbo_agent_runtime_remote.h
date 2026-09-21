@@ -3,7 +3,6 @@
 
 #include <platform.h>
 
-#include "http_common.h"
 #include "turbo_agent_memory_store.h"
 #include "turbo_agent_runtime.h"
 
@@ -83,18 +82,6 @@ CXX_C_API int turbo_agent_runtime_remote_dispatch_jsonrpc_text(
     turbo_agent_runtime_remote_t *remote, const char *request_json_text,
     char **out_response_json_text);
 
-/**
- * @brief Handle one HTTP-like JSON-RPC request against the remote runtime bridge.
- *
- * This does not start a listener. It only maps one `POST /v1/runtime/jsonrpc`
- * style request into the existing JSON-RPC dispatcher and returns one heap
- * allocated `http_response_t` for future HTTP/server adapters. Adapter-level
- * path/method/body failures map to HTTP status codes, while the response body
- * remains JSON.
- */
-CXX_C_API http_response_t *turbo_agent_runtime_remote_handle_http_jsonrpc(
-    turbo_agent_runtime_remote_t *remote, http_method_t method, const char *path,
-    const char *request_json_text);
 
 #ifdef __cplusplus
 }

@@ -7,10 +7,11 @@
 #include <json_parser.h>
 #include <cyaml.h>
 #include <tstr.h>
-#include <turbo_vec.h>
+#include <cstl/vec.h>
 
 #include <ctype.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,9 +31,9 @@ typedef struct turbo_agent_skill_s {
   tstr description;
   tstr path;
   tstr body;
-  turbo_vec_t triggers;
-  turbo_vec_t tools;
-  turbo_vec_t capabilities;
+  vec_t triggers;
+  vec_t tools;
+  vec_t capabilities;
 } turbo_agent_skill_t;
 
 typedef struct turbo_agent_workspace_tool_capability_entry_s {
@@ -45,8 +46,8 @@ struct turbo_agent_workspace_s {
   tstr working_directory;
   tstr skills_directory;
   tstr agents_filename;
-  turbo_vec_t always_tools;
-  turbo_vec_t tool_capabilities;
+  vec_t always_tools;
+  vec_t tool_capabilities;
   turbo_agent_policy_t policy;
   size_t max_instruction_bytes;
   size_t max_skill_bytes;
@@ -56,7 +57,7 @@ struct turbo_agent_workspace_s {
   size_t max_scan_depth;
   int skills_directory_explicit;
   tstr agent_instructions;
-  turbo_vec_t skills;
+  vec_t skills;
   turbo_agent_workspace_status_t last_status;
   char last_error[TURBO_AGENT_WORKSPACE_ERROR_BYTES];
 };
@@ -64,8 +65,8 @@ struct turbo_agent_workspace_s {
 struct turbo_agent_workspace_selection_s {
   tstr instructions;
   turbo_tool_registry_t *tools;
-  turbo_vec_t skill_names;
-  turbo_vec_t tool_names;
+  vec_t skill_names;
+  vec_t tool_names;
 };
 
 static char *turbo_agent_workspace_strdup(const char *text) {
@@ -90,37 +91,37 @@ static void turbo_agent_workspace_set_error(turbo_agent_workspace_t *workspace,
   snprintf(workspace->last_error, sizeof(workspace->last_error), "%s: %s", operation, detail);
 }
 
-static int turbo_agent_workspace_vec_init(turbo_vec_t *vec, size_t elem_size) {
-  return turbo_vec_init(vec, elem_size) == SALTS_OK ? 0 : -1;
+static int turbo_agent_workspace_vec_init(vec_t *vec, size_t elem_size) {
+  return vec_init_bytes(vec, elem_size, _Alignof(max_align_t), SIZE_MAX) == STL_OK ? 0 : -1;
 }
 
-static void turbo_agent_workspace_string_vec_destroy(turbo_vec_t *vec) {
+static void turbo_agent_workspace_string_vec_destroy(vec_t *vec) {
   size_t index;
   if (!vec) return;
-  for (index = 0; index < turbo_vec_size(vec); ++index) {
-    char **value = (char **)turbo_vec_at(vec, index);
+  for (index = 0; index < vec_size(vec); ++index) {
+    char **value = (char **)vec_at(vec, index);
     if (value) free(*value);
   }
-  turbo_vec_destroy(vec);
+  vec_destroy(vec);
 }
 
-static int turbo_agent_workspace_string_vec_contains(const turbo_vec_t *vec, const char *text) {
+static int turbo_agent_workspace_string_vec_contains(const vec_t *vec, const char *text) {
   size_t index;
   if (!vec || !text) return 0;
-  for (index = 0; index < turbo_vec_size(vec); ++index) {
-    char *const *value = (char *const *)turbo_vec_at((turbo_vec_t *)vec, index);
+  for (index = 0; index < vec_size(vec); ++index) {
+    char *const *value = (char *const *)vec_at((vec_t *)vec, index);
     if (value && *value && strcmp(*value, text) == 0) return 1;
   }
   return 0;
 }
 
-static int turbo_agent_workspace_string_vec_push(turbo_vec_t *vec, const char *text, int unique) {
+static int turbo_agent_workspace_string_vec_push(vec_t *vec, const char *text, int unique) {
   char *copy;
   if (!vec || !text || text[0] == '\0') return -1;
   if (unique && turbo_agent_workspace_string_vec_contains(vec, text)) return 0;
   copy = turbo_agent_workspace_strdup(text);
   if (!copy) return -1;
-  if (turbo_vec_push(vec, &copy) != SALTS_OK) {
+  if (vec_push(vec, &copy) != STL_OK) {
     free(copy);
     return -1;
   }
@@ -139,25 +140,25 @@ static void turbo_agent_skill_destroy(turbo_agent_skill_t *skill) {
   memset(skill, 0, sizeof(*skill));
 }
 
-static void turbo_agent_workspace_skill_vec_destroy(turbo_vec_t *skills) {
+static void turbo_agent_workspace_skill_vec_destroy(vec_t *skills) {
   size_t index;
   if (!skills) return;
-  for (index = 0; index < turbo_vec_size(skills); ++index) {
-    turbo_agent_skill_t *skill = (turbo_agent_skill_t *)turbo_vec_at(skills, index);
+  for (index = 0; index < vec_size(skills); ++index) {
+    turbo_agent_skill_t *skill = (turbo_agent_skill_t *)vec_at(skills, index);
     turbo_agent_skill_destroy(skill);
   }
-  turbo_vec_destroy(skills);
+  vec_destroy(skills);
 }
 
-static void turbo_agent_workspace_tool_capability_vec_destroy(turbo_vec_t *entries) {
+static void turbo_agent_workspace_tool_capability_vec_destroy(vec_t *entries) {
   size_t index;
   if (!entries) return;
-  for (index = 0; index < turbo_vec_size(entries); ++index) {
+  for (index = 0; index < vec_size(entries); ++index) {
     turbo_agent_workspace_tool_capability_entry_t *entry =
-        (turbo_agent_workspace_tool_capability_entry_t *)turbo_vec_at(entries, index);
+        (turbo_agent_workspace_tool_capability_entry_t *)vec_at(entries, index);
     if (entry) tstr_free(entry->tool_name);
   }
-  turbo_vec_destroy(entries);
+  vec_destroy(entries);
 }
 
 static int turbo_agent_workspace_ascii_equal_ci(const char *left, const char *right) {
@@ -430,7 +431,7 @@ static int turbo_agent_workspace_markdown_candidate(const char *name, size_t dep
 
 static turbo_agent_workspace_status_t
 turbo_agent_workspace_scan_skill_paths(turbo_agent_workspace_t *workspace, const char *directory,
-                                       size_t depth, turbo_vec_t *paths) {
+                                       size_t depth, vec_t *paths) {
   turbo_fs_dir_t *dir = NULL;
   turbo_fs_dirent_t entry;
   int read_status;
@@ -462,7 +463,7 @@ turbo_agent_workspace_scan_skill_paths(turbo_agent_workspace_t *workspace, const
     if (metadata.is_directory) {
       status = turbo_agent_workspace_scan_skill_paths(workspace, path, depth + 1, paths);
     } else if (metadata.is_file && turbo_agent_workspace_markdown_candidate(entry.name, depth)) {
-      if (turbo_vec_size(paths) >= workspace->max_skills) {
+      if (vec_size(paths) >= workspace->max_skills) {
         turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED,
                                         "skill scan", "skill count exceeded");
         status = TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED;
@@ -535,7 +536,7 @@ static int turbo_agent_workspace_frontmatter(const char *text, size_t len, size_
 }
 
 static int turbo_agent_workspace_copy_string_array(const json_value_t *metadata, const char *key,
-                                                   turbo_vec_t *out) {
+                                                   vec_t *out) {
   json_value_t *value = turbo_json_object_get(metadata, key);
   size_t index;
   if (!value) return 0;
@@ -646,8 +647,8 @@ cleanup:
 }
 
 static turbo_agent_workspace_status_t
-turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, turbo_vec_t *out_skills) {
-  turbo_vec_t paths;
+turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, vec_t *out_skills) {
+  vec_t paths;
   tstr root;
   turbo_fs_stat_t metadata;
   turbo_agent_workspace_status_t status;
@@ -690,16 +691,16 @@ turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, turbo_vec_
   }
   status = turbo_agent_workspace_scan_skill_paths(workspace, root, 0, &paths);
   if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
-  if (turbo_vec_size(&paths) > 1)
-    qsort(paths.data, turbo_vec_size(&paths), sizeof(char *), turbo_agent_workspace_path_compare);
-  for (index = 0; index < turbo_vec_size(&paths); ++index) {
-    char *const *path = (char *const *)turbo_vec_at(&paths, index);
+  if (vec_size(&paths) > 1)
+    qsort(paths.data, vec_size(&paths), sizeof(char *), turbo_agent_workspace_path_compare);
+  for (index = 0; index < vec_size(&paths); ++index) {
+    char *const *path = (char *const *)vec_at(&paths, index);
     turbo_agent_skill_t skill;
     size_t previous;
     status = turbo_agent_workspace_parse_skill(workspace, *path, &skill);
     if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
-    for (previous = 0; previous < turbo_vec_size(out_skills); ++previous) {
-      turbo_agent_skill_t *existing = (turbo_agent_skill_t *)turbo_vec_at(out_skills, previous);
+    for (previous = 0; previous < vec_size(out_skills); ++previous) {
+      turbo_agent_skill_t *existing = (turbo_agent_skill_t *)vec_at(out_skills, previous);
       if (turbo_agent_workspace_ascii_equal_ci(existing->name, skill.name)) {
         turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,
                                         "duplicate skill", skill.name);
@@ -708,7 +709,7 @@ turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, turbo_vec_
         goto cleanup;
       }
     }
-    if (turbo_vec_push(out_skills, &skill) != SALTS_OK) {
+    if (vec_push(out_skills, &skill) != STL_OK) {
       turbo_agent_skill_destroy(&skill);
       status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
       goto cleanup;
@@ -745,8 +746,8 @@ static int turbo_agent_workspace_skill_matches(const turbo_agent_skill_t *skill,
     }
     tstr_free(reference);
   }
-  for (index = 0; index < turbo_vec_size(&skill->triggers); ++index) {
-    char *const *trigger = (char *const *)turbo_vec_at((turbo_vec_t *)&skill->triggers, index);
+  for (index = 0; index < vec_size(&skill->triggers); ++index) {
+    char *const *trigger = (char *const *)vec_at((vec_t *)&skill->triggers, index);
     tstr normalized;
     size_t pos;
     if (!trigger || !*trigger || strlen(*trigger) < 3) continue;
@@ -800,9 +801,9 @@ turbo_agent_workspace_check_tool_capabilities(turbo_agent_workspace_t *workspace
   size_t required_capability_count = 0;
   size_t index;
   int matched = 0;
-  for (index = 0; index < turbo_vec_size(&workspace->tool_capabilities); ++index) {
+  for (index = 0; index < vec_size(&workspace->tool_capabilities); ++index) {
     const turbo_agent_workspace_tool_capability_entry_t *entry =
-        (const turbo_agent_workspace_tool_capability_entry_t *)turbo_vec_at_const(
+        (const turbo_agent_workspace_tool_capability_entry_t *)vec_at_const(
             &workspace->tool_capabilities, index);
     turbo_agent_workspace_status_t status;
     if (!entry || strcmp(entry->tool_name, name) != 0) continue;
@@ -848,11 +849,11 @@ turbo_agent_workspace_check_capability(turbo_agent_workspace_t *workspace,
 static turbo_agent_workspace_status_t
 turbo_agent_workspace_add_selected_tool(turbo_agent_workspace_t *workspace,
                                         const turbo_tool_registry_t *source_registry,
-                                        turbo_vec_t *tool_names, const char *tool_name) {
+                                        vec_t *tool_names, const char *tool_name) {
   turbo_agent_workspace_status_t status;
   if (turbo_agent_workspace_string_vec_contains(tool_names, tool_name))
     return TURBO_AGENT_WORKSPACE_OK;
-  if (turbo_vec_size(tool_names) >= workspace->max_projected_tools) {
+  if (vec_size(tool_names) >= workspace->max_projected_tools) {
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED,
                                     "tool projection", "tool count exceeded");
     return TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED;
@@ -872,10 +873,10 @@ turbo_agent_workspace_bind_projected_capabilities(turbo_agent_workspace_t *works
                                                   turbo_agent_workspace_selection_t *selection) {
   size_t mapping_index;
   size_t tool_index;
-  for (mapping_index = 0; mapping_index < turbo_vec_size(&workspace->tool_capabilities);
+  for (mapping_index = 0; mapping_index < vec_size(&workspace->tool_capabilities);
        ++mapping_index) {
     const turbo_agent_workspace_tool_capability_entry_t *entry =
-        (const turbo_agent_workspace_tool_capability_entry_t *)turbo_vec_at_const(
+        (const turbo_agent_workspace_tool_capability_entry_t *)vec_at_const(
             &workspace->tool_capabilities, mapping_index);
     const char *capability_name;
     turbo_tool_status_t tool_status;
@@ -897,8 +898,8 @@ turbo_agent_workspace_bind_projected_capabilities(turbo_agent_workspace_t *works
       return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
     }
   }
-  for (tool_index = 0; tool_index < turbo_vec_size(&selection->tool_names); ++tool_index) {
-    char *const *tool_name = (char *const *)turbo_vec_at(&selection->tool_names, tool_index);
+  for (tool_index = 0; tool_index < vec_size(&selection->tool_names); ++tool_index) {
+    char *const *tool_name = (char *const *)vec_at(&selection->tool_names, tool_index);
     const char *reason = NULL;
     if (turbo_agent_policy_check_tool(&workspace->policy, selection->tools, *tool_name, &reason) ==
         TURBO_AGENT_POLICY_ALLOW) {
@@ -1005,9 +1006,9 @@ turbo_agent_workspace_create(const turbo_agent_workspace_config_t *config,
       turbo_agent_workspace_destroy(workspace);
       return TURBO_AGENT_WORKSPACE_INVALID_ARGUMENT;
     }
-    for (previous = 0; previous < turbo_vec_size(&workspace->tool_capabilities); ++previous) {
+    for (previous = 0; previous < vec_size(&workspace->tool_capabilities); ++previous) {
       const turbo_agent_workspace_tool_capability_entry_t *existing =
-          (const turbo_agent_workspace_tool_capability_entry_t *)turbo_vec_at_const(
+          (const turbo_agent_workspace_tool_capability_entry_t *)vec_at_const(
               &workspace->tool_capabilities, previous);
       if (existing && strcmp(existing->tool_name, source->tool_name) == 0 &&
           existing->capability == source->capability) {
@@ -1017,7 +1018,7 @@ turbo_agent_workspace_create(const turbo_agent_workspace_config_t *config,
     }
     entry.tool_name = tstr_dup(source->tool_name);
     entry.capability = source->capability;
-    if (!entry.tool_name || turbo_vec_push(&workspace->tool_capabilities, &entry) != SALTS_OK) {
+    if (!entry.tool_name || vec_push(&workspace->tool_capabilities, &entry) != STL_OK) {
       tstr_free(entry.tool_name);
       turbo_agent_workspace_destroy(workspace);
       return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
@@ -1047,7 +1048,7 @@ void turbo_agent_workspace_destroy(turbo_agent_workspace_t *workspace) {
 
 turbo_agent_workspace_status_t turbo_agent_workspace_refresh(turbo_agent_workspace_t *workspace) {
   tstr instructions = NULL;
-  turbo_vec_t skills;
+  vec_t skills;
   turbo_agent_workspace_status_t status;
   memset(&skills, 0, sizeof(skills));
   if (!workspace) return TURBO_AGENT_WORKSPACE_INVALID_ARGUMENT;
@@ -1071,7 +1072,7 @@ turbo_agent_workspace_status_t turbo_agent_workspace_refresh(turbo_agent_workspa
 }
 
 size_t turbo_agent_workspace_skill_count(const turbo_agent_workspace_t *workspace) {
-  return workspace ? turbo_vec_size(&workspace->skills) : 0;
+  return workspace ? vec_size(&workspace->skills) : 0;
 }
 
 turbo_agent_workspace_status_t
@@ -1089,7 +1090,7 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
                               const char *base_instructions,
                               turbo_agent_workspace_selection_t **out_selection) {
   turbo_agent_workspace_selection_t *selection;
-  turbo_vec_t selected;
+  vec_t selected;
   turbo_agent_workspace_status_t status = TURBO_AGENT_WORKSPACE_OK;
   size_t index;
   if (!out_selection) return TURBO_AGENT_WORKSPACE_INVALID_ARGUMENT;
@@ -1104,16 +1105,16 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
     status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
     goto cleanup;
   }
-  for (index = 0; index < turbo_vec_size(&workspace->skills); ++index) {
-    turbo_agent_skill_t *skill = (turbo_agent_skill_t *)turbo_vec_at(&workspace->skills, index);
+  for (index = 0; index < vec_size(&workspace->skills); ++index) {
+    turbo_agent_skill_t *skill = (turbo_agent_skill_t *)vec_at(&workspace->skills, index);
     if (!turbo_agent_workspace_skill_matches(skill, task)) continue;
-    if (turbo_vec_size(&selected) >= workspace->max_selected_skills) {
+    if (vec_size(&selected) >= workspace->max_selected_skills) {
       turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED,
                                       "skill selection", "selected skill count exceeded");
       status = TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED;
       goto cleanup;
     }
-    if (turbo_vec_push(&selected, &skill) != SALTS_OK ||
+    if (vec_push(&selected, &skill) != STL_OK ||
         turbo_agent_workspace_string_vec_push(&selection->skill_names, skill->name, 1) != 0) {
       status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
       goto cleanup;
@@ -1132,19 +1133,19 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
         "effective instructions");
     if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
   }
-  for (index = 0; index < turbo_vec_size(&workspace->always_tools); ++index) {
-    char *const *tool = (char *const *)turbo_vec_at(&workspace->always_tools, index);
+  for (index = 0; index < vec_size(&workspace->always_tools); ++index) {
+    char *const *tool = (char *const *)vec_at(&workspace->always_tools, index);
     status = turbo_agent_workspace_add_selected_tool(workspace, source_registry,
                                                      &selection->tool_names, *tool);
     if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
   }
-  for (index = 0; index < turbo_vec_size(&selected); ++index) {
-    turbo_agent_skill_t **skill_ptr = (turbo_agent_skill_t **)turbo_vec_at(&selected, index);
+  for (index = 0; index < vec_size(&selected); ++index) {
+    turbo_agent_skill_t **skill_ptr = (turbo_agent_skill_t **)vec_at(&selected, index);
     turbo_agent_skill_t *skill = *skill_ptr;
     size_t item;
     static const char prefix[] = "\n\n# Skill: ";
-    for (item = 0; item < turbo_vec_size(&skill->capabilities); ++item) {
-      char *const *text = (char *const *)turbo_vec_at(&skill->capabilities, item);
+    for (item = 0; item < vec_size(&skill->capabilities); ++item) {
+      char *const *text = (char *const *)vec_at(&skill->capabilities, item);
       turbo_agent_policy_capability_t capability;
       if (turbo_agent_workspace_capability_from_text(*text, &capability) != 0) {
         turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,
@@ -1155,8 +1156,8 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
       status = turbo_agent_workspace_check_capability(workspace, capability, skill->name);
       if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
     }
-    for (item = 0; item < turbo_vec_size(&skill->tools); ++item) {
-      char *const *tool = (char *const *)turbo_vec_at(&skill->tools, item);
+    for (item = 0; item < vec_size(&skill->tools); ++item) {
+      char *const *tool = (char *const *)vec_at(&skill->tools, item);
       status = turbo_agent_workspace_add_selected_tool(workspace, source_registry,
                                                        &selection->tool_names, *tool);
       if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
@@ -1178,7 +1179,7 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
           workspace->max_instruction_bytes, "effective instructions");
     if (status != TURBO_AGENT_WORKSPACE_OK) goto cleanup;
   }
-  if (turbo_vec_size(&selection->tool_names) > 0) {
+  if (vec_size(&selection->tool_names) > 0) {
     const char **names;
     turbo_tool_status_t tool_status;
     if (!source_registry) {
@@ -1187,17 +1188,17 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
       status = TURBO_AGENT_WORKSPACE_TOOL_NOT_FOUND;
       goto cleanup;
     }
-    names = (const char **)calloc(turbo_vec_size(&selection->tool_names), sizeof(*names));
+    names = (const char **)calloc(vec_size(&selection->tool_names), sizeof(*names));
     if (!names) {
       status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
       goto cleanup;
     }
-    for (index = 0; index < turbo_vec_size(&selection->tool_names); ++index) {
-      char *const *name = (char *const *)turbo_vec_at(&selection->tool_names, index);
+    for (index = 0; index < vec_size(&selection->tool_names); ++index) {
+      char *const *name = (char *const *)vec_at(&selection->tool_names, index);
       names[index] = *name;
     }
     tool_status = turbo_tool_registry_project(
-        source_registry, names, turbo_vec_size(&selection->tool_names), &selection->tools);
+        source_registry, names, vec_size(&selection->tool_names), &selection->tools);
     free(names);
     if (tool_status != TURBO_TOOL_OK) {
       turbo_agent_workspace_set_error(workspace,
@@ -1228,7 +1229,7 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
   workspace->last_error[0] = '\0';
   *out_selection = selection;
 cleanup:
-  turbo_vec_destroy(&selected);
+  vec_destroy(&selected);
   if (status != TURBO_AGENT_WORKSPACE_OK) {
     turbo_agent_workspace_selection_destroy(selection);
   }
@@ -1256,29 +1257,29 @@ turbo_agent_workspace_selection_tools(const turbo_agent_workspace_selection_t *s
 
 size_t
 turbo_agent_workspace_selection_skill_count(const turbo_agent_workspace_selection_t *selection) {
-  return selection ? turbo_vec_size(&selection->skill_names) : 0;
+  return selection ? vec_size(&selection->skill_names) : 0;
 }
 
 const char *
 turbo_agent_workspace_selection_skill_name(const turbo_agent_workspace_selection_t *selection,
                                            size_t index) {
   char *const *name;
-  if (!selection || index >= turbo_vec_size(&selection->skill_names)) return NULL;
-  name = (char *const *)turbo_vec_at((turbo_vec_t *)&selection->skill_names, index);
+  if (!selection || index >= vec_size(&selection->skill_names)) return NULL;
+  name = (char *const *)vec_at((vec_t *)&selection->skill_names, index);
   return name ? *name : NULL;
 }
 
 size_t
 turbo_agent_workspace_selection_tool_count(const turbo_agent_workspace_selection_t *selection) {
-  return selection ? turbo_vec_size(&selection->tool_names) : 0;
+  return selection ? vec_size(&selection->tool_names) : 0;
 }
 
 const char *
 turbo_agent_workspace_selection_tool_name(const turbo_agent_workspace_selection_t *selection,
                                           size_t index) {
   char *const *name;
-  if (!selection || index >= turbo_vec_size(&selection->tool_names)) return NULL;
-  name = (char *const *)turbo_vec_at((turbo_vec_t *)&selection->tool_names, index);
+  if (!selection || index >= vec_size(&selection->tool_names)) return NULL;
+  name = (char *const *)vec_at((vec_t *)&selection->tool_names, index);
   return name ? *name : NULL;
 }
 

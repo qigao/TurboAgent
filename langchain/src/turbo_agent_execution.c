@@ -71,7 +71,7 @@ static int turbo_agent_execution_copy_graph_options(const turbo_graph_run_option
 
   memset(destination, 0, sizeof(*destination));
   if (!source) {
-    return TURBO_OK;
+    return SALTS_OK;
   }
   *destination = *source;
   destination->start_node = NULL;
@@ -81,38 +81,38 @@ static int turbo_agent_execution_copy_graph_options(const turbo_graph_run_option
   if (source->start_node) {
     destination->start_node = turbo_agent_util_strdup(source->start_node);
     if (!destination->start_node) {
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
   }
   if (source->interrupt_before_count == 0) {
-    return TURBO_OK;
+    return SALTS_OK;
   }
   if (!source->interrupt_before_nodes ||
       source->interrupt_before_count > SIZE_MAX / sizeof(*interrupts)) {
     turbo_agent_execution_free_graph_options(destination);
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
 
   interrupts = (char **)calloc(source->interrupt_before_count, sizeof(*interrupts));
   if (!interrupts) {
     turbo_agent_execution_free_graph_options(destination);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   destination->interrupt_before_nodes = (const char *const *)interrupts;
   for (i = 0; i < source->interrupt_before_count; ++i) {
     if (!source->interrupt_before_nodes[i]) {
       turbo_agent_execution_free_graph_options(destination);
-      return TURBO_EINVAL;
+      return SALTS_EINVAL;
     }
     interrupts[i] = turbo_agent_util_strdup(source->interrupt_before_nodes[i]);
     if (!interrupts[i]) {
       destination->interrupt_before_count = i;
       turbo_agent_execution_free_graph_options(destination);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
     destination->interrupt_before_count = i + 1;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static void turbo_agent_execution_free_runtime_options(turbo_agent_execution_t *execution) {
@@ -131,10 +131,10 @@ static int turbo_agent_execution_copy_optional_string(const char *source,
                                                       const char **destination) {
   if (!source) {
     *destination = NULL;
-    return TURBO_OK;
+    return SALTS_OK;
   }
   *destination = turbo_agent_util_strdup(source);
-  return *destination ? TURBO_OK : TURBO_ENOMEM;
+  return *destination ? SALTS_OK : SALTS_ENOMEM;
 }
 
 static int
@@ -144,7 +144,7 @@ turbo_agent_execution_copy_runtime_options(const turbo_agent_runtime_exec_option
 
   if (!source) {
     memset(&execution->runtime_options, 0, sizeof(execution->runtime_options));
-    return TURBO_OK;
+    return SALTS_OK;
   }
   execution->runtime_options = *source;
   execution->runtime_options.checkpoint_id = NULL;
@@ -155,7 +155,7 @@ turbo_agent_execution_copy_runtime_options(const turbo_agent_runtime_exec_option
 #define TURBO_COPY_EXECUTION_STRING(source_value, destination_value)                               \
   do {                                                                                             \
     rc = turbo_agent_execution_copy_optional_string((source_value), &(destination_value));         \
-    if (rc != TURBO_OK) {                                                                          \
+    if (rc != SALTS_OK) {                                                                          \
       turbo_agent_execution_free_runtime_options(execution);                                       \
       return rc;                                                                                   \
     }                                                                                              \
@@ -177,7 +177,7 @@ turbo_agent_execution_copy_runtime_options(const turbo_agent_runtime_exec_option
     execution->runtime_options.parent_link = &execution->parent_link;
   }
 #undef TURBO_COPY_EXECUTION_STRING
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static turbo_agent_execution_status_t
@@ -272,7 +272,7 @@ static void turbo_agent_execution_worker(void *arg) {
         &execution->runtime_options, execution->cancel_token, &summary, &state);
   }
 
-  if (rc == TURBO_OK && execution->hooks.complete) {
+  if (rc == SALTS_OK && execution->hooks.complete) {
     rc = execution->hooks.complete(execution->hooks.user_data, execution->graph,
                                    &execution->graph_options, execution->cancel_token,
                                    &summary, &state);
@@ -313,22 +313,22 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
   int rc;
 
   if (!out_execution) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   *out_execution = NULL;
   if (!executor || !runtime || !graph || (kind == TURBO_AGENT_EXECUTION_START && !input) ||
       !turbo_agent_execution_options_valid(execution_options)) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
 
   execution = (turbo_agent_execution_t *)calloc(1, sizeof(*execution));
   if (!execution) {
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   atomic_init(&execution->ref_count, 1);
   execution->kind = kind;
   execution->status = TURBO_AGENT_EXECUTION_QUEUED;
-  execution->operation_rc = TURBO_EBUSY;
+  execution->operation_rc = SALTS_EBUSY;
   execution->runtime = runtime;
   execution->graph = graph;
   if (hooks) {
@@ -338,23 +338,23 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
   turbo_cond_init(&execution->changed);
   if (!execution->mutex || !execution->changed) {
     turbo_agent_execution_destroy(execution);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
 
   if (input) {
     execution->input = turbo_json_clone(input);
     if (!execution->input) {
       turbo_agent_execution_release(execution);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
   }
   rc = turbo_agent_execution_copy_graph_options(graph_options, &execution->graph_options);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_agent_execution_release(execution);
     return rc;
   }
   rc = turbo_agent_execution_copy_runtime_options(runtime_options, execution);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_agent_execution_release(execution);
     return rc;
   }
@@ -363,30 +363,30 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
     cancel_config.deadline_mono_ms = execution_options->deadline_mono_ms;
   }
   rc = turbo_cancel_source_create(&cancel_config, &execution->cancel_source);
-  if (rc != TURBO_OK ||
-      turbo_cancel_source_token(execution->cancel_source, &execution->cancel_token) != TURBO_OK) {
+  if (rc != SALTS_OK ||
+      turbo_cancel_source_token(execution->cancel_source, &execution->cancel_token) != SALTS_OK) {
     turbo_agent_execution_release(execution);
-    return rc != TURBO_OK ? rc : TURBO_ENOMEM;
+    return rc != SALTS_OK ? rc : SALTS_ENOMEM;
   }
   rc = turbo_uuid_v7_generate(&uuid);
-  if (rc != TURBO_OK ||
-      turbo_uuid_format(&uuid, execution->id, sizeof(execution->id)) != TURBO_OK) {
+  if (rc != SALTS_OK ||
+      turbo_uuid_format(&uuid, execution->id, sizeof(execution->id)) != SALTS_OK) {
     turbo_agent_execution_release(execution);
-    return rc != TURBO_OK ? rc : TURBO_EIO;
+    return rc != SALTS_OK ? rc : SALTS_EIO;
   }
 
   if (!turbo_agent_execution_retain(execution)) {
     turbo_agent_execution_release(execution);
-    return TURBO_ERANGE;
+    return SALTS_ERANGE;
   }
   if (turbo_threadpool_try_submit(executor, turbo_agent_execution_worker, execution) != 0) {
     turbo_agent_execution_release(execution);
     turbo_agent_execution_release(execution);
-    return TURBO_EBUSY;
+    return SALTS_EBUSY;
   }
 
   *out_execution = execution;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_execution_start(turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
@@ -410,7 +410,7 @@ int turbo_agent_execution_resume(turbo_threadpool_t *executor, turbo_agent_runti
     if (out_execution) {
       *out_execution = NULL;
     }
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_RESUME, executor, runtime, graph, input,
                                       graph_options, runtime_options, execution_options, NULL,
@@ -427,7 +427,7 @@ int turbo_agent_execution_fork(turbo_threadpool_t *executor, turbo_agent_runtime
     if (out_execution) {
       *out_execution = NULL;
     }
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_FORK, executor, runtime, graph, input,
                                       graph_options, runtime_options, execution_options, NULL,
@@ -459,7 +459,7 @@ int turbo_agent_execution_resume_internal(
     if (out_execution) {
       *out_execution = NULL;
     }
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_RESUME, executor, runtime, graph, input,
                                       graph_options, runtime_options, execution_options, hooks,
@@ -478,7 +478,7 @@ int turbo_agent_execution_fork_internal(
     if (out_execution) {
       *out_execution = NULL;
     }
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return turbo_agent_execution_submit(TURBO_AGENT_EXECUTION_FORK, executor, runtime, graph, input,
                                       graph_options, runtime_options, execution_options, hooks,
@@ -493,21 +493,21 @@ int turbo_agent_execution_cancel(turbo_agent_execution_t *execution, turbo_cance
   int terminal;
 
   if (!execution) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   turbo_mutex_lock(&execution->mutex);
   terminal = turbo_agent_execution_is_terminal(execution->status);
   turbo_mutex_unlock(&execution->mutex);
-  return terminal ? TURBO_EALREADY : turbo_cancel_source_cancel(execution->cancel_source, reason);
+  return terminal ? SALTS_EALREADY : turbo_cancel_source_cancel(execution->cancel_source, reason);
 }
 
 int turbo_agent_execution_wait(turbo_agent_execution_t *execution, uint64_t timeout_ms) {
   uint64_t deadline_ms = UINT64_MAX;
   int has_timeout = timeout_ms != UINT64_MAX;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
 
   if (!execution) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   if (has_timeout) {
     deadline_ms = turbo_agent_execution_saturating_add(turbo_monotonic_ms(), timeout_ms);
@@ -524,7 +524,7 @@ int turbo_agent_execution_wait(turbo_agent_execution_t *execution, uint64_t time
     }
     now_ms = turbo_monotonic_ms();
     if (now_ms >= deadline_ms) {
-      rc = TURBO_ETIMEDOUT;
+      rc = SALTS_ETIMEDOUT;
       break;
     }
     wait_ms = deadline_ms - now_ms;
@@ -541,42 +541,42 @@ int turbo_agent_execution_wait(turbo_agent_execution_t *execution, uint64_t time
 int turbo_agent_execution_get_status(const turbo_agent_execution_t *execution,
                                      turbo_agent_execution_status_t *out_status) {
   if (!execution || !out_status) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   turbo_mutex_lock((turbo_mutex_t *)&execution->mutex);
   *out_status = execution->status;
   turbo_mutex_unlock((turbo_mutex_t *)&execution->mutex);
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_execution_result_code(const turbo_agent_execution_t *execution,
                                       int *out_result_code) {
   if (!execution || !out_result_code) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   turbo_mutex_lock((turbo_mutex_t *)&execution->mutex);
   if (!turbo_agent_execution_is_terminal(execution->status)) {
     turbo_mutex_unlock((turbo_mutex_t *)&execution->mutex);
-    return TURBO_EBUSY;
+    return SALTS_EBUSY;
   }
   *out_result_code = execution->operation_rc;
   turbo_mutex_unlock((turbo_mutex_t *)&execution->mutex);
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_execution_take_result(turbo_agent_execution_t *execution,
                                       json_value_t **out_summary, json_value_t **out_state) {
   if (!execution || !out_summary || !out_state) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   turbo_mutex_lock(&execution->mutex);
   if (!turbo_agent_execution_is_terminal(execution->status)) {
     turbo_mutex_unlock(&execution->mutex);
-    return TURBO_EBUSY;
+    return SALTS_EBUSY;
   }
   if (execution->result_taken) {
     turbo_mutex_unlock(&execution->mutex);
-    return TURBO_EALREADY;
+    return SALTS_EALREADY;
   }
   *out_summary = NULL;
   *out_state = NULL;
@@ -586,5 +586,5 @@ int turbo_agent_execution_take_result(turbo_agent_execution_t *execution,
   execution->summary = NULL;
   execution->state = NULL;
   turbo_mutex_unlock(&execution->mutex);
-  return TURBO_OK;
+  return SALTS_OK;
 }

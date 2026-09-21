@@ -2,7 +2,7 @@
 #define TURBO_RUNTIME_JSON_H
 
 #include <platform.h>
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 #include <stdint.h>
 
@@ -19,7 +19,7 @@ typedef enum turbo_runtime_json_status_e {
   TURBO_RUNTIME_JSON_NOT_FOUND = -5
 } turbo_runtime_json_status_t;
 
-/** Release one owned TurboParser JSON tree. */
+/** Release one owned SaltsUtils JSON tree. */
 CXX_C_API void turbo_runtime_json_destroy(json_value_t *value);
 
 /** Set or replace an object member. Ownership transfers only on success. */

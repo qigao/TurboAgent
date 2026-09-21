@@ -325,12 +325,19 @@ CXX_C_API int turbo_agent_apply_core_config(turbo_agent_t *agent,
   agent->structured_output_strict = config->structured_output_strict ? 1 : 0;
   agent->structured_output_max_retries = config->structured_output_max_retries;
   agent->api_key = config->api_key ? turbo_agent_util_strdup(config->api_key) : NULL;
+  if (agent->api_key) {
+    size_t key_length = strlen(agent->api_key);
+    agent->http_authorization = (char *)tstr_new_len("Bearer ", 7u);
+    if (agent->http_authorization) {
+      agent->http_authorization = tstr_cat_len(agent->http_authorization, agent->api_key, key_length);
+    }
+  }
 
   if (!provider->build_request || !agent->model || !agent->base_url || !agent->endpoint_path ||
       (config->instructions && !agent->instructions) ||
       (config->structured_output_name && !agent->structured_output_name) ||
       (config->structured_output_schema_json && !agent->structured_output_schema_json) ||
-      (config->api_key && !agent->api_key)) {
+      (config->api_key && (!agent->api_key || !agent->http_authorization))) {
     return -1;
   }
 

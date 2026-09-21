@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <turbo_deque.h>
-#include <turbo_str.h>
+#include <tstr.h>
 #include <salts/thread.h>
 #include <salts_uuid.h>
 #include <turbo_vec.h>

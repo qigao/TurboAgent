@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <salts/clock.h>
 
 typedef struct harness_transport_gate_s {
   atomic_int entered;
@@ -299,7 +300,7 @@ spec("turbo agent harness") {
     check_not_null(pool);
     check_not_null(harness);
     turbo_agent_harness_run_options_init(&options);
-    options.deadline_mono_ms = turbo_monotonic_ms();
+    options.deadline_mono_ms = salts_monotonic_ms();
     check_int_eq(turbo_agent_harness_start_text(harness, "too late", &options, &execution),
                  SALTS_OK);
     check_int_eq(turbo_agent_harness_execution_wait(execution, UINT64_MAX), SALTS_OK);

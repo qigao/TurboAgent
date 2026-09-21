@@ -13,11 +13,10 @@ target_include_directories(
                    $<INSTALL_INTERFACE:include>)
 target_link_libraries(mcp_tools PUBLIC TurboAgent::RuntimeTools
                                        Salts::JsonParser
-                                       TurboHttp::TurboHttp)
+                                       CHttp::Client)
 
 cmake_config_target(mcp_tools FOLDER "MCP Tools" EXPORT_NAME McpTools
                     ALIAS TurboAgent::McpTools)
-add_library(TurboNet::McpTools ALIAS mcp_tools)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 

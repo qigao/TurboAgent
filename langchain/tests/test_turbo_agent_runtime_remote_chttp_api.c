@@ -7,6 +7,7 @@
 #include "turbo_agent_runtime_remote_client.h"
 #include "turbo_agent_state.h"
 
+#include <stdio.h>
 #include <string.h>
 
 enum {

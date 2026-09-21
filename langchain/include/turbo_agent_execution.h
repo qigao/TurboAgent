@@ -2,7 +2,7 @@
 #define TURBO_AGENT_EXECUTION_H
 
 #include <turbo_agent_api.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 #include "turbo_agent_runtime.h"
 #include "turbo_runtime_control.h"

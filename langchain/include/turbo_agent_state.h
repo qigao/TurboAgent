@@ -3,7 +3,7 @@
 
 #include <platform.h>
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_runtime_json.h"
 
 #ifdef __cplusplus

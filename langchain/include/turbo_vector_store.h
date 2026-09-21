@@ -4,7 +4,7 @@
 #include <platform.h>
 #include <stddef.h>
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_text_splitter.h"
 
 #ifdef __cplusplus

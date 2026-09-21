@@ -7,7 +7,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 static turbo_agent_session_t *inbox_create_session(const char *thread_id,
                                                    turbo_agent_runtime_store_t store,
@@ -225,7 +225,7 @@ spec("turbo agent inbox") {
     json_value_t *first = inbox_message("first");
     json_value_t *blocked = inbox_message("blocked");
     char *first_id = NULL;
-    turbo_thread_t producer = NULL;
+    salts_thread_t producer = NULL;
     inbox_enqueue_task_t task = {0};
 
     check_int_eq(turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, first, 0, &first_id),
@@ -235,13 +235,13 @@ spec("turbo agent inbox") {
     task.kind = TURBO_AGENT_INBOX_FOLLOW_UP;
     task.result = TURBO_UNKNOWN;
     atomic_init(&task.entered, 0);
-    check_int_eq(turbo_thread_create(&producer, inbox_enqueue_task, &task), 0);
+    check_int_eq(salts_thread_create(&producer, inbox_enqueue_task, &task), 0);
     while (!atomic_load_explicit(&task.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
     check_int_eq(turbo_agent_session_inbox_close(session), SALTS_OK);
-    check_int_eq(turbo_thread_join(&producer), 0);
-    turbo_thread_destroy(&producer);
+    check_int_eq(salts_thread_join(&producer), 0);
+    salts_thread_destroy(&producer);
     check_int_eq(task.result, SALTS_ECANCELED);
     check_null(task.inbox_id);
     check_int_eq(turbo_agent_session_inbox_close(session), SALTS_EALREADY);
@@ -474,7 +474,7 @@ spec("turbo agent inbox") {
     json_value_t *first = inbox_message("producer one");
     json_value_t *second = inbox_message("producer two");
     inbox_enqueue_task_t tasks[2] = {0};
-    turbo_thread_t producers[2] = {NULL, NULL};
+    salts_thread_t producers[2] = {NULL, NULL};
     json_value_t *claimed = NULL;
     size_t index;
 
@@ -487,11 +487,11 @@ spec("turbo agent inbox") {
     for (index = 0; index < 2; ++index) {
       tasks[index].result = TURBO_UNKNOWN;
       atomic_init(&tasks[index].entered, 0);
-      check_int_eq(turbo_thread_create(&producers[index], inbox_enqueue_task, &tasks[index]), 0);
+      check_int_eq(salts_thread_create(&producers[index], inbox_enqueue_task, &tasks[index]), 0);
     }
     for (index = 0; index < 2; ++index) {
-      check_int_eq(turbo_thread_join(&producers[index]), 0);
-      turbo_thread_destroy(&producers[index]);
+      check_int_eq(salts_thread_join(&producers[index]), 0);
+      salts_thread_destroy(&producers[index]);
       check_int_eq(tasks[index].result, SALTS_OK);
       check_not_null(tasks[index].inbox_id);
     }

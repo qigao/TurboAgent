@@ -16,7 +16,7 @@
 #include "turbo_retriever.h"
 #include "turbo_tool_schema.h"
 
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -66,15 +66,15 @@ static int turbo_agent_session_apply_claimed_message(turbo_agent_session_t *sess
   const json_value_t *payload;
   const char *inbox_id;
   const char *content;
-  char event_id[TURBO_UUID_STRING_SIZE];
-  turbo_uuid_t uuid;
+  char event_id[SALTS_UUID_STRING_SIZE];
+  salts_uuid_t uuid;
 
   if (!session || !session->inbox || !record || !state) return -1;
   payload = turbo_json_object_get(record, "payload");
   inbox_id = turbo_json_get_string(record, "inbox_id");
   content = payload ? turbo_json_get_string(payload, "content") : NULL;
-  if (!inbox_id || !content || content[0] == '\0' || turbo_uuid_v7_generate(&uuid) != SALTS_OK ||
-      turbo_uuid_format(&uuid, event_id, sizeof(event_id)) != SALTS_OK) {
+  if (!inbox_id || !content || content[0] == '\0' || salts_uuid_v7_generate(&uuid) != SALTS_OK ||
+      salts_uuid_format(&uuid, event_id, sizeof(event_id)) != SALTS_OK) {
     (void)turbo_agent_inbox_requeue(session->inbox, inbox_id ? inbox_id : "");
     return -1;
   }

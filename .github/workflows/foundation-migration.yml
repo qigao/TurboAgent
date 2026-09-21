@@ -1,0 +1,226 @@
+name: Foundation Migration
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: turboagent-foundation-migration-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_SHA: bd4377bde504193ec85cec4b4d8020793d5c5984
+      SALTS_UTILS_SHA: 58e462e60405a8420a07028d0ef7504302a92440
+      CHTTP_SHA: b6456f4ecb7e69a85a728523db36661215c31983
+      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+    steps:
+      - name: Checkout exact TurboAgent head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify source identity
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
+
+      - name: Reject retired foundation contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(
+            CMakeLists.txt CMakeOptions.cmake CMakeUserPresets.json cmake
+            runtime_core runtime_data runtime_tools mcp_tools langchain
+            coding_tools codex_bridge llm_sandbox tools
+          )
+          patterns='TurboUtils::|TurboParser::|TurboNet::|TurboHttp::|TURBOUTILS_ROOT|TURBOPARSER_ROOT|TURBONET_ROOT|TURBOHTTP_ROOT|turbo_parser\.h|CoroNet|turbo_agent_runtime_remote_iris|find_package\((TurboUtils|TurboParser|TurboNet|TurboHttp)|find_dependency\((TurboUtils|TurboParser|TurboNet|TurboHttp)'
+          if git grep -nE "$patterns" -- "${paths[@]}" -- '*.c' '*.h' '*.cpp' '*.hpp' 'CMakeLists.txt' '*.cmake' '*.cmake.in' '*.json'; then
+            echo "retired foundation contract remains in active build/source/test code" >&2
+            exit 1
+          fi
+
+      - name: Checkout current Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: deps/salts
+          persist-credentials: false
+
+      - name: Checkout current SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: deps/salts-utils
+          persist-credentials: false
+
+      - name: Checkout current CHTTP
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/chttp
+          ref: ${{ env.CHTTP_SHA }}
+          path: deps/chttp
+          persist-credentials: false
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_SHA }}
+          path: vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          sudo mkdir -p /opt/salts /opt/salts-utils /opt/chttp /opt/turboagent
+          sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/chttp /opt/turboagent
+          sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
+          bash deps/salts-utils/cmake/ci/install-re2c.sh
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: turboagent-foundation-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_SHA }}-v1
+
+      - name: Build and install Salts
+        working-directory: deps/salts
+        env:
+          PROJECT_ROOT: ${{ runner.temp }}/salts-project
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF
+          cmake --build build/linux-gcc-debug --target install -j2
+          package="$RUNNER_TEMP/salts-project/external/pkgs/salts/debug"
+          test -f "$package/lib/cmake/Salts/SaltsConfig.cmake"
+          ln -sfn "$package" /opt/salts/debug
+
+      - name: Build host Lemon
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S deps/salts-utils/tools/lemon             -B deps/salts-utils/build/host-lemon             -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build deps/salts-utils/build/host-lemon --target lemon -j2
+
+      - name: Build and install SaltsUtils
+        working-directory: deps/salts-utils
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"             -DDATABIND_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"
+          cmake --build build/linux-gcc-debug --target install -j2
+          test -f /opt/salts-utils/debug/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake
+
+      - name: Build and install CHTTP
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S deps/chttp -B deps/chttp/build/turboagent-foundation -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/chttp"             -DCMAKE_INSTALL_PREFIX=/opt/chttp/debug             -DSALTS_ROOT=/opt/salts/debug             -DSALTS_UTILS_ROOT=/opt/salts-utils/debug             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF
+          cmake --build deps/chttp/build/turboagent-foundation --target install -j2
+          test -f /opt/chttp/debug/lib/cmake/Chttp/ChttpConfig.cmake
+
+      - name: Configure TurboAgent foundation build
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build/foundation -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent"             -DCMAKE_INSTALL_PREFIX=/opt/turboagent/debug             -DCMAKE_PREFIX_PATH="/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"             -DSALTS_ROOT=/opt/salts/debug             -DSALTS_UTILS_ROOT=/opt/salts-utils/debug             -DCHTTP_ROOT=/opt/chttp/debug             -DENABLE_MCP_TOOLS=ON             -DENABLE_LANGCHAIN=OFF             -DENABLE_LLM_SANDBOX=OFF             -DENABLE_CODING_TOOLS=ON             -DENABLE_CODEX_BRIDGE=ON             -DENABLE_TESTS=ON             -DBUILD_TESTS=ON             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
+          grep -F 'ENABLE_MCP_TOOLS:BOOL=ON' build/foundation/CMakeCache.txt
+          grep -F 'ENABLE_LANGCHAIN:BOOL=OFF' build/foundation/CMakeCache.txt
+          grep -F 'ENABLE_LLM_SANDBOX:BOOL=OFF' build/foundation/CMakeCache.txt
+
+      - name: Build and test foundation modules
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/foundation -j2
+          ctest --test-dir build/foundation --output-on-failure
+
+      - name: Install TurboAgent
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/foundation --target install -j2
+          config=/opt/turboagent/debug/lib/cmake/TurboAgent/TurboAgentConfig.cmake
+          test -f "$config"
+          test -f /opt/turboagent/debug/lib/cmake/TurboAgent/TurboAgentTargets.cmake
+          grep -F 'find_dependency(SaltsUtils CONFIG)' "$config"
+          grep -F 'find_dependency(Chttp CONFIG)' "$config"
+          if grep -Eq 'Turbo(Net|Http|Utils|Parser)' "$config"; then
+            echo "retired package escaped into installed config" >&2
+            exit 1
+          fi
+
+      - name: Build installed TurboAgent consumer
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+        shell: bash
+        run: |
+          set -euxo pipefail
+          consumer="$RUNNER_TEMP/turboagent-foundation-consumer"
+          mkdir -p "$consumer"
+          cat > "$consumer/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(turboagent_foundation_consumer LANGUAGES C)
+          find_package(TurboAgent CONFIG REQUIRED)
+          add_executable(turboagent_foundation_consumer main.c)
+          target_link_libraries(turboagent_foundation_consumer PRIVATE
+            TurboAgent::RuntimeCore
+            TurboAgent::RuntimeData
+            TurboAgent::RuntimeTools
+            TurboAgent::McpTools)
+          CMAKE
+          cat > "$consumer/main.c" <<'C'
+          #include <turbo_mcp_tool_pack.h>
+          #include <turbo_runtime_json.h>
+
+          int main(void) {
+            turbo_mcp_tool_pack_config_t config;
+            turbo_mcp_tool_pack_config_init(&config);
+            return config.abi_version == TURBO_MCP_TOOL_PACK_ABI_VERSION ? 0 : 1;
+          }
+          C
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent"             -DCMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"
+          cmake --build "$consumer/build" --verbose -j2
+          vcpkg_libs="$(find "$GITHUB_WORKSPACE" -type d \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
+          export LD_LIBRARY_PATH="/opt/turboagent/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          "$consumer/build/turboagent_foundation_consumer"
+
+      - name: Verify tracked source remains clean
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"

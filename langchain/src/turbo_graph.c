@@ -571,13 +571,13 @@ turbo_graph_cancel_status(const turbo_cancel_token_t *cancel_token) {
     return TURBO_GRAPH_EXEC_OK;
   }
   status = turbo_cancel_token_check(cancel_token);
-  if (status == TURBO_OK) {
+  if (status == SALTS_OK) {
     return TURBO_GRAPH_EXEC_OK;
   }
-  if (status == TURBO_ETIMEDOUT) {
+  if (status == SALTS_ETIMEDOUT) {
     return TURBO_GRAPH_EXEC_DEADLINE;
   }
-  return status == TURBO_ECANCELED ? TURBO_GRAPH_EXEC_CANCELLED
+  return status == SALTS_ECANCELED ? TURBO_GRAPH_EXEC_CANCELLED
                                    : TURBO_GRAPH_EXEC_ERROR;
 }
 

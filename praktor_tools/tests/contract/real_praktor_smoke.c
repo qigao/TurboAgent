@@ -1,5 +1,5 @@
 #include "turbo_praktor_tool_pack.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include "turbo_runtime_json.h"
 
 #include <stdio.h>
@@ -79,13 +79,13 @@ int main(void) {
   free(output);
   output = NULL;
 
-  args = turbo_json_create_object();
+  args = json_create_object();
   if (!args ||
       turbo_tool_registry_execute_json_value(
           registry, "praktor_real_command", args, &result) != TURBO_TOOL_OK ||
       !result ||
-      !turbo_json_get_string(result, "workflow_status") ||
-      strcmp(turbo_json_get_string(result, "workflow_status"), "success") != 0)
+      !json_get_string(result, "workflow_status") ||
+      strcmp(json_get_string(result, "workflow_status"), "success") != 0)
     goto cleanup;
 
   turbo_runtime_json_destroy(args);

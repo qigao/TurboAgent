@@ -1,6 +1,8 @@
 #include "turbo_praktor_tool_pack.h"
 
 #include <praktor.h>
+#include <json_parser.h>
+#include <turbo_runtime_json.h>
 #include <turbo_fs.h>
 #include <turbo_str.h>
 
@@ -85,15 +87,15 @@ static int turbo_praktor_schema_valid(const char *parameters_json) {
   const char *type;
   int valid;
   if (!parameters_json) return 1;
-  if (turbo_parse_json((const uint8_t *)parameters_json, strlen(parameters_json),
-                       &schema) != 0 ||
-      !schema || turbo_json_type(schema) != TURBO_JSON_OBJECT) {
-    turbo_free_json(&schema);
+  if (turbo_runtime_json_parse((const uint8_t *)parameters_json, strlen(parameters_json),
+                              &schema) != TURBO_RUNTIME_JSON_OK ||
+      !schema || json_type(schema) != JSON_OBJECT) {
+    turbo_runtime_json_destroy(schema);
     return 0;
   }
-  type = turbo_json_get_string(schema, "type");
+  type = json_get_string(schema, "type");
   valid = !type || strcmp(type, "object") == 0;
-  turbo_free_json(&schema);
+  turbo_runtime_json_destroy(schema);
   return valid;
 }
 
@@ -122,14 +124,14 @@ static const char *turbo_praktor_error_phase_name(praktor_error_phase phase) {
 
 static json_value_t *turbo_praktor_error_result(praktor_result status,
                                                 const praktor_error *error) {
-  json_value_t *result = turbo_json_create_object();
+  json_value_t *result = json_create_object();
   if (!result) return NULL;
-  turbo_json_object_set_string(result, "workflow_status", "error");
-  turbo_json_object_set_number(result, "result_code", (double)status);
-  turbo_json_object_set_string(
+  json_object_set_string(result, "workflow_status", "error");
+  json_object_set_number(result, "result_code", (double)status);
+  json_object_set_string(
       result, "error_phase",
       turbo_praktor_error_phase_name(error ? error->phase : PRAKTOR_ERROR_PHASE_NONE));
-  turbo_json_object_set_string(
+  json_object_set_string(
       result, "error",
       error && error->message[0] ? error->message : "Praktor workflow invocation failed");
   return result;
@@ -172,8 +174,9 @@ static int turbo_praktor_execute_text(turbo_praktor_binding_t *binding,
   if (status == PRAKTOR_RESULT_SUCCESS ||
       status == PRAKTOR_RESULT_EXECUTION_FAILED) {
     if (!output.data || !output.size ||
-        turbo_parse_json((const uint8_t *)output.data, output.size, &parsed) != 0 ||
-        !parsed || turbo_json_type(parsed) != TURBO_JSON_OBJECT) {
+        turbo_runtime_json_parse((const uint8_t *)output.data, output.size, &parsed) !=
+            TURBO_RUNTIME_JSON_OK ||
+        !parsed || json_type(parsed) != JSON_OBJECT) {
       goto cleanup;
     }
     rc = turbo_praktor_copy_text(output.data, output.size, out_output);
@@ -182,13 +185,13 @@ static int turbo_praktor_execute_text(turbo_praktor_binding_t *binding,
 
   parsed = turbo_praktor_error_result(status, &error);
   if (!parsed) goto cleanup;
-  serialized = turbo_json_serialize(parsed, &serialized_size);
+  serialized = json_serialize(parsed, &serialized_size);
   if (!serialized || serialized_size > binding->max_result_bytes) goto cleanup;
   rc = turbo_praktor_copy_text(serialized, serialized_size, out_output);
 
 cleanup:
-  if (serialized) turbo_json_serialize_free(serialized);
-  turbo_free_json(&parsed);
+  if (serialized) json_serialize_free(serialized);
+  turbo_runtime_json_destroy(parsed);
   binding->api->release_json(&output);
   return rc;
 }
@@ -214,29 +217,30 @@ static int turbo_praktor_execute(const json_value_t *arguments,
 
   if (out_result) *out_result = NULL;
   if (!binding || !binding->api || !out_result ||
-      (arguments && turbo_json_type(arguments) != TURBO_JSON_OBJECT)) {
+      (arguments && json_type(arguments) != JSON_OBJECT)) {
     return -1;
   }
 
   if (!effective_arguments) {
-    empty_arguments = turbo_json_create_object();
+    empty_arguments = json_create_object();
     if (!empty_arguments) return -1;
     effective_arguments = empty_arguments;
   }
-  input_json = turbo_json_serialize(effective_arguments, &input_size);
+  input_json = json_serialize(effective_arguments, &input_size);
   turbo_runtime_json_destroy(empty_arguments);
   if (!input_json) return -1;
 
   rc = turbo_praktor_execute_text(binding, input_json, input_size, &output_json);
-  turbo_json_serialize_free(input_json);
+  json_serialize_free(input_json);
   if (rc != 0 || !output_json) {
     free(output_json);
     return -1;
   }
-  if (turbo_parse_json((const uint8_t *)output_json, strlen(output_json), &parsed) != 0 ||
-      !parsed || turbo_json_type(parsed) != TURBO_JSON_OBJECT) {
+  if (turbo_runtime_json_parse((const uint8_t *)output_json, strlen(output_json), &parsed) !=
+          TURBO_RUNTIME_JSON_OK ||
+      !parsed || json_type(parsed) != JSON_OBJECT) {
     free(output_json);
-    turbo_free_json(&parsed);
+    turbo_runtime_json_destroy(parsed);
     return -1;
   }
   free(output_json);

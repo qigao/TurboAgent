@@ -1,6 +1,6 @@
 #include "praktor.h"
 #include "turbo_fs.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include "turbo_runtime_json.h"
 #include "turbo_str.h"
 #include "turbo_tool_registry.h"
@@ -18,7 +18,7 @@ typedef struct mock_json_field_s {
 } mock_json_field_t;
 
 struct json_value_s {
-  turbo_json_type_t type;
+  json_type_t type;
   mock_json_field_t fields[16];
   size_t field_count;
 };
@@ -71,26 +71,26 @@ int turbo_fs_lstat(const char *path, turbo_fs_stat_t *metadata) {
 
 static void mock_json_set_string(json_value_t *object, const char *key, const char *value) {
   mock_json_field_t *field;
-  if (!object || object->type != TURBO_JSON_OBJECT || !key || !value ||
+  if (!object || object->type != JSON_OBJECT || !key || !value ||
       object->field_count >= 16) return;
   field = &object->fields[object->field_count++];
   field->key = mock_strdup(key);
   field->string_value = mock_strdup(value);
 }
 
-json_value_t *turbo_json_create_object(void) {
+json_value_t *json_create_object(void) {
   json_value_t *value = (json_value_t *)calloc(1, sizeof(*value));
-  if (value) value->type = TURBO_JSON_OBJECT;
+  if (value) value->type = JSON_OBJECT;
   return value;
 }
 
-void turbo_json_object_set_string(json_value_t *object, const char *key, const char *value) {
+void json_object_set_string(json_value_t *object, const char *key, const char *value) {
   mock_json_set_string(object, key, value ? value : "");
 }
 
-void turbo_json_object_set_number(json_value_t *object, const char *key, double value) {
+void json_object_set_number(json_value_t *object, const char *key, double value) {
   mock_json_field_t *field;
-  if (!object || object->type != TURBO_JSON_OBJECT || !key ||
+  if (!object || object->type != JSON_OBJECT || !key ||
       object->field_count >= 16) return;
   field = &object->fields[object->field_count++];
   field->key = mock_strdup(key);
@@ -98,9 +98,9 @@ void turbo_json_object_set_number(json_value_t *object, const char *key, double 
   field->is_number = 1;
 }
 
-const char *turbo_json_get_string(const json_value_t *object, const char *key) {
+const char *json_get_string(const json_value_t *object, const char *key) {
   size_t i;
-  if (!object || object->type != TURBO_JSON_OBJECT || !key) return NULL;
+  if (!object || object->type != JSON_OBJECT || !key) return NULL;
   for (i = 0; i < object->field_count; ++i)
     if (!object->fields[i].is_number && object->fields[i].key &&
         strcmp(object->fields[i].key, key) == 0)
@@ -108,9 +108,9 @@ const char *turbo_json_get_string(const json_value_t *object, const char *key) {
   return NULL;
 }
 
-double turbo_json_get_double(const json_value_t *object, const char *key, double default_value) {
+double json_get_double(const json_value_t *object, const char *key, double default_value) {
   size_t i;
-  if (!object || object->type != TURBO_JSON_OBJECT || !key) return default_value;
+  if (!object || object->type != JSON_OBJECT || !key) return default_value;
   for (i = 0; i < object->field_count; ++i)
     if (object->fields[i].is_number && object->fields[i].key &&
         strcmp(object->fields[i].key, key) == 0)
@@ -118,42 +118,40 @@ double turbo_json_get_double(const json_value_t *object, const char *key, double
   return default_value;
 }
 
-turbo_json_type_t turbo_json_type(const json_value_t *value) {
-  return value ? value->type : TURBO_JSON_NULL;
+json_type_t json_type(const json_value_t *value) {
+  return value ? value->type : JSON_NULL;
 }
 
-void turbo_free_json(json_value_t **value) {
+void json_free(json_value_t *value) {
   size_t i;
-  if (!value || !*value) return;
-  for (i = 0; i < (*value)->field_count; ++i) {
-    free((*value)->fields[i].key);
-    free((*value)->fields[i].string_value);
+  if (!value) return;
+  for (i = 0; i < value->field_count; ++i) {
+    free(value->fields[i].key);
+    free(value->fields[i].string_value);
   }
-  free(*value);
-  *value = NULL;
+  free(value);
 }
 
 void turbo_runtime_json_destroy(json_value_t *value) {
-  turbo_free_json(&value);
+  json_free(value);
 }
 
-int turbo_parse_json(const uint8_t *data, size_t size, json_value_t **out_value) {
+json_value_t *json_parse(const char *data, size_t size) {
   char *text;
   json_value_t *object;
-  if (!data || !size || !out_value) return -1;
-  *out_value = NULL;
+  if (!data || !size) return NULL;
   text = (char *)malloc(size + 1);
-  if (!text) return -1;
+  if (!text) return NULL;
   memcpy(text, data, size);
   text[size] = '\0';
   if (!strchr(text, '{')) {
     free(text);
-    return -1;
+    return NULL;
   }
-  object = turbo_json_create_object();
+  object = json_create_object();
   if (!object) {
     free(text);
-    return -1;
+    return NULL;
   }
   if (strstr(text, "\"type\":\"object\"") ||
       strstr(text, "\"type\": \"object\""))
@@ -165,16 +163,22 @@ int turbo_parse_json(const uint8_t *data, size_t size, json_value_t **out_value)
       strstr(text, "\"workflow_status\": \"failed\""))
     mock_json_set_string(object, "workflow_status", "failed");
   free(text);
-  *out_value = object;
-  return 0;
+  return object;
 }
 
-char *turbo_json_serialize(const json_value_t *value, size_t *out_size) {
+int turbo_runtime_json_parse(const uint8_t *data, size_t size,
+                             json_value_t **out_value) {
+  if (!out_value) return -1;
+  *out_value = json_parse((const char *)data, size);
+  return *out_value ? 0 : -1;
+}
+
+char *json_serialize(const json_value_t *value, size_t *out_size) {
   char buffer[2048];
   size_t used = 0;
   size_t i;
   char *copy;
-  if (!value || value->type != TURBO_JSON_OBJECT) return NULL;
+  if (!value || value->type != JSON_OBJECT) return NULL;
   buffer[used++] = '{';
   for (i = 0; i < value->field_count; ++i) {
     int written;
@@ -199,7 +203,7 @@ char *turbo_json_serialize(const json_value_t *value, size_t *out_size) {
   return copy;
 }
 
-void turbo_json_serialize_free(char *text) { free(text); }
+void json_serialize_free(char *text) { free(text); }
 
 turbo_tool_registry_t *turbo_tool_registry_create(void) {
   return (turbo_tool_registry_t *)calloc(1, sizeof(turbo_tool_registry_t));

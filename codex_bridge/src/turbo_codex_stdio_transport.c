@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <turbo_str.h>
+#include <tstr.h>
 #include <salts/thread.h>
 
 #if defined(_WIN32)

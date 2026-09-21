@@ -17,7 +17,7 @@
 #define TURBO_AGENT_INBOX_MAX_EXACT_JSON_INTEGER UINT64_C(9007199254740991)
 
 typedef struct turbo_agent_inbox_ready_s {
-  tstr_t inbox_id;
+  tstr inbox_id;
   turbo_agent_inbox_kind_t kind;
   size_t payload_bytes;
   uint64_t sequence;
@@ -26,7 +26,7 @@ typedef struct turbo_agent_inbox_ready_s {
 
 struct turbo_agent_inbox_s {
   turbo_agent_runtime_t *runtime;
-  tstr_t thread_id;
+  tstr thread_id;
   turbo_agent_inbox_config_t config;
   salts_mutex_t mutex;
   salts_cond_t changed;
@@ -39,7 +39,7 @@ struct turbo_agent_inbox_s {
   int closed;
   int has_active_claim;
   turbo_agent_inbox_ready_t active_claim;
-  tstr_t active_event_id;
+  tstr active_event_id;
 };
 
 static int turbo_agent_inbox_kind_valid(turbo_agent_inbox_kind_t kind) {
@@ -749,7 +749,7 @@ int turbo_agent_inbox_requeue(turbo_agent_inbox_t *inbox, const char *inbox_id) 
 
 int turbo_agent_inbox_bind_applied_event(turbo_agent_inbox_t *inbox, const char *inbox_id,
                                          const char *event_id) {
-  tstr_t event_id_copy;
+  tstr event_id_copy;
   if (!inbox || !inbox_id || inbox_id[0] == '\0' || !event_id || event_id[0] == '\0') {
     return SALTS_EINVAL;
   }
@@ -768,8 +768,8 @@ int turbo_agent_inbox_bind_applied_event(turbo_agent_inbox_t *inbox, const char 
 }
 
 int turbo_agent_inbox_commit_bound_claim(turbo_agent_inbox_t *inbox) {
-  tstr_t inbox_id = NULL;
-  tstr_t event_id = NULL;
+  tstr inbox_id = NULL;
+  tstr event_id = NULL;
   int rc;
   if (!inbox) return SALTS_EINVAL;
   salts_mutex_lock(&inbox->mutex);

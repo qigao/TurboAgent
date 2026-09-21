@@ -1,7 +1,7 @@
 #ifndef TURBO_AGENT_RUNTIME_H
 #define TURBO_AGENT_RUNTIME_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_event.h"
 #include "turbo_graph.h"

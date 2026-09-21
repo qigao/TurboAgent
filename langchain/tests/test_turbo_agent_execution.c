@@ -7,6 +7,7 @@
 
 #include <stdatomic.h>
 #include <string.h>
+#include <salts/clock.h>
 
 typedef struct execution_gate_s {
   atomic_int entered;
@@ -166,7 +167,7 @@ spec("turbo agent execution") {
     turbo_agent_execution_t *execution = NULL;
     turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_FAILED;
     turbo_agent_execution_options_t options = {sizeof(options), TURBO_AGENT_EXECUTION_ABI_VERSION,
-                                               turbo_monotonic_ms()};
+                                               salts_monotonic_ms()};
 
     check_int_eq(turbo_agent_execution_start(
                      pool, runtime, graph, input, NULL,

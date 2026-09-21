@@ -102,7 +102,7 @@ static uint64_t turbo_agent_harness_saturating_add_ms(uint64_t left, uint64_t ri
 static int turbo_agent_harness_server_uuid(char out[TURBO_UUID_STRING_SIZE]) {
   turbo_uuid_t uuid;
   int rc = turbo_uuid_v7_generate(&uuid);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   return turbo_uuid_format(&uuid, out, TURBO_UUID_STRING_SIZE);
 }
 
@@ -131,7 +131,7 @@ void turbo_agent_harness_connection_release_internal(turbo_agent_harness_connect
   if (!connection) return;
   if (atomic_fetch_sub_explicit(&connection->ref_count, 1, memory_order_acq_rel) != 1) return;
   atomic_thread_fence(memory_order_acquire);
-  while (turbo_deque_pop_front(&connection->events, &event) == TURBO_OK) {
+  while (turbo_deque_pop_front(&connection->events, &event) == SALTS_OK) {
     turbo_agent_harness_event_destroy(&event);
   }
   turbo_deque_destroy(&connection->events);
@@ -144,9 +144,9 @@ void turbo_agent_harness_connection_release_internal(turbo_agent_harness_connect
 static void
 turbo_agent_harness_connection_set_stream_error(turbo_agent_harness_connection_t *connection,
                                                 int error) {
-  if (!connection || error == TURBO_OK) return;
+  if (!connection || error == SALTS_OK) return;
   turbo_mutex_lock(&connection->event_mutex);
-  if (connection->stream_error == TURBO_OK) connection->stream_error = error;
+  if (connection->stream_error == SALTS_OK) connection->stream_error = error;
   turbo_cond_broadcast(&connection->event_changed);
   turbo_mutex_unlock(&connection->event_mutex);
 }
@@ -158,16 +158,16 @@ static int turbo_agent_harness_connection_enqueue(turbo_agent_harness_connection
   size_t bytes = 0;
   size_t event_limit;
   size_t byte_limit;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
 
-  if (!connection || !message) return TURBO_EINVAL;
+  if (!connection || !message) return SALTS_EINVAL;
   serialized = turbo_json_serialize(message, &bytes);
-  if (!serialized) return TURBO_ENOMEM;
+  if (!serialized) return SALTS_ENOMEM;
   turbo_json_serialize_free(serialized);
   if (bytes > connection->server->config.max_single_event_bytes ||
       bytes > connection->server->config.max_event_bytes) {
-    turbo_agent_harness_connection_set_stream_error(connection, TURBO_EMSGSIZE);
-    return TURBO_EMSGSIZE;
+    turbo_agent_harness_connection_set_stream_error(connection, SALTS_EMSGSIZE);
+    return SALTS_EMSGSIZE;
   }
 
   event_limit = connection->server->config.max_event_count;
@@ -179,30 +179,30 @@ static int turbo_agent_harness_connection_enqueue(turbo_agent_harness_connection
   }
 
   turbo_mutex_lock(&connection->event_mutex);
-  while (!connection->closed && connection->stream_error == TURBO_OK &&
+  while (!connection->closed && connection->stream_error == SALTS_OK &&
          (turbo_deque_size(&connection->events) >= event_limit ||
           connection->event_bytes >= byte_limit || bytes > byte_limit - connection->event_bytes)) {
     if (!wait_for_capacity) {
-      rc = TURBO_EBUSY;
+      rc = SALTS_EBUSY;
       break;
     }
     turbo_cond_wait(&connection->event_changed, &connection->event_mutex);
   }
-  if (rc == TURBO_OK && connection->closed) rc = TURBO_ESHUTDOWN;
-  if (rc == TURBO_OK && connection->stream_error != TURBO_OK) {
+  if (rc == SALTS_OK && connection->closed) rc = SALTS_ESHUTDOWN;
+  if (rc == SALTS_OK && connection->stream_error != SALTS_OK) {
     rc = connection->stream_error;
   }
-  if (rc == TURBO_OK) {
+  if (rc == SALTS_OK) {
     if (connection->next_sequence >= TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER) {
-      connection->stream_error = TURBO_ERANGE;
-      rc = TURBO_ERANGE;
+      connection->stream_error = SALTS_ERANGE;
+      rc = SALTS_ERANGE;
     } else {
       event.sequence = ++connection->next_sequence;
       event.bytes = bytes;
       event.message = message;
-      if (turbo_deque_push_back(&connection->events, &event) != TURBO_OK) {
-        connection->stream_error = TURBO_ENOMEM;
-        rc = TURBO_ENOMEM;
+      if (turbo_deque_push_back(&connection->events, &event) != SALTS_OK) {
+        connection->stream_error = SALTS_ENOMEM;
+        rc = SALTS_ENOMEM;
       } else {
         connection->event_bytes += bytes;
         turbo_cond_broadcast(&connection->event_changed);
@@ -220,17 +220,17 @@ static int turbo_agent_harness_connection_enqueue_pair(turbo_agent_harness_conne
   size_t total_bytes = 0;
   size_t index;
   size_t pushed = 0;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
 
-  if (!connection || !first || !second) return TURBO_EINVAL;
+  if (!connection || !first || !second) return SALTS_EINVAL;
   for (index = 0; index < 2; ++index) {
     char *serialized = turbo_json_serialize(messages[index], &pending[index].bytes);
-    if (!serialized) return TURBO_ENOMEM;
+    if (!serialized) return SALTS_ENOMEM;
     turbo_json_serialize_free(serialized);
     if (pending[index].bytes > connection->server->config.max_single_event_bytes ||
         pending[index].bytes > connection->server->config.max_event_bytes - total_bytes) {
-      turbo_agent_harness_connection_set_stream_error(connection, TURBO_EMSGSIZE);
-      return TURBO_EMSGSIZE;
+      turbo_agent_harness_connection_set_stream_error(connection, SALTS_EMSGSIZE);
+      return SALTS_EMSGSIZE;
     }
     total_bytes += pending[index].bytes;
     pending[index].message = messages[index];
@@ -238,36 +238,36 @@ static int turbo_agent_harness_connection_enqueue_pair(turbo_agent_harness_conne
 
   turbo_mutex_lock(&connection->event_mutex);
   if (connection->closed) {
-    rc = TURBO_ESHUTDOWN;
-  } else if (connection->stream_error != TURBO_OK) {
+    rc = SALTS_ESHUTDOWN;
+  } else if (connection->stream_error != SALTS_OK) {
     rc = connection->stream_error;
   } else if (turbo_deque_size(&connection->events) >
                  connection->server->config.max_event_count - 2 ||
              total_bytes > connection->server->config.max_event_bytes - connection->event_bytes) {
-    rc = TURBO_EBUSY;
+    rc = SALTS_EBUSY;
   } else if (connection->next_sequence > TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER - 2) {
-    connection->stream_error = TURBO_ERANGE;
-    rc = TURBO_ERANGE;
+    connection->stream_error = SALTS_ERANGE;
+    rc = SALTS_ERANGE;
   }
-  for (index = 0; rc == TURBO_OK && index < 2; ++index) {
+  for (index = 0; rc == SALTS_OK && index < 2; ++index) {
     pending[index].sequence = ++connection->next_sequence;
-    if (turbo_deque_push_back(&connection->events, &pending[index]) != TURBO_OK) {
+    if (turbo_deque_push_back(&connection->events, &pending[index]) != SALTS_OK) {
       --connection->next_sequence;
-      connection->stream_error = TURBO_ENOMEM;
-      rc = TURBO_ENOMEM;
+      connection->stream_error = SALTS_ENOMEM;
+      rc = SALTS_ENOMEM;
       break;
     }
     connection->event_bytes += pending[index].bytes;
     ++pushed;
   }
-  while (rc != TURBO_OK && pushed > 0) {
+  while (rc != SALTS_OK && pushed > 0) {
     turbo_agent_harness_event_t rollback = {0};
-    if (turbo_deque_pop_back(&connection->events, &rollback) != TURBO_OK) break;
+    if (turbo_deque_pop_back(&connection->events, &rollback) != SALTS_OK) break;
     connection->event_bytes -= rollback.bytes;
     --connection->next_sequence;
     --pushed;
   }
-  if (rc == TURBO_OK) turbo_cond_broadcast(&connection->event_changed);
+  if (rc == SALTS_OK) turbo_cond_broadcast(&connection->event_changed);
   turbo_mutex_unlock(&connection->event_mutex);
   return rc;
 }
@@ -293,15 +293,15 @@ static int turbo_agent_harness_emit(turbo_agent_harness_connection_t *connection
   int rc;
   if (!connection || !method || !params) {
     turbo_runtime_json_destroy(params);
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   message = turbo_agent_harness_notification_create(method, params);
   if (!message) {
     turbo_runtime_json_destroy(params);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = turbo_agent_harness_connection_enqueue(connection, message, wait_for_capacity);
-  if (rc != TURBO_OK) turbo_runtime_json_destroy(message);
+  if (rc != SALTS_OK) turbo_runtime_json_destroy(message);
   return rc;
 }
 
@@ -324,11 +324,11 @@ static void turbo_agent_harness_turn_event_sink(const json_value_t *event, void 
   if (!params || !copy || !turbo_json_object_add_checked(params, "item", copy)) {
     turbo_runtime_json_destroy(copy);
     turbo_runtime_json_destroy(params);
-    turbo_agent_harness_connection_set_stream_error(turn->connection, TURBO_ENOMEM);
+    turbo_agent_harness_connection_set_stream_error(turn->connection, SALTS_ENOMEM);
     return;
   }
   rc = turbo_agent_harness_emit(turn->connection, "item/event", params, 1);
-  if (rc != TURBO_OK && rc != TURBO_ESHUTDOWN) {
+  if (rc != SALTS_OK && rc != SALTS_ESHUTDOWN) {
     turbo_agent_harness_connection_set_stream_error(turn->connection, rc);
   }
 }
@@ -395,35 +395,35 @@ static int turbo_agent_harness_server_load_thread(turbo_agent_harness_server_t *
   const char *bound_thread_id;
   int rc;
 
-  if (!server || !thread_id || !thread_id[0] || !out_thread) return TURBO_EINVAL;
+  if (!server || !thread_id || !thread_id[0] || !out_thread) return SALTS_EINVAL;
   *out_thread = NULL;
   existing = turbo_agent_harness_server_find_thread(server, thread_id);
   if (existing) {
     *out_thread = existing;
-    return TURBO_OK;
+    return SALTS_OK;
   }
 
   candidate.id = tstr_dup(thread_id);
-  if (!candidate.id) return TURBO_ENOMEM;
+  if (!candidate.id) return SALTS_ENOMEM;
   turbo_mutex_init(&candidate.mutex);
   if (!candidate.mutex) {
     tstr_free(candidate.id);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = server->config.thread_factory(thread_id, &candidate.harness,
                                      server->config.thread_factory_user_data);
-  if (rc != TURBO_OK || !candidate.harness) {
+  if (rc != SALTS_OK || !candidate.harness) {
     turbo_agent_harness_thread_destroy(&candidate);
-    return rc != TURBO_OK ? rc : TURBO_EIO;
+    return rc != SALTS_OK ? rc : SALTS_EIO;
   }
   bound_thread_id = turbo_agent_app_thread_id(turbo_agent_harness_app(candidate.harness));
   if (!bound_thread_id || strcmp(bound_thread_id, thread_id) != 0) {
     turbo_agent_harness_thread_destroy(&candidate);
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   rc = turbo_agent_session_inbox_configure(
       turbo_agent_app_session(turbo_agent_harness_app(candidate.harness)), &server->config.inbox);
-  if (rc != TURBO_OK && rc != TURBO_EALREADY) {
+  if (rc != SALTS_OK && rc != SALTS_EALREADY) {
     turbo_agent_harness_thread_destroy(&candidate);
     return rc;
   }
@@ -434,22 +434,22 @@ static int turbo_agent_harness_server_load_thread(turbo_agent_harness_server_t *
     turbo_mutex_unlock(&server->mutex);
     turbo_agent_harness_thread_destroy(&candidate);
     *out_thread = existing;
-    return TURBO_OK;
+    return SALTS_OK;
   }
   if (turbo_vec_size(&server->threads) >= server->config.max_threads) {
     turbo_mutex_unlock(&server->mutex);
     turbo_agent_harness_thread_destroy(&candidate);
-    return TURBO_EBUSY;
+    return SALTS_EBUSY;
   }
   rc = turbo_vec_push(&server->threads, &candidate);
-  if (rc == TURBO_OK) {
+  if (rc == SALTS_OK) {
     *out_thread = (turbo_agent_harness_thread_t *)turbo_vec_at(
         &server->threads, turbo_vec_size(&server->threads) - 1);
     memset(&candidate, 0, sizeof(candidate));
   }
   turbo_mutex_unlock(&server->mutex);
   turbo_agent_harness_thread_destroy(&candidate);
-  return rc == TURBO_OK ? TURBO_OK : TURBO_ENOMEM;
+  return rc == SALTS_OK ? SALTS_OK : SALTS_ENOMEM;
 }
 
 static const char *turbo_agent_harness_turn_status_text(const turbo_agent_harness_turn_t *turn) {
@@ -467,7 +467,7 @@ static const char *turbo_agent_harness_turn_status_text(const turbo_agent_harnes
   }
   if (turn->awaiting_approval) return "approvalPending";
   if (turn->starting || !turn->execution) return "inProgress";
-  if (turbo_agent_harness_execution_get_status(turn->execution, &status) != TURBO_OK) {
+  if (turbo_agent_harness_execution_get_status(turn->execution, &status) != SALTS_OK) {
     return "failed";
   }
   return status >= TURBO_AGENT_EXECUTION_COMPLETED ? "completing" : "inProgress";
@@ -477,11 +477,11 @@ static int turbo_agent_harness_turn_snapshot_locked(const turbo_agent_harness_tu
                                                     turbo_agent_harness_turn_snapshot_t *snapshot) {
   size_t id_size;
   size_t approval_size = 0;
-  if (!turn || !snapshot) return TURBO_EINVAL;
+  if (!turn || !snapshot) return SALTS_EINVAL;
   id_size = strlen(turn->id);
   if (turn->approval_request_id) approval_size = strlen(turn->approval_request_id);
   if (id_size >= sizeof(snapshot->id) || approval_size >= sizeof(snapshot->approval_request_id)) {
-    return TURBO_ERANGE;
+    return SALTS_ERANGE;
   }
   memset(snapshot, 0, sizeof(*snapshot));
   memcpy(snapshot->id, turn->id, id_size + 1);
@@ -490,7 +490,7 @@ static int turbo_agent_harness_turn_snapshot_locked(const turbo_agent_harness_tu
   }
   snapshot->thread_id = turn->thread->id;
   snapshot->status = turbo_agent_harness_turn_status_text(turn);
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static json_value_t *
@@ -523,7 +523,7 @@ static json_value_t *turbo_agent_harness_turn_json(turbo_agent_harness_turn_t *t
   turbo_mutex_lock(&turn->thread->mutex);
   rc = turbo_agent_harness_turn_snapshot_locked(turn, &snapshot);
   turbo_mutex_unlock(&turn->thread->mutex);
-  return rc == TURBO_OK ? turbo_agent_harness_turn_snapshot_json(&snapshot) : NULL;
+  return rc == SALTS_OK ? turbo_agent_harness_turn_snapshot_json(&snapshot) : NULL;
 }
 
 static json_value_t *turbo_agent_harness_thread_json(turbo_agent_harness_thread_t *thread) {
@@ -577,9 +577,9 @@ static int turbo_agent_harness_turn_emit_completed(turbo_agent_harness_turn_t *t
                                                    const char *status) {
   json_value_t *message = turbo_agent_harness_turn_completed_message(turn, status);
   int rc;
-  if (!message) return TURBO_ENOMEM;
+  if (!message) return SALTS_ENOMEM;
   rc = turbo_agent_harness_connection_enqueue(turn->connection, message, 0);
-  if (rc != TURBO_OK) turbo_runtime_json_destroy(message);
+  if (rc != SALTS_OK) turbo_runtime_json_destroy(message);
   return rc;
 }
 
@@ -601,11 +601,11 @@ static int turbo_agent_harness_turn_emit_resolution_and_completed(turbo_agent_ha
   if (!resolved_message || !completed_message) {
     turbo_runtime_json_destroy(resolved_message);
     turbo_runtime_json_destroy(completed_message);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = turbo_agent_harness_connection_enqueue_pair(turn->connection, resolved_message,
                                                    completed_message);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_runtime_json_destroy(resolved_message);
     turbo_runtime_json_destroy(completed_message);
   }
@@ -624,12 +624,12 @@ static int turbo_agent_harness_turn_emit_approval(turbo_agent_harness_turn_t *tu
   tstr_t owned_request_id = NULL;
   int rc;
 
-  if (!out_request_id) return TURBO_EINVAL;
+  if (!out_request_id) return SALTS_EINVAL;
   *out_request_id = NULL;
   rc = turbo_agent_harness_server_uuid(request_id);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   owned_request_id = tstr_dup(request_id);
-  if (!owned_request_id) return TURBO_ENOMEM;
+  if (!owned_request_id) return SALTS_ENOMEM;
   if (note && turbo_parse_json((const uint8_t *)note, strlen(note), &note_json) == 0 && note_json &&
       turbo_json_type(note_json) == TURBO_JSON_OBJECT &&
       strcmp(turbo_json_get_string(note_json, "kind") ? turbo_json_get_string(note_json, "kind")
@@ -653,7 +653,7 @@ static int turbo_agent_harness_turn_emit_approval(turbo_agent_harness_turn_t *tu
   turbo_runtime_json_destroy(note_json);
   if (!params) {
     tstr_free(owned_request_id);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   turbo_json_object_set_string(params, "requestId", request_id);
   if (note) turbo_json_object_set_string(params, "reason", note);
@@ -661,13 +661,13 @@ static int turbo_agent_harness_turn_emit_approval(turbo_agent_harness_turn_t *tu
   if (!decisions) {
     turbo_runtime_json_destroy(params);
     tstr_free(owned_request_id);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   turbo_json_array_add(decisions, turbo_json_create_string("approve_once"));
   turbo_json_array_add(decisions, turbo_json_create_string("deny"));
   turbo_json_object_add(params, "availableDecisions", decisions);
   rc = turbo_agent_harness_emit(turn->connection, method, params, 0);
-  if (rc == TURBO_OK) {
+  if (rc == SALTS_OK) {
     *out_request_id = owned_request_id;
   } else {
     tstr_free(owned_request_id);
@@ -694,37 +694,37 @@ static int turbo_agent_harness_turn_refresh(turbo_agent_harness_thread_t *thread
   if (!turn || turn->starting || turn->refreshing || turn->finalized || turn->awaiting_approval ||
       !turn->execution) {
     turbo_mutex_unlock(&thread->mutex);
-    return TURBO_OK;
+    return SALTS_OK;
   }
   has_result = turn->summary && turn->state;
   if (!has_result) {
     execution = turbo_agent_harness_execution_retain(turn->execution);
     if (!execution) {
       turbo_mutex_unlock(&thread->mutex);
-      return TURBO_ERANGE;
+      return SALTS_ERANGE;
     }
   }
   turn->refreshing = 1;
   turbo_mutex_unlock(&thread->mutex);
 
   if (has_result) {
-    rc = TURBO_OK;
+    rc = SALTS_OK;
     status = TURBO_AGENT_EXECUTION_COMPLETED;
   } else {
     rc = turbo_agent_harness_execution_get_status(execution, &status);
-    if (rc == TURBO_OK && status >= TURBO_AGENT_EXECUTION_COMPLETED) {
+    if (rc == SALTS_OK && status >= TURBO_AGENT_EXECUTION_COMPLETED) {
       rc = turbo_agent_harness_execution_take_result(execution, &summary, &state);
     }
     turbo_agent_harness_execution_release(execution);
   }
 
   turbo_mutex_lock(&thread->mutex);
-  if (rc != TURBO_OK || status < TURBO_AGENT_EXECUTION_COMPLETED) {
+  if (rc != SALTS_OK || status < TURBO_AGENT_EXECUTION_COMPLETED) {
     turn->refreshing = 0;
     turbo_mutex_unlock(&thread->mutex);
     turbo_runtime_json_destroy(summary);
     turbo_runtime_json_destroy(state);
-    return rc == TURBO_EBUSY ? TURBO_OK : rc;
+    return rc == SALTS_EBUSY ? SALTS_OK : rc;
   }
   if (!has_result) {
     turn->summary = summary;
@@ -746,20 +746,20 @@ static int turbo_agent_harness_turn_refresh(turbo_agent_harness_thread_t *thread
   rc = approval_pending ? turbo_agent_harness_turn_emit_approval(turn, &approval_request_id)
                         : turbo_agent_harness_turn_emit_completed(turn, protocol_status);
   turbo_mutex_lock(&thread->mutex);
-  if (rc == TURBO_OK && approval_pending) {
+  if (rc == SALTS_OK && approval_pending) {
     turn->approval_request_id = approval_request_id;
     turn->awaiting_approval = 1;
-  } else if (rc == TURBO_OK) {
+  } else if (rc == SALTS_OK) {
     turn->finalized = 1;
   } else {
     tstr_free(approval_request_id);
   }
   turn->refreshing = 0;
   turbo_mutex_unlock(&thread->mutex);
-  if (rc != TURBO_OK && rc != TURBO_ESHUTDOWN && rc != TURBO_EBUSY) {
+  if (rc != SALTS_OK && rc != SALTS_ESHUTDOWN && rc != SALTS_EBUSY) {
     turbo_agent_harness_connection_set_stream_error(turn->connection, rc);
   }
-  return rc == TURBO_EBUSY ? TURBO_OK : rc;
+  return rc == SALTS_EBUSY ? SALTS_OK : rc;
 }
 
 static void turbo_agent_harness_connection_refresh(turbo_agent_harness_connection_t *connection) {
@@ -770,7 +770,7 @@ static void turbo_agent_harness_connection_refresh(turbo_agent_harness_connectio
   size_t index;
   threads = (turbo_agent_harness_thread_t **)calloc(server->config.max_threads, sizeof(*threads));
   if (!threads) {
-    turbo_agent_harness_connection_set_stream_error(connection, TURBO_ENOMEM);
+    turbo_agent_harness_connection_set_stream_error(connection, SALTS_ENOMEM);
     return;
   }
   turbo_mutex_lock(&server->mutex);
@@ -813,16 +813,16 @@ static int turbo_agent_harness_response_success(const json_value_t *request, jso
   json_value_t *response;
   if (!result || !out_response) {
     turbo_runtime_json_destroy(result);
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   response = turbo_agent_harness_response_base(request);
   if (!response || !turbo_json_object_add_checked(response, "result", result)) {
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(response);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   *out_response = response;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static const char *turbo_agent_harness_rpc_message(int code) {
@@ -855,22 +855,22 @@ static int turbo_agent_harness_response_error(const json_value_t *request, int c
   if (!response || !error) {
     turbo_runtime_json_destroy(response);
     turbo_runtime_json_destroy(error);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   turbo_json_object_set_number(error, "code", (double)code);
   turbo_json_object_set_string(error, "message", turbo_agent_harness_rpc_message(code));
   turbo_json_object_add(response, "error", error);
   *out_response = response;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_rpc_from_error(int rc) {
-  if (rc == TURBO_EINVAL || rc == TURBO_EPROTO || rc == TURBO_EMSGSIZE) {
+  if (rc == SALTS_EINVAL || rc == SALTS_EPROTO || rc == SALTS_EMSGSIZE) {
     return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
-  if (rc == TURBO_EBUSY || rc == TURBO_EALREADY) return TURBO_AGENT_HARNESS_RPC_BUSY;
-  if (rc == TURBO_ENOENT) return TURBO_AGENT_HARNESS_RPC_NOT_FOUND;
-  if (rc == TURBO_ESHUTDOWN) return TURBO_AGENT_HARNESS_RPC_STREAM_FAILED;
+  if (rc == SALTS_EBUSY || rc == SALTS_EALREADY) return TURBO_AGENT_HARNESS_RPC_BUSY;
+  if (rc == SALTS_ENOENT) return TURBO_AGENT_HARNESS_RPC_NOT_FOUND;
+  if (rc == SALTS_ESHUTDOWN) return TURBO_AGENT_HARNESS_RPC_STREAM_FAILED;
   return TURBO_AGENT_HARNESS_RPC_INTERNAL;
 }
 
@@ -879,14 +879,14 @@ static int turbo_agent_harness_json_uint64(const json_value_t *value, uint64_t m
   double number;
   uint64_t converted;
   if (!value || turbo_json_type(value) != TURBO_JSON_NUMBER || !out_number) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   number = turbo_json_number(value);
-  if (number < (double)minimum || number > (double)maximum) return TURBO_ERANGE;
+  if (number < (double)minimum || number > (double)maximum) return SALTS_ERANGE;
   converted = (uint64_t)number;
-  if ((double)converted != number) return TURBO_EINVAL;
+  if ((double)converted != number) return SALTS_EINVAL;
   *out_number = converted;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_input_text(const json_value_t *params, tstr_t *out_text) {
@@ -896,12 +896,12 @@ static int turbo_agent_harness_input_text(const json_value_t *params, tstr_t *ou
   size_t index;
   size_t total_size = 0;
   size_t offset = 0;
-  if (!params || !out_text) return TURBO_EINVAL;
+  if (!params || !out_text) return SALTS_EINVAL;
   *out_text = NULL;
   input = turbo_json_object_get(params, "input");
   if (!input || turbo_json_type(input) != TURBO_JSON_ARRAY ||
       (count = turbo_json_array_size(input)) == 0) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   for (index = 0; index < count; ++index) {
     const json_value_t *item = turbo_json_array_get(input, index);
@@ -915,16 +915,16 @@ static int turbo_agent_harness_input_text(const json_value_t *params, tstr_t *ou
         turbo_json_type(text_json) != TURBO_JSON_STRING ||
         !(value = turbo_json_string(text_json)) ||
         (value_size = turbo_json_string_len(text_json)) == 0 || strlen(value) != value_size) {
-      return TURBO_ENOTSUP;
+      return SALTS_ENOTSUP;
     }
     if ((index > 0 && total_size == SIZE_MAX) ||
         value_size > SIZE_MAX - total_size - (index > 0 ? 1 : 0)) {
-      return TURBO_ERANGE;
+      return SALTS_ERANGE;
     }
     total_size += value_size + (index > 0 ? 1 : 0);
   }
   text = tstr_new_len(NULL, total_size);
-  if (!text) return TURBO_ENOMEM;
+  if (!text) return SALTS_ENOMEM;
   for (index = 0; index < count; ++index) {
     const json_value_t *item = turbo_json_array_get(input, index);
     const json_value_t *text_json = turbo_json_object_get(item, "text");
@@ -935,7 +935,7 @@ static int turbo_agent_harness_input_text(const json_value_t *params, tstr_t *ou
     offset += value_size;
   }
   *out_text = text;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_interrupt_nodes(const json_value_t *params, const char ***out_nodes,
@@ -944,27 +944,27 @@ static int turbo_agent_harness_interrupt_nodes(const json_value_t *params, const
   const char **nodes = NULL;
   size_t count;
   size_t index;
-  if (!out_nodes || !out_count) return TURBO_EINVAL;
+  if (!out_nodes || !out_count) return SALTS_EINVAL;
   *out_nodes = NULL;
   *out_count = 0;
-  if (!array) return TURBO_OK;
+  if (!array) return SALTS_OK;
   if (turbo_json_type(array) != TURBO_JSON_ARRAY ||
       (count = turbo_json_array_size(array)) > TURBO_AGENT_HARNESS_MAX_INTERRUPT_NODES) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
-  if (count == 0) return TURBO_OK;
+  if (count == 0) return SALTS_OK;
   nodes = (const char **)calloc(count, sizeof(*nodes));
-  if (!nodes) return TURBO_ENOMEM;
+  if (!nodes) return SALTS_ENOMEM;
   for (index = 0; index < count; ++index) {
     nodes[index] = turbo_json_string(turbo_json_array_get(array, index));
     if (!nodes[index] || !nodes[index][0]) {
       free(nodes);
-      return TURBO_EINVAL;
+      return SALTS_EINVAL;
     }
   }
   *out_nodes = nodes;
   *out_count = count;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_dispatch_initialize(turbo_agent_harness_connection_t *connection,
@@ -1019,7 +1019,7 @@ static int turbo_agent_harness_dispatch_initialize(turbo_agent_harness_connectio
   turbo_json_object_add(result, "capabilities", server_capabilities);
   connection->state = TURBO_AGENT_HARNESS_CONNECTION_INITIALIZED;
   *out_result = result;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_dispatch_thread_load(turbo_agent_harness_connection_t *connection,
@@ -1038,14 +1038,14 @@ static int turbo_agent_harness_dispatch_thread_load(turbo_agent_harness_connecti
       return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
     }
     rc = turbo_agent_harness_server_uuid(generated_id);
-    if (rc != TURBO_OK) return TURBO_AGENT_HARNESS_RPC_INTERNAL;
+    if (rc != SALTS_OK) return TURBO_AGENT_HARNESS_RPC_INTERNAL;
     thread_id = generated_id;
   } else {
     thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
     if (!thread_id || !thread_id[0]) return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
   rc = turbo_agent_harness_server_load_thread(connection->server, thread_id, &thread);
-  if (rc != TURBO_OK) return turbo_agent_harness_rpc_from_error(rc);
+  if (rc != SALTS_OK) return turbo_agent_harness_rpc_from_error(rc);
   thread_json = turbo_agent_harness_thread_json(thread);
   result = turbo_json_create_object();
   notify_params = turbo_json_create_object();
@@ -1060,12 +1060,12 @@ static int turbo_agent_harness_dispatch_thread_load(turbo_agent_harness_connecti
   turbo_json_object_add(result, "thread", thread_json);
   turbo_json_object_add(notify_params, "thread", notify_thread);
   rc = turbo_agent_harness_emit(connection, "thread/started", notify_params, 0);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_runtime_json_destroy(result);
     return TURBO_AGENT_HARNESS_RPC_STREAM_FAILED;
   }
   *out_result = result;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_dispatch_thread_get(turbo_agent_harness_connection_t *connection,
@@ -1088,7 +1088,7 @@ static int turbo_agent_harness_dispatch_thread_get(turbo_agent_harness_connectio
   }
   turbo_json_object_add(result, "thread", thread_json);
   *out_result = result;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_dispatch_thread_list(turbo_agent_harness_connection_t *connection,
@@ -1136,7 +1136,7 @@ static int turbo_agent_harness_dispatch_thread_list(turbo_agent_harness_connecti
   free(snapshot);
   turbo_json_object_add(result, "threads", threads);
   *out_result = result;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connection_t *connection,
@@ -1163,27 +1163,27 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
   thread = turbo_agent_harness_server_find_thread(connection->server, thread_id);
   if (!thread) return TURBO_AGENT_HARNESS_RPC_NOT_FOUND;
   rc = turbo_agent_harness_input_text(params, &text);
-  if (rc != TURBO_OK) {
-    return rc == TURBO_ENOMEM ? TURBO_AGENT_HARNESS_RPC_INTERNAL
+  if (rc != SALTS_OK) {
+    return rc == SALTS_ENOMEM ? TURBO_AGENT_HARNESS_RPC_INTERNAL
                               : TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
   deadline_json = turbo_json_object_get(params, "deadlineMonoMs");
   if (deadline_json) {
     if (turbo_agent_harness_json_uint64(deadline_json, 1,
                                         TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER,
-                                        &deadline_mono_ms) != TURBO_OK) {
+                                        &deadline_mono_ms) != SALTS_OK) {
       tstr_free(text);
       return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
     }
   }
   rc = turbo_agent_harness_interrupt_nodes(params, &interrupt_nodes, &interrupt_count);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     tstr_free(text);
-    return rc == TURBO_ENOMEM ? TURBO_AGENT_HARNESS_RPC_INTERNAL
+    return rc == SALTS_ENOMEM ? TURBO_AGENT_HARNESS_RPC_INTERNAL
                               : TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
   rc = turbo_agent_harness_server_uuid(turn_id);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     free(interrupt_nodes);
     tstr_free(text);
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
@@ -1221,18 +1221,18 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
 
   notify_params = turbo_agent_harness_params_base(turn);
   if (!notify_params) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto fail;
   }
   turn_json = turbo_agent_harness_turn_json(turn);
   if (!turn_json) {
     turbo_runtime_json_destroy(notify_params);
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto fail;
   }
   turbo_json_object_add(notify_params, "turn", turn_json);
   rc = turbo_agent_harness_emit(connection, "turn/started", notify_params, 0);
-  if (rc != TURBO_OK) goto fail;
+  if (rc != SALTS_OK) goto fail;
 
   turbo_agent_harness_run_options_init(&options);
   graph_options.interrupt_before_nodes = interrupt_nodes;
@@ -1244,25 +1244,25 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
   rc = turbo_agent_harness_start_text(thread->harness, text, &options, &turn->execution);
   free(interrupt_nodes);
   interrupt_nodes = NULL;
-  if (rc != TURBO_OK) goto fail;
+  if (rc != SALTS_OK) goto fail;
   turbo_mutex_lock(&thread->mutex);
   turn->starting = 0;
   turbo_mutex_unlock(&thread->mutex);
   result = turbo_json_create_object();
   if (!result) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto fail_after_submit;
   }
   turn_json = turbo_agent_harness_turn_json(turn);
   if (!turn_json) {
     turbo_runtime_json_destroy(result);
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto fail_after_submit;
   }
   turbo_json_object_add(result, "turn", turn_json);
   *out_result = result;
   tstr_free(text);
-  return TURBO_OK;
+  return SALTS_OK;
 
 fail_after_submit:
   (void)turbo_agent_harness_execution_cancel(turn->execution, TURBO_CANCEL_SHUTDOWN);
@@ -1279,7 +1279,7 @@ fail: {
   turn->starting = 0;
   turn->finalized = 1;
   turbo_mutex_unlock(&thread->mutex);
-  if (emit_rc != TURBO_OK && emit_rc != TURBO_ESHUTDOWN) {
+  if (emit_rc != SALTS_OK && emit_rc != SALTS_ESHUTDOWN) {
     turbo_agent_harness_connection_set_stream_error(connection, emit_rc);
   }
   tstr_free(text);
@@ -1305,7 +1305,7 @@ static int turbo_agent_harness_dispatch_turn_get(turbo_agent_harness_connection_
     turbo_mutex_unlock(&thread->mutex);
     return TURBO_AGENT_HARNESS_RPC_NOT_FOUND;
   }
-  if (turbo_agent_harness_turn_snapshot_locked(thread->turn, &snapshot) != TURBO_OK) {
+  if (turbo_agent_harness_turn_snapshot_locked(thread->turn, &snapshot) != SALTS_OK) {
     turbo_mutex_unlock(&thread->mutex);
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
@@ -1319,7 +1319,7 @@ static int turbo_agent_harness_dispatch_turn_get(turbo_agent_harness_connection_
   }
   turbo_json_object_add(result, "turn", turn_json);
   *out_result = result;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_dispatch_turn_interrupt(turbo_agent_harness_connection_t *connection,
@@ -1358,7 +1358,7 @@ static int turbo_agent_harness_dispatch_turn_interrupt(turbo_agent_harness_conne
     rc = turbo_agent_harness_turn_emit_resolution_and_completed(turn, approval_request_id,
                                                                 "cancelled", "interrupted");
     turbo_mutex_lock(&thread->mutex);
-    if (rc == TURBO_OK) {
+    if (rc == SALTS_OK) {
       turn->awaiting_approval = 0;
       turn->interrupt_requested = 1;
       turn->finalized = 1;
@@ -1369,9 +1369,9 @@ static int turbo_agent_harness_dispatch_turn_interrupt(turbo_agent_harness_conne
     turn->starting = 0;
     turbo_mutex_unlock(&thread->mutex);
     tstr_free(approval_request_id);
-    if (rc != TURBO_OK) return turbo_agent_harness_rpc_from_error(rc);
+    if (rc != SALTS_OK) return turbo_agent_harness_rpc_from_error(rc);
     *out_result = turbo_json_create_object();
-    return *out_result ? TURBO_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
+    return *out_result ? SALTS_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
   if (!turn->execution) {
     turbo_mutex_unlock(&thread->mutex);
@@ -1383,14 +1383,14 @@ static int turbo_agent_harness_dispatch_turn_interrupt(turbo_agent_harness_conne
   if (!execution) return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   rc = turbo_agent_harness_execution_cancel(execution, TURBO_CANCEL_USER);
   turbo_agent_harness_execution_release(execution);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_mutex_lock(&thread->mutex);
     if (thread->turn == turn && !turn->finalized) turn->interrupt_requested = 0;
     turbo_mutex_unlock(&thread->mutex);
     return turbo_agent_harness_rpc_from_error(rc);
   }
   *out_result = turbo_json_create_object();
-  return *out_result ? TURBO_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
+  return *out_result ? SALTS_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
 }
 
 static int turbo_agent_harness_dispatch_turn_steer(turbo_agent_harness_connection_t *connection,
@@ -1408,8 +1408,8 @@ static int turbo_agent_harness_dispatch_turn_steer(turbo_agent_harness_connectio
   thread = turbo_agent_harness_server_find_thread(connection->server, thread_id);
   if (!thread) return TURBO_AGENT_HARNESS_RPC_NOT_FOUND;
   rc = turbo_agent_harness_input_text(params, &text);
-  if (rc != TURBO_OK) {
-    return rc == TURBO_ENOMEM ? TURBO_AGENT_HARNESS_RPC_INTERNAL
+  if (rc != SALTS_OK) {
+    return rc == SALTS_ENOMEM ? TURBO_AGENT_HARNESS_RPC_INTERNAL
                               : TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
   (void)turbo_agent_harness_turn_refresh(thread);
@@ -1434,7 +1434,7 @@ static int turbo_agent_harness_dispatch_turn_steer(turbo_agent_harness_connectio
                                   TURBO_AGENT_INBOX_STEER, message, 0, &inbox_id);
   turbo_runtime_json_destroy(message);
   tstr_free(text);
-  if (rc != TURBO_OK) return turbo_agent_harness_rpc_from_error(rc);
+  if (rc != SALTS_OK) return turbo_agent_harness_rpc_from_error(rc);
   result = turbo_json_create_object();
   if (!result) {
     free(inbox_id);
@@ -1444,7 +1444,7 @@ static int turbo_agent_harness_dispatch_turn_steer(turbo_agent_harness_connectio
   turbo_json_object_set_string(result, "inboxId", inbox_id);
   free(inbox_id);
   *out_result = result;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_t *connection,
@@ -1463,7 +1463,7 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
                                                         TURBO_SESSION_INPUT_COMMAND, NULL};
   json_value_t *command = NULL;
   json_value_t *resolved = NULL;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
   if (!thread_id || !turn_id || !request_id || !decision ||
       (strcmp(decision, "approve_once") != 0 && strcmp(decision, "deny") != 0)) {
     return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
@@ -1492,7 +1492,7 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
     rc = turbo_agent_harness_turn_emit_resolution_and_completed(turn, request_id, decision,
                                                                 "declined");
     turbo_mutex_lock(&thread->mutex);
-    if (rc == TURBO_OK) {
+    if (rc == SALTS_OK) {
       turn->awaiting_approval = 0;
       turn->finalized = 1;
       if (turn->summary) {
@@ -1516,7 +1516,7 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
       return TURBO_AGENT_HARNESS_RPC_INTERNAL;
     }
     rc = turbo_agent_harness_emit(connection, "serverRequest/resolved", resolved, 0);
-    if (rc != TURBO_OK) {
+    if (rc != SALTS_OK) {
       turbo_mutex_lock(&thread->mutex);
       turn->starting = 0;
       turbo_mutex_unlock(&thread->mutex);
@@ -1534,7 +1534,7 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
     rc = turbo_agent_harness_resume(thread->harness, command, &options, &new_execution);
     turbo_runtime_json_destroy(command);
     turbo_mutex_lock(&thread->mutex);
-    if (rc == TURBO_OK) {
+    if (rc == SALTS_OK) {
       turn->execution = new_execution;
       turbo_agent_harness_execution_release(old_execution);
       turbo_runtime_json_destroy(turn->summary);
@@ -1551,26 +1551,26 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
       turn->approval_request_id = NULL;
       if (turn->summary) turbo_json_object_set_string(turn->summary, "status", "failed");
     }
-    if (rc == TURBO_OK) turn->starting = 0;
+    if (rc == SALTS_OK) turn->starting = 0;
     turbo_mutex_unlock(&thread->mutex);
-    if (rc != TURBO_OK) {
+    if (rc != SALTS_OK) {
       int emit_rc = turbo_agent_harness_turn_emit_completed(turn, "failed");
       turbo_mutex_lock(&thread->mutex);
       turn->starting = 0;
       turn->finalized = 1;
       turbo_mutex_unlock(&thread->mutex);
-      if (emit_rc != TURBO_OK && emit_rc != TURBO_ESHUTDOWN) {
+      if (emit_rc != SALTS_OK && emit_rc != SALTS_ESHUTDOWN) {
         turbo_agent_harness_connection_set_stream_error(connection, emit_rc);
       }
     }
   }
-  if (rc != TURBO_OK) return turbo_agent_harness_rpc_from_error(rc);
+  if (rc != SALTS_OK) return turbo_agent_harness_rpc_from_error(rc);
   if (strcmp(decision, "deny") == 0) {
     *out_result = turbo_json_create_object();
-    return *out_result ? TURBO_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
+    return *out_result ? SALTS_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
   *out_result = turbo_json_create_object();
-  return *out_result ? TURBO_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
+  return *out_result ? SALTS_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
 }
 
 static int turbo_agent_harness_dispatch_event_replay(turbo_agent_harness_connection_t *connection,
@@ -1592,13 +1592,13 @@ static int turbo_agent_harness_dispatch_event_replay(turbo_agent_harness_connect
   turbo_agent_harness_connection_refresh(connection);
   if (after_json) {
     if (turbo_agent_harness_json_uint64(after_json, 0, TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER,
-                                        &after) != TURBO_OK) {
+                                        &after) != SALTS_OK) {
       return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
     }
   }
   if (limit_json) {
     uint64_t value;
-    if (turbo_agent_harness_json_uint64(limit_json, 1, (uint64_t)limit, &value) != TURBO_OK) {
+    if (turbo_agent_harness_json_uint64(limit_json, 1, (uint64_t)limit, &value) != SALTS_OK) {
       return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
     }
     limit = (size_t)value;
@@ -1621,7 +1621,7 @@ static int turbo_agent_harness_dispatch_event_replay(turbo_agent_harness_connect
   }
   next = selected_count ? selected[selected_count - 1]->sequence : after;
   turbo_mutex_unlock(&connection->event_mutex);
-  if (stream_error != TURBO_OK) {
+  if (stream_error != SALTS_OK) {
     free(selected);
     return TURBO_AGENT_HARNESS_RPC_STREAM_FAILED;
   }
@@ -1647,7 +1647,7 @@ static int turbo_agent_harness_dispatch_event_replay(turbo_agent_harness_connect
   turbo_json_object_set_bool(result, "hasMore", next < latest ? 1 : 0);
   free(selected);
   *out_result = result;
-  return TURBO_OK;
+  return SALTS_OK;
 fail:
   free(selected);
   turbo_runtime_json_destroy(events);
@@ -1663,17 +1663,17 @@ static int turbo_agent_harness_dispatch_event_ack(turbo_agent_harness_connection
   uint64_t through;
   json_value_t *result;
   if (turbo_agent_harness_json_uint64(through_json, 0, TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER,
-                                      &through) != TURBO_OK) {
+                                      &through) != SALTS_OK) {
     return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
-  if (turbo_agent_harness_connection_ack_events(connection, through) != TURBO_OK) {
+  if (turbo_agent_harness_connection_ack_events(connection, through) != SALTS_OK) {
     return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
   result = turbo_json_create_object();
   if (!result) return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   turbo_json_object_set_number(result, "acknowledgedSequence", (double)through);
   *out_result = result;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_harness_dispatch_method(turbo_agent_harness_connection_t *connection,
@@ -1771,8 +1771,8 @@ turbo_agent_harness_server_create(const turbo_agent_harness_server_config_t *con
   server->config = *config;
   turbo_mutex_init(&server->mutex);
   if (!server->mutex ||
-      turbo_vec_init(&server->threads, sizeof(turbo_agent_harness_thread_t)) != TURBO_OK ||
-      turbo_vec_reserve(&server->threads, config->max_threads) != TURBO_OK) {
+      turbo_vec_init(&server->threads, sizeof(turbo_agent_harness_thread_t)) != SALTS_OK ||
+      turbo_vec_reserve(&server->threads, config->max_threads) != SALTS_OK) {
     turbo_agent_harness_server_destroy(server);
     return NULL;
   }
@@ -1807,8 +1807,8 @@ turbo_agent_harness_server_open_connection(turbo_agent_harness_server_t *server)
   turbo_mutex_init(&connection->event_mutex);
   turbo_cond_init(&connection->event_changed);
   if (!connection->dispatch_mutex || !connection->event_mutex || !connection->event_changed ||
-      turbo_deque_init(&connection->events, sizeof(turbo_agent_harness_event_t)) != TURBO_OK ||
-      turbo_deque_reserve(&connection->events, server->config.max_event_count) != TURBO_OK) {
+      turbo_deque_init(&connection->events, sizeof(turbo_agent_harness_event_t)) != SALTS_OK ||
+      turbo_deque_reserve(&connection->events, server->config.max_event_count) != SALTS_OK) {
     turbo_agent_harness_connection_release_internal(connection);
     return NULL;
   }
@@ -1867,13 +1867,13 @@ int turbo_agent_harness_connection_wait_event_json_value(
   turbo_agent_harness_connection_t *retained;
   uint64_t deadline_ms = UINT64_MAX;
   int timed = timeout_ms != UINT64_MAX;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
 
-  if (!out_event_json || !out_sequence) return TURBO_EINVAL;
+  if (!out_event_json || !out_sequence) return SALTS_EINVAL;
   *out_event_json = NULL;
   *out_sequence = 0;
   retained = turbo_agent_harness_connection_retain_internal(connection);
-  if (!retained) return TURBO_ESHUTDOWN;
+  if (!retained) return SALTS_ESHUTDOWN;
   if (timed) {
     deadline_ms = turbo_agent_harness_saturating_add_ms(turbo_monotonic_ms(), timeout_ms);
   }
@@ -1887,8 +1887,8 @@ int turbo_agent_harness_connection_wait_event_json_value(
     turbo_agent_harness_connection_refresh(retained);
     turbo_mutex_lock(&retained->event_mutex);
     if (retained->closed) {
-      rc = TURBO_ESHUTDOWN;
-    } else if (retained->stream_error != TURBO_OK) {
+      rc = SALTS_ESHUTDOWN;
+    } else if (retained->stream_error != SALTS_OK) {
       rc = retained->stream_error;
     } else if ((front = (turbo_agent_harness_event_t *)turbo_deque_front(&retained->events)) !=
                NULL) {
@@ -1897,13 +1897,13 @@ int turbo_agent_harness_connection_wait_event_json_value(
     } else if (timed) {
       uint64_t now_ms = turbo_monotonic_ms();
       if (now_ms >= deadline_ms) {
-        rc = TURBO_ETIMEDOUT;
+        rc = SALTS_ETIMEDOUT;
       } else if (deadline_ms - now_ms < wait_ms) {
         wait_ms = deadline_ms - now_ms;
       }
     }
 
-    if (source || rc != TURBO_OK) {
+    if (source || rc != SALTS_OK) {
       turbo_mutex_unlock(&retained->event_mutex);
     } else {
       (void)turbo_cond_timedwait(&retained->event_changed, &retained->event_mutex,
@@ -1916,10 +1916,10 @@ int turbo_agent_harness_connection_wait_event_json_value(
       json_value_t *copy = turbo_json_clone(source);
       json_value_t *params = copy ? turbo_json_object_get(copy, "params") : NULL;
       if (!copy) {
-        rc = TURBO_ENOMEM;
+        rc = SALTS_ENOMEM;
       } else if (!params || turbo_json_type(params) != TURBO_JSON_OBJECT) {
         turbo_runtime_json_destroy(copy);
-        rc = TURBO_EPROTO;
+        rc = SALTS_EPROTO;
       } else {
         turbo_json_object_set_number(params, "sequence", (double)sequence);
         *out_event_json = copy;
@@ -1936,25 +1936,25 @@ int turbo_agent_harness_connection_wait_event_json_value(
 int turbo_agent_harness_connection_ack_events(turbo_agent_harness_connection_t *connection,
                                               uint64_t sequence) {
   turbo_agent_harness_connection_t *retained;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
 
-  if (sequence > TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER) return TURBO_EINVAL;
+  if (sequence > TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER) return SALTS_EINVAL;
   retained = turbo_agent_harness_connection_retain_internal(connection);
-  if (!retained) return TURBO_ESHUTDOWN;
+  if (!retained) return SALTS_ESHUTDOWN;
 
   turbo_mutex_lock(&retained->event_mutex);
   if (retained->closed) {
-    rc = TURBO_ESHUTDOWN;
+    rc = SALTS_ESHUTDOWN;
   } else if (sequence > retained->next_sequence) {
-    rc = TURBO_EINVAL;
+    rc = SALTS_EINVAL;
   }
-  while (rc == TURBO_OK) {
+  while (rc == SALTS_OK) {
     turbo_agent_harness_event_t *front =
         (turbo_agent_harness_event_t *)turbo_deque_front(&retained->events);
     turbo_agent_harness_event_t released;
     if (!front || front->sequence > sequence) break;
-    if (turbo_deque_pop_front(&retained->events, &released) != TURBO_OK) {
-      rc = TURBO_EIO;
+    if (turbo_deque_pop_front(&retained->events, &released) != SALTS_OK) {
+      rc = SALTS_EIO;
       break;
     }
     retained->event_bytes -= released.bytes;
@@ -1963,9 +1963,9 @@ int turbo_agent_harness_connection_ack_events(turbo_agent_harness_connection_t *
     turbo_mutex_unlock(&retained->event_mutex);
     turbo_agent_harness_event_destroy(&released);
     turbo_mutex_lock(&retained->event_mutex);
-    if (retained->closed) rc = TURBO_ESHUTDOWN;
+    if (retained->closed) rc = SALTS_ESHUTDOWN;
   }
-  if (rc == TURBO_OK && sequence > retained->acknowledged_sequence) {
+  if (rc == SALTS_OK && sequence > retained->acknowledged_sequence) {
     retained->acknowledged_sequence = sequence;
   }
   turbo_mutex_unlock(&retained->event_mutex);
@@ -1982,15 +1982,15 @@ int turbo_agent_harness_connection_dispatch_json_value(turbo_agent_harness_conne
   json_value_t *result = NULL;
   int rpc_rc;
   int rc;
-  if (!out_response_json) return TURBO_EINVAL;
+  if (!out_response_json) return SALTS_EINVAL;
   *out_response_json = NULL;
-  if (!connection || !request_json) return TURBO_EINVAL;
+  if (!connection || !request_json) return SALTS_EINVAL;
   turbo_mutex_lock(&connection->dispatch_mutex);
   turbo_mutex_lock(&connection->event_mutex);
   if (connection->closed) {
     turbo_mutex_unlock(&connection->event_mutex);
     turbo_mutex_unlock(&connection->dispatch_mutex);
-    return TURBO_ESHUTDOWN;
+    return SALTS_ESHUTDOWN;
   }
   turbo_mutex_unlock(&connection->event_mutex);
   if (turbo_json_type(request_json) != TURBO_JSON_OBJECT ||
@@ -2021,7 +2021,7 @@ int turbo_agent_harness_connection_dispatch_json_value(turbo_agent_harness_conne
                                               out_response_json);
     } else {
       connection->state = TURBO_AGENT_HARNESS_CONNECTION_READY;
-      rc = TURBO_OK;
+      rc = SALTS_OK;
     }
     turbo_mutex_unlock(&connection->dispatch_mutex);
     return rc;
@@ -2033,11 +2033,11 @@ int turbo_agent_harness_connection_dispatch_json_value(turbo_agent_harness_conne
     return rc;
   }
   rpc_rc = turbo_agent_harness_dispatch_method(connection, method, params, &result);
-  if (rpc_rc == TURBO_OK && result) {
+  if (rpc_rc == SALTS_OK && result) {
     rc = turbo_agent_harness_response_success(request_json, result, out_response_json);
   } else {
     turbo_runtime_json_destroy(result);
-    if (rpc_rc == TURBO_OK) rpc_rc = TURBO_AGENT_HARNESS_RPC_INTERNAL;
+    if (rpc_rc == SALTS_OK) rpc_rc = TURBO_AGENT_HARNESS_RPC_INTERNAL;
     rc = turbo_agent_harness_response_error(request_json, rpc_rc, out_response_json);
   }
   turbo_mutex_unlock(&connection->dispatch_mutex);
@@ -2051,24 +2051,24 @@ int turbo_agent_harness_connection_dispatch_text(turbo_agent_harness_connection_
   json_value_t *response = NULL;
   char *serialized;
   int rc;
-  if (!out_response_json_text) return TURBO_EINVAL;
+  if (!out_response_json_text) return SALTS_EINVAL;
   *out_response_json_text = NULL;
-  if (!connection || !request_json_text || !request_json_text[0]) return TURBO_EINVAL;
+  if (!connection || !request_json_text || !request_json_text[0]) return SALTS_EINVAL;
   if (turbo_parse_json((const uint8_t *)request_json_text, strlen(request_json_text), &request) !=
           0 ||
       !request) {
     turbo_runtime_json_destroy(request);
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   rc = turbo_agent_harness_connection_dispatch_json_value(connection, request, &response);
   turbo_runtime_json_destroy(request);
-  if (rc != TURBO_OK || !response) {
+  if (rc != SALTS_OK || !response) {
     turbo_runtime_json_destroy(response);
     return rc;
   }
   serialized = turbo_json_serialize(response, NULL);
   turbo_runtime_json_destroy(response);
-  if (!serialized) return TURBO_ENOMEM;
+  if (!serialized) return SALTS_ENOMEM;
   *out_response_json_text = serialized;
-  return TURBO_OK;
+  return SALTS_OK;
 }

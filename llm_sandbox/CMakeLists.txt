@@ -16,7 +16,6 @@ target_link_libraries(llm_sandbox PUBLIC TurboAgent::RuntimeTools
 
 cmake_config_target(llm_sandbox FOLDER "LLM Sandbox" EXPORT_NAME LLMSandbox
                     ALIAS TurboAgent::LLMSandbox)
-add_library(TurboNet::LLMSandbox ALIAS llm_sandbox)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 

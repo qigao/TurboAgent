@@ -9,10 +9,10 @@
 
 typedef struct turbo_codex_delegate_binding_s {
   turbo_codex_client_t *client;
-  tstr_t model;
-  tstr_t cwd;
-  tstr_t sandbox;
-  tstr_t approval_policy;
+  tstr model;
+  tstr cwd;
+  tstr sandbox;
+  tstr approval_policy;
   uint64_t timeout_ms;
 } turbo_codex_delegate_binding_t;
 

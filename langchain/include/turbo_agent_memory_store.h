@@ -1,7 +1,7 @@
 #ifndef TURBO_AGENT_MEMORY_STORE_H
 #define TURBO_AGENT_MEMORY_STORE_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #ifdef __cplusplus
 extern "C" {

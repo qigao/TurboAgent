@@ -154,6 +154,7 @@ jobs:
           set -euxo pipefail
           cmake --preset linux-dev-user \
             -DCMAKE_INSTALL_PREFIX=/opt/turboparser/debug \
+            -DCMAKE_PREFIX_PATH="/opt/turboutils/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux" \
             -DENABLE_SANITIZER_ADDRESS=OFF \
             -DENABLE_TESTS=OFF \
             -DBUILD_TESTS=OFF \

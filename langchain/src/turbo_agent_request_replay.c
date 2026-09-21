@@ -9,7 +9,7 @@
 
 #include "turbo_prompt.h"
 
-#include <turbo_str.h>
+#include <tstr.h>
 
 #include <stdlib.h>
 #include <string.h>

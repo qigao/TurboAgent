@@ -46,7 +46,7 @@ jobs:
             runtime_core runtime_data runtime_tools mcp_tools langchain
             coding_tools codex_bridge llm_sandbox tools vendor
           )
-          patterns='TurboUtils::|TurboParser::|TurboNet::|TurboHttp::|TURBOUTILS_ROOT|TURBOPARSER_ROOT|TURBONET_ROOT|TURBOHTTP_ROOT|turbo_parser\.h|CoroNet|turbo_agent_runtime_remote_iris|http_client_t|http_response_t|rpc_client_t|[<\"]http_client\.h[>\"]|[<\"]http_common\.h[>\"]|turbo_http_|find_package\((TurboUtils|TurboParser|TurboNet|TurboHttp)|find_dependency\((TurboUtils|TurboParser|TurboNet|TurboHttp)'
+          patterns='TurboUtils::|TurboParser::|TurboNet::|TurboHttp::|TURBOUTILS_ROOT|TURBOPARSER_ROOT|TURBONET_ROOT|TURBOHTTP_ROOT|turbo_parser\.h|turbo_(thread|str|uuid|fs|vec|deque|error)\.h|tstr_t|turbo_vec_t|turbo_deque_t|turbo_uuid_t|CoroNet|turbo_agent_runtime_remote_iris|http_client_t|http_response_t|rpc_client_t|[<\"]http_client\.h[>\"]|[<\"]http_common\.h[>\"]|turbo_http_|find_package\((TurboUtils|TurboParser|TurboNet|TurboHttp)|find_dependency\((TurboUtils|TurboParser|TurboNet|TurboHttp)'
           mapfile -t files < <(
             find "${roots[@]}" -type f \
               \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' \

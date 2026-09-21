@@ -5,7 +5,7 @@
 
 #include <http_client/http.h>
 #include <json_parser.h>
-#include <turbo_str.h>
+#include <tstr.h>
 
 typedef struct turbo_mcp_client_s turbo_mcp_client_t;
 

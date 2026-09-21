@@ -15,7 +15,6 @@ target_link_libraries(runtime_core PUBLIC Salts::Core)
 
 cmake_config_target(runtime_core FOLDER "Runtime Core" EXPORT_NAME RuntimeCore
                     ALIAS TurboAgent::RuntimeCore)
-add_library(TurboNet::RuntimeCore ALIAS runtime_core)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 

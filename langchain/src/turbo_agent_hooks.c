@@ -38,21 +38,21 @@ CXX_C_API int turbo_agent_tool_approval_review_matches(const json_value_t *state
   if (!note || note[0] == '\0') {
     return 0;
   }
-  if (turbo_parse_json((const uint8_t *)note, strlen(note), &note_json) != 0 || !note_json ||
-      turbo_json_type(note_json) != TURBO_JSON_OBJECT) {
-    turbo_free_json(&note_json);
+  if (((note_json = json_parse((const char *)((const uint8_t *)note), (strlen(note)))) ? 0 : -1) != 0 || !note_json ||
+      json_type(note_json) != JSON_OBJECT) {
+    json_free(note_json); note_json = NULL;
     return 0;
   }
 
-  kind = turbo_json_get_string(note_json, "kind");
-  approved_call_id = turbo_json_get_string(note_json, "call_id");
-  approved_tool_name = turbo_json_get_string(note_json, "tool_name");
-  approved_arguments = turbo_json_get_string(note_json, "arguments");
+  kind = json_get_string(note_json, "kind");
+  approved_call_id = json_get_string(note_json, "call_id");
+  approved_tool_name = json_get_string(note_json, "tool_name");
+  approved_arguments = json_get_string(note_json, "arguments");
   matched = kind && strcmp(kind, "tool_approval") == 0 && approved_call_id &&
                     strcmp(approved_call_id, call_id) == 0 && approved_tool_name &&
                     strcmp(approved_tool_name, tool_name) == 0 && approved_arguments &&
                     strcmp(approved_arguments, arguments_json) == 0;
-  turbo_free_json(&note_json);
+  json_free(note_json); note_json = NULL;
   return matched ? 1 : 0;
 }
 
@@ -162,7 +162,7 @@ static int turbo_agent_action_policy_before_tool(
     return -1;
   }
 
-  if (turbo_parse_json((const uint8_t *)arguments_json, strlen(arguments_json), &args) != 0) {
+  if (((args = json_parse((const char *)((const uint8_t *)arguments_json), (strlen(arguments_json)))) ? 0 : -1) != 0) {
     if (out_reason) {
       *out_reason = "invalid_tool_arguments";
     }
@@ -170,7 +170,7 @@ static int turbo_agent_action_policy_before_tool(
   }
 
   decision = turbo_agent_policy_check_action(&guardrail_data->policy, definition, args, &reason);
-  turbo_free_json(&args);
+  json_free(args); args = NULL;
   if (decision == TURBO_AGENT_POLICY_ALLOW) {
     return 0;
   }
@@ -355,15 +355,15 @@ static int turbo_agent_append_trace_history(json_value_t *state,
   if (!event_json_value) {
     return -1;
   }
-  event = turbo_json_clone(event_json_value);
+  event = json_clone(event_json_value);
   turbo_runtime_json_destroy(event_json_value);
   if (!event) {
     return -1;
   }
 
-  turbo_json_object_set_number(event, "kind_code", (double)kind);
-  turbo_json_object_set_string(event, "name", name ? name : "");
-  turbo_json_array_add(events, event);
+  json_object_set_number(event, "kind_code", (double)kind);
+  json_object_set_string(event, "name", name ? name : "");
+  json_array_add(events, event);
   return 0;
 }
 

@@ -6,7 +6,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <turbo_deque.h>
+#include <cstl/deque.h>
 #include <tstr.h>
 #include <salts/clock.h>
 #include <salts/thread.h>
@@ -56,7 +56,7 @@ struct turbo_agent_harness_connection_s {
   salts_mutex_t dispatch_mutex;
   salts_mutex_t event_mutex;
   salts_cond_t event_changed;
-  turbo_deque_t events;
+  deque_t events;
   size_t event_bytes;
   uint64_t next_sequence;
   uint64_t acknowledged_sequence;
@@ -132,10 +132,10 @@ void turbo_agent_harness_connection_release_internal(turbo_agent_harness_connect
   if (!connection) return;
   if (atomic_fetch_sub_explicit(&connection->ref_count, 1, memory_order_acq_rel) != 1) return;
   atomic_thread_fence(memory_order_acquire);
-  while (turbo_deque_pop_front(&connection->events, &event) == SALTS_OK) {
+  while (deque_pop_front(&connection->events, &event) == STL_OK) {
     turbo_agent_harness_event_destroy(&event);
   }
-  turbo_deque_destroy(&connection->events);
+  deque_destroy(&connection->events);
   salts_cond_destroy(&connection->event_changed);
   salts_mutex_destroy(&connection->event_mutex);
   salts_mutex_destroy(&connection->dispatch_mutex);
@@ -181,7 +181,7 @@ static int turbo_agent_harness_connection_enqueue(turbo_agent_harness_connection
 
   salts_mutex_lock(&connection->event_mutex);
   while (!connection->closed && connection->stream_error == SALTS_OK &&
-         (turbo_deque_size(&connection->events) >= event_limit ||
+         (deque_size(&connection->events) >= event_limit ||
           connection->event_bytes >= byte_limit || bytes > byte_limit - connection->event_bytes)) {
     if (!wait_for_capacity) {
       rc = SALTS_EBUSY;
@@ -201,7 +201,7 @@ static int turbo_agent_harness_connection_enqueue(turbo_agent_harness_connection
       event.sequence = ++connection->next_sequence;
       event.bytes = bytes;
       event.message = message;
-      if (turbo_deque_push_back(&connection->events, &event) != SALTS_OK) {
+      if (deque_push_back(&connection->events, &event) != STL_OK) {
         connection->stream_error = SALTS_ENOMEM;
         rc = SALTS_ENOMEM;
       } else {
@@ -242,7 +242,7 @@ static int turbo_agent_harness_connection_enqueue_pair(turbo_agent_harness_conne
     rc = SALTS_ESHUTDOWN;
   } else if (connection->stream_error != SALTS_OK) {
     rc = connection->stream_error;
-  } else if (turbo_deque_size(&connection->events) >
+  } else if (deque_size(&connection->events) >
                  connection->server->config.max_event_count - 2 ||
              total_bytes > connection->server->config.max_event_bytes - connection->event_bytes) {
     rc = SALTS_EBUSY;
@@ -252,7 +252,7 @@ static int turbo_agent_harness_connection_enqueue_pair(turbo_agent_harness_conne
   }
   for (index = 0; rc == SALTS_OK && index < 2; ++index) {
     pending[index].sequence = ++connection->next_sequence;
-    if (turbo_deque_push_back(&connection->events, &pending[index]) != SALTS_OK) {
+    if (deque_push_back(&connection->events, &pending[index]) != STL_OK) {
       --connection->next_sequence;
       connection->stream_error = SALTS_ENOMEM;
       rc = SALTS_ENOMEM;
@@ -263,7 +263,7 @@ static int turbo_agent_harness_connection_enqueue_pair(turbo_agent_harness_conne
   }
   while (rc != SALTS_OK && pushed > 0) {
     turbo_agent_harness_event_t rollback = {0};
-    if (turbo_deque_pop_back(&connection->events, &rollback) != SALTS_OK) break;
+    if (deque_pop_back(&connection->events, &rollback) != STL_OK) break;
     connection->event_bytes -= rollback.bytes;
     --connection->next_sequence;
     --pushed;
@@ -1614,10 +1614,10 @@ static int turbo_agent_harness_dispatch_event_replay(turbo_agent_harness_connect
     free(selected);
     return TURBO_AGENT_HARNESS_RPC_NOT_FOUND;
   }
-  for (index = 0; index < turbo_deque_size(&connection->events) && selected_count < limit;
+  for (index = 0; index < deque_size(&connection->events) && selected_count < limit;
        ++index) {
     turbo_agent_harness_event_t *event =
-        (turbo_agent_harness_event_t *)turbo_deque_at(&connection->events, index);
+        (turbo_agent_harness_event_t *)deque_at(&connection->events, index);
     if (event && event->sequence > after) selected[selected_count++] = event;
   }
   next = selected_count ? selected[selected_count - 1]->sequence : after;
@@ -1808,8 +1808,8 @@ turbo_agent_harness_server_open_connection(turbo_agent_harness_server_t *server)
   salts_mutex_init(&connection->event_mutex);
   salts_cond_init(&connection->event_changed);
   if (!connection->dispatch_mutex || !connection->event_mutex || !connection->event_changed ||
-      turbo_deque_init(&connection->events, sizeof(turbo_agent_harness_event_t)) != SALTS_OK ||
-      turbo_deque_reserve(&connection->events, server->config.max_event_count) != SALTS_OK) {
+      deque_init_bytes(&connection->events, sizeof(turbo_agent_harness_event_t), _Alignof(turbo_agent_harness_event_t), server->config.max_event_count) != STL_OK ||
+      deque_reserve(&connection->events, server->config.max_event_count) != STL_OK) {
     turbo_agent_harness_connection_release_internal(connection);
     return NULL;
   }
@@ -1891,7 +1891,7 @@ int turbo_agent_harness_connection_wait_event_json_value(
       rc = SALTS_ESHUTDOWN;
     } else if (retained->stream_error != SALTS_OK) {
       rc = retained->stream_error;
-    } else if ((front = (turbo_agent_harness_event_t *)turbo_deque_front(&retained->events)) !=
+    } else if ((front = (turbo_agent_harness_event_t *)deque_front(&retained->events)) !=
                NULL) {
       source = front->message;
       sequence = front->sequence;
@@ -1951,10 +1951,10 @@ int turbo_agent_harness_connection_ack_events(turbo_agent_harness_connection_t *
   }
   while (rc == SALTS_OK) {
     turbo_agent_harness_event_t *front =
-        (turbo_agent_harness_event_t *)turbo_deque_front(&retained->events);
+        (turbo_agent_harness_event_t *)deque_front(&retained->events);
     turbo_agent_harness_event_t released;
     if (!front || front->sequence > sequence) break;
-    if (turbo_deque_pop_front(&retained->events, &released) != SALTS_OK) {
+    if (deque_pop_front(&retained->events, &released) != STL_OK) {
       rc = SALTS_EIO;
       break;
     }

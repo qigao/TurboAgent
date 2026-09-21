@@ -1,7 +1,7 @@
 #include "turbo_agent_inbox_internal.h"
 #include "turbo_agent_runtime_v1_internal.h"
 
-#include <turbo_deque.h>
+#include <cstl/deque.h>
 #include <tstr.h>
 #include <salts/clock.h>
 #include <salts/thread.h>
@@ -31,7 +31,7 @@ struct turbo_agent_inbox_s {
   turbo_agent_inbox_config_t config;
   salts_mutex_t mutex;
   salts_cond_t changed;
-  turbo_deque_t ready;
+  deque_t ready;
   size_t used_items;
   size_t used_bytes;
   size_t reserved_items;
@@ -97,14 +97,14 @@ static void turbo_agent_inbox_ready_reset(turbo_agent_inbox_ready_t *entry) {
 static int turbo_agent_inbox_ready_insert(turbo_agent_inbox_t *inbox,
                                           turbo_agent_inbox_ready_t *entry) {
   size_t index;
-  if (turbo_deque_push_back(&inbox->ready, entry) != SALTS_OK) return SALTS_ENOMEM;
+  if (deque_push_back(&inbox->ready, entry) != STL_OK) return SALTS_ENOMEM;
   memset(entry, 0, sizeof(*entry));
-  index = turbo_deque_size(&inbox->ready) - 1;
+  index = deque_size(&inbox->ready) - 1;
   while (index > 0) {
     turbo_agent_inbox_ready_t *current =
-        (turbo_agent_inbox_ready_t *)turbo_deque_at(&inbox->ready, index);
+        (turbo_agent_inbox_ready_t *)deque_at(&inbox->ready, index);
     turbo_agent_inbox_ready_t *previous =
-        (turbo_agent_inbox_ready_t *)turbo_deque_at(&inbox->ready, index - 1);
+        (turbo_agent_inbox_ready_t *)deque_at(&inbox->ready, index - 1);
     turbo_agent_inbox_ready_t swap;
     if (!current || !previous || previous->sequence <= current->sequence) break;
     swap = *previous;
@@ -118,17 +118,17 @@ static int turbo_agent_inbox_ready_insert(turbo_agent_inbox_t *inbox,
 static int turbo_agent_inbox_ready_take_kind(turbo_agent_inbox_t *inbox,
                                              turbo_agent_inbox_kind_t kind,
                                              turbo_agent_inbox_ready_t *out_entry) {
-  size_t count = turbo_deque_size(&inbox->ready);
+  size_t count = deque_size(&inbox->ready);
   size_t index;
   memset(out_entry, 0, sizeof(*out_entry));
   for (index = 0; index < count; ++index) {
     turbo_agent_inbox_ready_t entry;
-    if (turbo_deque_pop_front(&inbox->ready, &entry) != SALTS_OK) return SALTS_EIO;
+    if (deque_pop_front(&inbox->ready, &entry) != STL_OK) return SALTS_EIO;
     if (entry.kind == kind) {
       *out_entry = entry;
       return SALTS_OK;
     }
-    if (turbo_deque_push_back(&inbox->ready, &entry) != SALTS_OK) {
+    if (deque_push_back(&inbox->ready, &entry) != STL_OK) {
       turbo_agent_inbox_ready_reset(&entry);
       return SALTS_EIO;
     }
@@ -444,8 +444,8 @@ int turbo_agent_inbox_create(turbo_agent_runtime_t *runtime, const char *thread_
     turbo_agent_inbox_destroy(inbox);
     return SALTS_ENOMEM;
   }
-  if (turbo_deque_init(&inbox->ready, sizeof(turbo_agent_inbox_ready_t)) != SALTS_OK ||
-      turbo_deque_reserve(&inbox->ready, config->max_items) != SALTS_OK) {
+  if (deque_init_bytes(&inbox->ready, sizeof(turbo_agent_inbox_ready_t), _Alignof(turbo_agent_inbox_ready_t), config->max_items) != STL_OK ||
+      deque_reserve(&inbox->ready, config->max_items) != STL_OK) {
     turbo_agent_inbox_destroy(inbox);
     return SALTS_ENOMEM;
   }
@@ -461,11 +461,11 @@ int turbo_agent_inbox_create(turbo_agent_runtime_t *runtime, const char *thread_
 void turbo_agent_inbox_destroy(turbo_agent_inbox_t *inbox) {
   turbo_agent_inbox_ready_t entry;
   if (!inbox) return;
-  while (turbo_deque_pop_front(&inbox->ready, &entry) == SALTS_OK)
+  while (deque_pop_front(&inbox->ready, &entry) == STL_OK)
     turbo_agent_inbox_ready_reset(&entry);
   turbo_agent_inbox_ready_reset(&inbox->active_claim);
   tstr_free(inbox->active_event_id);
-  turbo_deque_destroy(&inbox->ready);
+  deque_destroy(&inbox->ready);
   salts_cond_destroy(&inbox->changed);
   salts_mutex_destroy(&inbox->mutex);
   tstr_free(inbox->thread_id);

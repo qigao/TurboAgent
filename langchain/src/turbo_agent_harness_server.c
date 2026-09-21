@@ -11,7 +11,7 @@
 #include <salts/clock.h>
 #include <salts/thread.h>
 #include <salts_uuid.h>
-#include <turbo_vec.h>
+#include <cstl/vec.h>
 
 enum {
   TURBO_AGENT_HARNESS_RPC_INVALID_REQUEST = -32600,
@@ -91,7 +91,7 @@ typedef struct turbo_agent_harness_turn_snapshot_s {
 struct turbo_agent_harness_server_s {
   salts_mutex_t mutex;
   turbo_agent_harness_server_config_t config;
-  turbo_vec_t threads;
+  vec_t threads;
 };
 
 static const uint64_t TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER = UINT64_C(9007199254740991);
@@ -369,9 +369,9 @@ static turbo_agent_harness_thread_t *
 turbo_agent_harness_server_find_thread_locked(turbo_agent_harness_server_t *server,
                                               const char *thread_id) {
   size_t index;
-  for (index = 0; index < turbo_vec_size(&server->threads); ++index) {
+  for (index = 0; index < vec_size(&server->threads); ++index) {
     turbo_agent_harness_thread_t *thread =
-        (turbo_agent_harness_thread_t *)turbo_vec_at(&server->threads, index);
+        (turbo_agent_harness_thread_t *)vec_at(&server->threads, index);
     if (thread && thread->id && strcmp(thread->id, thread_id) == 0) return thread;
   }
   return NULL;
@@ -437,15 +437,15 @@ static int turbo_agent_harness_server_load_thread(turbo_agent_harness_server_t *
     *out_thread = existing;
     return SALTS_OK;
   }
-  if (turbo_vec_size(&server->threads) >= server->config.max_threads) {
+  if (vec_size(&server->threads) >= server->config.max_threads) {
     salts_mutex_unlock(&server->mutex);
     turbo_agent_harness_thread_destroy(&candidate);
     return SALTS_EBUSY;
   }
-  rc = turbo_vec_push(&server->threads, &candidate);
+  rc = vec_push(&server->threads, &candidate);
   if (rc == SALTS_OK) {
-    *out_thread = (turbo_agent_harness_thread_t *)turbo_vec_at(
-        &server->threads, turbo_vec_size(&server->threads) - 1);
+    *out_thread = (turbo_agent_harness_thread_t *)vec_at(
+        &server->threads, vec_size(&server->threads) - 1);
     memset(&candidate, 0, sizeof(candidate));
   }
   salts_mutex_unlock(&server->mutex);
@@ -775,9 +775,9 @@ static void turbo_agent_harness_connection_refresh(turbo_agent_harness_connectio
     return;
   }
   salts_mutex_lock(&server->mutex);
-  total = turbo_vec_size(&server->threads);
+  total = vec_size(&server->threads);
   for (index = 0; index < total; ++index) {
-    threads[index] = (turbo_agent_harness_thread_t *)turbo_vec_at(&server->threads, index);
+    threads[index] = (turbo_agent_harness_thread_t *)vec_at(&server->threads, index);
   }
   salts_mutex_unlock(&server->mutex);
   for (index = 0; index < total; ++index) {
@@ -1118,10 +1118,10 @@ static int turbo_agent_harness_dispatch_thread_list(turbo_agent_harness_connecti
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
   salts_mutex_lock(&connection->server->mutex);
-  count = turbo_vec_size(&connection->server->threads);
+  count = vec_size(&connection->server->threads);
   for (index = 0; index < count; ++index) {
     snapshot[index] =
-        (turbo_agent_harness_thread_t *)turbo_vec_at(&connection->server->threads, index);
+        (turbo_agent_harness_thread_t *)vec_at(&connection->server->threads, index);
   }
   salts_mutex_unlock(&connection->server->mutex);
   for (index = 0; index < count; ++index) {
@@ -1772,8 +1772,8 @@ turbo_agent_harness_server_create(const turbo_agent_harness_server_config_t *con
   server->config = *config;
   salts_mutex_init(&server->mutex);
   if (!server->mutex ||
-      turbo_vec_init(&server->threads, sizeof(turbo_agent_harness_thread_t)) != SALTS_OK ||
-      turbo_vec_reserve(&server->threads, config->max_threads) != SALTS_OK) {
+      vec_init_bytes(&server->threads, sizeof(turbo_agent_harness_thread_t), _Alignof(turbo_agent_harness_thread_t), config->max_threads) != STL_OK ||
+      vec_reserve(&server->threads, config->max_threads) != STL_OK) {
     turbo_agent_harness_server_destroy(server);
     return NULL;
   }
@@ -1783,12 +1783,12 @@ turbo_agent_harness_server_create(const turbo_agent_harness_server_config_t *con
 void turbo_agent_harness_server_destroy(turbo_agent_harness_server_t *server) {
   size_t index;
   if (!server) return;
-  for (index = 0; index < turbo_vec_size(&server->threads); ++index) {
+  for (index = 0; index < vec_size(&server->threads); ++index) {
     turbo_agent_harness_thread_t *thread =
-        (turbo_agent_harness_thread_t *)turbo_vec_at(&server->threads, index);
+        (turbo_agent_harness_thread_t *)vec_at(&server->threads, index);
     turbo_agent_harness_thread_destroy(thread);
   }
-  turbo_vec_destroy(&server->threads);
+  vec_destroy(&server->threads);
   salts_mutex_destroy(&server->mutex);
   if (server->config.thread_factory_user_data_free) {
     server->config.thread_factory_user_data_free(server->config.thread_factory_user_data);
@@ -1825,14 +1825,14 @@ void turbo_agent_harness_connection_close(turbo_agent_harness_connection_t *conn
   salts_cond_broadcast(&connection->event_changed);
   salts_mutex_unlock(&connection->event_mutex);
   salts_mutex_lock(&connection->server->mutex);
-  count = turbo_vec_size(&connection->server->threads);
+  count = vec_size(&connection->server->threads);
   salts_mutex_unlock(&connection->server->mutex);
   for (index = 0; index < count; ++index) {
     turbo_agent_harness_thread_t *thread;
     turbo_agent_harness_turn_t *turn;
     turbo_agent_harness_execution_t *execution = NULL;
     salts_mutex_lock(&connection->server->mutex);
-    thread = (turbo_agent_harness_thread_t *)turbo_vec_at(&connection->server->threads, index);
+    thread = (turbo_agent_harness_thread_t *)vec_at(&connection->server->threads, index);
     salts_mutex_unlock(&connection->server->mutex);
     salts_mutex_lock(&thread->mutex);
     turn = thread->turn;

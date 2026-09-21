@@ -1,6 +1,10 @@
 #include "tinytest.h"
 #include "turbo_runtime_json.h"
 
+#include <cyaml.h>
+#include <cyaml_json_adapter.h>
+#include <xml_parser/xml_parser.h>
+
 #include <stdint.h>
 
 spec("runtime json") {
@@ -48,18 +52,19 @@ spec("runtime json") {
     turbo_runtime_json_destroy(value);
   }
 
-  it("uses TurboParser for YAML and XML formats") {
+  it("uses SaltsUtils for YAML and XML formats") {
     static const uint8_t yaml[] = "name: agent\ncount: 2\n";
     static const uint8_t xml[] = "<root><name>agent</name></root>";
-    turbo_yaml_doc_t *yaml_doc = NULL;
-    turbo_xml_doc_t *xml_doc = NULL;
+    cyaml_doc_t *yaml_doc = NULL;
+    salts_xml_document xml_doc = {0};
     json_value_t *yaml_json = NULL;
-    turbo_xml_node_t *xml_root = NULL;
+    salts_xml_node xml_root = {0};
+    salts_xml_node xml_name_node = {0};
     char *xml_name = NULL;
 
-    check_int_eq(turbo_parse_yaml(yaml, sizeof(yaml) - 1, &yaml_doc), 0);
+    yaml_doc = cyaml_parse((const char *)yaml, sizeof(yaml) - 1, NULL, NULL);
     check_not_null(yaml_doc);
-    yaml_json = turbo_yaml_to_json(yaml_doc);
+    yaml_json = json_value_from_cyaml(yaml_doc);
     check_not_null(yaml_json);
     check_str_eq(turbo_runtime_json_value_as_string(
                      turbo_json_object_get(yaml_json, "name")),
@@ -67,16 +72,18 @@ spec("runtime json") {
     check_true(turbo_runtime_json_value_as_int64(
                    turbo_json_object_get(yaml_json, "count"), 0) == INT64_C(2));
 
-    check_int_eq(turbo_parse_xml(xml, sizeof(xml) - 1, &xml_doc), 0);
-    check_not_null(xml_doc);
-    xml_root = turbo_xml_root_element(xml_doc);
-    check_not_null(xml_root);
-    xml_name = turbo_xml_child_text_dup(xml_root, "name");
+    check_int_eq(salts_xml_parse(&xml_doc, (const char *)xml, sizeof(xml) - 1, NULL, NULL),
+                 SALTS_XML_OK);
+    xml_root = salts_xml_document_root(&xml_doc);
+    check_not_null(xml_root.impl);
+    xml_name_node = salts_xml_node_find(xml_root, "name");
+    check_not_null(xml_name_node.impl);
+    xml_name = salts_xml_node_text_dup(xml_name_node);
     check_str_eq(xml_name, "agent");
 
-    turbo_xml_string_free(xml_name);
-    turbo_free_xml(&xml_doc);
+    salts_xml_owned_string_free(xml_name);
+    salts_xml_document_destroy(&xml_doc);
     turbo_runtime_json_destroy(yaml_json);
-    turbo_free_yaml(&yaml_doc);
+    cyaml_free(yaml_doc);
   }
 }

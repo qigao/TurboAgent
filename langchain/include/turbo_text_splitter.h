@@ -1,7 +1,7 @@
 #ifndef TURBO_TEXT_SPLITTER_H
 #define TURBO_TEXT_SPLITTER_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 #include <stddef.h>
 
 #include <json_parser.h>

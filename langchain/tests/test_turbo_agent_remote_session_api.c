@@ -224,7 +224,6 @@ static int remote_session_test_server_start(
     char *endpoint_url, size_t endpoint_capacity) {
   chttp_server_config config = remote_session_test_server_config();
   uint16_t port = 0u;
-  int written;
   int status;
 
   if (!server || !initialized || !started || !remote || !endpoint_url ||

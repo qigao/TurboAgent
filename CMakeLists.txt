@@ -114,3 +114,5 @@ install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/TurboAgentConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/TurboAgentConfigVersion.cmake"
   DESTINATION "${TURBO_AGENT_INSTALL_CMAKEDIR}")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_agent_api.h"
+        DESTINATION include)

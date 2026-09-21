@@ -39,7 +39,7 @@ typedef struct turbo_agent_execution_options_s {
  * callback user data, and the runtime store must outlive the terminal execution
  * state. Input JSON and option strings are copied before this function returns.
  * The executor should use an explicit queue capacity; queue rejection returns
- * TURBO_EBUSY without publishing an execution handle.
+ * SALTS_EBUSY without publishing an execution handle.
  *
  * A runtime/store may be used concurrently only when its store contract permits
  * it. The built-in memory and file stores should be treated as single-writer.
@@ -80,7 +80,7 @@ CXX_C_API int turbo_agent_execution_cancel(turbo_agent_execution_t *execution,
 
 /**
  * Wait for a terminal state. timeout_ms is relative; UINT64_MAX waits forever.
- * Returns TURBO_OK at a terminal state or TURBO_ETIMEDOUT for caller wait expiry.
+ * Returns SALTS_OK at a terminal state or SALTS_ETIMEDOUT for caller wait expiry.
  */
 CXX_C_API int turbo_agent_execution_wait(turbo_agent_execution_t *execution, uint64_t timeout_ms);
 
@@ -93,7 +93,7 @@ CXX_C_API int turbo_agent_execution_result_code(const turbo_agent_execution_t *e
 
 /**
  * Move the final summary/state to the caller exactly once.
- * Returns TURBO_EBUSY before terminal and TURBO_EALREADY after a prior take.
+ * Returns SALTS_EBUSY before terminal and SALTS_EALREADY after a prior take.
  */
 CXX_C_API int turbo_agent_execution_take_result(turbo_agent_execution_t *execution,
                                                 json_value_t **out_summary,

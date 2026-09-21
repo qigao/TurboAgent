@@ -7,7 +7,6 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 # Collect all sources
 include(CmakeUtils)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
-find_package(libfsm CONFIG REQUIRED PATHS "${FSM_ROOT}")
 cmake_add_source(
   SOURCES
   EXCLUDES
@@ -40,7 +39,7 @@ target_link_libraries(
          Salts::Core
          Salts::Mustache
          unofficial::sqlite3::sqlite3
-  PRIVATE OpenSSL::Crypto libfsm::libre libfsm::libfsm)
+  PRIVATE OpenSSL::Crypto)
 
 # Use the utility to configure common settings (Folder, Version, etc.)
 cmake_config_target(langchain FOLDER "LangChain" EXPORT_NAME LangChain

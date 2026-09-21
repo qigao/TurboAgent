@@ -1,6 +1,8 @@
 #ifndef TURBO_LANGCHAIN_H
 #define TURBO_LANGCHAIN_H
 
+#include <turbo_agent_api.h>
+
 #include "turbo_action_tool.h"
 #include "turbo_agent_policy.h"
 #include "turbo_chain.h"

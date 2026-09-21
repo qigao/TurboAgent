@@ -11,8 +11,10 @@ target_compile_definitions(llm_sandbox PRIVATE SHARED_CXX)
 target_include_directories(
   llm_sandbox PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                      $<INSTALL_INTERFACE:include>)
-target_link_libraries(llm_sandbox PUBLIC TurboAgent::RuntimeTools
-                                         TurboWasm::Runtime)
+target_link_libraries(llm_sandbox
+  PUBLIC TurboAgent::RuntimeTools
+         TurboWasm::Runtime
+  PRIVATE Salts::Core)
 
 cmake_config_target(llm_sandbox FOLDER "LLM Sandbox" EXPORT_NAME LLMSandbox
                     ALIAS TurboAgent::LLMSandbox)

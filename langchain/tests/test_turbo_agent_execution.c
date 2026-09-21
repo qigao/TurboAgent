@@ -81,19 +81,19 @@ spec("turbo agent execution") {
                      pool, runtime, graph, input, NULL,
                      &(turbo_agent_runtime_exec_options_t){.thread_id = "async-complete"}, NULL,
                      &execution),
-                 TURBO_OK);
+                 SALTS_OK);
     check_not_null(execution);
     check_not_null(turbo_agent_execution_id(execution));
     check_size_eq(strlen(turbo_agent_execution_id(execution)), TURBO_UUID_STRING_LENGTH);
-    check_int_eq(turbo_agent_execution_wait(execution, UINT64_MAX), TURBO_OK);
-    check_int_eq(turbo_agent_execution_get_status(execution, &status), TURBO_OK);
+    check_int_eq(turbo_agent_execution_wait(execution, UINT64_MAX), SALTS_OK);
+    check_int_eq(turbo_agent_execution_get_status(execution, &status), SALTS_OK);
     check_int_eq(status, TURBO_AGENT_EXECUTION_COMPLETED);
-    check_int_eq(turbo_agent_execution_result_code(execution, &operation_rc), TURBO_OK);
+    check_int_eq(turbo_agent_execution_result_code(execution, &operation_rc), SALTS_OK);
     check_int_eq(operation_rc, 0);
-    check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), TURBO_OK);
+    check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), SALTS_OK);
     check_str_eq(turbo_json_get_string(summary, "status"), "completed");
     check_true(turbo_runtime_json_value_as_bool(turbo_json_object_get(state, "visited_end"), 0));
-    check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), TURBO_EALREADY);
+    check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), SALTS_EALREADY);
 
     turbo_runtime_json_destroy(summary);
     turbo_runtime_json_destroy(state);
@@ -128,18 +128,18 @@ spec("turbo agent execution") {
                      pool, runtime, graph, input, NULL,
                      &(turbo_agent_runtime_exec_options_t){.thread_id = "async-cancel"}, NULL,
                      &execution),
-                 TURBO_OK);
+                 SALTS_OK);
     while (!atomic_load_explicit(&gate.entered, memory_order_acquire)) {
       turbo_thread_yield();
     }
-    check_int_eq(turbo_agent_execution_wait(execution, 0), TURBO_ETIMEDOUT);
-    check_int_eq(turbo_agent_execution_cancel(execution, TURBO_CANCEL_USER), TURBO_OK);
+    check_int_eq(turbo_agent_execution_wait(execution, 0), SALTS_ETIMEDOUT);
+    check_int_eq(turbo_agent_execution_cancel(execution, TURBO_CANCEL_USER), SALTS_OK);
     atomic_store_explicit(&gate.open, 1, memory_order_release);
-    check_int_eq(turbo_agent_execution_wait(execution, UINT64_MAX), TURBO_OK);
-    check_int_eq(turbo_agent_execution_get_status(execution, &status), TURBO_OK);
+    check_int_eq(turbo_agent_execution_wait(execution, UINT64_MAX), SALTS_OK);
+    check_int_eq(turbo_agent_execution_get_status(execution, &status), SALTS_OK);
     check_int_eq(status, TURBO_AGENT_EXECUTION_CANCELLED);
-    check_int_eq(turbo_agent_execution_cancel(execution, TURBO_CANCEL_SHUTDOWN), TURBO_EALREADY);
-    check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), TURBO_OK);
+    check_int_eq(turbo_agent_execution_cancel(execution, TURBO_CANCEL_SHUTDOWN), SALTS_EALREADY);
+    check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), SALTS_OK);
     check_str_eq(turbo_json_get_string(summary, "status"), "cancelled");
     check_not_null(turbo_json_get_string(summary, "checkpoint_id"));
     check_true(turbo_runtime_json_value_as_bool(turbo_json_object_get(state, "visited_start"), 0));
@@ -172,11 +172,11 @@ spec("turbo agent execution") {
                      pool, runtime, graph, input, NULL,
                      &(turbo_agent_runtime_exec_options_t){.thread_id = "async-deadline"}, &options,
                      &execution),
-                 TURBO_OK);
-    check_int_eq(turbo_agent_execution_wait(execution, UINT64_MAX), TURBO_OK);
-    check_int_eq(turbo_agent_execution_get_status(execution, &status), TURBO_OK);
+                 SALTS_OK);
+    check_int_eq(turbo_agent_execution_wait(execution, UINT64_MAX), SALTS_OK);
+    check_int_eq(turbo_agent_execution_get_status(execution, &status), SALTS_OK);
     check_int_eq(status, TURBO_AGENT_EXECUTION_TIMED_OUT);
-    check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), TURBO_OK);
+    check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), SALTS_OK);
     check_str_eq(turbo_json_get_string(summary, "status"), "timed_out");
     check_false(turbo_runtime_json_value_as_bool(turbo_json_object_get(state, "visited_start"), 0));
 
@@ -213,7 +213,7 @@ spec("turbo agent execution") {
                      pool, runtime, graph, input, NULL,
                      &(turbo_agent_runtime_exec_options_t){.thread_id = "async-rejected"}, NULL,
                      &execution),
-                 TURBO_EBUSY);
+                 SALTS_EBUSY);
     check_null(execution);
 
     atomic_store_explicit(&gate.open, 1, memory_order_release);

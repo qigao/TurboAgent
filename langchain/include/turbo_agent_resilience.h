@@ -1,7 +1,7 @@
 #ifndef TURBO_AGENT_RESILIENCE_H
 #define TURBO_AGENT_RESILIENCE_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_runtime_control.h"
 

@@ -260,11 +260,9 @@ spec("Praktor workflow tool pack") {
     workflow_config.description = "Exercise the result bound.";
     workflow_config.workflow_path = workflow_path;
     check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
-    check_int_eq(turbo_parse_json(
-                     (const uint8_t *)"{\"payload\":{\"name\":\"demo\",\"count\":7}}",
-                     strlen("{\"payload\":{\"name\":\"demo\",\"count\":7}}"),
-                     &arguments),
-                 0);
+    arguments = json_parse("{\"payload\":{\"name\":\"demo\",\"count\":7}}",
+                           strlen("{\"payload\":{\"name\":\"demo\",\"count\":7}}"));
+    check_not_null(arguments);
     check_int_eq(turbo_tool_registry_execute_json_value(
                      turbo_praktor_tool_pack_registry(pack), "praktor_bounded",
                      arguments, &result),

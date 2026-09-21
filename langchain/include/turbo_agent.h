@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 typedef struct turbo_agent_s turbo_agent_t;
-typedef struct http_client_s http_client_t;
+typedef struct chttp_client chttp_client;
 typedef struct turbo_model_provider_s turbo_model_provider_t;
 typedef struct turbo_tool_registry_s turbo_tool_registry_t;
 typedef struct turbo_action_tool_registry_s turbo_action_tool_registry_t;
@@ -44,7 +44,7 @@ typedef struct turbo_agent_config_s {
   turbo_agent_api_mode_t api_mode;
   int stream_response;
   int parallel_tool_calls;
-  http_client_t *http_client;
+  chttp_client *http_client;
   turbo_tool_registry_t *tool_registry;
   turbo_agent_transport_fn transport_fn;
   void *transport_user_data;

@@ -22,8 +22,8 @@ typedef enum turbo_agent_execution_kind_e {
 
 struct turbo_agent_execution_s {
   atomic_size_t ref_count;
-  turbo_mutex_t mutex;
-  turbo_cond_t changed;
+  salts_mutex_t mutex;
+  salts_cond_t changed;
   turbo_agent_execution_status_t status;
   turbo_agent_execution_kind_t kind;
   int operation_rc;
@@ -213,8 +213,8 @@ static void turbo_agent_execution_destroy(turbo_agent_execution_t *execution) {
   turbo_cancel_source_destroy(execution->cancel_source);
   turbo_agent_execution_free_graph_options(&execution->graph_options);
   turbo_agent_execution_free_runtime_options(execution);
-  turbo_cond_destroy(&execution->changed);
-  turbo_mutex_destroy(&execution->mutex);
+  salts_cond_destroy(&execution->changed);
+  salts_mutex_destroy(&execution->mutex);
   free(execution);
 }
 
@@ -253,10 +253,10 @@ static void turbo_agent_execution_worker(void *arg) {
   json_value_t *state = NULL;
   int rc;
 
-  turbo_mutex_lock(&execution->mutex);
+  salts_mutex_lock(&execution->mutex);
   execution->status = TURBO_AGENT_EXECUTION_RUNNING;
-  turbo_cond_broadcast(&execution->changed);
-  turbo_mutex_unlock(&execution->mutex);
+  salts_cond_broadcast(&execution->changed);
+  salts_mutex_unlock(&execution->mutex);
 
   if (execution->kind == TURBO_AGENT_EXECUTION_START) {
     rc = turbo_agent_runtime_exec_start_controlled(
@@ -278,14 +278,14 @@ static void turbo_agent_execution_worker(void *arg) {
                                    &summary, &state);
   }
 
-  turbo_mutex_lock(&execution->mutex);
+  salts_mutex_lock(&execution->mutex);
   execution->operation_rc = rc;
   execution->summary = summary;
   execution->state = state;
   execution->status =
       rc == 0 ? turbo_agent_execution_status_from_summary(summary) : TURBO_AGENT_EXECUTION_FAILED;
-  turbo_cond_broadcast(&execution->changed);
-  turbo_mutex_unlock(&execution->mutex);
+  salts_cond_broadcast(&execution->changed);
+  salts_mutex_unlock(&execution->mutex);
   if (execution->hooks.terminal) {
     execution->hooks.terminal(execution->hooks.user_data, execution);
   }
@@ -334,8 +334,8 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
   if (hooks) {
     execution->hooks = *hooks;
   }
-  turbo_mutex_init(&execution->mutex);
-  turbo_cond_init(&execution->changed);
+  salts_mutex_init(&execution->mutex);
+  salts_cond_init(&execution->changed);
   if (!execution->mutex || !execution->changed) {
     turbo_agent_execution_destroy(execution);
     return SALTS_ENOMEM;
@@ -495,9 +495,9 @@ int turbo_agent_execution_cancel(turbo_agent_execution_t *execution, turbo_cance
   if (!execution) {
     return SALTS_EINVAL;
   }
-  turbo_mutex_lock(&execution->mutex);
+  salts_mutex_lock(&execution->mutex);
   terminal = turbo_agent_execution_is_terminal(execution->status);
-  turbo_mutex_unlock(&execution->mutex);
+  salts_mutex_unlock(&execution->mutex);
   return terminal ? SALTS_EALREADY : turbo_cancel_source_cancel(execution->cancel_source, reason);
 }
 
@@ -513,13 +513,13 @@ int turbo_agent_execution_wait(turbo_agent_execution_t *execution, uint64_t time
     deadline_ms = turbo_agent_execution_saturating_add(turbo_monotonic_ms(), timeout_ms);
   }
 
-  turbo_mutex_lock(&execution->mutex);
+  salts_mutex_lock(&execution->mutex);
   while (!turbo_agent_execution_is_terminal(execution->status)) {
     uint64_t now_ms;
     uint64_t wait_ms;
 
     if (!has_timeout) {
-      turbo_cond_wait(&execution->changed, &execution->mutex);
+      salts_cond_wait(&execution->changed, &execution->mutex);
       continue;
     }
     now_ms = turbo_monotonic_ms();
@@ -531,10 +531,10 @@ int turbo_agent_execution_wait(turbo_agent_execution_t *execution, uint64_t time
     if (wait_ms > TURBO_EXECUTION_WAIT_SLICE_MS) {
       wait_ms = TURBO_EXECUTION_WAIT_SLICE_MS;
     }
-    (void)turbo_cond_timedwait(&execution->changed, &execution->mutex,
+    (void)salts_cond_timedwait(&execution->changed, &execution->mutex,
                                wait_ms * TURBO_EXECUTION_MS_TO_NS);
   }
-  turbo_mutex_unlock(&execution->mutex);
+  salts_mutex_unlock(&execution->mutex);
   return rc;
 }
 
@@ -543,9 +543,9 @@ int turbo_agent_execution_get_status(const turbo_agent_execution_t *execution,
   if (!execution || !out_status) {
     return SALTS_EINVAL;
   }
-  turbo_mutex_lock((turbo_mutex_t *)&execution->mutex);
+  salts_mutex_lock((salts_mutex_t *)&execution->mutex);
   *out_status = execution->status;
-  turbo_mutex_unlock((turbo_mutex_t *)&execution->mutex);
+  salts_mutex_unlock((salts_mutex_t *)&execution->mutex);
   return SALTS_OK;
 }
 
@@ -554,13 +554,13 @@ int turbo_agent_execution_result_code(const turbo_agent_execution_t *execution,
   if (!execution || !out_result_code) {
     return SALTS_EINVAL;
   }
-  turbo_mutex_lock((turbo_mutex_t *)&execution->mutex);
+  salts_mutex_lock((salts_mutex_t *)&execution->mutex);
   if (!turbo_agent_execution_is_terminal(execution->status)) {
-    turbo_mutex_unlock((turbo_mutex_t *)&execution->mutex);
+    salts_mutex_unlock((salts_mutex_t *)&execution->mutex);
     return SALTS_EBUSY;
   }
   *out_result_code = execution->operation_rc;
-  turbo_mutex_unlock((turbo_mutex_t *)&execution->mutex);
+  salts_mutex_unlock((salts_mutex_t *)&execution->mutex);
   return SALTS_OK;
 }
 
@@ -569,13 +569,13 @@ int turbo_agent_execution_take_result(turbo_agent_execution_t *execution,
   if (!execution || !out_summary || !out_state) {
     return SALTS_EINVAL;
   }
-  turbo_mutex_lock(&execution->mutex);
+  salts_mutex_lock(&execution->mutex);
   if (!turbo_agent_execution_is_terminal(execution->status)) {
-    turbo_mutex_unlock(&execution->mutex);
+    salts_mutex_unlock(&execution->mutex);
     return SALTS_EBUSY;
   }
   if (execution->result_taken) {
-    turbo_mutex_unlock(&execution->mutex);
+    salts_mutex_unlock(&execution->mutex);
     return SALTS_EALREADY;
   }
   *out_summary = NULL;
@@ -585,6 +585,6 @@ int turbo_agent_execution_take_result(turbo_agent_execution_t *execution,
   *out_state = execution->state;
   execution->summary = NULL;
   execution->state = NULL;
-  turbo_mutex_unlock(&execution->mutex);
+  salts_mutex_unlock(&execution->mutex);
   return SALTS_OK;
 }

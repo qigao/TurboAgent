@@ -1,4 +1,5 @@
 #include "turbo_embedding.h"
+#include <json_parser.h>
 
 #include <ctype.h>
 #include <stdint.h>
@@ -110,20 +111,20 @@ static int turbo_embedding_hashing_embed_text(void *user_data, const char *text,
     values[(size_t)(hash % config->dimensions)] += 1.0;
   }
 
-  embedding = turbo_json_create_array();
+  embedding = json_create_array();
   if (!embedding) {
     free(values);
     return -1;
   }
   for (i = 0; i < config->dimensions; ++i) {
-    json_value_t *value = turbo_json_create_number(values[i]);
+    json_value_t *value = json_create_number(values[i]);
 
     if (!value) {
-      turbo_free_json(&embedding);
+      json_free(embedding); embedding = NULL;
       free(values);
       return -1;
     }
-    turbo_json_array_add(embedding, value);
+    json_array_add(embedding, value);
   }
   free(values);
   *out_embedding_json = embedding;

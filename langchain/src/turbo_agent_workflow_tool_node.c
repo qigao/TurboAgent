@@ -70,9 +70,9 @@ static int turbo_agent_tool_calls_preflight(const turbo_tool_registry_t *registr
     if (!turbo_agent_tool_call_record_fields(call, &calls[index].call_id, &calls[index].tool_name,
                                              &calls[index].arguments_json) ||
         !calls[index].call_id[0] || !calls[index].tool_name[0])
-      return TURBO_EPROTO;
+      return SALTS_EPROTO;
     for (previous = 0; previous < index; ++previous) {
-      if (strcmp(calls[previous].call_id, calls[index].call_id) == 0) return TURBO_EPROTO;
+      if (strcmp(calls[previous].call_id, calls[index].call_id) == 0) return SALTS_EPROTO;
     }
     calls[index].status = turbo_tool_registry_get_execution_policy(registry, calls[index].tool_name,
                                                                    &calls[index].policy);
@@ -82,14 +82,14 @@ static int turbo_agent_tool_calls_preflight(const turbo_tool_registry_t *registr
       calls[index].replayed = 1;
       continue;
     }
-    if (calls[index].status != TURBO_TOOL_OK) return TURBO_EPROTO;
+    if (calls[index].status != TURBO_TOOL_OK) return SALTS_EPROTO;
     if (turbo_agent_policy_check_tool(policy, registry, calls[index].tool_name,
                                       &calls[index].policy_reason) != TURBO_AGENT_POLICY_ALLOW) {
       calls[index].status = TURBO_TOOL_ERROR;
       calls[index].replayed = 1;
     }
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
@@ -124,7 +124,7 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     return -1;
   }
   if (turbo_agent_tool_calls_preflight(agent->tool_registry, &agent->tool_policy, tool_calls, calls,
-                                       count) != TURBO_OK) {
+                                       count) != SALTS_OK) {
     turbo_agent_state_set_model_error(ctx->state, "tool", "malformed pending tool call record");
     goto cleanup;
   }
@@ -227,7 +227,7 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
                                          saved_context.cancel_token, saved_context.thread_id,
                                          saved_context.run_id, agent->tool_registry,
                                          &agent->tool_policy, calls, count);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_agent_state_set_model_error(ctx->state, "tool_executor",
                                       "tool batch planning or dispatch failed");
     rc = -1;

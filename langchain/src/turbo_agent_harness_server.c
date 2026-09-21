@@ -8,6 +8,7 @@
 #include <string.h>
 #include <turbo_deque.h>
 #include <tstr.h>
+#include <salts/clock.h>
 #include <salts/thread.h>
 #include <salts_uuid.h>
 #include <turbo_vec.h>
@@ -1875,7 +1876,7 @@ int turbo_agent_harness_connection_wait_event_json_value(
   retained = turbo_agent_harness_connection_retain_internal(connection);
   if (!retained) return SALTS_ESHUTDOWN;
   if (timed) {
-    deadline_ms = turbo_agent_harness_saturating_add_ms(turbo_monotonic_ms(), timeout_ms);
+    deadline_ms = turbo_agent_harness_saturating_add_ms(salts_monotonic_ms(), timeout_ms);
   }
 
   for (;;) {
@@ -1895,7 +1896,7 @@ int turbo_agent_harness_connection_wait_event_json_value(
       source = front->message;
       sequence = front->sequence;
     } else if (timed) {
-      uint64_t now_ms = turbo_monotonic_ms();
+      uint64_t now_ms = salts_monotonic_ms();
       if (now_ms >= deadline_ms) {
         rc = SALTS_ETIMEDOUT;
       } else if (deadline_ms - now_ms < wait_ms) {

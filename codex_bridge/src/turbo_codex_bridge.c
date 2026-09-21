@@ -16,9 +16,9 @@ enum {
 
 struct turbo_codex_client_s {
   turbo_codex_transport_t transport;
-  tstr_t client_name;
-  tstr_t client_title;
-  tstr_t client_version;
+  tstr client_name;
+  tstr client_title;
+  tstr client_version;
   int experimental_api;
   size_t max_message_bytes;
   uint64_t initialize_timeout_ms;
@@ -31,10 +31,10 @@ struct turbo_codex_client_s {
   uint64_t next_request_id;
   int initialized;
   int closed;
-  tstr_t last_error;
-  tstr_t capture_thread_id;
-  tstr_t capture_turn_id;
-  tstr_t captured_text;
+  tstr last_error;
+  tstr capture_thread_id;
+  tstr capture_turn_id;
+  tstr captured_text;
   json_value_t *completed_turn;
   int capture_error;
 };
@@ -144,7 +144,7 @@ void turbo_codex_client_destroy(turbo_codex_client_t *client) {
 
 static int turbo_codex_send_json(turbo_codex_client_t *client, const json_value_t *message) {
   char *serialized = NULL;
-  tstr_t frame = NULL;
+  tstr frame = NULL;
   size_t length = 0;
   int rc;
   if (!client || !message || client->closed) return SALTS_ESHUTDOWN;
@@ -298,7 +298,7 @@ static void turbo_codex_capture_notification(turbo_codex_client_t *client, const
         client->capture_error = SALTS_EMSGSIZE;
         turbo_codex_set_error(client, "Codex agent message exceeds max_message_bytes");
       } else {
-        tstr_t appended = tstr_cat_len(client->captured_text, delta, delta_length);
+        tstr appended = tstr_cat_len(client->captured_text, delta, delta_length);
         if (!appended) {
           client->capture_error = SALTS_ENOMEM;
           turbo_codex_set_error(client, "failed to capture Codex agent message");
@@ -571,8 +571,8 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
   const json_value_t *turn;
   const char *thread_id = NULL;
   const char *turn_id = NULL;
-  tstr_t owned_thread_id = NULL;
-  tstr_t owned_turn_id = NULL;
+  tstr owned_thread_id = NULL;
+  tstr owned_turn_id = NULL;
   uint64_t deadline;
   uint64_t remaining;
   int rc = SALTS_OK;

@@ -2,7 +2,7 @@
 #include "turbo_agent_runtime_v1_internal.h"
 
 #include <turbo_deque.h>
-#include <turbo_str.h>
+#include <tstr.h>
 #include <salts/thread.h>
 #include <salts_uuid.h>
 

@@ -1,8 +1,7 @@
 #ifndef TURBO_RUNTIME_CONTROL_H
 #define TURBO_RUNTIME_CONTROL_H
 
-#include <platform.h>
-#include <turbo_error.h>
+#include <turbo_agent_api.h>
 
 #include <stdint.h>
 

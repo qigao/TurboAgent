@@ -3,7 +3,7 @@
 
 #include <turbo_deque.h>
 #include <turbo_str.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
 #include <turbo_uuid.h>
 
 #include <stdlib.h>
@@ -28,8 +28,8 @@ struct turbo_agent_inbox_s {
   turbo_agent_runtime_t *runtime;
   tstr_t thread_id;
   turbo_agent_inbox_config_t config;
-  turbo_mutex_t mutex;
-  turbo_cond_t changed;
+  salts_mutex_t mutex;
+  salts_cond_t changed;
   turbo_deque_t ready;
   size_t used_items;
   size_t used_bytes;
@@ -150,14 +150,14 @@ static int turbo_agent_inbox_wait_for_capacity(turbo_agent_inbox_t *inbox, size_
     uint64_t now;
     uint64_t wait_ms;
     if (!timed) {
-      turbo_cond_wait(&inbox->changed, &inbox->mutex);
+      salts_cond_wait(&inbox->changed, &inbox->mutex);
       continue;
     }
     now = turbo_monotonic_ms();
     if (now >= deadline) return SALTS_EBUSY;
     wait_ms = deadline - now;
     if (wait_ms > TURBO_AGENT_INBOX_WAIT_SLICE_MS) wait_ms = TURBO_AGENT_INBOX_WAIT_SLICE_MS;
-    (void)turbo_cond_timedwait(&inbox->changed, &inbox->mutex,
+    (void)salts_cond_timedwait(&inbox->changed, &inbox->mutex,
                                wait_ms * TURBO_AGENT_INBOX_MS_TO_NS);
   }
   return inbox->closed ? SALTS_ECANCELED : SALTS_OK;
@@ -437,8 +437,8 @@ int turbo_agent_inbox_create(turbo_agent_runtime_t *runtime, const char *thread_
   inbox->thread_id = tstr_dup(thread_id);
   inbox->config = *config;
   inbox->next_sequence = 1;
-  turbo_mutex_init(&inbox->mutex);
-  turbo_cond_init(&inbox->changed);
+  salts_mutex_init(&inbox->mutex);
+  salts_cond_init(&inbox->changed);
   if (!inbox->thread_id || !inbox->mutex || !inbox->changed) {
     turbo_agent_inbox_destroy(inbox);
     return SALTS_ENOMEM;
@@ -465,8 +465,8 @@ void turbo_agent_inbox_destroy(turbo_agent_inbox_t *inbox) {
   turbo_agent_inbox_ready_reset(&inbox->active_claim);
   tstr_free(inbox->active_event_id);
   turbo_deque_destroy(&inbox->ready);
-  turbo_cond_destroy(&inbox->changed);
-  turbo_mutex_destroy(&inbox->mutex);
+  salts_cond_destroy(&inbox->changed);
+  salts_mutex_destroy(&inbox->mutex);
   tstr_free(inbox->thread_id);
   free(inbox);
 }
@@ -509,7 +509,7 @@ int turbo_agent_inbox_enqueue(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind
     goto cleanup;
   }
   memcpy(caller_id, inbox_id, strlen(inbox_id) + 1);
-  turbo_mutex_lock(&inbox->mutex);
+  salts_mutex_lock(&inbox->mutex);
   rc = turbo_agent_inbox_wait_for_capacity(inbox, payload_bytes, timeout_ms);
   if (rc == SALTS_OK && inbox->next_sequence > TURBO_AGENT_INBOX_MAX_EXACT_JSON_INTEGER) {
     rc = SALTS_ERANGE;
@@ -520,7 +520,7 @@ int turbo_agent_inbox_enqueue(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind
     sequence = inbox->next_sequence++;
     reserved = 1;
   }
-  turbo_mutex_unlock(&inbox->mutex);
+  salts_mutex_unlock(&inbox->mutex);
   if (rc != SALTS_OK) goto cleanup;
   record = turbo_json_create_object();
   if (!record) {
@@ -547,7 +547,7 @@ int turbo_agent_inbox_enqueue(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind
   entry.payload_bytes = payload_bytes;
   entry.sequence = sequence;
   entry.transition_seq = 1;
-  turbo_mutex_lock(&inbox->mutex);
+  salts_mutex_lock(&inbox->mutex);
   --inbox->reserved_items;
   inbox->reserved_bytes -= payload_bytes;
   reserved = 0;
@@ -555,19 +555,19 @@ int turbo_agent_inbox_enqueue(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind
   if (rc == SALTS_OK) {
     ++inbox->used_items;
     inbox->used_bytes += payload_bytes;
-    turbo_cond_broadcast(&inbox->changed);
+    salts_cond_broadcast(&inbox->changed);
   }
-  turbo_mutex_unlock(&inbox->mutex);
+  salts_mutex_unlock(&inbox->mutex);
   if (rc != SALTS_OK) goto cleanup;
   *out_inbox_id = caller_id;
   caller_id = NULL;
 cleanup:
   if (reserved) {
-    turbo_mutex_lock(&inbox->mutex);
+    salts_mutex_lock(&inbox->mutex);
     --inbox->reserved_items;
     inbox->reserved_bytes -= payload_bytes;
-    turbo_cond_broadcast(&inbox->changed);
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_cond_broadcast(&inbox->changed);
+    salts_mutex_unlock(&inbox->mutex);
   }
   turbo_agent_inbox_ready_reset(&entry);
   free(caller_id);
@@ -617,24 +617,24 @@ int turbo_agent_inbox_claim(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind_t
   *out_record = NULL;
   if (!inbox || !run_id || run_id[0] == '\0' || !turbo_agent_inbox_kind_valid(kind))
     return SALTS_EINVAL;
-  turbo_mutex_lock(&inbox->mutex);
+  salts_mutex_lock(&inbox->mutex);
   if (inbox->closed) {
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_mutex_unlock(&inbox->mutex);
     return SALTS_ECANCELED;
   }
   if (inbox->has_active_claim) {
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_mutex_unlock(&inbox->mutex);
     return SALTS_EBUSY;
   }
   rc = turbo_agent_inbox_ready_take_kind(inbox, kind, &entry);
   if (rc != SALTS_OK) {
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_mutex_unlock(&inbox->mutex);
     return rc;
   }
   inbox->active_claim = entry;
   memset(&entry, 0, sizeof(entry));
   inbox->has_active_claim = 1;
-  turbo_mutex_unlock(&inbox->mutex);
+  salts_mutex_unlock(&inbox->mutex);
   rc = turbo_agent_runtime_store_get_json(inbox->runtime, TURBO_AGENT_INBOX_PAYLOADS_COLLECTION,
                                           inbox->active_claim.inbox_id, &record) == 0
            ? SALTS_OK
@@ -643,16 +643,16 @@ int turbo_agent_inbox_claim(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind_t
     rc = turbo_agent_inbox_persist_transition(inbox, inbox->active_claim.inbox_id,
                                               TURBO_AGENT_INBOX_CLAIMED, "claimed",
                                               inbox->active_claim.transition_seq + 1, run_id, NULL);
-  turbo_mutex_lock(&inbox->mutex);
+  salts_mutex_lock(&inbox->mutex);
   if (rc == SALTS_OK) ++inbox->active_claim.transition_seq;
   else {
     entry = inbox->active_claim;
     memset(&inbox->active_claim, 0, sizeof(inbox->active_claim));
     inbox->has_active_claim = 0;
     (void)turbo_agent_inbox_ready_insert(inbox, &entry);
-    turbo_cond_broadcast(&inbox->changed);
+    salts_cond_broadcast(&inbox->changed);
   }
-  turbo_mutex_unlock(&inbox->mutex);
+  salts_mutex_unlock(&inbox->mutex);
   if (rc != SALTS_OK) {
     turbo_runtime_json_destroy(record);
     return rc;
@@ -667,14 +667,14 @@ static int turbo_agent_inbox_resolve_entry(turbo_agent_inbox_t *inbox, const cha
   turbo_agent_inbox_status_t status = 0;
   int rc;
   memset(out_entry, 0, sizeof(*out_entry));
-  turbo_mutex_lock(&inbox->mutex);
+  salts_mutex_lock(&inbox->mutex);
   if (inbox->has_active_claim && strcmp(inbox->active_claim.inbox_id, inbox_id) == 0) {
     *out_entry = inbox->active_claim;
     out_entry->inbox_id = tstr_clone(inbox->active_claim.inbox_id);
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_mutex_unlock(&inbox->mutex);
     return out_entry->inbox_id ? SALTS_OK : SALTS_ENOMEM;
   }
-  turbo_mutex_unlock(&inbox->mutex);
+  salts_mutex_unlock(&inbox->mutex);
   rc = turbo_agent_inbox_load_ready(inbox, inbox_id, out_entry, &status);
   if (rc != SALTS_OK) return rc;
   if (status != TURBO_AGENT_INBOX_CLAIMED) {
@@ -700,7 +700,7 @@ int turbo_agent_inbox_mark_applied(turbo_agent_inbox_t *inbox, const char *inbox
   rc = turbo_agent_inbox_persist_transition(inbox, inbox_id, TURBO_AGENT_INBOX_APPLIED, "applied",
                                             entry.transition_seq + 1, NULL, applied_event_id);
   if (rc == SALTS_OK) {
-    turbo_mutex_lock(&inbox->mutex);
+    salts_mutex_lock(&inbox->mutex);
     if (inbox->has_active_claim && strcmp(inbox->active_claim.inbox_id, inbox_id) == 0) {
       turbo_agent_inbox_ready_reset(&inbox->active_claim);
       tstr_free(inbox->active_event_id);
@@ -711,8 +711,8 @@ int turbo_agent_inbox_mark_applied(turbo_agent_inbox_t *inbox, const char *inbox
       --inbox->used_items;
       inbox->used_bytes -= entry.payload_bytes;
     }
-    turbo_cond_broadcast(&inbox->changed);
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_cond_broadcast(&inbox->changed);
+    salts_mutex_unlock(&inbox->mutex);
   }
   turbo_agent_inbox_ready_reset(&entry);
   return rc;
@@ -732,7 +732,7 @@ int turbo_agent_inbox_requeue(turbo_agent_inbox_t *inbox, const char *inbox_id) 
                                             entry.transition_seq + 1, NULL, NULL);
   if (rc == SALTS_OK) {
     ++entry.transition_seq;
-    turbo_mutex_lock(&inbox->mutex);
+    salts_mutex_lock(&inbox->mutex);
     if (inbox->has_active_claim && strcmp(inbox->active_claim.inbox_id, inbox_id) == 0) {
       turbo_agent_inbox_ready_reset(&inbox->active_claim);
       tstr_free(inbox->active_event_id);
@@ -740,8 +740,8 @@ int turbo_agent_inbox_requeue(turbo_agent_inbox_t *inbox, const char *inbox_id) 
       inbox->has_active_claim = 0;
     }
     rc = turbo_agent_inbox_ready_insert(inbox, &entry);
-    turbo_cond_broadcast(&inbox->changed);
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_cond_broadcast(&inbox->changed);
+    salts_mutex_unlock(&inbox->mutex);
   }
   turbo_agent_inbox_ready_reset(&entry);
   return rc;
@@ -755,15 +755,15 @@ int turbo_agent_inbox_bind_applied_event(turbo_agent_inbox_t *inbox, const char 
   }
   event_id_copy = tstr_dup(event_id);
   if (!event_id_copy) return SALTS_ENOMEM;
-  turbo_mutex_lock(&inbox->mutex);
+  salts_mutex_lock(&inbox->mutex);
   if (!inbox->has_active_claim || strcmp(inbox->active_claim.inbox_id, inbox_id) != 0 ||
       inbox->active_event_id) {
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_mutex_unlock(&inbox->mutex);
     tstr_free(event_id_copy);
     return SALTS_EINVAL;
   }
   inbox->active_event_id = event_id_copy;
-  turbo_mutex_unlock(&inbox->mutex);
+  salts_mutex_unlock(&inbox->mutex);
   return SALTS_OK;
 }
 
@@ -772,12 +772,12 @@ int turbo_agent_inbox_commit_bound_claim(turbo_agent_inbox_t *inbox) {
   tstr_t event_id = NULL;
   int rc;
   if (!inbox) return SALTS_EINVAL;
-  turbo_mutex_lock(&inbox->mutex);
+  salts_mutex_lock(&inbox->mutex);
   if (inbox->has_active_claim && inbox->active_event_id) {
     inbox_id = tstr_clone(inbox->active_claim.inbox_id);
     event_id = tstr_clone(inbox->active_event_id);
   }
-  turbo_mutex_unlock(&inbox->mutex);
+  salts_mutex_unlock(&inbox->mutex);
   if (!inbox_id && !event_id) return SALTS_OK;
   if (!inbox_id || !event_id) {
     tstr_free(inbox_id);
@@ -792,13 +792,13 @@ int turbo_agent_inbox_commit_bound_claim(turbo_agent_inbox_t *inbox) {
 
 int turbo_agent_inbox_close(turbo_agent_inbox_t *inbox) {
   if (!inbox) return SALTS_EINVAL;
-  turbo_mutex_lock(&inbox->mutex);
+  salts_mutex_lock(&inbox->mutex);
   if (inbox->closed) {
-    turbo_mutex_unlock(&inbox->mutex);
+    salts_mutex_unlock(&inbox->mutex);
     return SALTS_EALREADY;
   }
   inbox->closed = 1;
-  turbo_cond_broadcast(&inbox->changed);
-  turbo_mutex_unlock(&inbox->mutex);
+  salts_cond_broadcast(&inbox->changed);
+  salts_mutex_unlock(&inbox->mutex);
   return SALTS_OK;
 }

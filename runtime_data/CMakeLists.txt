@@ -15,7 +15,6 @@ target_link_libraries(runtime_data PUBLIC Salts::JsonParser Salts::Core)
 
 cmake_config_target(runtime_data FOLDER "Runtime Data" EXPORT_NAME RuntimeData
                     ALIAS TurboAgent::RuntimeData)
-add_library(TurboNet::RuntimeData ALIAS runtime_data)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 

@@ -4,6 +4,7 @@
 #include "turbo_agent_runtime_internal.h"
 #include "turbo_agent_util_internal.h"
 
+#include <salts/clock.h>
 #include <salts/thread.h>
 
 #include <limits.h>
@@ -133,11 +134,11 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
     return agent->transport_fn(request_json, out_response_json, agent->transport_user_data);
   }
   turbo_agent_execution_context_get(&context);
-  execution_start = turbo_monotonic_ms();
+  execution_start = salts_monotonic_ms();
   for (attempt = 1; attempt <= agent->retry_policy.max_attempts; ++attempt) {
     turbo_agent_transport_response_t response = {sizeof(turbo_agent_transport_response_t),
                                                  TURBO_AGENT_TRANSPORT_V2_ABI_VERSION};
-    uint64_t started_ms = turbo_monotonic_ms();
+    uint64_t started_ms = salts_monotonic_ms();
     uint64_t finished_ms;
     unsigned int delay_ms = 0;
     int invoke_rc;
@@ -146,7 +147,7 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
     invoke_rc = agent->transport_v2(
         request_json, context.cancel_token, agent->retry_policy.request_timeout_ms,
         agent->retry_policy.connect_timeout_ms, &response, agent->transport_v2_user_data);
-    finished_ms = turbo_monotonic_ms();
+    finished_ms = salts_monotonic_ms();
     if (response.struct_size < sizeof(response) ||
         response.abi_version != TURBO_AGENT_TRANSPORT_V2_ABI_VERSION) {
       free(response.body);

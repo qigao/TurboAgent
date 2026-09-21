@@ -3,7 +3,7 @@
 
 #include <platform.h>
 
-#include "rpc_client.h"
+#include <http_client/http.h>
 #include "turbo_agent_memory_store.h"
 #include "turbo_agent_runtime.h"
 
@@ -15,15 +15,15 @@ typedef struct turbo_agent_runtime_remote_client_s turbo_agent_runtime_remote_cl
 
 typedef struct turbo_agent_runtime_remote_client_config_s {
   const char *url;
-  rpc_client_t *rpc_client;
+  chttp_client *http_client;
 } turbo_agent_runtime_remote_client_config_t;
 
 /**
  * @brief Create one runtime remote client over an RPC JSON-RPC endpoint.
  *
- * When `rpc_client` is provided, this wrapper borrows it and never destroys it.
- * Otherwise `url` must point at one runtime JSON-RPC endpoint and the wrapper
- * creates one owned simple `rpc_client_t`.
+ * When `http_client` is provided, this wrapper borrows it and never destroys it.
+ * `url` always names the runtime JSON-RPC endpoint. Otherwise the wrapper
+ * creates one owned bounded CHTTP client.
  */
 CXX_C_API turbo_agent_runtime_remote_client_t *turbo_agent_runtime_remote_client_create(
     const turbo_agent_runtime_remote_client_config_t *config);

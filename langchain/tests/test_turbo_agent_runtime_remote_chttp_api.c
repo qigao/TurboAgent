@@ -107,7 +107,7 @@ static chttp_server_config remote_chttp_server_config(void) {
 }
 
 spec("turbo agent runtime remote CHTTP api") {
-  it("round-trips runtime.start through CHTTP without TurboHttp or CoroNet") {
+  it("round-trips runtime.start through the supported CHTTP stack") {
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
     turbo_graph_t *graph = remote_chttp_graph_create();

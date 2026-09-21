@@ -13,8 +13,8 @@ target_include_directories(
                        $<INSTALL_INTERFACE:include>)
 target_link_libraries(
   praktor_tools
-  PUBLIC TurboAgent::RuntimeTools TurboParser::Parser
-  PRIVATE Praktor::Praktor TurboUtils::Core)
+  PUBLIC TurboAgent::RuntimeTools Salts::JsonParser
+  PRIVATE Praktor::Praktor Salts::Core)
 
 cmake_config_target(praktor_tools FOLDER "Praktor Tools" EXPORT_NAME PraktorTools
                     ALIAS TurboAgent::PraktorTools)
@@ -30,7 +30,7 @@ if(BUILD_TESTS)
     LIBS
     praktor_tools
     TurboUtils::Core
-    TurboUtils::TinyTest
+    Salts::TinyTest
     INCLUDES
     include
     FOLDER

@@ -2,7 +2,7 @@
 #define TURBO_MODEL_PROVIDER_H
 
 #include <platform.h>
-#include <http_client.h>
+#include <http_client/http.h>
 
 #include <json_parser.h>
 #include "turbo_event.h"
@@ -16,14 +16,16 @@ typedef struct turbo_model_provider_s turbo_model_provider_t;
 
 typedef int (*turbo_model_provider_build_request_fn)(const turbo_agent_t *agent,
                                                      json_value_t *state, char **out_request_json);
-typedef int (*turbo_model_provider_configure_http_client_fn)(const turbo_agent_t *agent,
-                                                             http_client_t *http_client);
+typedef int (*turbo_model_provider_build_http_headers_fn)(const turbo_agent_t *agent,
+                                                           chttp_header *headers,
+                                                           size_t capacity,
+                                                           size_t *out_count);
 
 struct turbo_model_provider_s {
   const char *name;
   const char *default_endpoint_path;
   turbo_model_provider_build_request_fn build_request;
-  turbo_model_provider_configure_http_client_fn configure_http_client;
+  turbo_model_provider_build_http_headers_fn build_http_headers;
 };
 
 /**

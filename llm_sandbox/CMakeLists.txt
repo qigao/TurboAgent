@@ -92,18 +92,18 @@ if(BUILD_TESTS)
 
     cmake_add_test(
       SOURCES tests/test_turbo_tool_runtime_wasm.c
-      LIBS llm_sandbox TurboUtils::TinyTest
+      LIBS llm_sandbox Salts::TinyTest
       FOLDER "LLM Sandbox/tests")
 
     cmake_add_test(
       SOURCES tests/test_turbo_wasm_tool_pack.c
-      LIBS llm_sandbox TurboUtils::TinyTest
+      LIBS llm_sandbox Salts::TinyTest
       FOLDER "LLM Sandbox/tests")
 
     if(TARGET langchain)
       cmake_add_test(
         SOURCES tests/test_turbo_wasm_tool_pack_workspace.c
-        LIBS llm_sandbox langchain TurboUtils::TinyTest
+        LIBS llm_sandbox langchain Salts::TinyTest
         FOLDER "LLM Sandbox/tests")
     endif()
 

@@ -3,7 +3,7 @@
 #include "turbo_agent_execution.h"
 #include "turbo_agent_state.h"
 
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 
 #include <stdatomic.h>
 #include <string.h>
@@ -84,7 +84,7 @@ spec("turbo agent execution") {
                  SALTS_OK);
     check_not_null(execution);
     check_not_null(turbo_agent_execution_id(execution));
-    check_size_eq(strlen(turbo_agent_execution_id(execution)), TURBO_UUID_STRING_LENGTH);
+    check_size_eq(strlen(turbo_agent_execution_id(execution)), SALTS_UUID_STRING_LENGTH);
     check_int_eq(turbo_agent_execution_wait(execution, UINT64_MAX), SALTS_OK);
     check_int_eq(turbo_agent_execution_get_status(execution, &status), SALTS_OK);
     check_int_eq(status, TURBO_AGENT_EXECUTION_COMPLETED);

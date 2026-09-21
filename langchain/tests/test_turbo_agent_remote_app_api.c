@@ -123,6 +123,7 @@ static int remote_app_test_server_start(chttp_server *server, int *initialized,
   chttp_server_config config;
   uint16_t port = 0u;
   int status;
+  int written;
 
   if (!server || !initialized || !started || !remote || !endpoint_url ||
       endpoint_capacity == 0u) {

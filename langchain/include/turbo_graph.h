@@ -2,7 +2,7 @@
 #define TURBO_GRAPH_H
 
 #include <stddef.h>
-#include <platform.h>
+#include <turbo_agent_api.h>
 #include <json_parser.h>
 
 #include "turbo_event.h"

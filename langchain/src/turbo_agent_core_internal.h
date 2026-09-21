@@ -18,6 +18,7 @@ typedef struct turbo_agent_tool_executor_s turbo_agent_tool_executor_t;
 
 struct turbo_agent_s {
   char *api_key;
+  char *http_authorization;
   char *model;
   char *base_url;
   char *endpoint_path;

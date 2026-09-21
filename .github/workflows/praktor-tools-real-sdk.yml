@@ -19,8 +19,6 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      LEGACY_TURBOUTILS_SHA: e436d34802c076768e2a42acc0d9ed2742ec9953
-      LEGACY_TURBOPARSER_SHA: 21fb5ec18f512b4afc140530aa22ffcee44f5b64
       SALTS_SHA: f1d8466244e6e0d74baed86e99ae6205e431557f
       SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
       CHTTP_SHA: 9d2e64ee46d15541a24b61ae979df0cca8615d3b
@@ -42,22 +40,6 @@ jobs:
           set -euxo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git diff --exit-code
-
-      - name: Checkout legacy TurboUtils
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/salts
-          ref: ${{ env.LEGACY_TURBOUTILS_SHA }}
-          path: deps/legacy-turboutils
-          persist-credentials: false
-
-      - name: Checkout legacy TurboParser
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/salts-utils
-          ref: ${{ env.LEGACY_TURBOPARSER_SHA }}
-          path: deps/legacy-turboparser
-          persist-credentials: false
 
       - name: Checkout current Salts
         uses: actions/checkout@v4
@@ -115,8 +97,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
           ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          sudo mkdir -p /opt/turboutils /opt/turboparser /opt/salts /opt/salts-utils /opt/chttp /opt/http-services /opt/turbo_script /opt/praktor /opt/turboagent
-          sudo chown -R "$USER":"$USER" /opt/turboutils /opt/turboparser /opt/salts /opt/salts-utils /opt/chttp /opt/http-services /opt/turbo_script /opt/praktor /opt/turboagent
+          sudo mkdir -p /opt/salts /opt/salts-utils /opt/chttp /opt/http-services /opt/turbo_script /opt/praktor /opt/turboagent
+          sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/chttp /opt/http-services /opt/turbo_script /opt/praktor /opt/turboagent
           sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
           bash deps/salts-utils/cmake/ci/install-re2c.sh
 
@@ -125,45 +107,6 @@ jobs:
         with:
           path: ~/.cache/vcpkg/archives
           key: turboagent-praktor-real-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_SHA }}-v1
-
-      - name: Build and install legacy TurboUtils
-        working-directory: deps/legacy-turboutils
-        env:
-          PROJECT_ROOT: ${{ runner.temp }}/legacy-project
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cmake --preset linux-dev-user \
-            -DCMAKE_INSTALL_PREFIX=/opt/turboutils/debug \
-            -DENABLE_SANITIZER_ADDRESS=OFF \
-            -DENABLE_TESTS=OFF \
-            -DBUILD_TESTS=OFF \
-            -DBUILD_EXAMPLES=OFF \
-            -DBUILD_BENCHMARKS=OFF
-          cmake --build build/linux-gcc-debug --target install -j2
-          test -f /opt/turboutils/debug/lib/cmake/TurboUtils/TurboUtilsConfig.cmake
-
-      - name: Build and install legacy TurboParser
-        working-directory: deps/legacy-turboparser
-        env:
-          TURBOUTILS_ROOT: /opt/turboutils/debug
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cmake --preset linux-dev-user \
-            -DCMAKE_INSTALL_PREFIX=/opt/turboparser/debug \
-            -DCMAKE_PREFIX_PATH="/opt/turboutils/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux" \
-            -DENABLE_SANITIZER_ADDRESS=OFF \
-            -DENABLE_TESTS=OFF \
-            -DBUILD_TESTS=OFF \
-            -DBUILD_EXAMPLES=OFF \
-            -DBUILD_BENCHMARKS=OFF \
-            -DTURBO_ENABLE_CAPTURE=OFF
-          cmake --build build/linux-gcc-debug --target install -j2
-          test -f /opt/turboparser/debug/lib/cmake/TurboParser/TurboParserConfig.cmake
-          test -f /opt/turboparser/debug/include/turbo_parser.h
 
       - name: Build and install current Salts
         working-directory: deps/salts
@@ -274,9 +217,7 @@ jobs:
             -DVCPKG_MANIFEST_MODE=ON \
             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent" \
             -DCMAKE_INSTALL_PREFIX=/opt/turboagent/debug \
-            -DCMAKE_PREFIX_PATH="/opt/turboutils/debug;/opt/turboparser/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux" \
-            -DTURBOUTILS_ROOT=/opt/turboutils/debug \
-            -DTURBOPARSER_ROOT=/opt/turboparser/debug \
+            -DCMAKE_PREFIX_PATH="/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux" \
             -DPRAKTOR_ROOT=/opt/praktor/debug \
             -DENABLE_PRAKTOR_TOOLS=ON \
             -DENABLE_MCP_TOOLS=OFF \
@@ -303,7 +244,7 @@ jobs:
           grep -F 'test_turbo_praktor_tool_pack' "$RUNNER_TEMP/ctest-list.txt"
 
           vcpkg_libs="$(find "$GITHUB_WORKSPACE" -type d \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
-          export LD_LIBRARY_PATH="/opt/turboagent/debug/lib:/opt/praktor/debug/lib:/opt/turbo_script/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:/opt/turboparser/debug/lib:/opt/turboutils/debug/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="/opt/turboagent/debug/lib:/opt/praktor/debug/lib:/opt/turbo_script/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/praktor-real -R 'test_turbo_praktor_tool_pack' --output-on-failure
 
       - name: Install TurboAgent with PraktorTools
@@ -350,7 +291,7 @@ jobs:
           }
           C
 
-          export CMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/turboutils/debug;/opt/turboparser/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux"
+          export CMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux"
           cmake -S "$consumer" -B "$consumer/build" -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
@@ -358,7 +299,7 @@ jobs:
           cmake --build "$consumer/build" --verbose -j2
 
           vcpkg_libs="$(find "$GITHUB_WORKSPACE" -type d \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
-          export LD_LIBRARY_PATH="/opt/turboagent/debug/lib:/opt/praktor/debug/lib:/opt/turbo_script/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:/opt/turboparser/debug/lib:/opt/turboutils/debug/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="/opt/turboagent/debug/lib:/opt/praktor/debug/lib:/opt/turbo_script/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
           "$consumer/build/turboagent_installed_praktor"
 
       - name: Upload installed TurboAgent SDK

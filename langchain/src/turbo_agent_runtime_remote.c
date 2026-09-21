@@ -21,8 +21,6 @@ enum {
   TURBO_AGENT_RUNTIME_REMOTE_RPC_INTERNAL = -32603
 };
 
-static const char *TURBO_AGENT_RUNTIME_REMOTE_HTTP_JSONRPC_PATH = "/v1/runtime/jsonrpc";
-
 static json_value_t *turbo_agent_runtime_remote_response_base(const json_value_t *request_json) {
   json_value_t *response_json = turbo_json_create_object();
   const json_value_t *id_json = request_json ? turbo_json_object_get(request_json, "id") : NULL;
@@ -118,62 +116,6 @@ static int turbo_agent_runtime_remote_build_error_response_text(
     return -1;
   }
   return turbo_agent_runtime_remote_serialize_response_json(response_json, out_response_json_text);
-}
-
-static http_response_t *turbo_agent_runtime_remote_http_response_create(
-    int status_code, const char *headers, const char *body, http_error_code_t error_code,
-    const char *error_text) {
-  http_response_t *response = (http_response_t *)calloc(1, sizeof(*response));
-
-  if (!response) {
-    return NULL;
-  }
-  response->status_code = status_code;
-  response->error_code = error_code;
-  if (headers) {
-    response->headers = tstr_dup(headers);
-    if (!response->headers) {
-      http_response_free(response);
-      return NULL;
-    }
-    response->headers_len = strlen(response->headers);
-  }
-  if (body) {
-    response->body = (char *)calloc(strlen(body) + 1, sizeof(*response->body));
-    if (!response->body) {
-      http_response_free(response);
-      return NULL;
-    }
-    memcpy(response->body, body, strlen(body));
-    response->body_len = strlen(body);
-  }
-  if (error_text) {
-    response->error = tstr_dup(error_text);
-    if (!response->error) {
-      http_response_free(response);
-      return NULL;
-    }
-  }
-  return response;
-}
-
-static http_response_t *turbo_agent_runtime_remote_http_error_response(
-    int status_code, int rpc_error_code, const char *rpc_message) {
-  char *body = NULL;
-  http_response_t *response;
-
-  if (turbo_agent_runtime_remote_build_error_response_text(NULL, rpc_error_code, rpc_message,
-                                                           &body) != 0 ||
-      !body) {
-    turbo_json_serialize_free(body);
-    return turbo_agent_runtime_remote_http_response_create(
-        500, "Content-Type: application/json\r\n", NULL, HTTP_ERROR_PARSE_FAILED,
-        "Failed to build JSON-RPC error response");
-  }
-  response = turbo_agent_runtime_remote_http_response_create(
-      status_code, "Content-Type: application/json\r\n", body, HTTP_ERROR_NONE, NULL);
-  turbo_json_serialize_free(body);
-  return response;
 }
 
 static int turbo_agent_runtime_remote_validate_request(const json_value_t *request_json,
@@ -2018,55 +1960,4 @@ CXX_C_API int turbo_agent_runtime_remote_dispatch_jsonrpc_text(
         out_response_json_text);
   }
   return turbo_agent_runtime_remote_serialize_response_json(response_json, out_response_json_text);
-}
-
-CXX_C_API http_response_t *turbo_agent_runtime_remote_handle_http_jsonrpc(
-    turbo_agent_runtime_remote_t *remote, http_method_t method, const char *path,
-    const char *request_json_text) {
-  char *response_json_text = NULL;
-  http_response_t *response;
-  json_value_t *request_json = NULL;
-  int rc;
-
-  if (!remote || !remote->runtime) {
-    return turbo_agent_runtime_remote_http_error_response(
-        500, TURBO_AGENT_RUNTIME_REMOTE_RPC_INTERNAL, "Internal error");
-  }
-  if (method != HTTP_POST) {
-    return turbo_agent_runtime_remote_http_error_response(
-        405, TURBO_AGENT_RUNTIME_REMOTE_RPC_INVALID_REQUEST, "Method not allowed");
-  }
-  if (!path || strcmp(path, TURBO_AGENT_RUNTIME_REMOTE_HTTP_JSONRPC_PATH) != 0) {
-    return turbo_agent_runtime_remote_http_error_response(
-        404, TURBO_AGENT_RUNTIME_REMOTE_RPC_INVALID_REQUEST, "Not found");
-  }
-  if (!request_json_text) {
-    return turbo_agent_runtime_remote_http_error_response(
-        400, TURBO_AGENT_RUNTIME_REMOTE_RPC_INVALID_REQUEST, "Invalid request");
-  }
-  if (turbo_parse_json((const uint8_t *)request_json_text, strlen(request_json_text), &request_json) !=
-          0 ||
-      !request_json) {
-    turbo_free_json(&request_json);
-    return turbo_agent_runtime_remote_http_error_response(
-        400, TURBO_AGENT_RUNTIME_REMOTE_RPC_INVALID_REQUEST, "Invalid request");
-  }
-  turbo_free_json(&request_json);
-
-  rc = turbo_agent_runtime_remote_dispatch_jsonrpc_text(remote, request_json_text,
-                                                        &response_json_text);
-  if (rc != 0 || !response_json_text) {
-    turbo_json_serialize_free(response_json_text);
-    return turbo_agent_runtime_remote_http_error_response(
-        500, TURBO_AGENT_RUNTIME_REMOTE_RPC_INTERNAL, "Internal error");
-  }
-
-  response = turbo_agent_runtime_remote_http_response_create(
-      200, "Content-Type: application/json\r\n", response_json_text, HTTP_ERROR_NONE, NULL);
-  turbo_json_serialize_free(response_json_text);
-  if (!response) {
-    return turbo_agent_runtime_remote_http_error_response(
-        500, TURBO_AGENT_RUNTIME_REMOTE_RPC_INTERNAL, "Internal error");
-  }
-  return response;
 }

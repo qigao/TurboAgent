@@ -26,6 +26,8 @@ if(BUILD_TESTS)
     ${TEST_SOURCES}
     LIBS
     runtime_data
+    Salts::CYamlJsonAdapter
+    Salts::XmlParser
     Salts::TinyTest
     INCLUDES
     include

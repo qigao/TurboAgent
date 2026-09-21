@@ -92,12 +92,12 @@ static turbo_cancel_reason_t turbo_cancel_state_refresh_deadline_locked(turbo_ca
 
 static int turbo_cancel_reason_status(turbo_cancel_reason_t reason) {
   if (reason == TURBO_CANCEL_NONE) {
-    return TURBO_OK;
+    return SALTS_OK;
   }
   if (reason == TURBO_CANCEL_DEADLINE) {
-    return TURBO_ETIMEDOUT;
+    return SALTS_ETIMEDOUT;
   }
-  return TURBO_ECANCELED;
+  return SALTS_ECANCELED;
 }
 
 static uint64_t turbo_cancel_saturating_add_ms(uint64_t start, uint64_t duration) {
@@ -113,11 +113,11 @@ int turbo_cancel_source_create(const turbo_cancel_source_config_t *config,
   turbo_cancel_state_t *state = NULL;
 
   if (!out_source) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   *out_source = NULL;
   if (!turbo_cancel_config_valid(config)) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
 
   source = (turbo_cancel_source_t *)calloc(1, sizeof(*source));
@@ -125,7 +125,7 @@ int turbo_cancel_source_create(const turbo_cancel_source_config_t *config,
   if (!source || !state) {
     free(source);
     free(state);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
 
   turbo_mutex_init(&state->mutex);
@@ -135,7 +135,7 @@ int turbo_cancel_source_create(const turbo_cancel_source_config_t *config,
     turbo_mutex_destroy(&state->mutex);
     free(state);
     free(source);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
 
   atomic_init(&state->ref_count, 1);
@@ -146,7 +146,7 @@ int turbo_cancel_source_create(const turbo_cancel_source_config_t *config,
   }
   source->state = state;
   *out_source = source;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 void turbo_cancel_source_destroy(turbo_cancel_source_t *source) {
@@ -163,39 +163,39 @@ int turbo_cancel_source_token(const turbo_cancel_source_t *source,
   turbo_cancel_token_t *token;
 
   if (!out_token) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   *out_token = NULL;
   if (!source || !source->state) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   if (!turbo_cancel_state_retain(source->state)) {
-    return TURBO_ERANGE;
+    return SALTS_ERANGE;
   }
 
   token = (turbo_cancel_token_t *)calloc(1, sizeof(*token));
   if (!token) {
     turbo_cancel_state_release(source->state);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   atomic_init(&token->ref_count, 1);
   token->state = source->state;
   *out_token = token;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_cancel_source_cancel(turbo_cancel_source_t *source, turbo_cancel_reason_t reason) {
-  int status = TURBO_OK;
+  int status = SALTS_OK;
 
   if (!source || !source->state || !turbo_cancel_reason_valid(reason)) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
 
   turbo_mutex_lock(&source->state->mutex);
   turbo_cancel_state_refresh_deadline_locked(source->state,
                                              turbo_cancel_state_now_ms(source->state));
   if (source->state->reason != TURBO_CANCEL_NONE) {
-    status = TURBO_EALREADY;
+    status = SALTS_EALREADY;
   } else {
     source->state->reason = reason;
     turbo_cond_broadcast(&source->state->cond);
@@ -251,7 +251,7 @@ int turbo_cancel_token_check(const turbo_cancel_token_t *token) {
   turbo_cancel_reason_t reason;
 
   if (!token || !token->state) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   turbo_mutex_lock(&token->state->mutex);
   reason = turbo_cancel_state_refresh_deadline_locked(token->state,

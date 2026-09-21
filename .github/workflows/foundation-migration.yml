@@ -161,9 +161,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake -S . -B build/foundation -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent"             -DCMAKE_INSTALL_PREFIX=/opt/turboagent/debug             -DCMAKE_PREFIX_PATH="/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"             -DSALTS_ROOT=/opt/salts/debug             -DSALTS_UTILS_ROOT=/opt/salts-utils/debug             -DCHTTP_ROOT=/opt/chttp/debug             -DENABLE_MCP_TOOLS=ON             -DENABLE_LANGCHAIN=OFF             -DENABLE_LLM_SANDBOX=OFF             -DENABLE_CODING_TOOLS=ON             -DENABLE_CODEX_BRIDGE=ON             -DENABLE_TESTS=ON             -DBUILD_TESTS=ON             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
+          cmake -S . -B build/foundation -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent"             -DCMAKE_INSTALL_PREFIX=/opt/turboagent/debug             -DCMAKE_PREFIX_PATH="/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"             -DSALTS_ROOT=/opt/salts/debug             -DSALTS_UTILS_ROOT=/opt/salts-utils/debug             -DCHTTP_ROOT=/opt/chttp/debug             -DENABLE_MCP_TOOLS=ON             -DENABLE_LANGCHAIN=ON             -DENABLE_LLM_SANDBOX=OFF             -DENABLE_CODING_TOOLS=ON             -DENABLE_CODEX_BRIDGE=ON             -DENABLE_TESTS=ON             -DBUILD_TESTS=ON             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
           grep -F 'ENABLE_MCP_TOOLS:BOOL=ON' build/foundation/CMakeCache.txt
-          grep -F 'ENABLE_LANGCHAIN:BOOL=OFF' build/foundation/CMakeCache.txt
+          grep -F 'ENABLE_LANGCHAIN:BOOL=ON' build/foundation/CMakeCache.txt
           grep -F 'ENABLE_LLM_SANDBOX:BOOL=OFF' build/foundation/CMakeCache.txt
 
       - name: Build and test foundation modules
@@ -206,11 +206,13 @@ jobs:
             TurboAgent::RuntimeCore
             TurboAgent::RuntimeData
             TurboAgent::RuntimeTools
-            TurboAgent::McpTools)
+            TurboAgent::McpTools
+            TurboAgent::LangChain)
           CMAKE
           cat > "$consumer/main.c" <<'C'
           #include <turbo_mcp_tool_pack.h>
           #include <turbo_runtime_json.h>
+          #include <turbo_agent_runtime_remote_chttp.h>
 
           int main(void) {
             turbo_mcp_tool_pack_config_t config;

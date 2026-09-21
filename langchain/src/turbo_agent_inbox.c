@@ -4,7 +4,7 @@
 #include <turbo_deque.h>
 #include <turbo_str.h>
 #include <salts/thread.h>
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -80,10 +80,10 @@ static uint64_t turbo_agent_inbox_saturating_add(uint64_t left, uint64_t right) 
   return UINT64_MAX - left < right ? UINT64_MAX : left + right;
 }
 
-static int turbo_agent_inbox_make_uuid(char out_id[TURBO_UUID_STRING_SIZE]) {
-  turbo_uuid_t uuid;
-  if (turbo_uuid_v7_generate(&uuid) != SALTS_OK) return SALTS_EIO;
-  return turbo_uuid_format(&uuid, out_id, TURBO_UUID_STRING_SIZE) == SALTS_OK ? SALTS_OK
+static int turbo_agent_inbox_make_uuid(char out_id[SALTS_UUID_STRING_SIZE]) {
+  salts_uuid_t uuid;
+  if (salts_uuid_v7_generate(&uuid) != SALTS_OK) return SALTS_EIO;
+  return salts_uuid_format(&uuid, out_id, SALTS_UUID_STRING_SIZE) == SALTS_OK ? SALTS_OK
                                                                               : SALTS_EIO;
 }
 
@@ -168,7 +168,7 @@ static int turbo_agent_inbox_build_transition(const turbo_agent_inbox_t *inbox,
                                               turbo_agent_inbox_status_t status, const char *action,
                                               uint64_t transition_seq, const char *run_id,
                                               const char *event_id, json_value_t **out_transition) {
-  char transition_id[TURBO_UUID_STRING_SIZE];
+  char transition_id[SALTS_UUID_STRING_SIZE];
   char timestamp[32];
   json_value_t *transition;
   *out_transition = NULL;
@@ -474,7 +474,7 @@ void turbo_agent_inbox_destroy(turbo_agent_inbox_t *inbox) {
 int turbo_agent_inbox_enqueue(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind_t kind,
                               const json_value_t *message, uint64_t timeout_ms,
                               char **out_inbox_id) {
-  char inbox_id[TURBO_UUID_STRING_SIZE];
+  char inbox_id[SALTS_UUID_STRING_SIZE];
   char timestamp[32];
   char *payload_text = NULL, *caller_id = NULL;
   json_value_t *payload_copy = NULL, *record = NULL;

@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 
 #define TURBO_EXECUTION_WAIT_SLICE_MS (UINT32_MAX - UINT64_C(1))
 #define TURBO_EXECUTION_MS_TO_NS UINT64_C(1000000)
@@ -28,7 +28,7 @@ struct turbo_agent_execution_s {
   turbo_agent_execution_kind_t kind;
   int operation_rc;
   int result_taken;
-  char id[TURBO_UUID_STRING_SIZE];
+  char id[SALTS_UUID_STRING_SIZE];
   turbo_agent_runtime_t *runtime;
   turbo_graph_t *graph;
   json_value_t *input;
@@ -309,7 +309,7 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
   turbo_agent_execution_t *execution = NULL;
   turbo_cancel_source_config_t cancel_config = {sizeof(cancel_config),
                                                 TURBO_RUNTIME_CONTROL_ABI_VERSION, 0, NULL, NULL};
-  turbo_uuid_t uuid;
+  salts_uuid_t uuid;
   int rc;
 
   if (!out_execution) {
@@ -368,9 +368,9 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
     turbo_agent_execution_release(execution);
     return rc != SALTS_OK ? rc : SALTS_ENOMEM;
   }
-  rc = turbo_uuid_v7_generate(&uuid);
+  rc = salts_uuid_v7_generate(&uuid);
   if (rc != SALTS_OK ||
-      turbo_uuid_format(&uuid, execution->id, sizeof(execution->id)) != SALTS_OK) {
+      salts_uuid_format(&uuid, execution->id, sizeof(execution->id)) != SALTS_OK) {
     turbo_agent_execution_release(execution);
     return rc != SALTS_OK ? rc : SALTS_EIO;
   }

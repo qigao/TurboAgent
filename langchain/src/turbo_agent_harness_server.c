@@ -9,7 +9,7 @@
 #include <turbo_deque.h>
 #include <turbo_str.h>
 #include <salts/thread.h>
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 #include <turbo_vec.h>
 
 enum {
@@ -81,8 +81,8 @@ struct turbo_agent_harness_turn_s {
 };
 
 typedef struct turbo_agent_harness_turn_snapshot_s {
-  char id[TURBO_UUID_STRING_SIZE];
-  char approval_request_id[TURBO_UUID_STRING_SIZE];
+  char id[SALTS_UUID_STRING_SIZE];
+  char approval_request_id[SALTS_UUID_STRING_SIZE];
   const char *thread_id;
   const char *status;
 } turbo_agent_harness_turn_snapshot_t;
@@ -99,11 +99,11 @@ static uint64_t turbo_agent_harness_saturating_add_ms(uint64_t left, uint64_t ri
   return right > UINT64_MAX - left ? UINT64_MAX : left + right;
 }
 
-static int turbo_agent_harness_server_uuid(char out[TURBO_UUID_STRING_SIZE]) {
-  turbo_uuid_t uuid;
-  int rc = turbo_uuid_v7_generate(&uuid);
+static int turbo_agent_harness_server_uuid(char out[SALTS_UUID_STRING_SIZE]) {
+  salts_uuid_t uuid;
+  int rc = salts_uuid_v7_generate(&uuid);
   if (rc != SALTS_OK) return rc;
-  return turbo_uuid_format(&uuid, out, TURBO_UUID_STRING_SIZE);
+  return salts_uuid_format(&uuid, out, SALTS_UUID_STRING_SIZE);
 }
 
 turbo_agent_harness_connection_t *
@@ -527,7 +527,7 @@ static json_value_t *turbo_agent_harness_turn_json(turbo_agent_harness_turn_t *t
 }
 
 static json_value_t *turbo_agent_harness_thread_json(turbo_agent_harness_thread_t *thread) {
-  char active_turn_id[TURBO_UUID_STRING_SIZE] = {0};
+  char active_turn_id[SALTS_UUID_STRING_SIZE] = {0};
   const char *status = "idle";
   json_value_t *thread_json;
   salts_mutex_lock(&thread->mutex);
@@ -620,7 +620,7 @@ static int turbo_agent_harness_turn_emit_approval(turbo_agent_harness_turn_t *tu
   const char *note = turbo_agent_state_review_note(turn->state);
   const char *method = "item/review/requestApproval";
   const char *item_id = turn->id;
-  char request_id[TURBO_UUID_STRING_SIZE];
+  char request_id[SALTS_UUID_STRING_SIZE];
   tstr_t owned_request_id = NULL;
   int rc;
 
@@ -1025,7 +1025,7 @@ static int turbo_agent_harness_dispatch_initialize(turbo_agent_harness_connectio
 static int turbo_agent_harness_dispatch_thread_load(turbo_agent_harness_connection_t *connection,
                                                     const json_value_t *params, int create_new,
                                                     json_value_t **out_result) {
-  char generated_id[TURBO_UUID_STRING_SIZE];
+  char generated_id[SALTS_UUID_STRING_SIZE];
   const char *thread_id;
   turbo_agent_harness_thread_t *thread;
   json_value_t *thread_json;
@@ -1156,7 +1156,7 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
   json_value_t *notify_params = NULL;
   json_value_t *result = NULL;
   json_value_t *turn_json = NULL;
-  char turn_id[TURBO_UUID_STRING_SIZE];
+  char turn_id[SALTS_UUID_STRING_SIZE];
   int rc;
 
   if (!thread_id || !thread_id[0]) return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;

@@ -21,6 +21,12 @@ option(BUILD_TESTS "Build test suite" ${BUILD_TESTS_DEFAULT})
 option(ENABLE_LANGCHAIN "Build the langchain module" ON)
 option(ENABLE_CODING_TOOLS "Build the bounded coding tool pack" ON)
 option(ENABLE_CODEX_BRIDGE "Build the Codex App Server client bridge" ON)
+option(ENABLE_MCP_TOOLS "Build the MCP tool pack" ON)
+option(ENABLE_LLM_SANDBOX "Build the LLM sandbox" ON)
+option(ENABLE_PRAKTOR_TOOLS "Build the optional Praktor workflow tool pack" OFF)
+set(SALTS_ROOT "" CACHE PATH "Salts install prefix")
+set(SALTS_UTILS_ROOT "" CACHE PATH "SaltsUtils install prefix")
+set(PRAKTOR_ROOT "" CACHE PATH "Praktor install prefix for ENABLE_PRAKTOR_TOOLS")
 cmake_dependent_option(
     BUILD_BENCHMARKS "Build benchmark executables" ON
     "BUILD_TESTS" OFF

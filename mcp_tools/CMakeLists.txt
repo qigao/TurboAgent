@@ -12,7 +12,7 @@ target_include_directories(
   mcp_tools PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                    $<INSTALL_INTERFACE:include>)
 target_link_libraries(mcp_tools PUBLIC TurboAgent::RuntimeTools
-                                       TurboParser::Parser
+                                       Salts::JsonParser
                                        TurboHttp::TurboHttp)
 
 cmake_config_target(mcp_tools FOLDER "MCP Tools" EXPORT_NAME McpTools
@@ -28,7 +28,7 @@ if(BUILD_TESTS)
     ${TEST_SOURCES}
     LIBS
     mcp_tools
-    TurboUtils::TinyTest
+    Salts::TinyTest
     INCLUDES
     include
     FOLDER

@@ -1,0 +1,323 @@
+name: Praktor Tools Real SDK
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: turboagent-praktor-real-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SALTS_SHA: f1d8466244e6e0d74baed86e99ae6205e431557f
+      SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
+      CHTTP_SHA: 9d2e64ee46d15541a24b61ae979df0cca8615d3b
+      TURBOSCRIPT_SHA: 2ddb6b6a71d6c57c3b59ed95adb7de526fced569
+      PRAKTOR_SHA: f5d34f386001b7ca9035d2ad455b6209c4e1c102
+      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+    steps:
+      - name: Checkout exact TurboAgent head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify source identity
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code
+
+      - name: Checkout current Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: deps/salts
+          persist-credentials: false
+
+      - name: Checkout current SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: deps/salts-utils
+          persist-credentials: false
+
+      - name: Checkout current CHTTP
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/chttp
+          ref: ${{ env.CHTTP_SHA }}
+          path: deps/chttp
+          persist-credentials: false
+
+      - name: Checkout current TurboScript
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/TurboScript
+          ref: ${{ env.TURBOSCRIPT_SHA }}
+          path: deps/turboscript
+          persist-credentials: false
+
+      - name: Checkout current Praktor
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/praktor
+          ref: ${{ env.PRAKTOR_SHA }}
+          path: deps/praktor
+          persist-credentials: false
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_SHA }}
+          path: vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare public toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          sudo mkdir -p /opt/salts /opt/salts-utils /opt/chttp /opt/http-services /opt/turbo_script /opt/praktor /opt/turboagent
+          sudo chown -R "$USER":"$USER" /opt/salts /opt/salts-utils /opt/chttp /opt/http-services /opt/turbo_script /opt/praktor /opt/turboagent
+          sudo ln -sfn "$GITHUB_WORKSPACE/vcpkg" /opt/vcpkg
+          bash deps/salts-utils/cmake/ci/install-re2c.sh
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: turboagent-praktor-real-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_SHA }}-v1
+
+      - name: Build and install current Salts
+        working-directory: deps/salts
+        env:
+          PROJECT_ROOT: ${{ runner.temp }}/salts-project
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-dev-user \
+            -DENABLE_SANITIZER_ADDRESS=OFF \
+            -DENABLE_SANITIZER_UNDEFINED=OFF
+          cmake --build build/linux-gcc-debug --target install -j2
+          package="$RUNNER_TEMP/salts-project/external/pkgs/salts/debug"
+          test -f "$package/lib/cmake/Salts/SaltsConfig.cmake"
+          ln -sfn "$package" /opt/salts/debug
+
+      - name: Build host Lemon for current SaltsUtils
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S deps/salts-utils/tools/lemon \
+            -B deps/salts-utils/build/host-lemon \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build deps/salts-utils/build/host-lemon --target lemon -j2
+
+      - name: Build and install current SaltsUtils
+        working-directory: deps/salts-utils
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-dev-user \
+            -DENABLE_SANITIZER_ADDRESS=OFF \
+            -DENABLE_SANITIZER_UNDEFINED=OFF \
+            -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon" \
+            -DDATABIND_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"
+          cmake --build build/linux-gcc-debug --target install -j2
+          test -f /opt/salts-utils/debug/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake
+
+      - name: Build and install current CHTTP
+        shell: bash
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+        run: |
+          set -euxo pipefail
+          cmake -S deps/chttp -B deps/chttp/build/turboagent-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/chttp" \
+            -DCMAKE_INSTALL_PREFIX=/opt/chttp/debug \
+            -DSALTS_ROOT=/opt/salts/debug \
+            -DSALTS_UTILS_ROOT=/opt/salts-utils/debug \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BENCHMARKS=OFF
+          cmake --build deps/chttp/build/turboagent-ci --target install -j2
+          test -f /opt/chttp/debug/lib/cmake/Chttp/ChttpConfig.cmake
+          ln -sfn /opt/chttp/debug /opt/http-services/debug
+
+      - name: Build and install script-enabled TurboScript
+        working-directory: deps/turboscript
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          CHTTP_ROOT: /opt/chttp/debug
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-dev-user \
+            -DENABLE_SANITIZER_ADDRESS=OFF \
+            -DENABLE_TESTS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF
+          cmake --build build/linux-gcc-debug --target install -j2
+          test -f /opt/turbo_script/debug/lib/cmake/TurboScript/TurboScriptConfig.cmake
+
+      - name: Build and install script-enabled Praktor
+        working-directory: deps/praktor
+        env:
+          SALTS_ROOT: /opt/salts/debug
+          SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          CHTTP_ROOT: /opt/chttp/debug
+          TURBOSCRIPT_ROOT: /opt/turbo_script/debug
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --preset linux-dev-user \
+            -DCMAKE_PREFIX_PATH="/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/praktor/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/praktor/vcpkg_installed/x64-linux" \
+            -DENABLE_SCRIPT_ENGINE=ON \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_SANITIZER_ADDRESS=OFF
+          cmake --build build/linux-gcc-debug --target install -j2
+          test -f /opt/praktor/debug/lib/cmake/Praktor/PraktorConfig.cmake
+          grep -F 'if("ON" STREQUAL "ON")' /opt/praktor/debug/lib/cmake/Praktor/PraktorConfig.cmake
+
+      - name: Configure TurboAgent with real Praktor
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build/praktor-real -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent" \
+            -DCMAKE_INSTALL_PREFIX=/opt/turboagent/debug \
+            -DCMAKE_PREFIX_PATH="/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug" \
+            -DSALTS_ROOT=/opt/salts/debug \
+            -DSALTS_UTILS_ROOT=/opt/salts-utils/debug \
+            -DPRAKTOR_ROOT=/opt/praktor/debug \
+            -DENABLE_PRAKTOR_TOOLS=ON \
+            -DENABLE_MCP_TOOLS=OFF \
+            -DENABLE_LLM_SANDBOX=OFF \
+            -DENABLE_LANGCHAIN=OFF \
+            -DENABLE_CODING_TOOLS=OFF \
+            -DENABLE_CODEX_BRIDGE=OFF \
+            -DENABLE_TESTS=ON \
+            -DBUILD_TESTS=ON \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BENCHMARKS=OFF \
+            -DENABLE_ASAN=OFF \
+            -DENABLE_SANITIZER_ADDRESS=OFF
+          grep -F 'ENABLE_PRAKTOR_TOOLS:BOOL=ON' build/praktor-real/CMakeCache.txt
+          grep -F 'ENABLE_MCP_TOOLS:BOOL=OFF' build/praktor-real/CMakeCache.txt
+          grep -F 'ENABLE_LLM_SANDBOX:BOOL=OFF' build/praktor-real/CMakeCache.txt
+
+      - name: Build and run real Praktor tool-pack test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/praktor-real -j2
+          ctest --test-dir build/praktor-real -N | tee "$RUNNER_TEMP/ctest-list.txt"
+          grep -F 'test_turbo_praktor_tool_pack' "$RUNNER_TEMP/ctest-list.txt"
+
+          vcpkg_libs="$(find "$GITHUB_WORKSPACE" -type d \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
+          export LD_LIBRARY_PATH="/opt/turboagent/debug/lib:/opt/praktor/debug/lib:/opt/turbo_script/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/praktor-real -R 'test_turbo_praktor_tool_pack' --output-on-failure
+
+      - name: Install TurboAgent with PraktorTools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/praktor-real --target install -j2
+          config=/opt/turboagent/debug/lib/cmake/TurboAgent/TurboAgentConfig.cmake
+          targets=/opt/turboagent/debug/lib/cmake/TurboAgent/TurboAgentTargets.cmake
+          test -f "$config"
+          test -f "$targets"
+          test -f /opt/turboagent/debug/include/turbo_praktor_tool_pack.h
+          grep -F 'if("ON" STREQUAL "ON")' "$config"
+          grep -F 'find_dependency(Praktor CONFIG)' "$config"
+          grep -F 'if("OFF" STREQUAL "ON" OR "OFF" STREQUAL "ON")' "$config"
+          grep -F 'if("OFF" STREQUAL "ON")' "$config"
+
+      - name: Build and run installed TurboAgent consumer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          consumer="$RUNNER_TEMP/turboagent-installed-consumer"
+          mkdir -p "$consumer"
+          cat > "$consumer/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(turboagent_installed_praktor LANGUAGES C)
+          find_package(TurboAgent CONFIG REQUIRED)
+          add_executable(turboagent_installed_praktor main.c)
+          target_link_libraries(turboagent_installed_praktor PRIVATE TurboAgent::PraktorTools)
+          CMAKE
+          cat > "$consumer/main.c" <<'C'
+          #include <turbo_praktor_tool_pack.h>
+          #include <stdio.h>
+
+          int main(void) {
+            turbo_praktor_tool_pack_config_t config;
+            turbo_praktor_tool_pack_t *pack;
+            turbo_praktor_tool_pack_config_init(&config);
+            pack = turbo_praktor_tool_pack_create(&config);
+            if (!pack) return 1;
+            turbo_praktor_tool_pack_destroy(pack);
+            puts("TURBOAGENT_INSTALLED_PRAKTOR_OK");
+            return 0;
+          }
+          C
+
+          export SALTS_ROOT=/opt/salts/debug
+          export CMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent"
+          cmake --build "$consumer/build" --verbose -j2
+
+          vcpkg_libs="$(find "$GITHUB_WORKSPACE" -type d \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
+          export LD_LIBRARY_PATH="/opt/turboagent/debug/lib:/opt/praktor/debug/lib:/opt/turbo_script/debug/lib:/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          "$consumer/build/turboagent_installed_praktor"
+
+      - name: Upload installed TurboAgent SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-praktor-sdk-${{ github.sha }}
+          retention-days: 14
+          path: /opt/turboagent/debug
+          if-no-files-found: error
+
+      - name: Verify tracked source remains clean
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"

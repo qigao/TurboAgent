@@ -205,13 +205,13 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_json_value(void *impl,
   if (!out_result) return TURBO_TOOL_INVALID_ARGUMENT;
   *out_result = NULL;
   if (arguments) {
-    arguments_json = turbo_json_serialize(arguments, NULL);
+    arguments_json = json_serialize(arguments, NULL);
     if (!arguments_json) return TURBO_TOOL_ERROR;
   }
   status = turbo_tool_runtime_wasm_invoke(impl, name, arguments_json, &output_json);
-  turbo_json_serialize_free(arguments_json);
+  json_serialize_free(arguments_json);
   if (status != TURBO_TOOL_OK) return status;
-  if (turbo_parse_json((const uint8_t *)output_json, strlen(output_json), &parsed) != 0) {
+  if (turbo_runtime_json_parse((const uint8_t *)output_json, strlen(output_json), &parsed) != 0) {
     free(output_json);
     return TURBO_TOOL_ERROR;
   }
@@ -242,24 +242,24 @@ static int turbo_tool_runtime_wasm_load_tool(turbo_tool_runtime_wasm_impl_t *imp
                                    impl->max_metadata_bytes, &metadata_json, &guest_status) != 0 ||
       guest_status != 0 || !metadata_json[0])
     goto cleanup;
-  if (turbo_parse_json((const uint8_t *)metadata_json, strlen(metadata_json), &metadata) != 0 ||
-      turbo_json_type(metadata) != TURBO_JSON_OBJECT)
+  if (turbo_runtime_json_parse((const uint8_t *)metadata_json, strlen(metadata_json), &metadata) != 0 ||
+      json_type(metadata) != JSON_OBJECT)
     goto cleanup;
-  name = turbo_json_get_string(metadata, "name");
-  description = turbo_json_get_string(metadata, "description");
-  parameters = turbo_json_object_get(metadata, "parameters");
-  strict = turbo_json_object_get(metadata, "strict");
+  name = json_get_string(metadata, "name");
+  description = json_get_string(metadata, "description");
+  parameters = json_object_get(metadata, "parameters");
+  strict = json_object_get(metadata, "strict");
   if (!name || !name[0] || !description || !parameters ||
-      turbo_json_type(parameters) != TURBO_JSON_OBJECT || !strict ||
-      turbo_json_type(strict) != TURBO_JSON_BOOL)
+      json_type(parameters) != JSON_OBJECT || !strict ||
+      json_type(strict) != JSON_BOOL)
     goto cleanup;
-  parameters_json = turbo_json_serialize(parameters, NULL);
+  parameters_json = json_serialize(parameters, NULL);
   if (!parameters_json) goto cleanup;
   tool->name = (char *)tstr_dup(name);
   tool->description = (char *)tstr_dup(description);
   tool->parameters_json = (char *)tstr_dup(parameters_json);
   tool->parameters_schema = turbo_tool_schema_parse_parameters_json_value(parameters_json, 0);
-  tool->strict = turbo_json_bool(strict) ? 1 : 0;
+  tool->strict = json_bool(strict) ? 1 : 0;
   if (!tool->name || !tool->description || !tool->parameters_json || !tool->parameters_schema)
     goto cleanup;
   for (prior_index = 0; prior_index < index; ++prior_index)
@@ -268,7 +268,7 @@ static int turbo_tool_runtime_wasm_load_tool(turbo_tool_runtime_wasm_impl_t *imp
 
 cleanup:
   if (rc != 0) turbo_tool_runtime_wasm_tool_clear(tool);
-  turbo_json_serialize_free(parameters_json);
+  json_serialize_free(parameters_json);
   turbo_runtime_json_destroy(metadata);
   free(metadata_json);
   return rc;

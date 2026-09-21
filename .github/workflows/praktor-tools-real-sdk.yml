@@ -24,7 +24,7 @@ jobs:
       SALTS_SHA: f1d8466244e6e0d74baed86e99ae6205e431557f
       SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
       CHTTP_SHA: 9d2e64ee46d15541a24b61ae979df0cca8615d3b
-      TURBOSCRIPT_SHA: 5e190f4d6256d67e9aea03dafdc7488d16d3b00e
+      TURBOSCRIPT_SHA: 7216b8442ce8cec7f0581b02d4c3b3a79e01a813
       PRAKTOR_SHA: f5d34f386001b7ca9035d2ad455b6209c4e1c102
       VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       CMAKE_BUILD_PARALLEL_LEVEL: 2
@@ -231,7 +231,7 @@ jobs:
         env:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
-          CHTTP_ROOT: /opt/http-services/debug
+          CHTTP_ROOT: /opt/chttp/debug
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         shell: bash
         run: |
@@ -274,7 +274,7 @@ jobs:
             -DVCPKG_MANIFEST_MODE=ON \
             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/turboagent" \
             -DCMAKE_INSTALL_PREFIX=/opt/turboagent/debug \
-            -DCMAKE_PREFIX_PATH="/opt/turboutils/debug;/opt/turboparser/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug" \
+            -DCMAKE_PREFIX_PATH="/opt/turboutils/debug;/opt/turboparser/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux" \
             -DTURBOUTILS_ROOT=/opt/turboutils/debug \
             -DTURBOPARSER_ROOT=/opt/turboparser/debug \
             -DPRAKTOR_ROOT=/opt/praktor/debug \
@@ -350,7 +350,7 @@ jobs:
           }
           C
 
-          export CMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/turboutils/debug;/opt/turboparser/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"
+          export CMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/turboutils/debug;/opt/turboparser/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux/debug;$GITHUB_WORKSPACE/deps/legacy-turboutils/vcpkg_installed/x64-linux"
           cmake -S "$consumer" -B "$consumer/build" -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \

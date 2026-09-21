@@ -43,7 +43,7 @@ typedef struct turbo_agent_harness_event_s {
 typedef struct turbo_agent_harness_turn_s turbo_agent_harness_turn_t;
 
 typedef struct turbo_agent_harness_thread_s {
-  tstr_t id;
+  tstr id;
   turbo_agent_harness_t *harness;
   salts_mutex_t mutex;
   turbo_agent_harness_turn_t *turn;
@@ -66,8 +66,8 @@ struct turbo_agent_harness_connection_s {
 };
 
 struct turbo_agent_harness_turn_s {
-  tstr_t id;
-  tstr_t approval_request_id;
+  tstr id;
+  tstr approval_request_id;
   turbo_agent_harness_thread_t *thread;
   turbo_agent_harness_connection_t *connection;
   turbo_agent_harness_execution_t *execution;
@@ -613,7 +613,7 @@ static int turbo_agent_harness_turn_emit_resolution_and_completed(turbo_agent_ha
 }
 
 static int turbo_agent_harness_turn_emit_approval(turbo_agent_harness_turn_t *turn,
-                                                  tstr_t *out_request_id) {
+                                                  tstr *out_request_id) {
   json_value_t *params = NULL;
   json_value_t *decisions = NULL;
   json_value_t *note_json = NULL;
@@ -621,7 +621,7 @@ static int turbo_agent_harness_turn_emit_approval(turbo_agent_harness_turn_t *tu
   const char *method = "item/review/requestApproval";
   const char *item_id = turn->id;
   char request_id[SALTS_UUID_STRING_SIZE];
-  tstr_t owned_request_id = NULL;
+  tstr owned_request_id = NULL;
   int rc;
 
   if (!out_request_id) return SALTS_EINVAL;
@@ -684,7 +684,7 @@ static int turbo_agent_harness_turn_refresh(turbo_agent_harness_thread_t *thread
   const char *summary_status;
   const char *pending_action;
   const char *protocol_status = NULL;
-  tstr_t approval_request_id = NULL;
+  tstr approval_request_id = NULL;
   int approval_pending = 0;
   int rc;
   int has_result = 0;
@@ -889,9 +889,9 @@ static int turbo_agent_harness_json_uint64(const json_value_t *value, uint64_t m
   return SALTS_OK;
 }
 
-static int turbo_agent_harness_input_text(const json_value_t *params, tstr_t *out_text) {
+static int turbo_agent_harness_input_text(const json_value_t *params, tstr *out_text) {
   const json_value_t *input;
-  tstr_t text;
+  tstr text;
   size_t count;
   size_t index;
   size_t total_size = 0;
@@ -1152,7 +1152,7 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
   turbo_agent_harness_turn_t *previous = NULL;
   turbo_agent_harness_run_options_t options;
   turbo_graph_run_options_t graph_options = {0};
-  tstr_t text = NULL;
+  tstr text = NULL;
   json_value_t *notify_params = NULL;
   json_value_t *result = NULL;
   json_value_t *turn_json = NULL;
@@ -1330,7 +1330,7 @@ static int turbo_agent_harness_dispatch_turn_interrupt(turbo_agent_harness_conne
   turbo_agent_harness_thread_t *thread;
   turbo_agent_harness_turn_t *turn;
   turbo_agent_harness_execution_t *execution;
-  tstr_t approval_request_id = NULL;
+  tstr approval_request_id = NULL;
   int rc;
   if (!thread_id || !turn_id) return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   thread = turbo_agent_harness_server_find_thread(connection->server, thread_id);
@@ -1401,7 +1401,7 @@ static int turbo_agent_harness_dispatch_turn_steer(turbo_agent_harness_connectio
   turbo_agent_harness_thread_t *thread;
   json_value_t *message;
   json_value_t *result;
-  tstr_t text = NULL;
+  tstr text = NULL;
   char *inbox_id = NULL;
   int rc;
   if (!thread_id || !expected_turn_id) return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;

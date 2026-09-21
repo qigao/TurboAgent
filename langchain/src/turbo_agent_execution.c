@@ -56,9 +56,9 @@ static void turbo_agent_execution_free_graph_options(turbo_graph_run_options_t *
   if (!options) {
     return;
   }
-  tstr_free((tstr_t)options->start_node);
+  tstr_free((tstr)options->start_node);
   for (i = 0; i < options->interrupt_before_count; ++i) {
-    tstr_free((tstr_t)options->interrupt_before_nodes[i]);
+    tstr_free((tstr)options->interrupt_before_nodes[i]);
   }
   free((void *)options->interrupt_before_nodes);
   memset(options, 0, sizeof(*options));
@@ -116,13 +116,13 @@ static int turbo_agent_execution_copy_graph_options(const turbo_graph_run_option
 }
 
 static void turbo_agent_execution_free_runtime_options(turbo_agent_execution_t *execution) {
-  tstr_free((tstr_t)execution->runtime_options.checkpoint_id);
-  tstr_free((tstr_t)execution->runtime_options.thread_id);
-  tstr_free((tstr_t)execution->parent_link.parent_agent_run_id);
-  tstr_free((tstr_t)execution->parent_link.parent_tool_call_id);
-  tstr_free((tstr_t)execution->parent_link.parent_tool_name);
-  tstr_free((tstr_t)execution->parent_link.parent_graph_run_id);
-  tstr_free((tstr_t)execution->parent_link.call_frame_id);
+  tstr_free((tstr)execution->runtime_options.checkpoint_id);
+  tstr_free((tstr)execution->runtime_options.thread_id);
+  tstr_free((tstr)execution->parent_link.parent_agent_run_id);
+  tstr_free((tstr)execution->parent_link.parent_tool_call_id);
+  tstr_free((tstr)execution->parent_link.parent_tool_name);
+  tstr_free((tstr)execution->parent_link.parent_graph_run_id);
+  tstr_free((tstr)execution->parent_link.call_frame_id);
   memset(&execution->runtime_options, 0, sizeof(execution->runtime_options));
   memset(&execution->parent_link, 0, sizeof(execution->parent_link));
 }

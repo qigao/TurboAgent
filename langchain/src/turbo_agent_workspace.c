@@ -6,7 +6,7 @@
 #include <turbo_fs.h>
 #include <json_parser.h>
 #include <cyaml.h>
-#include <turbo_str.h>
+#include <tstr.h>
 #include <turbo_vec.h>
 
 #include <ctype.h>

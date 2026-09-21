@@ -46,17 +46,6 @@ static int turbo_agent_runtime_remote_client_method_retryable(const char *method
          strcmp(method, "memory.validateRecord") == 0;
 }
 
-static char *turbo_agent_runtime_remote_client_text_copy(const char *text) {
-  size_t length;
-  char *copy;
-  if (!text) return NULL;
-  length = strlen(text);
-  copy = (char *)malloc(length + 1u);
-  if (!copy) return NULL;
-  memcpy(copy, text, length + 1u);
-  return copy;
-}
-
 static int turbo_agent_runtime_remote_client_endpoint(
     const char *url, char *connection_uri, size_t connection_capacity,
     char *authority, size_t authority_capacity, char **out_target) {

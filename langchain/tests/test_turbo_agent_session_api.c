@@ -7,7 +7,7 @@
 #include "turbo_agent_workflow.h"
 #include "turbo_model_provider.h"
 #include "turbo_prompt.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_retriever.h"
 #include "turbo_runnable.h"
 #include "turbo_tool_registry.h"

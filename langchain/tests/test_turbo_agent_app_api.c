@@ -14,7 +14,7 @@
 #include "turbo_tool_registry.h"
 #include "../src/turbo_agent_runtime_internal.h"
 #include "turbo_graph.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_runtime_json.h"
 
 #include <platform.h>

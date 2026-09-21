@@ -7,6 +7,30 @@
 
 #define TURBO_RUNTIME_JSON_INT64_UPPER_EXCLUSIVE 9223372036854775808.0
 
+int turbo_runtime_json_parse(const uint8_t *data, size_t len,
+                             json_value_t **out_value) {
+  json_value_t *value;
+
+  if (!data || !out_value) {
+    return TURBO_RUNTIME_JSON_INVALID_ARGUMENT;
+  }
+  *out_value = NULL;
+  value = json_parse((const char *)data, len);
+  if (!value) {
+    return TURBO_RUNTIME_JSON_ERROR;
+  }
+  *out_value = value;
+  return TURBO_RUNTIME_JSON_OK;
+}
+
+void turbo_runtime_json_reset(json_value_t **value) {
+  if (!value || !*value) {
+    return;
+  }
+  json_free(*value);
+  *value = NULL;
+}
+
 void turbo_runtime_json_destroy(json_value_t *value) {
   json_free(value);
 }

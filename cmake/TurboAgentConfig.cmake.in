@@ -1,8 +1,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(TurboUtils CONFIG)
-find_dependency(TurboParser CONFIG)
+find_dependency(SaltsUtils CONFIG)
 
 if("@ENABLE_MCP_TOOLS@" STREQUAL "ON" OR "@ENABLE_LANGCHAIN@" STREQUAL "ON")
   find_dependency(TurboHttp CONFIG)

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include <salts/clock.h>
 #include <salts/thread.h>
 
 #define TURBO_CANCEL_MAX_WAIT_SLICE_MS (UINT32_MAX - UINT64_C(1))
@@ -32,7 +33,7 @@ static uint64_t turbo_cancel_state_now_ms(const turbo_cancel_state_t *state) {
   if (state && state->monotonic_ms) {
     return state->monotonic_ms(state->clock_user_data);
   }
-  return turbo_monotonic_ms();
+  return salts_monotonic_ms();
 }
 
 static int turbo_cancel_config_valid(const turbo_cancel_source_config_t *config) {

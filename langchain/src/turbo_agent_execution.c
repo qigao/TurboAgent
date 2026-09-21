@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <salts_uuid.h>
+#include <salts/clock.h>
 
 #define TURBO_EXECUTION_WAIT_SLICE_MS (UINT32_MAX - UINT64_C(1))
 #define TURBO_EXECUTION_MS_TO_NS UINT64_C(1000000)
@@ -510,7 +511,7 @@ int turbo_agent_execution_wait(turbo_agent_execution_t *execution, uint64_t time
     return SALTS_EINVAL;
   }
   if (has_timeout) {
-    deadline_ms = turbo_agent_execution_saturating_add(turbo_monotonic_ms(), timeout_ms);
+    deadline_ms = turbo_agent_execution_saturating_add(salts_monotonic_ms(), timeout_ms);
   }
 
   salts_mutex_lock(&execution->mutex);
@@ -522,7 +523,7 @@ int turbo_agent_execution_wait(turbo_agent_execution_t *execution, uint64_t time
       salts_cond_wait(&execution->changed, &execution->mutex);
       continue;
     }
-    now_ms = turbo_monotonic_ms();
+    now_ms = salts_monotonic_ms();
     if (now_ms >= deadline_ms) {
       rc = SALTS_ETIMEDOUT;
       break;

@@ -291,6 +291,7 @@ jobs:
           }
           C
 
+          export SALTS_ROOT=/opt/salts/debug
           export CMAKE_PREFIX_PATH="/opt/turboagent/debug;/opt/praktor/debug;/opt/turbo_script/debug;/opt/chttp/debug;/opt/salts-utils/debug;/opt/salts/debug"
           cmake -S "$consumer" -B "$consumer/build" -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \

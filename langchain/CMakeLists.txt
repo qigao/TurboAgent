@@ -34,12 +34,12 @@ target_link_libraries(
   PUBLIC TurboAgent::RuntimeCore
          TurboAgent::RuntimeData
          TurboAgent::RuntimeTools
-         TurboParser::Parser
+         Salts::JsonParser
          TurboHttp::HttpClient
          TurboHttp::TurboHttp
          TurboHttp::Iris
-         TurboUtils::Core
-         TurboParser::Mustache
+         Salts::Core
+         Salts::Mustache
          unofficial::sqlite3::sqlite3
   PRIVATE OpenSSL::Crypto libfsm::libre libfsm::libfsm)
 
@@ -77,7 +77,7 @@ if(BUILD_TESTS)
     ${TEST_SOURCES}
     LIBS
     langchain
-    TurboUtils::TinyTest
+    Salts::TinyTest
     INCLUDES
     include
     tests

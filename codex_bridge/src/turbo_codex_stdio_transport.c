@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include <turbo_str.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -196,7 +196,7 @@ static int turbo_codex_stdio_read_impl(uint64_t timeout_ms, char **out_line, voi
     if (timeout_ms == 0 || (deadline != UINT64_MAX && turbo_monotonic_ms() >= deadline)) {
       return SALTS_ETIMEDOUT;
     }
-    turbo_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
+    salts_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
   }
 }
 
@@ -267,14 +267,14 @@ static void turbo_codex_stdio_close_impl(void *user_data) {
     deadline = turbo_monotonic_ms() + TURBO_CODEX_STDIO_CLOSE_TIMEOUT_MS;
     while (waitpid(stdio_transport->process, &status, WNOHANG) == 0 &&
            turbo_monotonic_ms() < deadline) {
-      turbo_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
+      salts_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
     }
     if (waitpid(stdio_transport->process, &status, WNOHANG) == 0) {
       kill(stdio_transport->process, SIGTERM);
       deadline = turbo_monotonic_ms() + TURBO_CODEX_STDIO_CLOSE_TIMEOUT_MS;
       while (waitpid(stdio_transport->process, &status, WNOHANG) == 0 &&
              turbo_monotonic_ms() < deadline) {
-        turbo_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
+        salts_sleep_ms(TURBO_CODEX_STDIO_POLL_INTERVAL_MS);
       }
       if (waitpid(stdio_transport->process, &status, WNOHANG) == 0) {
         kill(stdio_transport->process, SIGKILL);

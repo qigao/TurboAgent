@@ -582,7 +582,7 @@ CXX_C_API int turbo_agent_runtime_remote_client_call_json(
 
   if (status != SALTS_OK) {
     call_result.error_code = error.status ? error.status : status;
-    call_result.http_status = error.http_status;
+    call_result.http_status = response.status_code;
     call_result.error_message = error.stage;
     if (out_error_json) {
       *out_error_json = turbo_agent_runtime_remote_client_build_error_json(

@@ -403,16 +403,16 @@ static int turbo_mcp_tool_invoke(const json_value_t *arguments,
   name_value = json_create_string(binding->remote_name);
   if (!params || !arguments_copy || !name_value ||
       !json_object_add_checked(params, "name", name_value)) {
-    turbo_free_json(&name_value);
-    turbo_free_json(&params);
-    turbo_free_json(&arguments_copy);
+    json_free(name_value); name_value = NULL;
+    json_free(params); params = NULL;
+    json_free(arguments_copy); arguments_copy = NULL;
     status = TURBO_TOOL_OUT_OF_MEMORY;
     goto cleanup;
   }
   name_value = NULL;
   if (!json_object_add_checked(params, "arguments", arguments_copy)) {
-    turbo_free_json(&params);
-    turbo_free_json(&arguments_copy);
+    json_free(params); params = NULL;
+    json_free(arguments_copy); arguments_copy = NULL;
     status = TURBO_TOOL_OUT_OF_MEMORY;
     goto cleanup;
   }
@@ -423,8 +423,8 @@ static int turbo_mcp_tool_invoke(const json_value_t *arguments,
   params = NULL;
 
 cleanup:
-  turbo_free_json(&params);
-  turbo_free_json(&arguments_copy);
+  json_free(params); params = NULL;
+  json_free(arguments_copy); arguments_copy = NULL;
   for (index = 0; index < vec_size(&headers); ++index) {
     tstr *header = (tstr *)vec_at(&headers, index);
     if (header) tstr_free(*header);
@@ -530,8 +530,8 @@ turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack) {
     if (cursor) cursor_value = json_create_string(cursor);
     if (!params || (cursor && (!cursor_value || !json_object_add_checked(
                                                  params, "cursor", cursor_value)))) {
-      turbo_free_json(&cursor_value);
-      turbo_free_json(&params);
+      json_free(cursor_value); cursor_value = NULL;
+      json_free(params); params = NULL;
       status = TURBO_TOOL_OUT_OF_MEMORY;
       goto fail;
     }
@@ -543,7 +543,7 @@ turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack) {
         strcmp(result_type, "complete") != 0 ||
         !(tools = json_object_get(result, "tools")) ||
         json_type(tools) != JSON_ARRAY) {
-      turbo_free_json(&result);
+      json_free(result); result = NULL;
       turbo_mcp_client_set_error(pack->client, "invalid MCP tools/list result");
       status = TURBO_TOOL_ERROR;
       goto fail;
@@ -552,7 +552,7 @@ turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack) {
       status = turbo_mcp_register_remote_tool(pack, candidate,
                                               json_array_get(tools, index), &rejected);
       if (status != TURBO_TOOL_OK) {
-        turbo_free_json(&result);
+        json_free(result); result = NULL;
         turbo_mcp_client_set_error(pack->client,
                                    status == TURBO_TOOL_DUPLICATE
                                        ? "MCP tool names collide after local namespacing"
@@ -562,7 +562,7 @@ turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack) {
     }
     next_cursor = json_get_string(result, "nextCursor");
     if (!next_cursor || !next_cursor[0]) {
-      turbo_free_json(&result);
+      json_free(result); result = NULL;
       turbo_tool_registry_destroy(pack->registry);
       pack->registry = candidate;
       pack->rejected_tool_count = rejected;
@@ -570,14 +570,14 @@ turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack) {
       return TURBO_TOOL_OK;
     }
     if (cursor && strcmp(cursor, next_cursor) == 0) {
-      turbo_free_json(&result);
+      json_free(result); result = NULL;
       turbo_mcp_client_set_error(pack->client, "MCP tools/list cursor did not advance");
       status = TURBO_TOOL_ERROR;
       goto fail;
     }
     tstr_free(cursor);
     cursor = tstr_dup(next_cursor);
-    turbo_free_json(&result);
+    json_free(result); result = NULL;
     if (!cursor) {
       status = TURBO_TOOL_OUT_OF_MEMORY;
       goto fail;

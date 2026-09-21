@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <turbo_str.h>
+#include <tstr.h>
 
 #include "turbo_runtime_json.h"
 

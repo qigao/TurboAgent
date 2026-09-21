@@ -2,7 +2,7 @@
 #include "turbo_praktor_tool_pack.h"
 
 #include <turbo_fs.h>
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -173,20 +173,18 @@ spec("Praktor workflow tool pack") {
     workflow_config.description = "Run inspect.";
     workflow_config.workflow_path = workflow_path;
     check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
-    check_int_eq(turbo_parse_json(
-                     (const uint8_t *)"{\"payload\":{\"name\":\"demo\",\"count\":7}}",
-                     strlen("{\"payload\":{\"name\":\"demo\",\"count\":7}}"),
-                     &arguments),
-                 0);
+    arguments = json_parse("{\"payload\":{\"name\":\"demo\",\"count\":7}}",
+                           strlen("{\"payload\":{\"name\":\"demo\",\"count\":7}}"));
+    check_not_null(arguments);
     check_int_eq(turbo_tool_registry_execute_json_value(
                      turbo_praktor_tool_pack_registry(pack), "praktor_inspect",
                      arguments, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_json_get_string(result, "workflow_status"), "success");
-    tasks = turbo_json_object_get(result, "tasks");
-    inspect = turbo_json_object_get(tasks, "inspect");
-    outputs = turbo_json_object_get(inspect, "outputs");
-    check_int_eq((int)turbo_json_get_double(outputs, "count", -1.0), 7);
+    check_str_eq(json_get_string(result, "workflow_status"), "success");
+    tasks = json_object_get(result, "tasks");
+    inspect = json_object_get(tasks, "inspect");
+    outputs = json_object_get(inspect, "outputs");
+    check_int_eq((int)json_get_double(outputs, "count", -1.0), 7);
 
     check_int_eq(turbo_tool_registry_execute(
                      turbo_praktor_tool_pack_registry(pack), "praktor_inspect",
@@ -194,14 +192,13 @@ spec("Praktor workflow tool pack") {
                      &string_output),
                  TURBO_TOOL_OK);
     check_not_null(string_output);
-    check_int_eq(turbo_parse_json((const uint8_t *)string_output, strlen(string_output),
-                                  &string_result),
-                 0);
-    check_str_eq(turbo_json_get_string(string_result, "workflow_status"), "success");
+    string_result = json_parse(string_output, strlen(string_output));
+    check_not_null(string_result);
+    check_str_eq(json_get_string(string_result, "workflow_status"), "success");
 
-    turbo_free_json(&arguments);
-    turbo_free_json(&result);
-    turbo_free_json(&string_result);
+    json_free(arguments);
+    json_free(result);
+    json_free(string_result);
     free(string_output);
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
@@ -214,7 +211,7 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_config_t pack_config;
     turbo_praktor_workflow_config_t workflow_config;
     turbo_praktor_tool_pack_t *pack;
-    json_value_t *arguments = turbo_json_create_object();
+    json_value_t *arguments = json_create_object();
     json_value_t *result = NULL;
 
     check_not_null(workspace);
@@ -233,11 +230,11 @@ spec("Praktor workflow tool pack") {
                      turbo_praktor_tool_pack_registry(pack), "praktor_failure",
                      arguments, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_json_get_string(result, "workflow_status"), "failed");
-    check_not_null(turbo_json_get_string(result, "error"));
+    check_str_eq(json_get_string(result, "workflow_status"), "failed");
+    check_not_null(json_get_string(result, "error"));
 
     turbo_runtime_json_destroy(arguments);
-    turbo_free_json(&result);
+    json_free(result);
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
     free(workspace);
@@ -274,7 +271,7 @@ spec("Praktor workflow tool pack") {
                  TURBO_TOOL_ERROR);
     check_null(result);
 
-    turbo_free_json(&arguments);
+    json_free(arguments);
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
     free(workspace);

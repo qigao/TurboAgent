@@ -7,7 +7,7 @@
 #include "turbo_agent_util_internal.h"
 
 #include <openssl/sha.h>
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -445,9 +445,9 @@ static int turbo_agent_context_compact_once(turbo_agent_context_t *context, json
   json_value_t *prepared_summary = NULL;
   json_value_t *prepared_source = NULL;
   char *source_hash = NULL;
-  char compaction_id[TURBO_UUID_STRING_SIZE];
+  char compaction_id[SALTS_UUID_STRING_SIZE];
   char created_at[64];
-  turbo_uuid_t uuid;
+  salts_uuid_t uuid;
   uint64_t source_tokens = 0;
   uint64_t summary_tokens = 0;
   size_t desired_cut;
@@ -478,8 +478,8 @@ static int turbo_agent_context_compact_once(turbo_agent_context_t *context, json
     goto cleanup;
   }
   source_hash = turbo_agent_context_source_hash(source);
-  if (!source_hash || turbo_uuid_v7_generate(&uuid) != SALTS_OK ||
-      turbo_uuid_format(&uuid, compaction_id, sizeof(compaction_id)) != SALTS_OK ||
+  if (!source_hash || salts_uuid_v7_generate(&uuid) != SALTS_OK ||
+      salts_uuid_format(&uuid, compaction_id, sizeof(compaction_id)) != SALTS_OK ||
       turbo_agent_runtime_make_timestamp(created_at, sizeof(created_at)) != 0) {
     rc = SALTS_EIO;
     goto cleanup;

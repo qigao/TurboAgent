@@ -4,7 +4,7 @@
 #include "turbo_agent_runtime_internal.h"
 #include "turbo_agent_util_internal.h"
 
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 #include <limits.h>
 #include <stdint.h>
@@ -81,7 +81,7 @@ static unsigned int turbo_agent_retry_delay(const turbo_agent_retry_policy_t *po
 
 static int turbo_agent_retry_wait(const turbo_cancel_token_t *token, unsigned int delay_ms) {
   if (!token) {
-    turbo_sleep_ms(delay_ms);
+    salts_sleep_ms(delay_ms);
     return SALTS_OK;
   }
   if (turbo_cancel_token_wait(token, delay_ms) == TURBO_CANCEL_WAIT_SIGNALED)

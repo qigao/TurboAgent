@@ -44,7 +44,7 @@ jobs:
           roots=(
             CMakeLists.txt CMakeOptions.cmake CMakeUserPresets.json cmake
             runtime_core runtime_data runtime_tools mcp_tools langchain
-            coding_tools codex_bridge llm_sandbox tools vendor/cjwt
+            coding_tools codex_bridge llm_sandbox tools vendor
           )
           patterns='TurboUtils::|TurboParser::|TurboNet::|TurboHttp::|TURBOUTILS_ROOT|TURBOPARSER_ROOT|TURBONET_ROOT|TURBOHTTP_ROOT|turbo_parser\.h|CoroNet|turbo_agent_runtime_remote_iris|find_package\((TurboUtils|TurboParser|TurboNet|TurboHttp)|find_dependency\((TurboUtils|TurboParser|TurboNet|TurboHttp)'
           mapfile -t files < <(

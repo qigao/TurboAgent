@@ -145,7 +145,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       }
       return -1;
     }
-    if (turbo_agent_usage_record(agent, ctx->state, response) != TURBO_OK) {
+    if (turbo_agent_usage_record(agent, ctx->state, response) != SALTS_OK) {
       turbo_agent_state_set_model_error(ctx->state, "usage", "failed to record provider usage");
       free(response_json);
       turbo_runtime_json_destroy(response);

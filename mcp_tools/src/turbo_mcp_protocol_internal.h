@@ -33,6 +33,6 @@ turbo_tool_status_t turbo_mcp_client_request(
 
 const char *turbo_mcp_client_last_error(const turbo_mcp_client_t *client);
 void turbo_mcp_client_set_error(turbo_mcp_client_t *client, const char *message);
-tstr_t turbo_mcp_format_header(const char *name, const char *value, size_t value_length);
+tstr turbo_mcp_format_header(const char *name, const char *value, size_t value_length);
 
 #endif

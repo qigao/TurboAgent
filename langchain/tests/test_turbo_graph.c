@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <salts/clock.h>
 
 typedef struct {
   const char *value;
@@ -495,7 +496,7 @@ spec("turbo graph runtime") {
       turbo_graph_run_result_t result = {0};
       turbo_cancel_source_config_t config = {
           sizeof(config), TURBO_RUNTIME_CONTROL_ABI_VERSION,
-          turbo_monotonic_ms(), NULL, NULL};
+          salts_monotonic_ms(), NULL, NULL};
       turbo_cancel_source_t *source = NULL;
       turbo_cancel_token_t *token = NULL;
       string_payload_t start = {"start"};

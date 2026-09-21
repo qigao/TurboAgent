@@ -30,31 +30,31 @@ struct turbo_agent_session_s {
   size_t max_follow_ups_per_execution;
   turbo_agent_memory_store_t memory_store;
   turbo_agent_session_workflow_kind_t workflow_kind;
-  tstr_t thread_id;
-  tstr_t last_run_id;
-  tstr_t last_checkpoint_id;
-  tstr_t memory_namespace;
-  tstr_t parent_agent_run_id;
-  tstr_t parent_tool_call_id;
-  tstr_t parent_tool_name;
-  tstr_t parent_graph_run_id;
-  tstr_t call_frame_id;
-  tstr_t model;
-  tstr_t base_url;
-  tstr_t provider_name;
+  tstr thread_id;
+  tstr last_run_id;
+  tstr last_checkpoint_id;
+  tstr memory_namespace;
+  tstr parent_agent_run_id;
+  tstr parent_tool_call_id;
+  tstr parent_tool_name;
+  tstr parent_graph_run_id;
+  tstr call_frame_id;
+  tstr model;
+  tstr base_url;
+  tstr provider_name;
   int has_api_key;
   turbo_agent_knowledge_store_t *knowledge_store;
-  tstr_t knowledge_query;
-  tstr_t knowledge_kind;
-  tstr_t knowledge_uri_prefix;
+  tstr knowledge_query;
+  tstr knowledge_kind;
+  tstr knowledge_uri_prefix;
   size_t knowledge_limit;
   turbo_agent_knowledge_context_config_t knowledge_context_config;
   turbo_retriever_t *retriever;
-  tstr_t retriever_query;
-  tstr_t retriever_kind;
-  tstr_t retriever_uri_prefix;
+  tstr retriever_query;
+  tstr retriever_kind;
+  tstr retriever_uri_prefix;
   size_t retriever_limit;
-  tstr_t retriever_scope;
+  tstr retriever_scope;
   turbo_retriever_context_config_t retriever_context_config;
 };
 
@@ -150,8 +150,8 @@ static int turbo_agent_session_should_create_agent(const turbo_agent_config_t *c
                     config->transport_fn || config->provider || config->tool_registry);
 }
 
-static void turbo_agent_session_replace_string(tstr_t *slot, const char *text) {
-  tstr_t copy = turbo_agent_util_strdup(text);
+static void turbo_agent_session_replace_string(tstr *slot, const char *text) {
+  tstr copy = turbo_agent_util_strdup(text);
 
   if (!slot) {
     tstr_free(copy);

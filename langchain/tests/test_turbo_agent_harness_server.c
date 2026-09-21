@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <turbo_str.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 typedef struct harness_server_factory_s {
   turbo_threadpool_t *executor;
@@ -136,7 +136,7 @@ static int harness_server_gated_transport(const char *request_json, char **out_r
   (void)request_json;
   atomic_store_explicit(&gate->entered, 1, memory_order_release);
   while (!atomic_load_explicit(&gate->open, memory_order_acquire)) {
-    turbo_thread_yield();
+    salts_thread_yield();
   }
   return harness_server_success_transport(NULL, out_response_json, NULL);
 }
@@ -268,7 +268,7 @@ static int harness_server_wait_for_event(turbo_agent_harness_connection_t *conne
     }
     turbo_runtime_json_destroy(response);
     if (found) return 1;
-    turbo_thread_yield();
+    salts_thread_yield();
   }
   return 0;
 }
@@ -313,7 +313,7 @@ static int harness_server_wait_for_events(turbo_agent_harness_connection_t *conn
       *inout_sequence = next;
     }
     turbo_runtime_json_destroy(response);
-    if (next_method < method_count) turbo_thread_yield();
+    if (next_method < method_count) salts_thread_yield();
   }
   return next_method == method_count;
 }
@@ -360,7 +360,7 @@ static tstr_t harness_server_wait_for_approval(turbo_agent_harness_connection_t 
     }
     turbo_runtime_json_destroy(response);
     if (request_id) return request_id;
-    turbo_thread_yield();
+    salts_thread_yield();
   }
   return NULL;
 }
@@ -468,7 +468,7 @@ spec("turbo agent harness server") {
         turbo_json_object_get(turbo_json_object_get(response, "result"), "turn"), "id"));
     turbo_runtime_json_destroy(response);
     while (!atomic_load_explicit(&gate.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
 
     observer = turbo_agent_harness_server_open_connection(server);
@@ -695,7 +695,7 @@ spec("turbo agent harness server") {
     turbo_agent_harness_connection_t *owner = turbo_agent_harness_server_open_connection(server);
     turbo_agent_harness_connection_t *observer = turbo_agent_harness_server_open_connection(server);
     harness_server_close_task_t close_task = {0};
-    turbo_thread_t closer = NULL;
+    salts_thread_t closer = NULL;
     json_value_t *response;
     json_value_t *params;
     const json_value_t *turn_json;
@@ -718,20 +718,20 @@ spec("turbo agent harness server") {
         turbo_json_object_get(turbo_json_object_get(response, "result"), "turn"), "id"));
     turbo_runtime_json_destroy(response);
     while (!atomic_load_explicit(&gate.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
 
     close_task.connection = owner;
     atomic_init(&close_task.entered, 0);
     atomic_init(&close_task.done, 0);
-    check_int_eq(turbo_thread_create(&closer, harness_server_close_connection_task, &close_task),
+    check_int_eq(salts_thread_create(&closer, harness_server_close_connection_task, &close_task),
                  0);
     while (!atomic_load_explicit(&close_task.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
     atomic_store_explicit(&gate.open, 1, memory_order_release);
-    check_int_eq(turbo_thread_join(&closer), 0);
-    turbo_thread_destroy(&closer);
+    check_int_eq(salts_thread_join(&closer), 0);
+    salts_thread_destroy(&closer);
     check_true(atomic_load_explicit(&close_task.done, memory_order_acquire));
 
     params = turbo_json_create_object();
@@ -758,7 +758,7 @@ spec("turbo agent harness server") {
     turbo_agent_harness_connection_t *connection =
         turbo_agent_harness_server_open_connection(server);
     harness_server_event_wait_task_t wait_task = {0};
-    turbo_thread_t waiter = NULL;
+    salts_thread_t waiter = NULL;
     json_value_t *response;
     json_value_t *event = NULL;
     uint64_t sequence = 0;
@@ -769,15 +769,15 @@ spec("turbo agent harness server") {
     harness_server_ready(connection);
     wait_task.connection = connection;
     atomic_init(&wait_task.entered, 0);
-    check_int_eq(turbo_thread_create(&waiter, harness_server_wait_event_task, &wait_task), 0);
+    check_int_eq(salts_thread_create(&waiter, harness_server_wait_event_task, &wait_task), 0);
     while (!atomic_load_explicit(&wait_task.entered, memory_order_acquire))
-      turbo_thread_yield();
+      salts_thread_yield();
 
     response = harness_server_rpc(connection, 50, "thread/start", turbo_json_create_object());
     check_not_null(turbo_json_object_get(response, "result"));
     turbo_runtime_json_destroy(response);
-    check_int_eq(turbo_thread_join(&waiter), 0);
-    turbo_thread_destroy(&waiter);
+    check_int_eq(salts_thread_join(&waiter), 0);
+    salts_thread_destroy(&waiter);
     check_int_eq(wait_task.rc, SALTS_OK);
     check_not_null(wait_task.event);
     check_str_eq(turbo_json_get_string(wait_task.event, "method"), "thread/started");

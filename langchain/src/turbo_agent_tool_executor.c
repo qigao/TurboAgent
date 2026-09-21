@@ -5,7 +5,7 @@
 #include "turbo_agent_runtime_v1_internal.h"
 
 #include <openssl/sha.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 #include <limits.h>
 #include <stdlib.h>
@@ -22,7 +22,7 @@
 struct turbo_agent_tool_executor_s {
   turbo_agent_tool_executor_config_t config;
   turbo_threadpool_t *pool;
-  turbo_mutex_t batch_mutex;
+  salts_mutex_t batch_mutex;
 };
 
 typedef struct turbo_agent_tool_task_s {
@@ -88,7 +88,7 @@ int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *c
     free(executor);
     return SALTS_ENOMEM;
   }
-  turbo_mutex_init(&executor->batch_mutex);
+  salts_mutex_init(&executor->batch_mutex);
   *out_executor = executor;
   return SALTS_OK;
 }
@@ -96,7 +96,7 @@ int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *c
 void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *executor) {
   if (!executor) return;
   turbo_threadpool_destroy(executor->pool);
-  turbo_mutex_destroy(&executor->batch_mutex);
+  salts_mutex_destroy(&executor->batch_mutex);
   free(executor);
 }
 
@@ -390,7 +390,7 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
         strlen(calls[index].arguments_json) > executor->config.max_arguments_bytes)
       return SALTS_EMSGSIZE;
   }
-  turbo_mutex_lock(&executor->batch_mutex);
+  salts_mutex_lock(&executor->batch_mutex);
   for (index = 0; index < call_count; ++index) {
     const char *reason = NULL;
     const char *const *required_capabilities = NULL;
@@ -443,6 +443,6 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
     }
   }
 cleanup:
-  turbo_mutex_unlock(&executor->batch_mutex);
+  salts_mutex_unlock(&executor->batch_mutex);
   return rc;
 }

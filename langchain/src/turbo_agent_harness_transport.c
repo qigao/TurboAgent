@@ -5,13 +5,13 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 enum { TURBO_AGENT_HARNESS_JSONL_DEFAULT_EVENT_BATCH = 64 };
 
 struct turbo_agent_harness_jsonl_transport_s {
   turbo_agent_harness_jsonl_transport_config_t config;
-  turbo_mutex_t output_mutex;
+  salts_mutex_t output_mutex;
 };
 
 static int turbo_agent_harness_jsonl_transport_config_valid(
@@ -35,9 +35,9 @@ turbo_agent_harness_jsonl_write_serialized(turbo_agent_harness_jsonl_transport_t
   if (!frame) return SALTS_ENOMEM;
   memcpy(frame, json_text, json_size);
   frame[json_size] = '\n';
-  turbo_mutex_lock(&transport->output_mutex);
+  salts_mutex_lock(&transport->output_mutex);
   rc = transport->config.write(frame, json_size + 1, transport->config.write_user_data);
-  turbo_mutex_unlock(&transport->output_mutex);
+  salts_mutex_unlock(&transport->output_mutex);
   free(frame);
   return rc;
 }
@@ -63,7 +63,7 @@ turbo_agent_harness_jsonl_transport_t *turbo_agent_harness_jsonl_transport_creat
     free(transport);
     return NULL;
   }
-  turbo_mutex_init(&transport->output_mutex);
+  salts_mutex_init(&transport->output_mutex);
   if (!transport->output_mutex) {
     turbo_agent_harness_connection_release_internal(transport->config.connection);
     free(transport);
@@ -74,7 +74,7 @@ turbo_agent_harness_jsonl_transport_t *turbo_agent_harness_jsonl_transport_creat
 
 void turbo_agent_harness_jsonl_transport_destroy(turbo_agent_harness_jsonl_transport_t *transport) {
   if (!transport) return;
-  turbo_mutex_destroy(&transport->output_mutex);
+  salts_mutex_destroy(&transport->output_mutex);
   if (transport->config.write_user_data_free) {
     transport->config.write_user_data_free(transport->config.write_user_data);
   }

@@ -8,6 +8,7 @@
 #include <tstr.h>
 
 #include "turbo_runtime_json.h"
+#include <salts/clock.h>
 
 enum {
   TURBO_CODEX_DEFAULT_MAX_MESSAGE_BYTES = 4 * 1024 * 1024,
@@ -441,13 +442,13 @@ int turbo_codex_client_request(turbo_codex_client_t *client, const char *method,
   turbo_runtime_json_destroy(request);
   if (rc != SALTS_OK) return rc;
   if (timeout_ms != UINT64_MAX) {
-    uint64_t now = turbo_monotonic_ms();
+    uint64_t now = salts_monotonic_ms();
     deadline = timeout_ms > UINT64_MAX - now ? UINT64_MAX : now + timeout_ms;
   }
   while (!matched) {
     uint64_t remaining = UINT64_MAX;
     if (timeout_ms != UINT64_MAX) {
-      uint64_t now = turbo_monotonic_ms();
+      uint64_t now = salts_monotonic_ms();
       if (now >= deadline) return SALTS_ETIMEDOUT;
       remaining = deadline - now;
     }
@@ -545,7 +546,7 @@ void turbo_codex_run_options_init(turbo_codex_run_options_t *options) {
 static uint64_t turbo_codex_remaining(uint64_t deadline) {
   uint64_t now;
   if (deadline == UINT64_MAX) return UINT64_MAX;
-  now = turbo_monotonic_ms();
+  now = salts_monotonic_ms();
   return now >= deadline ? 0 : deadline - now;
 }
 
@@ -597,7 +598,7 @@ int turbo_codex_client_run_text(turbo_codex_client_t *client, const char *prompt
   if (run_options->timeout_ms == UINT64_MAX) {
     deadline = UINT64_MAX;
   } else {
-    uint64_t now = turbo_monotonic_ms();
+    uint64_t now = salts_monotonic_ms();
     deadline = run_options->timeout_ms > UINT64_MAX - now
                    ? UINT64_MAX
                    : now + run_options->timeout_ms;

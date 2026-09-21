@@ -5,6 +5,8 @@
 #include <turbo_error.h>
 #include <turbo_fs.h>
 #include <turbo_parser.h>
+#include <cyaml.h>
+#include <cyaml_json_adapter.h>
 #include <turbo_str.h>
 #include <turbo_vec.h>
 
@@ -583,18 +585,19 @@ turbo_agent_workspace_parse_skill(turbo_agent_workspace_t *workspace, const char
     goto cleanup;
   }
   if (frontmatter > 0) {
-    turbo_yaml_doc_t *yaml = NULL;
+    cyaml_doc_t *yaml = NULL;
     json_value_t *metadata = NULL;
     const char *name;
     const char *description;
-    if (turbo_parse_yaml((const uint8_t *)file + yaml_begin, yaml_len, &yaml) != 0 || !yaml) {
+    yaml = cyaml_parse(file + yaml_begin, yaml_len, NULL, NULL);
+    if (!yaml) {
       turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,
                                       "skill frontmatter", path);
       status = TURBO_AGENT_WORKSPACE_PARSE_ERROR;
       goto cleanup;
     }
-    metadata = turbo_yaml_to_json(yaml);
-    turbo_free_yaml(&yaml);
+    metadata = json_value_from_cyaml(yaml);
+    cyaml_free(yaml);
     if (!metadata || turbo_json_type(metadata) != TURBO_JSON_OBJECT) {
       turbo_free_json(&metadata);
       turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,

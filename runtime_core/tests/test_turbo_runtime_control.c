@@ -3,7 +3,7 @@
 
 #include <stdatomic.h>
 
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 typedef struct test_clock_s {
   atomic_uint_fast64_t now_ms;
@@ -114,25 +114,25 @@ spec("runtime cancellation control") {
     enum { WAITER_COUNT = 2 };
     turbo_cancel_source_t *source = NULL;
     cancel_waiter_t waiters[WAITER_COUNT] = {0};
-    turbo_thread_t threads[WAITER_COUNT] = {0};
+    salts_thread_t threads[WAITER_COUNT] = {0};
     int i;
 
     check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
     for (i = 0; i < WAITER_COUNT; ++i) {
       check_int_eq(turbo_cancel_source_token(source, &waiters[i].token), SALTS_OK);
       atomic_init(&waiters[i].entered, 0);
-      check_int_eq(turbo_thread_create(&threads[i], cancel_waiter_run, &waiters[i]), SALTS_OK);
+      check_int_eq(salts_thread_create(&threads[i], cancel_waiter_run, &waiters[i]), SALTS_OK);
     }
 
     for (i = 0; i < WAITER_COUNT; ++i) {
       while (!atomic_load_explicit(&waiters[i].entered, memory_order_acquire)) {
-        turbo_thread_yield();
+        salts_thread_yield();
       }
     }
     check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_SHUTDOWN), SALTS_OK);
 
     for (i = 0; i < WAITER_COUNT; ++i) {
-      check_int_eq(turbo_thread_join(&threads[i]), SALTS_OK);
+      check_int_eq(salts_thread_join(&threads[i]), SALTS_OK);
       check_int_eq(waiters[i].wait_status, TURBO_CANCEL_WAIT_SIGNALED);
       check_int_eq(waiters[i].reason, TURBO_CANCEL_SHUTDOWN);
       turbo_cancel_token_release(waiters[i].token);

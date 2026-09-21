@@ -2,7 +2,7 @@
 #define TURBO_EVENT_LOG_H
 
 #include <stddef.h>
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_event.h"
 #include "turbo_runtime_json.h"

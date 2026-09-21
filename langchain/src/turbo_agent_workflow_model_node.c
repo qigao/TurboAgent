@@ -11,7 +11,7 @@
 #include "turbo_agent_validation_internal.h"
 #include "turbo_model_provider.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 #include <string.h>

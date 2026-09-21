@@ -2,7 +2,7 @@
 
 #include "turbo_agent_memory_store.h"
 #include "turbo_agent_state.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 #include <string.h>

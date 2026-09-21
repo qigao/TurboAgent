@@ -1,7 +1,7 @@
 #include "turbo_agent_harness_server_internal.h"
 
 #include "turbo_agent_state.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdatomic.h>
 #include <stdlib.h>

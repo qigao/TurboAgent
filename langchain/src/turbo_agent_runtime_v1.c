@@ -6,7 +6,7 @@
 #include "turbo_agent_util_internal.h"
 #include "turbo_event_log.h"
 #include "turbo_graph_run_log.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <errno.h>
 #include <stdatomic.h>

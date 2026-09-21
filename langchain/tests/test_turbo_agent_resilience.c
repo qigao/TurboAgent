@@ -77,8 +77,8 @@ static turbo_agent_t *resilience_agent(resilience_transport_t *transport,
   policy.base_delay_ms = 1;
   policy.max_delay_ms = 2;
   policy.max_elapsed_ms = 100;
-  if (turbo_agent_retry_configure(agent, &policy) != TURBO_OK ||
-      turbo_agent_transport_v2_set(agent, resilience_v2_transport, transport, NULL) != TURBO_OK) {
+  if (turbo_agent_retry_configure(agent, &policy) != SALTS_OK ||
+      turbo_agent_transport_v2_set(agent, resilience_v2_transport, transport, NULL) != SALTS_OK) {
     turbo_agent_destroy(agent);
     return NULL;
   }
@@ -145,8 +145,8 @@ spec("turbo agent resilience") {
     json_value_t *state = turbo_agent_state_create();
     turbo_graph_exec_ctx_t ctx = {0};
 
-    check_int_eq(turbo_cancel_source_create(NULL, &source), TURBO_OK);
-    check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
+    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
     transport.cancel_source = source;
     agent = resilience_agent(&transport, 3);
     turbo_agent_execution_context_get(&saved);

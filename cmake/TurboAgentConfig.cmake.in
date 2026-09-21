@@ -11,7 +11,6 @@ if("@ENABLE_LLM_SANDBOX@" STREQUAL "ON")
 endif()
 if("@ENABLE_LANGCHAIN@" STREQUAL "ON")
   find_dependency(OpenSSL)
-  find_dependency(libfsm CONFIG)
   find_dependency(unofficial-sqlite3 CONFIG)
 endif()
 

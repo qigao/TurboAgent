@@ -221,20 +221,20 @@ static int turbo_mcp_collect_header(turbo_mcp_tool_binding_t *tool,
   else
     return 1;
   binding.name = tstr_dup(name);
-  if (!binding.name || turbo_vec_init(&binding.path, sizeof(tstr_t)) != TURBO_OK) {
+  if (!binding.name || turbo_vec_init(&binding.path, sizeof(tstr_t)) != SALTS_OK) {
     turbo_mcp_header_binding_destroy(&binding);
     return -1;
   }
   for (index = 0; index < turbo_vec_size(path); ++index) {
     const char *const *segment = (const char *const *)turbo_vec_at_const(path, index);
     tstr_t copy = segment && *segment ? tstr_dup(*segment) : NULL;
-    if (!copy || turbo_vec_push(&binding.path, &copy) != TURBO_OK) {
+    if (!copy || turbo_vec_push(&binding.path, &copy) != SALTS_OK) {
       tstr_free(copy);
       turbo_mcp_header_binding_destroy(&binding);
       return -1;
     }
   }
-  if (turbo_vec_push(&tool->headers, &binding) != TURBO_OK) {
+  if (turbo_vec_push(&tool->headers, &binding) != SALTS_OK) {
     turbo_mcp_header_binding_destroy(&binding);
     return -1;
   }
@@ -274,7 +274,7 @@ static int turbo_mcp_scan_schema(const json_value_t *node, int reachable,
       json_value_t *child = turbo_json_object_value(properties, index);
       const char *popped = NULL;
       int status;
-      if (!key || turbo_vec_push(path, &key) != TURBO_OK) return -1;
+      if (!key || turbo_vec_push(path, &key) != SALTS_OK) return -1;
       status = turbo_mcp_scan_schema(child, 1, path, tool, depth + 1);
       (void)turbo_vec_pop(path, &popped);
       if (status != 0) return status;
@@ -379,7 +379,7 @@ static int turbo_mcp_tool_invoke(const json_value_t *arguments,
 
   if (!binding || !binding->pack || !out_result ||
       (arguments && turbo_json_type(arguments) != TURBO_JSON_OBJECT) ||
-      turbo_vec_init(&headers, sizeof(tstr_t)) != TURBO_OK) {
+      turbo_vec_init(&headers, sizeof(tstr_t)) != SALTS_OK) {
     return -1;
   }
   *out_result = NULL;
@@ -390,7 +390,7 @@ static int turbo_mcp_tool_invoke(const json_value_t *arguments,
     tstr_t formatted;
     if (!value || turbo_json_is_null(value)) continue;
     formatted = turbo_mcp_parameter_header(header, value);
-    if (!formatted || turbo_vec_push(&headers, &formatted) != TURBO_OK) {
+    if (!formatted || turbo_vec_push(&headers, &formatted) != SALTS_OK) {
       tstr_free(formatted);
       turbo_mcp_client_set_error(binding->pack->client,
                                  "tool argument cannot be mirrored to its MCP header");
@@ -455,8 +455,8 @@ static turbo_tool_status_t turbo_mcp_register_remote_tool(
   description = turbo_json_get_string(remote_tool, "description");
   binding = (turbo_mcp_tool_binding_t *)calloc(1, sizeof(*binding));
   if (!binding || turbo_vec_init(&binding->headers, sizeof(turbo_mcp_header_binding_t)) !=
-                      TURBO_OK ||
-      turbo_vec_init(&path, sizeof(const char *)) != TURBO_OK) {
+                      SALTS_OK ||
+      turbo_vec_init(&path, sizeof(const char *)) != SALTS_OK) {
     turbo_mcp_tool_binding_destroy(binding);
     return TURBO_TOOL_OUT_OF_MEMORY;
   }

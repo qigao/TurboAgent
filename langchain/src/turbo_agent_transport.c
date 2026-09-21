@@ -7,6 +7,7 @@
 
 #include <http_client/http.h>
 #include <uri_parser.h>
+#include <turbo_str.h>
 
 #include <stdio.h>
 #include <stdlib.h>

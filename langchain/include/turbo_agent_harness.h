@@ -2,7 +2,7 @@
 #define TURBO_AGENT_HARNESS_H
 
 #include <turbo_agent_api.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 #include "turbo_agent_app.h"
 #include "turbo_agent_execution.h"

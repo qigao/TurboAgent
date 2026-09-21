@@ -1,7 +1,7 @@
 #ifndef TURBO_VECTOR_STORE_H
 #define TURBO_VECTOR_STORE_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 #include <stddef.h>
 
 #include <json_parser.h>

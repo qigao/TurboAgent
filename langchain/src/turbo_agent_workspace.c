@@ -3,7 +3,7 @@
 #include "turbo_agent_lifecycle_internal.h"
 
 #include <turbo_error.h>
-#include <turbo_fs.h>
+#include <salts_fs.h>
 #include <json_parser.h>
 #include <cyaml.h>
 #include <tstr.h>
@@ -192,7 +192,7 @@ static int turbo_agent_workspace_relative_path_valid(const char *path, int allow
   const char *component;
   const char *cursor;
   if (!path || path[0] == '\0') return allow_empty;
-  if (turbo_fs_path_is_absolute(path) || strchr(path, ':')) return 0;
+  if (salts_fs_path_is_absolute(path) || strchr(path, ':')) return 0;
   component = path;
   for (cursor = path;; ++cursor) {
     if (*cursor == '/' || *cursor == '\\' || *cursor == '\0') {
@@ -274,12 +274,12 @@ turbo_agent_workspace_append_bounded(turbo_agent_workspace_t *workspace, tstr *t
 static turbo_agent_workspace_status_t
 turbo_agent_workspace_read_file(turbo_agent_workspace_t *workspace, const char *path, size_t limit,
                                 tstr *out_text) {
-  turbo_fs_stat_t metadata;
-  turbo_fs_buf_t buffer = {0};
+  salts_fs_stat_t metadata;
+  salts_fs_buf_t buffer = {0};
   int rc;
   if (!workspace || !path || !out_text) return TURBO_AGENT_WORKSPACE_INVALID_ARGUMENT;
   *out_text = NULL;
-  rc = turbo_fs_lstat(path, &metadata);
+  rc = salts_fs_lstat(path, &metadata);
   if (rc != 0) {
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_IO_ERROR, "read", path);
     return TURBO_AGENT_WORKSPACE_IO_ERROR;
@@ -292,13 +292,13 @@ turbo_agent_workspace_read_file(turbo_agent_workspace_t *workspace, const char *
                                     "read", path);
     return workspace->last_status;
   }
-  if (turbo_fs_read_file(path, &buffer) != 0 || buffer.len > limit) {
-    turbo_fs_buf_free(&buffer);
+  if (salts_fs_read_file(path, &buffer) != 0 || buffer.len > limit) {
+    salts_fs_buf_free(&buffer);
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_IO_ERROR, "read", path);
     return TURBO_AGENT_WORKSPACE_IO_ERROR;
   }
   *out_text = tstr_dup_len(buffer.base, buffer.len);
-  turbo_fs_buf_free(&buffer);
+  salts_fs_buf_free(&buffer);
   if (!*out_text) {
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY, "read", path);
     return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
@@ -311,14 +311,14 @@ turbo_agent_workspace_append_agents_file(turbo_agent_workspace_t *workspace, tst
                                          const char *directory, const char *scope) {
   tstr path = turbo_agent_workspace_path_join(directory, workspace->agents_filename);
   tstr content = NULL;
-  turbo_fs_stat_t metadata;
+  salts_fs_stat_t metadata;
   turbo_agent_workspace_status_t status;
   if (!path) return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
-  if (turbo_fs_access(path, TURBO_FS_ACCESS_EXISTS) != 0) {
+  if (salts_fs_access(path, SALTS_FS_ACCESS_EXISTS) != 0) {
     tstr_free(path);
     return TURBO_AGENT_WORKSPACE_OK;
   }
-  if (turbo_fs_lstat(path, &metadata) != 0) {
+  if (salts_fs_lstat(path, &metadata) != 0) {
     tstr_free(path);
     return TURBO_AGENT_WORKSPACE_OK;
   }
@@ -376,7 +376,7 @@ turbo_agent_workspace_load_agents(turbo_agent_workspace_t *workspace, tstr *out_
   for (cursor = workspace->working_directory;; ++cursor) {
     if (*cursor == '/' || *cursor == '\\' || *cursor == '\0') {
       size_t len = (size_t)(cursor - component);
-      turbo_fs_stat_t metadata;
+      salts_fs_stat_t metadata;
       tstr next = tstr_dup_len(component, len);
       tstr scope;
       tstr grown;
@@ -392,7 +392,7 @@ turbo_agent_workspace_load_agents(turbo_agent_workspace_t *workspace, tstr *out_
       }
       tstr_free(current);
       current = grown;
-      if (turbo_fs_lstat(current, &metadata) != 0 || !metadata.is_directory ||
+      if (salts_fs_lstat(current, &metadata) != 0 || !metadata.is_directory ||
           metadata.is_symlink) {
         turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_IO_ERROR,
                                         "working directory", current);
@@ -432,32 +432,32 @@ static int turbo_agent_workspace_markdown_candidate(const char *name, size_t dep
 static turbo_agent_workspace_status_t
 turbo_agent_workspace_scan_skill_paths(turbo_agent_workspace_t *workspace, const char *directory,
                                        size_t depth, vec_t *paths) {
-  turbo_fs_dir_t *dir = NULL;
-  turbo_fs_dirent_t entry;
+  salts_fs_dir_t *dir = NULL;
+  salts_fs_dirent_t entry;
   int read_status;
   if (depth > workspace->max_scan_depth) {
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED, "skill scan",
                                     "directory depth exceeded");
     return TURBO_AGENT_WORKSPACE_LIMIT_EXCEEDED;
   }
-  if (turbo_fs_opendir(directory, &dir) != 0) {
+  if (salts_fs_opendir(directory, &dir) != 0) {
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_IO_ERROR, "skill scan",
                                     directory);
     return TURBO_AGENT_WORKSPACE_IO_ERROR;
   }
-  while ((read_status = turbo_fs_readdir(dir, &entry)) > 0) {
+  while ((read_status = salts_fs_readdir(dir, &entry)) > 0) {
     tstr path = turbo_agent_workspace_path_join(directory, entry.name);
-    turbo_fs_stat_t metadata;
+    salts_fs_stat_t metadata;
     turbo_agent_workspace_status_t status = TURBO_AGENT_WORKSPACE_OK;
     if (!path) {
-      turbo_fs_closedir(dir);
+      salts_fs_closedir(dir);
       return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
     }
-    if (turbo_fs_lstat(path, &metadata) != 0 || metadata.is_symlink) {
+    if (salts_fs_lstat(path, &metadata) != 0 || metadata.is_symlink) {
       turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_IO_ERROR, "skill scan",
                                       path);
       tstr_free(path);
-      turbo_fs_closedir(dir);
+      salts_fs_closedir(dir);
       return TURBO_AGENT_WORKSPACE_IO_ERROR;
     }
     if (metadata.is_directory) {
@@ -473,11 +473,11 @@ turbo_agent_workspace_scan_skill_paths(turbo_agent_workspace_t *workspace, const
     }
     tstr_free(path);
     if (status != TURBO_AGENT_WORKSPACE_OK) {
-      turbo_fs_closedir(dir);
+      salts_fs_closedir(dir);
       return status;
     }
   }
-  turbo_fs_closedir(dir);
+  salts_fs_closedir(dir);
   if (read_status < 0) {
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_IO_ERROR, "skill scan",
                                     directory);
@@ -493,13 +493,13 @@ static int turbo_agent_workspace_path_compare(const void *left, const void *righ
 }
 
 static tstr turbo_agent_workspace_skill_fallback_name(const char *path) {
-  char basename[TURBO_FS_MAX_PATH];
-  char dirname[TURBO_FS_MAX_PATH];
+  char basename[SALTS_FS_MAX_PATH];
+  char dirname[SALTS_FS_MAX_PATH];
   size_t len;
-  if (turbo_fs_path_basename(path, basename, sizeof(basename)) != 0) return NULL;
+  if (salts_fs_path_basename(path, basename, sizeof(basename)) != 0) return NULL;
   if (turbo_agent_workspace_ascii_equal_ci(basename, "SKILL.md")) {
-    if (turbo_fs_path_dirname(path, dirname, sizeof(dirname)) != 0 ||
-        turbo_fs_path_basename(dirname, basename, sizeof(basename)) != 0)
+    if (salts_fs_path_dirname(path, dirname, sizeof(dirname)) != 0 ||
+        salts_fs_path_basename(dirname, basename, sizeof(basename)) != 0)
       return NULL;
   } else {
     len = strlen(basename);
@@ -650,7 +650,7 @@ static turbo_agent_workspace_status_t
 turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, vec_t *out_skills) {
   vec_t paths;
   tstr root;
-  turbo_fs_stat_t metadata;
+  salts_fs_stat_t metadata;
   turbo_agent_workspace_status_t status;
   size_t index;
   memset(&paths, 0, sizeof(paths));
@@ -667,7 +667,7 @@ turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, vec_t *out
     status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
     goto cleanup;
   }
-  if (turbo_fs_access(root, TURBO_FS_ACCESS_EXISTS) != 0) {
+  if (salts_fs_access(root, SALTS_FS_ACCESS_EXISTS) != 0) {
     if (!workspace->skills_directory_explicit) {
       status = TURBO_AGENT_WORKSPACE_OK;
       goto cleanup;
@@ -677,7 +677,7 @@ turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, vec_t *out
     status = TURBO_AGENT_WORKSPACE_IO_ERROR;
     goto cleanup;
   }
-  if (turbo_fs_lstat(root, &metadata) != 0) {
+  if (salts_fs_lstat(root, &metadata) != 0) {
     turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_IO_ERROR, "skills directory",
                                     root);
     status = TURBO_AGENT_WORKSPACE_IO_ERROR;
@@ -726,7 +726,7 @@ static int turbo_agent_workspace_skill_matches(const turbo_agent_skill_t *skill,
   size_t index;
   tstr marker;
   tstr reference;
-  char basename[TURBO_FS_MAX_PATH];
+  char basename[SALTS_FS_MAX_PATH];
   if (!skill || !task || task[0] == '\0') return 0;
   marker = tstr_dup("$");
   if (!marker) return 0;
@@ -736,7 +736,7 @@ static int turbo_agent_workspace_skill_matches(const turbo_agent_skill_t *skill,
     return 1;
   }
   tstr_free(marker);
-  if (turbo_fs_path_basename(skill->path, basename, sizeof(basename)) == 0) {
+  if (salts_fs_path_basename(skill->path, basename, sizeof(basename)) == 0) {
     reference = tstr_dup("#skills/");
     if (!reference) return 0;
     reference = tstr_cat(reference, basename);
@@ -934,7 +934,7 @@ turbo_agent_workspace_status_t
 turbo_agent_workspace_create(const turbo_agent_workspace_config_t *config,
                              turbo_agent_workspace_t **out_workspace) {
   turbo_agent_workspace_t *workspace;
-  turbo_fs_stat_t root_metadata;
+  salts_fs_stat_t root_metadata;
   const char *skills_directory;
   const char *agents_filename;
   size_t index;
@@ -946,7 +946,7 @@ turbo_agent_workspace_create(const turbo_agent_workspace_config_t *config,
                                                       : TURBO_AGENT_WORKSPACE_DEFAULT_AGENTS_FILE;
   if (!config || config->struct_size < sizeof(*config) ||
       config->abi_version != TURBO_AGENT_WORKSPACE_CONFIG_ABI_VERSION || !config->workspace_root ||
-      !turbo_fs_path_is_absolute(config->workspace_root) ||
+      !salts_fs_path_is_absolute(config->workspace_root) ||
       !turbo_agent_workspace_relative_path_valid(config->working_directory, 1) ||
       !turbo_agent_workspace_relative_path_valid(skills_directory, 0) ||
       !turbo_agent_workspace_filename_valid(agents_filename) ||
@@ -956,7 +956,7 @@ turbo_agent_workspace_create(const turbo_agent_workspace_config_t *config,
       config->always_tool_count > config->max_projected_tools ||
       (config->always_tool_count > 0 && !config->always_tools) ||
       (config->tool_capability_count > 0 && !config->tool_capabilities) ||
-      turbo_fs_lstat(config->workspace_root, &root_metadata) != 0 || !root_metadata.is_directory ||
+      salts_fs_lstat(config->workspace_root, &root_metadata) != 0 || !root_metadata.is_directory ||
       root_metadata.is_symlink) {
     return TURBO_AGENT_WORKSPACE_INVALID_ARGUMENT;
   }

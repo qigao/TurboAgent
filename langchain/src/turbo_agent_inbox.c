@@ -3,6 +3,7 @@
 
 #include <turbo_deque.h>
 #include <tstr.h>
+#include <salts/clock.h>
 #include <salts/thread.h>
 #include <salts_uuid.h>
 
@@ -145,7 +146,7 @@ static int turbo_agent_inbox_wait_for_capacity(turbo_agent_inbox_t *inbox, size_
                                                uint64_t timeout_ms) {
   uint64_t deadline = UINT64_MAX;
   int timed = timeout_ms != TURBO_AGENT_INBOX_WAIT_INFINITE;
-  if (timed) deadline = turbo_agent_inbox_saturating_add(turbo_monotonic_ms(), timeout_ms);
+  if (timed) deadline = turbo_agent_inbox_saturating_add(salts_monotonic_ms(), timeout_ms);
   while (!inbox->closed && !turbo_agent_inbox_has_capacity(inbox, payload_bytes)) {
     uint64_t now;
     uint64_t wait_ms;
@@ -153,7 +154,7 @@ static int turbo_agent_inbox_wait_for_capacity(turbo_agent_inbox_t *inbox, size_
       salts_cond_wait(&inbox->changed, &inbox->mutex);
       continue;
     }
-    now = turbo_monotonic_ms();
+    now = salts_monotonic_ms();
     if (now >= deadline) return SALTS_EBUSY;
     wait_ms = deadline - now;
     if (wait_ms > TURBO_AGENT_INBOX_WAIT_SLICE_MS) wait_ms = TURBO_AGENT_INBOX_WAIT_SLICE_MS;

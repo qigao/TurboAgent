@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_WORKFLOW_H
 #define TURBO_AGENT_WORKFLOW_H
 
+#include <turbo_agent_api.h>
+
 #include "turbo_agent_graph.h"
 
 #ifdef __cplusplus

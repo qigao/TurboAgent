@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <turbo_str.h>
+#include <tstr.h>
 #include <turbo_vec.h>
 
 static const char *const turbo_mcp_tool_required_capabilities[] = {"runtime_tools", "network"};

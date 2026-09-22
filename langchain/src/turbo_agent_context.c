@@ -454,7 +454,7 @@ static int turbo_agent_context_compact_once(turbo_agent_context_t *context, json
   size_t cut;
   int rc;
 
-  if (!events || json_type(events) != TURBO_JSON_ARRAY) return SALTS_EPROTO;
+  if (!events || json_type(events) != JSON_ARRAY) return SALTS_EPROTO;
   rc = turbo_agent_context_choose_cut(context, events, &desired_cut);
   if (rc != SALTS_OK) return rc;
   rc =

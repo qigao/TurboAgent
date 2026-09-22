@@ -93,7 +93,7 @@ int turbo_agent_harness_jsonl_transport_dispatch_line(
                                                     &response_json);
   if (rc != SALTS_OK || !response_json) return rc;
   rc = turbo_agent_harness_jsonl_write_serialized(transport, response_json);
-  turbo_json_serialize_free(response_json);
+  json_serialize_free(response_json);
   return rc;
 }
 
@@ -118,14 +118,14 @@ int turbo_agent_harness_jsonl_transport_pump_events(
       break;
     }
     if (rc != SALTS_OK) break;
-    event_text = turbo_json_serialize(event_json, NULL);
+    event_text = json_serialize(event_json, NULL);
     if (!event_text) {
       turbo_runtime_json_destroy(event_json);
       rc = SALTS_ENOMEM;
       break;
     }
     rc = turbo_agent_harness_jsonl_write_serialized(transport, event_text);
-    turbo_json_serialize_free(event_text);
+    json_serialize_free(event_text);
     turbo_runtime_json_destroy(event_json);
     if (rc != SALTS_OK) break;
     rc = turbo_agent_harness_connection_ack_events(transport->config.connection, sequence);

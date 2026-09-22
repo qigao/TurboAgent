@@ -34,6 +34,7 @@ target_link_libraries(
          TurboAgent::RuntimeTools
          Salts::JsonParser
          Salts::UriParser
+         Salts::DotEnvParser
          CHttp::Client
          CHttp::Server
          Salts::Core

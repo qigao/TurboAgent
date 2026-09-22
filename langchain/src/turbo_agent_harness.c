@@ -1,4 +1,5 @@
 #include "turbo_agent_harness.h"
+#include <json_parser.h>
 
 #include "turbo_agent_execution_internal.h"
 #include "turbo_agent_session_internal.h"
@@ -138,15 +139,15 @@ int turbo_agent_harness_get_capabilities(const turbo_agent_harness_t *harness,
     turbo_runtime_json_destroy(capabilities);
     return rc != SALTS_OK ? rc : SALTS_EIO;
   }
-  turbo_json_object_set_bool(capabilities, "has_async_execution", 1);
-  turbo_json_object_set_bool(capabilities, "supports_start", 1);
-  turbo_json_object_set_bool(capabilities, "supports_resume", 1);
-  turbo_json_object_set_bool(capabilities, "supports_fork", 1);
-  turbo_json_object_set_bool(capabilities, "supports_cancel", 1);
-  turbo_json_object_set_bool(capabilities, "supports_deadline", 1);
-  turbo_json_object_set_bool(capabilities, "supports_event_sink", 1);
-  turbo_json_object_set_number(capabilities, "max_concurrent_executions", 1.0);
-  turbo_json_object_set_number(capabilities, "executor_queue_capacity",
+  json_object_set_bool(capabilities, "has_async_execution", 1);
+  json_object_set_bool(capabilities, "supports_start", 1);
+  json_object_set_bool(capabilities, "supports_resume", 1);
+  json_object_set_bool(capabilities, "supports_fork", 1);
+  json_object_set_bool(capabilities, "supports_cancel", 1);
+  json_object_set_bool(capabilities, "supports_deadline", 1);
+  json_object_set_bool(capabilities, "supports_event_sink", 1);
+  json_object_set_number(capabilities, "max_concurrent_executions", 1.0);
+  json_object_set_number(capabilities, "executor_queue_capacity",
                                (double)turbo_threadpool_capacity(harness->executor));
   *out_capabilities_json = capabilities;
   return SALTS_OK;

@@ -1,5 +1,5 @@
 {
-  "name": "vcpkg-turbonet",
+  "name": "turboagent",
   "version-semver": "0.1.0",
   "dependencies": [
     {

@@ -1,9 +1,9 @@
 #ifndef TURBO_AGENT_STATE_H
 #define TURBO_AGENT_STATE_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_runtime_json.h"
 
 #ifdef __cplusplus

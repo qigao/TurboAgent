@@ -2,7 +2,7 @@
 
 #include "turbo_state_graph_store.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_state_graph.h"
 
 #include <errno.h>

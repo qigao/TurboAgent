@@ -1,4 +1,5 @@
 #include "turbo_retriever.h"
+#include <json_parser.h>
 
 #include "turbo_agent_state.h"
 #include "turbo_agent_knowledge_store.h"
@@ -25,31 +26,31 @@ static const char *turbo_retriever_latest_user_query(const json_value_t *state) 
   const json_value_t *input;
   size_t i;
 
-  if (!state || turbo_json_type(state) != TURBO_JSON_OBJECT) {
+  if (!state || json_type(state) != JSON_OBJECT) {
     return NULL;
   }
-  input = turbo_json_object_get(state, "input");
-  if (!input || turbo_json_type(input) != TURBO_JSON_ARRAY) {
+  input = json_object_get(state, "input");
+  if (!input || json_type(input) != JSON_ARRAY) {
     return NULL;
   }
-  for (i = turbo_json_array_size(input); i > 0; --i) {
-    const json_value_t *message = turbo_json_array_get(input, i - 1);
+  for (i = json_array_size(input); i > 0; --i) {
+    const json_value_t *message = json_array_get(input, i - 1);
     const json_value_t *content;
     const char *role;
     const char *text;
 
-    if (!message || turbo_json_type(message) != TURBO_JSON_OBJECT) {
+    if (!message || json_type(message) != JSON_OBJECT) {
       continue;
     }
-    role = turbo_json_get_string(message, "role");
+    role = json_get_string(message, "role");
     if (!role || strcmp(role, "user") != 0) {
       continue;
     }
-    content = turbo_json_object_get(message, "content");
-    if (!content || turbo_json_type(content) != TURBO_JSON_STRING) {
+    content = json_object_get(message, "content");
+    if (!content || json_type(content) != JSON_STRING) {
       continue;
     }
-    text = turbo_json_get_string(message, "content");
+    text = json_get_string(message, "content");
     if (text && text[0] != '\0') {
       return text;
     }
@@ -155,49 +156,49 @@ int turbo_retriever_build_context(
       0) {
     return -1;
   }
-  context = turbo_json_create_object();
-  layers = turbo_json_create_array();
+  context = json_create_object();
+  layers = json_create_array();
   if (!context || !layers) {
     goto cleanup;
   }
 
-  result_count = turbo_json_array_size(results);
+  result_count = json_array_size(results);
   for (i = 0; i < result_count; ++i) {
-    const json_value_t *result = turbo_json_array_get(results, i);
-    const char *text = turbo_json_get_string(result, "text");
-    const char *uri = turbo_json_get_string(result, "uri");
+    const json_value_t *result = json_array_get(results, i);
+    const char *text = json_get_string(result, "text");
+    const char *uri = json_get_string(result, "uri");
     json_value_t *layer;
 
     if (!text || !text[0]) {
       continue;
     }
-    layer = turbo_json_create_object();
+    layer = json_create_object();
     if (!layer) {
       goto cleanup;
     }
-    turbo_json_object_set_string(layer, "scope", "retriever");
-    turbo_json_object_set_string(layer, "path", uri ? uri : "");
-    turbo_json_object_set_string(layer, "text", text);
-    turbo_json_array_add(layers, layer);
+    json_object_set_string(layer, "scope", "retriever");
+    json_object_set_string(layer, "path", uri ? uri : "");
+    json_object_set_string(layer, "text", text);
+    json_array_add(layers, layer);
     if (turbo_retriever_context_append(&context_text, &context_capacity,
                                        &context_len, text) != 0) {
       goto cleanup;
     }
   }
 
-  turbo_json_object_set_string(context, "query", query);
-  turbo_json_object_set_string(context, "kind",
+  json_object_set_string(context, "query", query);
+  json_object_set_string(context, "kind",
                                effective_options.kind ? effective_options.kind : "");
-  turbo_json_object_set_string(
+  json_object_set_string(
       context, "uri_prefix",
       effective_options.uri_prefix ? effective_options.uri_prefix : "");
-  turbo_json_object_set_number(context, "layer_count",
-                               (double)turbo_json_array_size(layers));
-  turbo_json_object_set_string(context, "context_text",
+  json_object_set_number(context, "layer_count",
+                               (double)json_array_size(layers));
+  json_object_set_string(context, "context_text",
                                context_text ? context_text : "");
-  turbo_json_object_add(context, "layers", layers);
+  json_object_add(context, "layers", layers);
   layers = NULL;
-  turbo_json_object_add(context, "evidence", results);
+  json_object_add(context, "evidence", results);
   results = NULL;
   *out_context_json = context;
   context = NULL;
@@ -205,9 +206,9 @@ int turbo_retriever_build_context(
 
 cleanup:
   free(context_text);
-  turbo_free_json(&layers);
-  turbo_free_json(&context);
-  turbo_free_json(&results);
+  json_free(layers); layers = NULL;
+  json_free(context); context = NULL;
+  json_free(results); results = NULL;
   return rc;
 }
 
@@ -220,7 +221,7 @@ int turbo_retriever_load_context(
   int rc = 0;
 
   if (!retriever || !state || !query || !query[0] ||
-      turbo_json_type(state) != TURBO_JSON_OBJECT) {
+      json_type(state) != JSON_OBJECT) {
     return -1;
   }
   if (options) {
@@ -230,21 +231,21 @@ int turbo_retriever_load_context(
       0) {
     return -1;
   }
-  if (!results || turbo_json_type(results) != TURBO_JSON_ARRAY) {
-    turbo_free_json(&results);
+  if (!results || json_type(results) != JSON_ARRAY) {
+    json_free(results); results = NULL;
     return -1;
   }
 
-  for (i = 0; i < turbo_json_array_size(results); ++i) {
-    const json_value_t *item = turbo_json_array_get(results, i);
+  for (i = 0; i < json_array_size(results); ++i) {
+    const json_value_t *item = json_array_get(results, i);
     const char *uri;
     const char *text;
 
-    if (!item || turbo_json_type(item) != TURBO_JSON_OBJECT) {
+    if (!item || json_type(item) != JSON_OBJECT) {
       continue;
     }
-    uri = turbo_json_get_string(item, "uri");
-    text = turbo_json_get_string(item, "text");
+    uri = json_get_string(item, "uri");
+    text = json_get_string(item, "text");
     if (text && text[0] != '\0' &&
         turbo_agent_state_add_memory_context_layer(
             state, scope && scope[0] ? scope : "retriever", uri, text) != 0) {
@@ -253,7 +254,7 @@ int turbo_retriever_load_context(
     }
   }
 
-  turbo_free_json(&results);
+  json_free(results); results = NULL;
   return rc;
 }
 
@@ -375,7 +376,7 @@ static int turbo_retriever_vector_store_query(
   vector_options.limit = options->limit;
   rc = turbo_vector_store_query(adapter->store, query_embedding, &vector_options,
                                 out_results_json);
-  turbo_free_json(&query_embedding);
+  json_free(query_embedding); query_embedding = NULL;
   return rc;
 }
 

@@ -1,13 +1,13 @@
 #ifndef TURBO_AGENT_KNOWLEDGE_STORE_H
 #define TURBO_AGENT_KNOWLEDGE_STORE_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "turbo_action_tool.h"
 #include "turbo_agent_graph.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_tool_registry.h"
 
 #ifdef __cplusplus

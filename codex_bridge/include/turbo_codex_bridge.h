@@ -1,9 +1,8 @@
 #ifndef TURBO_CODEX_BRIDGE_H
 #define TURBO_CODEX_BRIDGE_H
 
-#include <platform.h>
-#include <turbo_error.h>
-#include <turbo_parser.h>
+#include <turbo_agent_api.h>
+#include <json_parser.h>
 
 #include "turbo_tool_registry.h"
 
@@ -55,7 +54,7 @@ typedef void (*turbo_codex_event_fn)(const char *method, const json_value_t *par
 /**
  * Resolve a Codex server-initiated request such as command/file approval.
  *
- * On success, return TURBO_OK and one owned JSON result through `out_result`.
+ * On success, return SALTS_OK and one owned JSON result through `out_result`.
  * Returning an error produces a JSON-RPC error response. When no handler is
  * configured, the client fails closed: known approval requests are declined
  * and unknown requests receive Method not found.
@@ -156,7 +155,7 @@ turbo_codex_stdio_transport_config_init(turbo_codex_stdio_transport_config_t *co
 /**
  * Start `codex app-server --stdio` and return an owned transport.
  * Android and other platforms without a child-process implementation return
- * TURBO_ENOTSUP.
+ * SALTS_ENOTSUP.
  */
 CXX_C_API int turbo_codex_stdio_transport_create(
     const turbo_codex_stdio_transport_config_t *config,

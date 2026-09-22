@@ -1,8 +1,8 @@
 #ifndef TURBO_PROMPT_H
 #define TURBO_PROMPT_H
 
-#include <platform.h>
-#include <turbo_parser.h>
+#include <turbo_agent_api.h>
+#include <json_parser.h>
 
 #include "turbo_runtime_json.h"
 

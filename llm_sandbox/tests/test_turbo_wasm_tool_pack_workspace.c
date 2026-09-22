@@ -1,6 +1,6 @@
 #include "tinytest.h"
 #include "turbo_agent_workspace.h"
-#include "turbo_fs.h"
+#include <salts_fs.h>
 #include "turbo_wasm_tool_pack.h"
 
 #include <stdlib.h>
@@ -11,19 +11,19 @@
 #endif
 
 static int pack_workspace_write_text(const char *path, const char *text) {
-  turbo_fs_buf_t buffer = turbo_fs_buf_init((void *)text, strlen(text));
-  return turbo_fs_write_file(path, &buffer);
+  salts_fs_buf_t buffer = salts_fs_buf_init((void *)text, strlen(text));
+  return salts_fs_write_file(path, &buffer);
 }
 
 static turbo_wasm_policy_t *pack_workspace_wasm_policy_create(char *module_name,
                                                               size_t module_name_size) {
   turbo_wasm_policy_t *policy = turbo_wasm_policy_create();
-  char module_root[TURBO_FS_MAX_PATH];
+  char module_root[SALTS_FS_MAX_PATH];
 
   if (!policy ||
-      turbo_fs_path_dirname(LLM_SANDBOX_WASM_TOOL_WASM_PATH, module_root, sizeof(module_root)) !=
+      salts_fs_path_dirname(LLM_SANDBOX_WASM_TOOL_WASM_PATH, module_root, sizeof(module_root)) !=
           0 ||
-      turbo_fs_path_basename(LLM_SANDBOX_WASM_TOOL_WASM_PATH, module_name, module_name_size) != 0 ||
+      salts_fs_path_basename(LLM_SANDBOX_WASM_TOOL_WASM_PATH, module_name, module_name_size) != 0 ||
       turbo_wasm_policy_set_capabilities(policy, TURBO_WASM_CAP_CORE | TURBO_WASM_CAP_APP) !=
           TURBO_WASM_OK ||
       turbo_wasm_policy_set_module_root(policy, module_root) != TURBO_WASM_OK) {
@@ -44,10 +44,10 @@ spec("TurboWasm tool pack workspace integration") {
                                      "---\n"
                                      "Use the registered sandboxed echo tool.\n";
     char *root = tt_make_temp_dir("turbo_wasm_pack_workspace");
-    char skills[TURBO_FS_MAX_PATH];
-    char skill_dir[TURBO_FS_MAX_PATH];
-    char skill_path[TURBO_FS_MAX_PATH];
-    char module_name[TURBO_FS_MAX_PATH];
+    char skills[SALTS_FS_MAX_PATH];
+    char skill_dir[SALTS_FS_MAX_PATH];
+    char skill_path[SALTS_FS_MAX_PATH];
+    char module_name[SALTS_FS_MAX_PATH];
     turbo_wasm_tool_pack_config_t pack_config;
     turbo_wasm_tool_pack_module_config_t module_config;
     turbo_wasm_tool_pack_t *pack = NULL;
@@ -63,11 +63,11 @@ spec("TurboWasm tool pack workspace integration") {
 
     check_not_null(root);
     check_not_null(wasm_policy);
-    check_int_eq(turbo_fs_path_join(skills, sizeof(skills), root, "skills"), 0);
-    check_int_eq(turbo_fs_path_join(skill_dir, sizeof(skill_dir), skills, "wasm-echo"), 0);
-    check_int_eq(turbo_fs_mkdir(skills, 0700), 0);
-    check_int_eq(turbo_fs_mkdir(skill_dir, 0700), 0);
-    check_int_eq(turbo_fs_path_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
+    check_int_eq(salts_fs_path_join(skills, sizeof(skills), root, "skills"), 0);
+    check_int_eq(salts_fs_path_join(skill_dir, sizeof(skill_dir), skills, "wasm-echo"), 0);
+    check_int_eq(salts_fs_mkdir(skills, 0700), 0);
+    check_int_eq(salts_fs_mkdir(skill_dir, 0700), 0);
+    check_int_eq(salts_fs_path_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
     check_int_eq(pack_workspace_write_text(skill_path, skill_text), 0);
 
     turbo_wasm_tool_pack_config_init(&pack_config);

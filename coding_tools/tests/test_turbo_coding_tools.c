@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #include "turbo_coding_tools.h"
 
-#include <turbo_fs.h>
+#include <salts_fs.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,15 +21,15 @@ static char *coding_test_strdup(const char *text) {
 }
 
 static char *coding_test_workspace(void) {
-  char temp[TURBO_FS_MAX_PATH];
-  char path[TURBO_FS_MAX_PATH];
-  if (turbo_fs_get_tmpdir(temp, sizeof(temp)) != 0) return NULL;
+  char temp[SALTS_FS_MAX_PATH];
+  char path[SALTS_FS_MAX_PATH];
+  if (salts_fs_get_tmpdir(temp, sizeof(temp)) != 0) return NULL;
 #ifdef _WIN32
   snprintf(path, sizeof(path), "%s/turbo_coding_%llu", temp, (unsigned long long)GetTickCount64());
 #else
   snprintf(path, sizeof(path), "%s/turbo_coding_%lu", temp, (unsigned long)getpid());
 #endif
-  if (turbo_fs_mkdir(path, 0700) != 0) return NULL;
+  if (salts_fs_mkdir(path, 0700) != 0) return NULL;
   return coding_test_strdup(path);
 }
 
@@ -37,16 +37,16 @@ spec("turbo coding tools") {
 
   it("should register bounded read-only tools and reject workspace escape") {
     char *workspace = coding_test_workspace();
-    char file_path[TURBO_FS_MAX_PATH];
-    turbo_fs_buf_t write_buffer = turbo_fs_buf_init("hello", 5);
+    char file_path[SALTS_FS_MAX_PATH];
+    salts_fs_buf_t write_buffer = salts_fs_buf_init("hello", 5);
     turbo_coding_tools_config_t config;
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_execution_policy_t policy = {0};
     char *output = NULL;
 
     check_not_null(workspace);
-    check_int_eq(turbo_fs_path_join(file_path, sizeof(file_path), workspace, "note.txt"), 0);
-    check_int_eq(turbo_fs_write_file(file_path, &write_buffer), 0);
+    check_int_eq(salts_fs_path_join(file_path, sizeof(file_path), workspace, "note.txt"), 0);
+    check_int_eq(salts_fs_write_file(file_path, &write_buffer), 0);
     turbo_coding_tools_config_init(&config);
     config.workspace_root = workspace;
     config.max_read_bytes = 64;
@@ -71,21 +71,21 @@ spec("turbo coding tools") {
 
     free(output);
     turbo_tool_registry_destroy(registry);
-    turbo_fs_unlink(file_path);
-    turbo_fs_rmdir(workspace);
+    salts_fs_unlink(file_path);
+    salts_fs_rmdir(workspace);
     free(workspace);
   }
 
   it("should enforce read byte limits") {
     char *workspace = coding_test_workspace();
-    char file_path[TURBO_FS_MAX_PATH];
-    turbo_fs_buf_t write_buffer = turbo_fs_buf_init("0123456789", 10);
+    char file_path[SALTS_FS_MAX_PATH];
+    salts_fs_buf_t write_buffer = salts_fs_buf_init("0123456789", 10);
     turbo_coding_tools_config_t config;
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     char *output = NULL;
 
-    check_int_eq(turbo_fs_path_join(file_path, sizeof(file_path), workspace, "large.txt"), 0);
-    check_int_eq(turbo_fs_write_file(file_path, &write_buffer), 0);
+    check_int_eq(salts_fs_path_join(file_path, sizeof(file_path), workspace, "large.txt"), 0);
+    check_int_eq(salts_fs_write_file(file_path, &write_buffer), 0);
     turbo_coding_tools_config_init(&config);
     config.workspace_root = workspace;
     config.max_read_bytes = 4;
@@ -97,8 +97,8 @@ spec("turbo coding tools") {
 
     free(output);
     turbo_tool_registry_destroy(registry);
-    turbo_fs_unlink(file_path);
-    turbo_fs_rmdir(workspace);
+    salts_fs_unlink(file_path);
+    salts_fs_rmdir(workspace);
     free(workspace);
   }
 }

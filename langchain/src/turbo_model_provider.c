@@ -201,7 +201,7 @@ static void turbo_model_provider_free_anthropic_stream_state(
 }
 
 static char *turbo_model_provider_normalize_sse_newlines(const char *data, size_t len) {
-  tstr_t normalized;
+  tstr normalized;
   size_t i;
   size_t out = 0;
 

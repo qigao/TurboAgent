@@ -3,16 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <turbo_str.h>
+#include <tstr.h>
 
 #include "turbo_runtime_json.h"
 
 typedef struct turbo_codex_delegate_binding_s {
   turbo_codex_client_t *client;
-  tstr_t model;
-  tstr_t cwd;
-  tstr_t sandbox;
-  tstr_t approval_policy;
+  tstr model;
+  tstr cwd;
+  tstr sandbox;
+  tstr approval_policy;
   uint64_t timeout_ms;
 } turbo_codex_delegate_binding_t;
 
@@ -31,11 +31,11 @@ static void turbo_codex_delegate_binding_destroy(void *user_data) {
 }
 
 static turbo_tool_status_t turbo_codex_tool_status(int rc) {
-  if (rc == TURBO_OK) return TURBO_TOOL_OK;
-  if (rc == TURBO_ECANCELED) return TURBO_TOOL_CANCELLED;
-  if (rc == TURBO_ETIMEDOUT) return TURBO_TOOL_DEADLINE_EXCEEDED;
-  if (rc == TURBO_EMSGSIZE) return TURBO_TOOL_OUTPUT_LIMIT;
-  if (rc == TURBO_EBUSY) return TURBO_TOOL_BACKPRESSURE;
+  if (rc == SALTS_OK) return TURBO_TOOL_OK;
+  if (rc == SALTS_ECANCELED) return TURBO_TOOL_CANCELLED;
+  if (rc == SALTS_ETIMEDOUT) return TURBO_TOOL_DEADLINE_EXCEEDED;
+  if (rc == SALTS_EMSGSIZE) return TURBO_TOOL_OUTPUT_LIMIT;
+  if (rc == SALTS_EBUSY) return TURBO_TOOL_BACKPRESSURE;
   return TURBO_TOOL_ERROR;
 }
 
@@ -52,10 +52,10 @@ static int turbo_codex_delegate_execute(const json_value_t *arguments,
   int rc;
   if (out_result) *out_result = NULL;
   if (!binding || !binding->client || !arguments ||
-      turbo_json_type(arguments) != TURBO_JSON_OBJECT || !out_result) {
+      json_type(arguments) != JSON_OBJECT || !out_result) {
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
-  task = turbo_json_get_string(arguments, "task");
+  task = json_get_string(arguments, "task");
   if (!task || !task[0]) return TURBO_TOOL_INVALID_ARGUMENT;
   turbo_codex_run_options_init(&options);
   options.model = binding->model;
@@ -65,22 +65,22 @@ static int turbo_codex_delegate_execute(const json_value_t *arguments,
   options.timeout_ms = binding->timeout_ms;
   rc = turbo_codex_client_run_text(binding->client, task, &options, &thread_id, &turn_id, &text,
                                    &turn);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     free(thread_id);
     free(turn_id);
     free(text);
     turbo_runtime_json_destroy(turn);
     return turbo_codex_tool_status(rc);
   }
-  result = turbo_json_create_object();
+  result = json_create_object();
   if (!result) {
     rc = TURBO_TOOL_OUT_OF_MEMORY;
     goto cleanup;
   }
-  turbo_json_object_set_string(result, "threadId", thread_id);
-  turbo_json_object_set_string(result, "turnId", turn_id);
-  turbo_json_object_set_string(result, "text", text ? text : "");
-  if (!turbo_json_object_add_checked(result, "turn", turn)) {
+  json_object_set_string(result, "threadId", thread_id);
+  json_object_set_string(result, "turnId", turn_id);
+  json_object_set_string(result, "text", text ? text : "");
+  if (!json_object_add_checked(result, "turn", turn)) {
     rc = TURBO_TOOL_OUT_OF_MEMORY;
     goto cleanup;
   }

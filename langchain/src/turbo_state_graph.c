@@ -1,7 +1,7 @@
 #include "turbo_state_graph.h"
 
 #include "turbo_agent_util_internal.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdio.h>
 #include <stdlib.h>

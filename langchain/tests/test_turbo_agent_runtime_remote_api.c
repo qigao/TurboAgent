@@ -1,11 +1,10 @@
 #include "tinytest.h"
-#include "http_common.h"
 #include "turbo_agent_graph.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_runtime_remote.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_test_support.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,16 +127,6 @@ static json_value_t *parse_remote_json_text(const char *json_text) {
   check_not_null(json_text);
   check_int_eq(turbo_parse_json((const uint8_t *)json_text, strlen(json_text), &json), 0);
   return json;
-}
-
-static void check_remote_http_json_content_type(http_response_t *response) {
-  char *content_type;
-
-  check_not_null(response);
-  content_type = http_response_get_header(response, "Content-Type");
-  check_not_null(content_type);
-  check_true(strstr(content_type, "application/json") != NULL);
-  free(content_type);
 }
 
 static json_value_t *create_remote_jsonrpc_request_from_fixture(const char *fixture_name,
@@ -1586,125 +1575,7 @@ spec("turbo agent runtime remote api") {
     turbo_agent_runtime_destroy(runtime);
   }
 
-  it("should handle http-like json-rpc requests over the canonical path") {
-    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
-    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
-    turbo_graph_t *graph = create_remote_graph();
-    remote_graph_registry_t registry = {"remote-skeleton", graph};
-    turbo_agent_runtime_remote_config_t config = {0};
-    turbo_agent_runtime_remote_t *remote;
-    json_value_t *request_json =
-        create_remote_jsonrpc_request_from_fixture("runtime_remote_thread_control.golden.json",
-                                                   "start_request");
-    char *request_json_text = NULL;
-    http_response_t *response;
-    json_value_t *response_json;
-
-    check_not_null(runtime);
-    check_not_null(graph);
-    check_not_null(request_json);
-
-    config.runtime = runtime;
-    config.graph_resolver = remote_graph_resolver;
-    config.graph_resolver_user_data = &registry;
-    remote = turbo_agent_runtime_remote_create(&config);
-    check_not_null(remote);
-
-    request_json_text = turbo_json_serialize(request_json, NULL);
-    check_not_null(request_json_text);
-    response = turbo_agent_runtime_remote_handle_http_jsonrpc(
-        remote, HTTP_POST, "/v1/runtime/jsonrpc", request_json_text);
-    check_not_null(response);
-    check_int_eq(response->status_code, 200);
-    check_remote_http_json_content_type(response);
-    check_not_null(response->body);
-    response_json = parse_remote_json_text(response->body);
-    check_remote_jsonrpc_success_fixture(response_json,
-                                         "runtime_remote_thread_control.golden.json",
-                                         "start_response");
-
-    turbo_free_json(&response_json);
-    http_response_free(response);
-    turbo_json_serialize_free(request_json_text);
-    turbo_free_json(&request_json);
-    turbo_agent_runtime_remote_destroy(remote);
-    turbo_graph_destroy(graph);
-    turbo_agent_runtime_destroy(runtime);
-  }
-
-  it("should reject non-post and unknown-path http-like json-rpc requests") {
-    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
-    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
-    turbo_agent_runtime_remote_config_t config = {0};
-    turbo_agent_runtime_remote_t *remote;
-    http_response_t *method_response;
-    http_response_t *path_response;
-    json_value_t *method_body_json;
-    json_value_t *path_body_json;
-
-    check_not_null(runtime);
-    config.runtime = runtime;
-    remote = turbo_agent_runtime_remote_create(&config);
-    check_not_null(remote);
-
-    method_response = turbo_agent_runtime_remote_handle_http_jsonrpc(
-        remote, HTTP_GET, "/v1/runtime/jsonrpc", "{}");
-    check_not_null(method_response);
-    check_int_eq(method_response->status_code, 405);
-    check_remote_http_json_content_type(method_response);
-    method_body_json = parse_remote_json_text(method_response->body);
-    check_true(turbo_json_is_null(turbo_json_object_get(method_body_json, "id")));
-    check_int_eq(turbo_json_get_int(turbo_json_object_get(method_body_json, "error"), "code", 0),
-                 -32600);
-
-    path_response = turbo_agent_runtime_remote_handle_http_jsonrpc(
-        remote, HTTP_POST, "/wrong/path", "{}");
-    check_not_null(path_response);
-    check_int_eq(path_response->status_code, 404);
-    check_remote_http_json_content_type(path_response);
-    path_body_json = parse_remote_json_text(path_response->body);
-    check_true(turbo_json_is_null(turbo_json_object_get(path_body_json, "id")));
-    check_int_eq(turbo_json_get_int(turbo_json_object_get(path_body_json, "error"), "code", 0),
-                 -32600);
-
-    turbo_free_json(&method_body_json);
-    turbo_free_json(&path_body_json);
-    http_response_free(method_response);
-    http_response_free(path_response);
-    turbo_agent_runtime_remote_destroy(remote);
-    turbo_agent_runtime_destroy(runtime);
-  }
-
-  it("should return bad request for malformed http-like json-rpc bodies") {
-    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
-    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
-    turbo_agent_runtime_remote_config_t config = {0};
-    turbo_agent_runtime_remote_t *remote;
-    http_response_t *response;
-    json_value_t *response_json;
-
-    check_not_null(runtime);
-    config.runtime = runtime;
-    remote = turbo_agent_runtime_remote_create(&config);
-    check_not_null(remote);
-
-    response = turbo_agent_runtime_remote_handle_http_jsonrpc(
-        remote, HTTP_POST, "/v1/runtime/jsonrpc", "{\"jsonrpc\":");
-    check_not_null(response);
-    check_int_eq(response->status_code, 400);
-    check_remote_http_json_content_type(response);
-    response_json = parse_remote_json_text(response->body);
-    check_true(turbo_json_is_null(turbo_json_object_get(response_json, "id")));
-    check_int_eq(turbo_json_get_int(turbo_json_object_get(response_json, "error"), "code", 0),
-                 -32600);
-
-    turbo_free_json(&response_json);
-    http_response_free(response);
-    turbo_agent_runtime_remote_destroy(remote);
-    turbo_agent_runtime_destroy(runtime);
-  }
-
-  it("should return json-rpc invalid params for malformed start requests") {
+        it("should return json-rpc invalid params for malformed start requests") {
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
     turbo_agent_runtime_remote_config_t config = {0};

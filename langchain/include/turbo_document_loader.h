@@ -1,9 +1,9 @@
 #ifndef TURBO_DOCUMENT_LOADER_H
 #define TURBO_DOCUMENT_LOADER_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #ifdef __cplusplus
 extern "C" {

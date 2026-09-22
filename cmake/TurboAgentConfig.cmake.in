@@ -1,12 +1,18 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(TurboUtils CONFIG)
-find_dependency(TurboParser CONFIG)
-find_dependency(TurboNet CONFIG)
-find_dependency(TurboHttp CONFIG)
-find_dependency(TurboWasm CONFIG)
-find_dependency(unofficial-sqlite3 CONFIG)
+find_dependency(SaltsUtils CONFIG)
+
+if("@ENABLE_MCP_TOOLS@" STREQUAL "ON" OR "@ENABLE_LANGCHAIN@" STREQUAL "ON")
+  find_dependency(Chttp CONFIG)
+endif()
+if("@ENABLE_LLM_SANDBOX@" STREQUAL "ON")
+  find_dependency(TurboWasm CONFIG)
+endif()
+if("@ENABLE_LANGCHAIN@" STREQUAL "ON")
+  find_dependency(OpenSSL)
+  find_dependency(unofficial-sqlite3 CONFIG)
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/TurboAgentTargets.cmake")
 check_required_components(TurboAgent)

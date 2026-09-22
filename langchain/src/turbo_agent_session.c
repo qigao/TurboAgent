@@ -11,12 +11,12 @@
 #include "turbo_agent_util_internal.h"
 #include "turbo_agent_workflow.h"
 #include "turbo_model_provider.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_prompt.h"
 #include "turbo_retriever.h"
 #include "turbo_tool_schema.h"
 
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -30,31 +30,31 @@ struct turbo_agent_session_s {
   size_t max_follow_ups_per_execution;
   turbo_agent_memory_store_t memory_store;
   turbo_agent_session_workflow_kind_t workflow_kind;
-  tstr_t thread_id;
-  tstr_t last_run_id;
-  tstr_t last_checkpoint_id;
-  tstr_t memory_namespace;
-  tstr_t parent_agent_run_id;
-  tstr_t parent_tool_call_id;
-  tstr_t parent_tool_name;
-  tstr_t parent_graph_run_id;
-  tstr_t call_frame_id;
-  tstr_t model;
-  tstr_t base_url;
-  tstr_t provider_name;
+  tstr thread_id;
+  tstr last_run_id;
+  tstr last_checkpoint_id;
+  tstr memory_namespace;
+  tstr parent_agent_run_id;
+  tstr parent_tool_call_id;
+  tstr parent_tool_name;
+  tstr parent_graph_run_id;
+  tstr call_frame_id;
+  tstr model;
+  tstr base_url;
+  tstr provider_name;
   int has_api_key;
   turbo_agent_knowledge_store_t *knowledge_store;
-  tstr_t knowledge_query;
-  tstr_t knowledge_kind;
-  tstr_t knowledge_uri_prefix;
+  tstr knowledge_query;
+  tstr knowledge_kind;
+  tstr knowledge_uri_prefix;
   size_t knowledge_limit;
   turbo_agent_knowledge_context_config_t knowledge_context_config;
   turbo_retriever_t *retriever;
-  tstr_t retriever_query;
-  tstr_t retriever_kind;
-  tstr_t retriever_uri_prefix;
+  tstr retriever_query;
+  tstr retriever_kind;
+  tstr retriever_uri_prefix;
   size_t retriever_limit;
-  tstr_t retriever_scope;
+  tstr retriever_scope;
   turbo_retriever_context_config_t retriever_context_config;
 };
 
@@ -66,15 +66,15 @@ static int turbo_agent_session_apply_claimed_message(turbo_agent_session_t *sess
   const json_value_t *payload;
   const char *inbox_id;
   const char *content;
-  char event_id[TURBO_UUID_STRING_SIZE];
-  turbo_uuid_t uuid;
+  char event_id[SALTS_UUID_STRING_SIZE];
+  salts_uuid_t uuid;
 
   if (!session || !session->inbox || !record || !state) return -1;
   payload = turbo_json_object_get(record, "payload");
   inbox_id = turbo_json_get_string(record, "inbox_id");
   content = payload ? turbo_json_get_string(payload, "content") : NULL;
-  if (!inbox_id || !content || content[0] == '\0' || turbo_uuid_v7_generate(&uuid) != TURBO_OK ||
-      turbo_uuid_format(&uuid, event_id, sizeof(event_id)) != TURBO_OK) {
+  if (!inbox_id || !content || content[0] == '\0' || salts_uuid_v7_generate(&uuid) != SALTS_OK ||
+      salts_uuid_format(&uuid, event_id, sizeof(event_id)) != SALTS_OK) {
     (void)turbo_agent_inbox_requeue(session->inbox, inbox_id ? inbox_id : "");
     return -1;
   }
@@ -88,7 +88,7 @@ static int turbo_agent_session_apply_claimed_message(turbo_agent_session_t *sess
   turbo_json_object_set_string(event, "inbox_kind",
                                kind == TURBO_AGENT_INBOX_STEER ? "steer" : "follow_up");
   turbo_json_object_set_string(event, "content", content);
-  if (turbo_agent_inbox_bind_applied_event(session->inbox, inbox_id, event_id) != TURBO_OK ||
+  if (turbo_agent_inbox_bind_applied_event(session->inbox, inbox_id, event_id) != SALTS_OK ||
       turbo_agent_state_add_user_message(state, content) != 0 ||
       turbo_agent_append_event(state, event) != 0) {
     (void)turbo_agent_inbox_requeue(session->inbox, inbox_id);
@@ -111,15 +111,15 @@ static int turbo_agent_session_apply_pending_steer(turbo_agent_t *agent, json_va
     turbo_agent_execution_context_get(&context);
     if (!context.run_id || context.run_id[0] == '\0') return -1;
     rc = turbo_agent_inbox_claim(session->inbox, TURBO_AGENT_INBOX_STEER, context.run_id, &record);
-    if (rc != TURBO_ENOENT && rc != TURBO_ECANCELED && rc != TURBO_EBUSY) {
-      if (rc != TURBO_OK || !record) return -1;
+    if (rc != SALTS_ENOENT && rc != SALTS_ECANCELED && rc != SALTS_EBUSY) {
+      if (rc != SALTS_OK || !record) return -1;
       rc = turbo_agent_session_apply_claimed_message(session, TURBO_AGENT_INBOX_STEER, record,
                                                      state);
       turbo_runtime_json_destroy(record);
-      if (rc != TURBO_OK) return rc;
+      if (rc != SALTS_OK) return rc;
     }
   }
-  return session->context ? turbo_agent_context_prepare(session->context, state, 0) : TURBO_OK;
+  return session->context ? turbo_agent_context_prepare(session->context, state, 0) : SALTS_OK;
 }
 
 static int turbo_agent_session_handle_context_overflow(turbo_agent_t *agent, json_value_t *state,
@@ -150,8 +150,8 @@ static int turbo_agent_session_should_create_agent(const turbo_agent_config_t *c
                     config->transport_fn || config->provider || config->tool_registry);
 }
 
-static void turbo_agent_session_replace_string(tstr_t *slot, const char *text) {
-  tstr_t copy = turbo_agent_util_strdup(text);
+static void turbo_agent_session_replace_string(tstr *slot, const char *text) {
+  tstr copy = turbo_agent_util_strdup(text);
 
   if (!slot) {
     tstr_free(copy);
@@ -958,7 +958,7 @@ static int turbo_agent_session_run_follow_ups(turbo_agent_session_t *session, tu
   size_t follow_up_count;
 
   if (!session || !session->inbox || !graph || !summary_slot || !out_state) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   for (follow_up_count = 0; follow_up_count < session->max_follow_ups_per_execution;
        ++follow_up_count) {
@@ -973,15 +973,15 @@ static int turbo_agent_session_run_follow_ups(turbo_agent_session_t *session, tu
     int run_rc;
     int rc;
 
-    if (!status || strcmp(status, "completed") != 0) return TURBO_OK;
+    if (!status || strcmp(status, "completed") != 0) return SALTS_OK;
     rc = turbo_agent_inbox_claim(session->inbox, TURBO_AGENT_INBOX_FOLLOW_UP, session->last_run_id,
                                  &record);
-    if (rc == TURBO_ENOENT || rc == TURBO_ECANCELED) return TURBO_OK;
-    if (rc != TURBO_OK || !record) return rc != TURBO_OK ? rc : TURBO_EIO;
+    if (rc == SALTS_ENOENT || rc == SALTS_ECANCELED) return SALTS_OK;
+    if (rc != SALTS_OK || !record) return rc != SALTS_OK ? rc : SALTS_EIO;
     rc = turbo_agent_session_apply_claimed_message(session, TURBO_AGENT_INBOX_FOLLOW_UP, record,
                                                    *out_state);
     turbo_runtime_json_destroy(record);
-    if (rc != TURBO_OK) return rc;
+    if (rc != SALTS_OK) return rc;
 
     exec_options.thread_id = session->thread_id;
     exec_options.event_sink = event_sink;
@@ -995,7 +995,7 @@ static int turbo_agent_session_run_follow_ups(turbo_agent_session_t *session, tu
                        cancel_token, &next_summary, &next_state)
                  : turbo_agent_runtime_exec_start(session->runtime, graph, *out_state, options,
                                                   &exec_options, &next_summary, &next_state);
-    if (run_rc != TURBO_OK) {
+    if (run_rc != SALTS_OK) {
       turbo_runtime_json_destroy(next_state);
       turbo_runtime_json_destroy(next_summary);
       return run_rc;
@@ -1009,12 +1009,12 @@ static int turbo_agent_session_run_follow_ups(turbo_agent_session_t *session, tu
     turbo_runtime_json_destroy(previous_state);
 
     rc = turbo_agent_session_capture_summary(session, next_summary);
-    if (rc == TURBO_OK) {
+    if (rc == SALTS_OK) {
       rc = turbo_agent_inbox_commit_bound_claim(session->inbox);
     }
-    if (rc != TURBO_OK) return rc;
+    if (rc != SALTS_OK) return rc;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static const char *turbo_agent_session_output_item_child_run_id(const json_value_t *output_item) {
@@ -1220,14 +1220,14 @@ CXX_C_API int turbo_agent_session_inbox_configure(turbo_agent_session_t *session
   turbo_agent_inbox_t *inbox;
   if (!session || !config || !session->runtime || !session->thread_id ||
       session->thread_id[0] == '\0') {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   if (session->inbox) {
-    return TURBO_EALREADY;
+    return SALTS_EALREADY;
   }
   {
     int rc = turbo_agent_inbox_create(session->runtime, session->thread_id, config, &inbox);
-    if (rc != TURBO_OK) {
+    if (rc != SALTS_OK) {
       return rc;
     }
   }
@@ -1237,7 +1237,7 @@ CXX_C_API int turbo_agent_session_inbox_configure(turbo_agent_session_t *session
     session->agent->before_turn = turbo_agent_session_apply_pending_steer;
     session->agent->before_turn_user_data = session;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_session_prepare_start_options_internal(
@@ -1245,7 +1245,7 @@ int turbo_agent_session_prepare_start_options_internal(
     void *event_sink_user_data, turbo_agent_runtime_parent_link_t *parent_link,
     turbo_agent_runtime_exec_options_t *out_options) {
   if (!session || !session->runtime || !parent_link || !out_options) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   memset(parent_link, 0, sizeof(*parent_link));
   memset(out_options, 0, sizeof(*out_options));
@@ -1255,7 +1255,7 @@ int turbo_agent_session_prepare_start_options_internal(
   if (turbo_agent_session_has_parent_link(session, parent_link)) {
     out_options->parent_link = parent_link;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_session_prepare_resume_options_internal(
@@ -1264,16 +1264,16 @@ int turbo_agent_session_prepare_resume_options_internal(
     turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
     turbo_agent_runtime_exec_options_t *out_options) {
   if (!session || !session->runtime || !session_options || !out_options) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   if (session_options->scope != TURBO_SESSION_SCOPE_CHECKPOINT &&
       session_options->scope != TURBO_SESSION_SCOPE_THREAD) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   if (session_options->input_kind != TURBO_SESSION_INPUT_OVERRIDE &&
       session_options->input_kind != TURBO_SESSION_INPUT_PATCH &&
       session_options->input_kind != TURBO_SESSION_INPUT_COMMAND) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
 
   memset(out_options, 0, sizeof(*out_options));
@@ -1281,19 +1281,19 @@ int turbo_agent_session_prepare_resume_options_internal(
   out_options->input_kind = (turbo_agent_runtime_input_kind_t)session_options->input_kind;
   if (out_options->scope == TURBO_RUNTIME_SCOPE_THREAD) {
     if (!session->thread_id || !session->thread_id[0]) {
-      return TURBO_EINVAL;
+      return SALTS_EINVAL;
     }
     out_options->thread_id = session->thread_id;
   } else {
     out_options->checkpoint_id = turbo_agent_session_resolve_checkpoint_id(
         session, session_options->checkpoint_id);
     if (!out_options->checkpoint_id || !out_options->checkpoint_id[0]) {
-      return TURBO_EINVAL;
+      return SALTS_EINVAL;
     }
   }
   out_options->event_sink = event_sink;
   out_options->event_sink_user_data = event_sink_user_data;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_session_complete_execution_internal(
@@ -1305,13 +1305,13 @@ int turbo_agent_session_complete_execution_internal(
   int rc;
 
   if (!session || !graph || !summary || !*summary || !state || !*state) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   rc = turbo_agent_session_capture_summary(session, *summary);
-  if (rc == TURBO_OK && session->inbox) {
+  if (rc == SALTS_OK && session->inbox) {
     rc = turbo_agent_inbox_commit_bound_claim(session->inbox);
   }
-  if (rc == TURBO_OK && session->inbox) {
+  if (rc == SALTS_OK && session->inbox) {
     rc = turbo_agent_session_run_follow_ups(
         session, graph, graph_options, event_sink, event_sink_user_data,
         cancel_token, summary, state);
@@ -1326,23 +1326,23 @@ CXX_C_API int turbo_agent_session_context_configure(
 
   if (!session || !policy || !session->runtime || !session->agent || !session->thread_id ||
       session->thread_id[0] == '\0') {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
-  if (session->context) return TURBO_EALREADY;
+  if (session->context) return SALTS_EALREADY;
   rc = turbo_agent_context_create(session->runtime, session->agent, session->thread_id, policy,
                                   &context);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   session->context = context;
   session->agent->before_turn = turbo_agent_session_apply_pending_steer;
   session->agent->before_turn_user_data = session;
   session->agent->context_overflow = turbo_agent_session_handle_context_overflow;
   session->agent->context_overflow_user_data = session;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 CXX_C_API int turbo_agent_session_context_compact(turbo_agent_session_t *session,
                                                   const json_value_t *state) {
-  if (!session || !session->context || !state) return TURBO_EINVAL;
+  if (!session || !session->context || !state) return SALTS_EINVAL;
   return turbo_agent_context_prepare(session->context, (json_value_t *)state, 1);
 }
 
@@ -1350,7 +1350,7 @@ CXX_C_API int turbo_agent_session_context_status(turbo_agent_session_t *session,
                                                  json_value_t **out_status) {
   if (!session || !session->context) {
     if (out_status) *out_status = NULL;
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return turbo_agent_context_status(session->context, out_status);
 }
@@ -1363,7 +1363,7 @@ CXX_C_API int turbo_agent_session_enqueue(turbo_agent_session_t *session,
     if (out_inbox_id) {
       *out_inbox_id = NULL;
     }
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return turbo_agent_inbox_enqueue(session->inbox, kind, message, timeout_ms, out_inbox_id);
 }
@@ -1374,7 +1374,7 @@ CXX_C_API int turbo_agent_session_inbox_status(turbo_agent_session_t *session, c
     if (out_status) {
       *out_status = NULL;
     }
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return turbo_agent_inbox_status(session->inbox, inbox_id, out_status);
 }
@@ -1386,7 +1386,7 @@ CXX_C_API int turbo_agent_session_inbox_claim(turbo_agent_session_t *session,
     if (out_record) {
       *out_record = NULL;
     }
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return turbo_agent_inbox_claim(session->inbox, kind, run_id, out_record);
 }
@@ -1396,17 +1396,17 @@ CXX_C_API int turbo_agent_session_inbox_mark_applied(turbo_agent_session_t *sess
                                                      const char *applied_event_id) {
   return session && session->inbox
              ? turbo_agent_inbox_mark_applied(session->inbox, inbox_id, applied_event_id)
-             : TURBO_EINVAL;
+             : SALTS_EINVAL;
 }
 
 CXX_C_API int turbo_agent_session_inbox_requeue(turbo_agent_session_t *session,
                                                 const char *inbox_id) {
   return session && session->inbox ? turbo_agent_inbox_requeue(session->inbox, inbox_id)
-                                   : TURBO_EINVAL;
+                                   : SALTS_EINVAL;
 }
 
 CXX_C_API int turbo_agent_session_inbox_close(turbo_agent_session_t *session) {
-  return session && session->inbox ? turbo_agent_inbox_close(session->inbox) : TURBO_EINVAL;
+  return session && session->inbox ? turbo_agent_inbox_close(session->inbox) : SALTS_EINVAL;
 }
 
 CXX_C_API turbo_agent_t *turbo_agent_session_agent(const turbo_agent_session_t *session) {
@@ -1437,7 +1437,7 @@ turbo_agent_session_tool_registry(const turbo_agent_session_t *session) {
 CXX_C_API int turbo_agent_session_tool_executor_configure(
     turbo_agent_session_t *session,
     const turbo_agent_tool_executor_config_t *config) {
-  if (!session || !session->agent) return TURBO_EINVAL;
+  if (!session || !session->agent) return SALTS_EINVAL;
   return turbo_agent_tool_executor_configure(session->agent, config);
 }
 

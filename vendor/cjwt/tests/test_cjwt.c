@@ -3,7 +3,7 @@
 
 #include "tinytest.h"
 
-#include <turbo_parser.h>
+#include <json_parser.h>
 #include <stdbool.h>
 #include <errno.h>
 #include <stdio.h>

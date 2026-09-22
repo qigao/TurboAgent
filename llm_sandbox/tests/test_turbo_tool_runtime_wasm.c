@@ -1,5 +1,5 @@
 #include "tinytest.h"
-#include "turbo_fs.h"
+#include <salts_fs.h>
 #include "turbo_tool_runtime_wasm.h"
 #include "turbo_tool_runtime_wasm3.h"
 
@@ -38,11 +38,11 @@ static turbo_tool_runtime_t *create_runtime(const char *module_path, uint32_t ca
   turbo_wasm_execution_limits_t limits;
   turbo_wasm_policy_t *policy = NULL;
   turbo_tool_runtime_t *runtime = NULL;
-  char module_root[TURBO_FS_MAX_PATH];
-  char module_name[TURBO_FS_MAX_PATH];
+  char module_root[SALTS_FS_MAX_PATH];
+  char module_name[SALTS_FS_MAX_PATH];
 
-  if (turbo_fs_path_dirname(module_path, module_root, sizeof(module_root)) != 0 ||
-      turbo_fs_path_basename(module_path, module_name, sizeof(module_name)) != 0)
+  if (salts_fs_path_dirname(module_path, module_root, sizeof(module_root)) != 0 ||
+      salts_fs_path_basename(module_path, module_name, sizeof(module_name)) != 0)
     return NULL;
   policy = turbo_wasm_policy_create();
   if (!policy || turbo_wasm_policy_set_capabilities(policy, capabilities) != TURBO_WASM_OK ||

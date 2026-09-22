@@ -1,7 +1,7 @@
 #ifndef TURBO_TOOL_RUNTIME_WASM3_H
 #define TURBO_TOOL_RUNTIME_WASM3_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_tool_runtime_wasm.h"
 

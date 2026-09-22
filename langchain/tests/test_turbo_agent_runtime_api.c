@@ -655,10 +655,10 @@ spec("turbo agent runtime api") {
     check_not_null(runtime);
     check_not_null(graph);
     check_not_null(state);
-    check_int_eq(turbo_cancel_source_create(NULL, &source), TURBO_OK);
-    check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
+    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
     check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER),
-                 TURBO_OK);
+                 SALTS_OK);
 
     check_int_eq(turbo_agent_runtime_exec_start_controlled(
                      runtime, graph, state, NULL,

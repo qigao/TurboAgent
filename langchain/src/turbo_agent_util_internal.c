@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-CXX_C_API tstr_t turbo_agent_util_strdup(const char *src) {
+CXX_C_API tstr turbo_agent_util_strdup(const char *src) {
   return tstr_dup(src);
 }
 
@@ -88,7 +88,7 @@ CXX_C_API void turbo_agent_util_free_user_data(void *user_data) { free(user_data
 
 CXX_C_API int turbo_agent_util_append_bytes(char **buffer, size_t *length, const char *data,
                                             size_t data_len) {
-  tstr_t next;
+  tstr next;
 
   if (!buffer || (!data && data_len > 0)) {
     return -1;

@@ -6,7 +6,7 @@
 #include "turbo_agent_util_internal.h"
 #include "turbo_event_log.h"
 #include "turbo_graph_run_log.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <errno.h>
 #include <stdatomic.h>
@@ -1181,9 +1181,9 @@ int turbo_agent_runtime_store_put_json(turbo_agent_runtime_t *runtime, const cha
   if (!serialized) {
     return -1;
   }
-  turbo_mutex_lock(&runtime->store_mutex);
+  salts_mutex_lock(&runtime->store_mutex);
   rc = runtime->store.put(runtime->store.user_data, collection, id, serialized);
-  turbo_mutex_unlock(&runtime->store_mutex);
+  salts_mutex_unlock(&runtime->store_mutex);
   turbo_json_serialize_free(serialized);
   return rc;
 }
@@ -1198,9 +1198,9 @@ int turbo_agent_runtime_store_get_json(turbo_agent_runtime_t *runtime, const cha
   }
 
   *out_record_json = NULL;
-  turbo_mutex_lock(&runtime->store_mutex);
+  salts_mutex_lock(&runtime->store_mutex);
   rc = runtime->store.get(runtime->store.user_data, collection, id, &serialized);
-  turbo_mutex_unlock(&runtime->store_mutex);
+  salts_mutex_unlock(&runtime->store_mutex);
   if (rc != 0 || !serialized) {
     free(serialized);
     return -1;
@@ -1221,10 +1221,10 @@ int turbo_agent_runtime_store_list_json(turbo_agent_runtime_t *runtime, const ch
   }
 
   *out_records_json = NULL;
-  turbo_mutex_lock(&runtime->store_mutex);
+  salts_mutex_lock(&runtime->store_mutex);
   rc = runtime->store.list(runtime->store.user_data, collection, filter_key, filter_value,
                            &serialized);
-  turbo_mutex_unlock(&runtime->store_mutex);
+  salts_mutex_unlock(&runtime->store_mutex);
   if (rc != 0 || !serialized) {
     free(serialized);
     return -1;
@@ -2119,7 +2119,7 @@ turbo_agent_runtime_create(const turbo_agent_runtime_store_t *store) {
     return NULL;
   }
   runtime->store = *store;
-  turbo_mutex_init(&runtime->store_mutex);
+  salts_mutex_init(&runtime->store_mutex);
   if (!runtime->store_mutex) {
     free(runtime);
     return NULL;
@@ -2134,7 +2134,7 @@ CXX_C_API void turbo_agent_runtime_destroy(turbo_agent_runtime_t *runtime) {
   if (runtime->store.user_data_free) {
     runtime->store.user_data_free(runtime->store.user_data);
   }
-  turbo_mutex_destroy(&runtime->store_mutex);
+  salts_mutex_destroy(&runtime->store_mutex);
   free(runtime);
 }
 

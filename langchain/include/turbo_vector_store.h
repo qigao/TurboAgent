@@ -1,10 +1,10 @@
 #ifndef TURBO_VECTOR_STORE_H
 #define TURBO_VECTOR_STORE_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 #include <stddef.h>
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_text_splitter.h"
 
 #ifdef __cplusplus

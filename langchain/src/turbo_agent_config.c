@@ -2,10 +2,10 @@
 #include "turbo_agent_transport_internal.h"
 #include "turbo_agent_util_internal.h"
 
-#include "CoroNet/turbo_coro_context.h"
-#include "http_client.h"
+#include <http_client/http.h>
+#include <dotenv.h>
 #include "turbo_model_provider.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -106,19 +106,19 @@ static char *turbo_agent_normalize_endpoint_path(const char *src) {
 
 static const turbo_model_provider_t turbo_agent_responses_provider = {
     "openai_responses", "responses", turbo_agent_build_responses_turn_request,
-    turbo_agent_configure_http_client_openai};
+    turbo_agent_build_http_headers_openai};
 
 static const turbo_model_provider_t turbo_agent_chat_completions_provider = {
     "openai_chat_completions", "chat/completions", turbo_agent_build_chat_turn_request,
-    turbo_agent_configure_http_client_openai};
+    turbo_agent_build_http_headers_openai};
 
 static const turbo_model_provider_t turbo_agent_compatible_chat_completions_provider = {
     "openai_compatible_chat_completions", "chat/completions",
-    turbo_agent_build_compatible_chat_turn_request, turbo_agent_configure_http_client_openai};
+    turbo_agent_build_compatible_chat_turn_request, turbo_agent_build_http_headers_openai};
 
 static const turbo_model_provider_t turbo_anthropic_messages_provider = {
     "anthropic_messages", "messages", turbo_agent_build_anthropic_messages_turn_request,
-    turbo_agent_configure_http_client_anthropic};
+    turbo_agent_build_http_headers_anthropic};
 
 static const turbo_model_provider_t *
 turbo_agent_provider_from_api_mode(turbo_agent_api_mode_t api_mode) {
@@ -326,12 +326,19 @@ CXX_C_API int turbo_agent_apply_core_config(turbo_agent_t *agent,
   agent->structured_output_strict = config->structured_output_strict ? 1 : 0;
   agent->structured_output_max_retries = config->structured_output_max_retries;
   agent->api_key = config->api_key ? turbo_agent_util_strdup(config->api_key) : NULL;
+  if (agent->api_key) {
+    size_t key_length = strlen(agent->api_key);
+    agent->http_authorization = (char *)tstr_new_len("Bearer ", 7u);
+    if (agent->http_authorization) {
+      agent->http_authorization = tstr_cat_len(agent->http_authorization, agent->api_key, key_length);
+    }
+  }
 
   if (!provider->build_request || !agent->model || !agent->base_url || !agent->endpoint_path ||
       (config->instructions && !agent->instructions) ||
       (config->structured_output_name && !agent->structured_output_name) ||
       (config->structured_output_schema_json && !agent->structured_output_schema_json) ||
-      (config->api_key && !agent->api_key)) {
+      (config->api_key && (!agent->api_key || !agent->http_authorization))) {
     return -1;
   }
 
@@ -343,54 +350,71 @@ CXX_C_API int turbo_agent_apply_core_config(turbo_agent_t *agent,
   return 0;
 }
 
-typedef struct turbo_agent_http_client_create_task_s {
-  turbo_agent_t *agent;
-  int done;
-} turbo_agent_http_client_create_task_t;
+static native_io_backend_kind turbo_agent_http_backend(void) {
+#if defined(_WIN32)
+  return NATIVE_IO_BACKEND_IOCP;
+#elif defined(__linux__)
+  return NATIVE_IO_BACKEND_EPOLL;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+  return NATIVE_IO_BACKEND_KQUEUE;
+#else
+  return (native_io_backend_kind)0;
+#endif
+}
 
-static void turbo_agent_http_client_create_coro(coro_t *co, void *arg) {
-  turbo_agent_http_client_create_task_t *task = (turbo_agent_http_client_create_task_t *)arg;
-  coro_context_t *ctx;
-
-  (void)co;
-  if (task && task->agent) {
-    task->agent->http_client = http_client_create(task->agent->base_url);
-    task->done = 1;
-  }
-
-  ctx = coro_context_current();
-  if (ctx) {
-    coro_context_stop(ctx);
-  }
+static chttp_client_config turbo_agent_default_http_client_config(void) {
+  const cnet_client_config network = {
+      .backend = turbo_agent_http_backend(),
+      .connection_capacity = 4u,
+      .command_capacity = 64u,
+      .request_capacity = 64u,
+      .completion_batch_capacity = 16u,
+      .event_capacity = 64u,
+      .max_send_bytes = 16u * 1024u * 1024u,
+      .receive_buffer_bytes = 256u * 1024u,
+      .connect_timeout_ms = 60000u,
+      .read_timeout_ms = 60000u,
+      .write_timeout_ms = 60000u,
+      .tls_io_buffer_bytes = 64u * 1024u,
+      .tls_handshake_timeout_ms = 60000u,
+      .command_buffer_bytes = 0u,
+      .event_buffer_bytes = 0u};
+  const chttp_client_config config = {
+      .network = network,
+      .request_capacity = 4u,
+      .max_start_line_bytes = 8192u,
+      .max_header_count = 64u,
+      .max_header_bytes = 64u * 1024u,
+      .max_request_body_bytes = 16u * 1024u * 1024u,
+      .max_response_body_bytes = 64u * 1024u * 1024u,
+      .max_informational_responses = 8u,
+      .stream_chunk_bytes = 64u * 1024u,
+      .h2_input_buffer_bytes = 128u * 1024u,
+      .h2_hpack_dynamic_table_bytes = 4096u,
+      .h2_max_settings_count = 32u};
+  return config;
 }
 
 static int turbo_agent_create_owned_http_client(turbo_agent_t *agent) {
-  turbo_agent_http_client_create_task_t task = {0};
-  coro_context_t *ctx;
+  chttp_client_config config;
 
   if (!agent) {
     return -1;
   }
 
-  ctx = coro_context_create(NULL);
-  if (!ctx) {
+  agent->http_client = (chttp_client *)calloc(1u, sizeof(*agent->http_client));
+  if (!agent->http_client) {
     return -1;
   }
 
-  task.agent = agent;
-  if (coro_context_spawn(ctx, turbo_agent_http_client_create_coro, &task) != 0) {
-    coro_context_destroy(ctx);
+  config = turbo_agent_default_http_client_config();
+  if (config.network.backend == (native_io_backend_kind)0 ||
+      chttp_client_init(agent->http_client, &config) != SALTS_OK) {
+    free(agent->http_client);
+    agent->http_client = NULL;
     return -1;
   }
 
-  coro_context_run(ctx, TURBO_RUN_DEFAULT);
-  if (!task.done || !agent->http_client) {
-    coro_context_destroy(ctx);
-    return -1;
-  }
-
-  agent->http_context = ctx;
-  agent->owns_http_context = 1;
   agent->owns_http_client = 1;
   return 0;
 }
@@ -407,12 +431,6 @@ CXX_C_API int turbo_agent_attach_http_client(turbo_agent_t *agent,
     agent->owns_http_client = 0;
   } else if (!config->transport_fn) {
     if (turbo_agent_create_owned_http_client(agent) != 0) {
-      return -1;
-    }
-  }
-
-  if (agent->http_client && provider->configure_http_client) {
-    if (provider->configure_http_client(agent, agent->http_client) != 0) {
       return -1;
     }
   }
@@ -439,9 +457,9 @@ CXX_C_API int turbo_agent_config_apply_env(turbo_agent_config_t *config, const c
   }
 
   if (env_path && env_path[0] != '\0') {
-    env_rc = turbo_dotenv_load(env_path, overwrite_env ? true : false);
+    env_rc = dotenv_load(env_path, overwrite_env ? true : false);
   } else {
-    env_rc = turbo_dotenv_load_default(overwrite_env ? true : false);
+    env_rc = dotenv_load_default(overwrite_env ? true : false);
   }
   turbo_agent_config_sync_process_env();
 

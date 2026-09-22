@@ -1,8 +1,7 @@
 #ifndef TURBO_RUNTIME_CONTROL_H
 #define TURBO_RUNTIME_CONTROL_H
 
-#include <platform.h>
-#include <turbo_error.h>
+#include <turbo_agent_api.h>
 
 #include <stdint.h>
 
@@ -54,7 +53,7 @@ typedef struct turbo_cancel_source_config_s {
  * @brief Create the single writable owner for one cancellation state.
  * @param config Optional versioned configuration. NULL creates no deadline.
  * @param out_source Receives the owned source on success.
- * @return TURBO_OK, TURBO_EINVAL, or TURBO_ENOMEM.
+ * @return SALTS_OK, SALTS_EINVAL, or SALTS_ENOMEM.
  */
 CXX_C_API int turbo_cancel_source_create(const turbo_cancel_source_config_t *config,
                                          turbo_cancel_source_t **out_source);
@@ -70,14 +69,14 @@ CXX_C_API void turbo_cancel_source_destroy(turbo_cancel_source_t *source);
 
 /**
  * @brief Create one owned read-only token from a source.
- * @return TURBO_OK, TURBO_EINVAL, TURBO_ENOMEM, or TURBO_ERANGE.
+ * @return SALTS_OK, SALTS_EINVAL, SALTS_ENOMEM, or SALTS_ERANGE.
  */
 CXX_C_API int turbo_cancel_source_token(const turbo_cancel_source_t *source,
                                         turbo_cancel_token_t **out_token);
 
 /**
  * @brief Publish the first cancellation reason and wake every waiter.
- * @return TURBO_OK, TURBO_EINVAL, or TURBO_EALREADY when a reason already won.
+ * @return SALTS_OK, SALTS_EINVAL, or SALTS_EALREADY when a reason already won.
  */
 CXX_C_API int turbo_cancel_source_cancel(turbo_cancel_source_t *source,
                                          turbo_cancel_reason_t reason);
@@ -93,8 +92,8 @@ CXX_C_API void turbo_cancel_token_release(turbo_cancel_token_t *token);
 
 /**
  * @brief Check cancellation and materialize an expired deadline.
- * @return TURBO_OK while active, TURBO_ECANCELED for explicit cancellation,
- *         TURBO_ETIMEDOUT for deadline expiry, or TURBO_EINVAL.
+ * @return SALTS_OK while active, SALTS_ECANCELED for explicit cancellation,
+ *         SALTS_ETIMEDOUT for deadline expiry, or SALTS_EINVAL.
  */
 CXX_C_API int turbo_cancel_token_check(const turbo_cancel_token_t *token);
 

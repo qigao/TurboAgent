@@ -1,7 +1,7 @@
 #ifndef TURBO_MCP_TOOL_PACK_H
 #define TURBO_MCP_TOOL_PACK_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_tool_registry.h"
 
@@ -46,7 +46,7 @@ typedef struct turbo_mcp_tool_pack_config_s {
   const char *server_id;
   const char *client_name;
   const char *client_version;
-  /** Optional host-owned credential copied into the default TurboHTTP client. */
+  /** Optional host-owned credential copied into the default CHTTP client. */
   const char *bearer_token;
   int64_t timeout_ms;
   size_t max_tools;

@@ -11,11 +11,10 @@ target_compile_definitions(runtime_tools PRIVATE SHARED_CXX)
 target_include_directories(
   runtime_tools PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                        $<INSTALL_INTERFACE:include>)
-target_link_libraries(runtime_tools PUBLIC TurboAgent::RuntimeData TurboParser::Parser)
+target_link_libraries(runtime_tools PUBLIC TurboAgent::RuntimeData Salts::JsonParser)
 
 cmake_config_target(runtime_tools FOLDER "Runtime Tools" EXPORT_NAME RuntimeTools
                     ALIAS TurboAgent::RuntimeTools)
-add_library(TurboNet::RuntimeTools ALIAS runtime_tools)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 
@@ -26,7 +25,7 @@ if(BUILD_TESTS)
     ${TEST_SOURCES}
     LIBS
     runtime_tools
-    TurboUtils::TinyTest
+    Salts::TinyTest
     INCLUDES
     include
     FOLDER

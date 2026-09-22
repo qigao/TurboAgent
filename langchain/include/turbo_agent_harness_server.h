@@ -1,8 +1,7 @@
 #ifndef TURBO_AGENT_HARNESS_SERVER_H
 #define TURBO_AGENT_HARNESS_SERVER_H
 
-#include <platform.h>
-#include <turbo_error.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_agent_harness.h"
 #include "turbo_agent_inbox.h"
@@ -104,16 +103,16 @@ CXX_C_API void turbo_agent_harness_connection_close(turbo_agent_harness_connecti
  * Dispatch one headerless JSON-RPC-style request or notification.
  *
  * Requests return one caller-owned TurboParser JSON response. Successful
- * notifications return `TURBO_OK` with `*out_response_json == NULL`.
+ * notifications return `SALTS_OK` with `*out_response_json == NULL`.
  * Protocol failures are represented as JSON `error` responses and still
- * return `TURBO_OK`; C errors mean the dispatcher could not produce a valid
+ * return `SALTS_OK`; C errors mean the dispatcher could not produce a valid
  * response.
  *
  * @param connection Live connection.
  * @param request_json Borrowed TurboParser JSON object.
  * @param out_response_json Receives an owned response, or NULL for a
  * successful notification; destroy it with `turbo_runtime_json_destroy()`.
- * @return `TURBO_OK`, `TURBO_EINVAL`, `TURBO_ENOMEM`, or `TURBO_ESHUTDOWN`.
+ * @return `SALTS_OK`, `SALTS_EINVAL`, `SALTS_ENOMEM`, or `SALTS_ESHUTDOWN`.
  */
 CXX_C_API int
 turbo_agent_harness_connection_dispatch_json_value(turbo_agent_harness_connection_t *connection,
@@ -123,13 +122,13 @@ turbo_agent_harness_connection_dispatch_json_value(turbo_agent_harness_connectio
 /**
  * JSON text adapter over `dispatch_json_value` using TurboParser.
  *
- * A successful notification returns `TURBO_OK` and NULL output. A non-NULL
- * output is released with `turbo_json_serialize_free()`.
+ * A successful notification returns `SALTS_OK` and NULL output. A non-NULL
+ * output is released with `json_serialize_free()`.
  *
  * @param connection Live connection.
  * @param request_json_text Borrowed UTF-8 JSON text.
  * @param out_response_json_text Receives serialized response or NULL.
- * @return Dispatcher status; malformed JSON returns `TURBO_EPROTO`.
+ * @return Dispatcher status; malformed JSON returns `SALTS_EPROTO`.
  */
 CXX_C_API int
 turbo_agent_harness_connection_dispatch_text(turbo_agent_harness_connection_t *connection,
@@ -151,8 +150,8 @@ turbo_agent_harness_connection_dispatch_text(turbo_agent_harness_connection_t *c
  * @param out_event_json Receives an owned notification clone whose params
  * contain `sequence`; destroy it with `turbo_runtime_json_destroy()`.
  * @param out_sequence Receives the exact journal sequence.
- * @return `TURBO_OK`, `TURBO_ETIMEDOUT`, a stream error, or
- * `TURBO_ESHUTDOWN`.
+ * @return `SALTS_OK`, `SALTS_ETIMEDOUT`, a stream error, or
+ * `SALTS_ESHUTDOWN`.
  */
 CXX_C_API int turbo_agent_harness_connection_wait_event_json_value(
     turbo_agent_harness_connection_t *connection, uint64_t timeout_ms,
@@ -161,8 +160,8 @@ CXX_C_API int turbo_agent_harness_connection_wait_event_json_value(
 /**
  * Acknowledge and release all journal events through `sequence`.
  *
- * @return `TURBO_OK`, `TURBO_EINVAL` for a future sequence, or
- * `TURBO_ESHUTDOWN` after close.
+ * @return `SALTS_OK`, `SALTS_EINVAL` for a future sequence, or
+ * `SALTS_ESHUTDOWN` after close.
  */
 CXX_C_API int
 turbo_agent_harness_connection_ack_events(turbo_agent_harness_connection_t *connection,

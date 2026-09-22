@@ -1,6 +1,8 @@
 #ifndef TURBO_LANGCHAIN_H
 #define TURBO_LANGCHAIN_H
 
+#include <turbo_agent_api.h>
+
 #include "turbo_action_tool.h"
 #include "turbo_agent_policy.h"
 #include "turbo_chain.h"
@@ -26,7 +28,7 @@
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_runtime_remote.h"
 #include "turbo_agent_runtime_remote_client.h"
-#include "turbo_agent_runtime_remote_iris.h"
+#include "turbo_agent_runtime_remote_chttp.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_subagent.h"
 #include "turbo_agent_subgraph.h"

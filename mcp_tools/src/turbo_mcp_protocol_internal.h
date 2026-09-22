@@ -3,9 +3,9 @@
 
 #include "turbo_mcp_tool_pack.h"
 
-#include <turbo_http.h>
-#include <turbo_parser.h>
-#include <turbo_str.h>
+#include <http_client/http.h>
+#include <json_parser.h>
+#include <tstr.h>
 
 typedef struct turbo_mcp_client_s turbo_mcp_client_t;
 
@@ -33,6 +33,6 @@ turbo_tool_status_t turbo_mcp_client_request(
 
 const char *turbo_mcp_client_last_error(const turbo_mcp_client_t *client);
 void turbo_mcp_client_set_error(turbo_mcp_client_t *client, const char *message);
-tstr_t turbo_mcp_format_header(const char *name, const char *value, size_t value_length);
+tstr turbo_mcp_format_header(const char *name, const char *value, size_t value_length);
 
 #endif

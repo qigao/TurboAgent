@@ -9,8 +9,8 @@
 #include <string.h>
 
 typedef struct {
-  tstr_t name;
-  tstr_t semantic_id;
+  tstr name;
+  tstr semantic_id;
   turbo_graph_node_fn json_fn;
   turbo_graph_json_value_node_fn json_value_fn;
   void *user_data;
@@ -19,15 +19,15 @@ typedef struct {
 typedef struct {
   size_t from_index;
   size_t to_index;
-  tstr_t semantic_id;
+  tstr semantic_id;
   turbo_graph_edge_predicate_fn json_predicate;
   turbo_graph_json_value_edge_predicate_fn json_value_predicate;
   void *user_data;
 } turbo_graph_edge_entry_t;
 
 struct turbo_graph_s {
-  tstr_t name;
-  tstr_t entry_node;
+  tstr name;
+  tstr entry_node;
   turbo_graph_node_entry_t *nodes;
   size_t node_count;
   size_t node_capacity;
@@ -38,15 +38,15 @@ struct turbo_graph_s {
 };
 
 struct turbo_graph_checkpoint_s {
-  tstr_t next_node;
+  tstr next_node;
   size_t steps;
   json_value_t *state;
-  tstr_t topology_id;
+  tstr topology_id;
 };
 
 #define TURBO_GRAPH_CHECKPOINT_SCHEMA_VERSION 3
 
-static tstr_t turbo_graph_join_edge_semantic_id(const char *from, const char *to) {
+static tstr turbo_graph_join_edge_semantic_id(const char *from, const char *to) {
   return tstr_cat_typed(tstr_new(), "{}->{}", from ? from : "", to ? to : "");
 }
 
@@ -571,13 +571,13 @@ turbo_graph_cancel_status(const turbo_cancel_token_t *cancel_token) {
     return TURBO_GRAPH_EXEC_OK;
   }
   status = turbo_cancel_token_check(cancel_token);
-  if (status == TURBO_OK) {
+  if (status == SALTS_OK) {
     return TURBO_GRAPH_EXEC_OK;
   }
-  if (status == TURBO_ETIMEDOUT) {
+  if (status == SALTS_ETIMEDOUT) {
     return TURBO_GRAPH_EXEC_DEADLINE;
   }
-  return status == TURBO_ECANCELED ? TURBO_GRAPH_EXEC_CANCELLED
+  return status == SALTS_ECANCELED ? TURBO_GRAPH_EXEC_CANCELLED
                                    : TURBO_GRAPH_EXEC_ERROR;
 }
 

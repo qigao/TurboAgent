@@ -1,8 +1,8 @@
 #ifndef TURBO_TOOL_REGISTRY_H
 #define TURBO_TOOL_REGISTRY_H
 
-#include <platform.h>
-#include <turbo_parser.h>
+#include <turbo_agent_api.h>
+#include <json_parser.h>
 
 #include "turbo_tool.h"
 

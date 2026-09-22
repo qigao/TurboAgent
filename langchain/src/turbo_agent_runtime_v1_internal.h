@@ -7,8 +7,8 @@
 #include "turbo_agent_runtime.h"
 
 #include "turbo_agent_state.h"
-#include "turbo_parser.h"
-#include <turbo_thread.h>
+#include <json_parser.h>
+#include <salts/thread.h>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -35,7 +35,7 @@ typedef struct {
 
 struct turbo_agent_runtime_s {
   turbo_agent_runtime_store_t store;
-  turbo_mutex_t store_mutex;
+  salts_mutex_t store_mutex;
 };
 
 /* ---- bind helpers ---- */

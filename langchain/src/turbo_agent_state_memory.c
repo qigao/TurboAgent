@@ -3,7 +3,7 @@
 #include "turbo_agent_hooks_internal.h"
 #include "turbo_agent_state_memory_internal.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdio.h>
 #include <stdlib.h>

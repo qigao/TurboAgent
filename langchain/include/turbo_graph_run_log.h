@@ -1,7 +1,7 @@
 #ifndef TURBO_GRAPH_RUN_LOG_H
 #define TURBO_GRAPH_RUN_LOG_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_event_log.h"
 #include "turbo_graph.h"

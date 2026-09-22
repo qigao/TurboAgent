@@ -1,19 +1,15 @@
 #include "tinytest.h"
 
-#include "error_recovery.h"
-#include "http_client.h"
-#include "iris_app.h"
-#include "rpc_client.h"
-#include "server.h"
+#include <http_server/http.h>
 #include "turbo_agent_graph.h"
 #include "turbo_agent_memory_store.h"
 #include "turbo_agent_remote_app.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_runtime_remote.h"
-#include "turbo_agent_runtime_remote_iris.h"
+#include "turbo_agent_runtime_remote_chttp.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_test_support.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -36,17 +32,14 @@ typedef struct {
 } remote_app_graph_registry_t;
 
 typedef struct {
-  coro_context_t *coro_ctx;
-  coro_socket_t *server;
-  int server_stopped;
+  chttp_server server;
+  int server_initialized;
+  int server_started;
   turbo_graph_t *graph;
   turbo_agent_runtime_store_t store;
   turbo_agent_runtime_t *runtime;
   turbo_agent_runtime_remote_t *remote;
-  turbo_agent_runtime_remote_iris_t *bridge;
   turbo_agent_remote_app_t *app;
-  http_client_t *http_client;
-  rpc_client_t *rpc_client;
   int accessors_ok;
   int inspect_thread_ok;
   int inspect_latest_run_ok;
@@ -74,30 +67,110 @@ typedef struct {
   int high_level_helpers_ok;
 } remote_app_test_state_t;
 
-static void remote_app_test_state_cleanup(remote_app_test_state_t *state) {
-  if (!state) {
-    return;
+
+enum {
+  REMOTE_APP_TEST_CONNECTIONS = 4,
+  REMOTE_APP_TEST_COMMANDS = 32,
+  REMOTE_APP_TEST_SEND_BYTES = 64 * 1024,
+  REMOTE_APP_TEST_BUFFER_BYTES = 1024 * 1024,
+  REMOTE_APP_TEST_TIMEOUT_MS = 5000
+};
+
+static chttp_server_config remote_app_test_server_config(void) {
+  chttp_server_config config = {0};
+  config.host = "127.0.0.1";
+  config.port = 0u;
+  config.backlog = REMOTE_APP_TEST_CONNECTIONS;
+#if defined(_WIN32)
+  config.network.backend = NATIVE_IO_BACKEND_IOCP;
+#elif defined(__linux__)
+  config.network.backend = NATIVE_IO_BACKEND_EPOLL;
+#else
+  config.network.backend = NATIVE_IO_BACKEND_KQUEUE;
+#endif
+  config.network.connection_capacity = REMOTE_APP_TEST_CONNECTIONS;
+  config.network.command_capacity = REMOTE_APP_TEST_COMMANDS;
+  config.network.request_capacity = REMOTE_APP_TEST_COMMANDS;
+  config.network.completion_batch_capacity = REMOTE_APP_TEST_CONNECTIONS;
+  config.network.event_capacity = REMOTE_APP_TEST_COMMANDS;
+  config.network.max_send_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.network.receive_buffer_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.network.connect_timeout_ms = REMOTE_APP_TEST_TIMEOUT_MS;
+  config.network.read_timeout_ms = REMOTE_APP_TEST_TIMEOUT_MS;
+  config.network.write_timeout_ms = REMOTE_APP_TEST_TIMEOUT_MS;
+  config.route_capacity = 4u;
+  config.middleware_capacity = 1u;
+  config.max_route_middleware_count = 1u;
+  config.max_route_param_count = 1u;
+  config.max_route_param_bytes = 256u;
+  config.max_target_bytes = 256u;
+  config.max_header_count = 32u;
+  config.max_header_bytes = 8192u;
+  config.max_request_body_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.max_response_header_count = 32u;
+  config.max_response_header_bytes = 8192u;
+  config.max_response_body_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.max_buffered_response_body_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.buffer_capacity_bytes = REMOTE_APP_TEST_BUFFER_BYTES;
+  config.poll_slice_ms = 1u;
+  return config;
+}
+
+static int remote_app_test_server_start(chttp_server *server, int *initialized,
+                                        int *started,
+                                        turbo_agent_runtime_remote_t *remote,
+                                        char *endpoint_url, size_t endpoint_capacity) {
+  chttp_server_config config;
+  uint16_t port = 0u;
+  int status;
+  int written;
+
+  if (!server || !initialized || !started || !remote || !endpoint_url ||
+      endpoint_capacity == 0u) {
+    return -1;
   }
+
+  config = remote_app_test_server_config();
+  status = chttp_server_init(server, &config);
+  if (status != SALTS_OK) return -1;
+  *initialized = 1;
+
+  status = turbo_agent_runtime_remote_chttp_mount(
+      remote, server, "/v1/runtime/jsonrpc");
+  if (status != SALTS_OK) return -1;
+  status = chttp_server_start(server);
+  if (status != SALTS_OK) return -1;
+  *started = 1;
+  status = chttp_server_port(server, &port);
+  if (status != SALTS_OK || port == 0u) return -1;
+
+  written = snprintf(endpoint_url, endpoint_capacity,
+                     "http://127.0.0.1:%u/v1/runtime/jsonrpc",
+                     (unsigned int)port);
+  return written > 0 && (size_t)written < endpoint_capacity ? 0 : -1;
+}
+
+static void remote_app_test_server_cleanup(chttp_server *server, int *initialized,
+                                           int *started) {
+  if (!server || !initialized || !started) return;
+  if (*started) {
+    (void)chttp_server_stop(server, REMOTE_APP_TEST_TIMEOUT_MS);
+    *started = 0;
+  }
+  if (*initialized) {
+    (void)chttp_server_destroy(server);
+    *initialized = 0;
+  }
+}
+
+static void remote_app_test_state_cleanup(remote_app_test_state_t *state) {
+  if (!state) return;
   if (state->app) {
     turbo_agent_remote_app_destroy(state->app);
     state->app = NULL;
   }
-  if (state->rpc_client) {
-    rpc_client_destroy(state->rpc_client);
-    state->rpc_client = NULL;
-  }
-  if (state->http_client) {
-    http_client_destroy(state->http_client);
-    state->http_client = NULL;
-  }
-  if (!state->server_stopped && state->server) {
-    coro_socket_destroy(state->server);
-    state->server = NULL;
-  }
-  if (state->bridge) {
-    turbo_agent_runtime_remote_iris_destroy(state->bridge);
-    state->bridge = NULL;
-  }
+  remote_app_test_server_cleanup(&state->server, &state->server_initialized,
+                                 &state->server_started);
   if (state->remote) {
     turbo_agent_runtime_remote_destroy(state->remote);
     state->remote = NULL;
@@ -109,31 +182,11 @@ static void remote_app_test_state_cleanup(remote_app_test_state_t *state) {
   state->graph = NULL;
 }
 
-static int remote_app_configure_session_rpc_client(
-    http_client_t **http_client, rpc_client_t **rpc_client,
+static int remote_app_configure_session_client(
     turbo_agent_remote_session_config_t *session_config, const char *endpoint_url) {
-  rpc_client_config_t rpc_config = {0};
-
-  if (!http_client || !rpc_client || !session_config || !endpoint_url || !endpoint_url[0]) {
-    return -1;
-  }
-  *http_client = http_client_create(endpoint_url);
-  if (!*http_client) {
-    return -1;
-  }
-  http_client_set_connect_timeout(*http_client, 1000);
-  http_client_set_read_timeout(*http_client, 5000);
-  http_client_set_timeout(*http_client, 5000);
-
-  rpc_config.url = endpoint_url;
-  rpc_config.http_client = *http_client;
-  *rpc_client = rpc_client_create(&rpc_config);
-  if (!*rpc_client) {
-    http_client_destroy(*http_client);
-    *http_client = NULL;
-    return -1;
-  }
-  session_config->client_config.rpc_client = *rpc_client;
+  if (!session_config || !endpoint_url || !endpoint_url[0]) return -1;
+  session_config->client_config.url = endpoint_url;
+  session_config->client_config.http_client = NULL;
   return 0;
 }
 
@@ -347,12 +400,10 @@ static void remote_app_count_event_sink(const json_value_t *event,
   *count += 1;
 }
 
-static void remote_app_test_coro(coro_t *co, void *arg) {
+static void remote_app_test_coro(void *arg) {
   remote_app_test_state_t *state = (remote_app_test_state_t *)arg;
-  iris_app_t *app = iris_app_default();
   remote_app_graph_registry_t registry = {0};
   turbo_agent_runtime_remote_config_t remote_config = {0};
-  turbo_agent_runtime_remote_iris_config_t bridge_config = {0};
   turbo_agent_remote_session_config_t session_config = {0};
   turbo_agent_remote_app_config_t app_config = {0};
   json_value_t *input_state = NULL;
@@ -403,11 +454,7 @@ static void remote_app_test_coro(coro_t *co, void *arg) {
   json_value_t *child_history_events = NULL;
   json_value_t *child_trace_events = NULL;
   int replayed_event_count = 0;
-  int written;
-  const unsigned short port = 29888;
   static const char *interrupt_before_end[] = {"end"};
-
-  (void)co;
 
   state->store = turbo_agent_runtime_store_memory_create();
   state->runtime = turbo_agent_runtime_create(&state->store);
@@ -426,30 +473,13 @@ static void remote_app_test_coro(coro_t *co, void *arg) {
     return;
   }
 
-  bridge_config.remote = state->remote;
-  bridge_config.path = "/v1/runtime/jsonrpc";
-  state->bridge = turbo_agent_runtime_remote_iris_create(&bridge_config);
-  if (!state->bridge || turbo_agent_runtime_remote_iris_mount(state->bridge, app) != 0) {
+  if (remote_app_test_server_start(&state->server, &state->server_initialized,
+                                   &state->server_started, state->remote,
+                                   endpoint_url, sizeof(endpoint_url)) != 0) {
     return;
   }
 
-  init_router();
-  state->server = iris_server_start(app, state->coro_ctx, port);
-  if (!state->server) {
-    return;
-  }
-
-  coro_yield();
-  coro_sleep(state->coro_ctx, 50);
-
-  written = snprintf(endpoint_url, sizeof(endpoint_url), "http://127.0.0.1:%u/v1/runtime/jsonrpc",
-                     (unsigned)port);
-  if (written <= 0 || (size_t)written >= sizeof(endpoint_url)) {
-    return;
-  }
-
-  if (remote_app_configure_session_rpc_client(&state->http_client, &state->rpc_client,
-                                              &session_config, endpoint_url) != 0) {
+  if (remote_app_configure_session_client(&session_config, endpoint_url) != 0) {
     return;
   }
   app_config.session_config = &session_config;
@@ -781,53 +811,29 @@ static void remote_app_test_coro(coro_t *co, void *arg) {
   turbo_free_json(&summary_json);
   turbo_free_json(&fork_summary_json);
 
-  if (state->server) {
-    state->server_stopped = 1;
-    coro_socket_destroy(state->server);
-    state->server = NULL;
-  }
   remote_app_test_state_cleanup(state);
 }
 
 typedef struct {
-  coro_context_t *coro_ctx;
-  coro_socket_t *server;
-  int server_stopped;
+  chttp_server server;
+  int server_initialized;
+  int server_started;
   turbo_agent_runtime_store_t runtime_store;
   turbo_agent_memory_store_t memory_store;
   turbo_agent_runtime_t *runtime;
   turbo_agent_runtime_remote_t *remote;
-  turbo_agent_runtime_remote_iris_t *bridge;
   turbo_agent_remote_app_t *app;
-  http_client_t *http_client;
-  rpc_client_t *rpc_client;
   int memory_helpers_ok;
 } remote_app_memory_test_state_t;
 
 static void remote_app_memory_test_state_cleanup(remote_app_memory_test_state_t *state) {
-  if (!state) {
-    return;
-  }
+  if (!state) return;
   if (state->app) {
     turbo_agent_remote_app_destroy(state->app);
     state->app = NULL;
   }
-  if (state->rpc_client) {
-    rpc_client_destroy(state->rpc_client);
-    state->rpc_client = NULL;
-  }
-  if (state->http_client) {
-    http_client_destroy(state->http_client);
-    state->http_client = NULL;
-  }
-  if (!state->server_stopped && state->server) {
-    coro_socket_destroy(state->server);
-    state->server = NULL;
-  }
-  if (state->bridge) {
-    turbo_agent_runtime_remote_iris_destroy(state->bridge);
-    state->bridge = NULL;
-  }
+  remote_app_test_server_cleanup(&state->server, &state->server_initialized,
+                                 &state->server_started);
   if (state->remote) {
     turbo_agent_runtime_remote_destroy(state->remote);
     state->remote = NULL;
@@ -839,11 +845,9 @@ static void remote_app_memory_test_state_cleanup(remote_app_memory_test_state_t 
   }
 }
 
-static void remote_app_memory_test_coro(coro_t *co, void *arg) {
+static void remote_app_memory_test_coro(void *arg) {
   remote_app_memory_test_state_t *state = (remote_app_memory_test_state_t *)arg;
-  iris_app_t *app = iris_app_default();
   turbo_agent_runtime_remote_config_t remote_config = {0};
-  turbo_agent_runtime_remote_iris_config_t bridge_config = {0};
   turbo_agent_remote_session_config_t session_config = {0};
   turbo_agent_remote_app_config_t app_config = {0};
   turbo_agent_memory_query_options_t options = {0};
@@ -859,10 +863,6 @@ static void remote_app_memory_test_coro(coro_t *co, void *arg) {
   int record_valid = 0;
   int invalid_record_valid = 1;
   char endpoint_url[256];
-  int written;
-  const unsigned short port = 29887;
-
-  (void)co;
 
   state->runtime_store = turbo_agent_runtime_store_memory_create();
   state->memory_store = turbo_agent_memory_store_memory_create();
@@ -878,30 +878,13 @@ static void remote_app_memory_test_coro(coro_t *co, void *arg) {
     return;
   }
 
-  bridge_config.remote = state->remote;
-  bridge_config.path = "/v1/runtime/jsonrpc";
-  state->bridge = turbo_agent_runtime_remote_iris_create(&bridge_config);
-  if (!state->bridge || turbo_agent_runtime_remote_iris_mount(state->bridge, app) != 0) {
+  if (remote_app_test_server_start(&state->server, &state->server_initialized,
+                                   &state->server_started, state->remote,
+                                   endpoint_url, sizeof(endpoint_url)) != 0) {
     return;
   }
 
-  init_router();
-  state->server = iris_server_start(app, state->coro_ctx, port);
-  if (!state->server) {
-    return;
-  }
-
-  coro_yield();
-  coro_sleep(state->coro_ctx, 50);
-
-  written = snprintf(endpoint_url, sizeof(endpoint_url), "http://127.0.0.1:%u/v1/runtime/jsonrpc",
-                     (unsigned)port);
-  if (written <= 0 || (size_t)written >= sizeof(endpoint_url)) {
-    return;
-  }
-
-  if (remote_app_configure_session_rpc_client(&state->http_client, &state->rpc_client,
-                                              &session_config, endpoint_url) != 0) {
+  if (remote_app_configure_session_client(&session_config, endpoint_url) != 0) {
     return;
   }
   app_config.session_config = &session_config;
@@ -1008,20 +991,13 @@ static void remote_app_memory_test_coro(coro_t *co, void *arg) {
   turbo_free_json(&invalid_record);
   turbo_free_json(&record);
 
-  if (state->server) {
-    state->server_stopped = 1;
-    coro_socket_destroy(state->server);
-    state->server = NULL;
-  }
   remote_app_memory_test_state_cleanup(state);
 }
 
-static void remote_app_committed_handoff_coro(coro_t *co, void *arg) {
+static void remote_app_committed_handoff_coro(void *arg) {
   remote_app_test_state_t *state = (remote_app_test_state_t *)arg;
-  iris_app_t *app = iris_app_default();
   remote_app_graph_registry_t registry = {0};
   turbo_agent_runtime_remote_config_t remote_config = {0};
-  turbo_agent_runtime_remote_iris_config_t bridge_config = {0};
   turbo_agent_remote_session_config_t session_config = {0};
   turbo_agent_remote_app_config_t app_config = {0};
   json_value_t *input_state = NULL;
@@ -1030,11 +1006,7 @@ static void remote_app_committed_handoff_coro(coro_t *co, void *arg) {
   json_value_t *supervisor_inspect_json = NULL;
   json_value_t *orchestration_inspect_json = NULL;
   char endpoint_url[256];
-  int written;
-  const unsigned short port = 29891;
   static const char *interrupt_before_end[] = {"end"};
-
-  (void)co;
 
   state->store = turbo_agent_runtime_store_memory_create();
   state->runtime = turbo_agent_runtime_create(&state->store);
@@ -1053,30 +1025,13 @@ static void remote_app_committed_handoff_coro(coro_t *co, void *arg) {
     return;
   }
 
-  bridge_config.remote = state->remote;
-  bridge_config.path = "/v1/runtime/jsonrpc";
-  state->bridge = turbo_agent_runtime_remote_iris_create(&bridge_config);
-  if (!state->bridge || turbo_agent_runtime_remote_iris_mount(state->bridge, app) != 0) {
+  if (remote_app_test_server_start(&state->server, &state->server_initialized,
+                                   &state->server_started, state->remote,
+                                   endpoint_url, sizeof(endpoint_url)) != 0) {
     return;
   }
 
-  init_router();
-  state->server = iris_server_start(app, state->coro_ctx, port);
-  if (!state->server) {
-    return;
-  }
-
-  coro_yield();
-  coro_sleep(state->coro_ctx, 50);
-
-  written = snprintf(endpoint_url, sizeof(endpoint_url), "http://127.0.0.1:%u/v1/runtime/jsonrpc",
-                     (unsigned)port);
-  if (written <= 0 || (size_t)written >= sizeof(endpoint_url)) {
-    return;
-  }
-
-  if (remote_app_configure_session_rpc_client(&state->http_client, &state->rpc_client,
-                                              &session_config, endpoint_url) != 0) {
+  if (remote_app_configure_session_client(&session_config, endpoint_url) != 0) {
     return;
   }
   app_config.session_config = &session_config;
@@ -1137,20 +1092,13 @@ cleanup:
   turbo_free_json(&supervisor_inspect_json);
   turbo_free_json(&orchestration_inspect_json);
 
-  if (state->server) {
-    state->server_stopped = 1;
-    coro_socket_destroy(state->server);
-    state->server = NULL;
-  }
   remote_app_test_state_cleanup(state);
 }
 
-static void remote_app_high_level_test_coro(coro_t *co, void *arg) {
+static void remote_app_high_level_test_coro(void *arg) {
   remote_app_test_state_t *state = (remote_app_test_state_t *)arg;
-  iris_app_t *app = iris_app_default();
   remote_app_graph_registry_t registry = {0};
   turbo_agent_runtime_remote_config_t remote_config = {0};
-  turbo_agent_runtime_remote_iris_config_t bridge_config = {0};
   turbo_agent_remote_session_config_t session_config = {0};
   turbo_agent_remote_app_config_t app_config = {0};
   json_value_t *messages = NULL;
@@ -1159,11 +1107,7 @@ static void remote_app_high_level_test_coro(coro_t *co, void *arg) {
   json_value_t *result_json = NULL;
   char *result_text = NULL;
   const char *status;
-  int written;
   char endpoint_url[256];
-  const unsigned short port = 29889;
-
-  (void)co;
 
   state->store = turbo_agent_runtime_store_memory_create();
   state->runtime = turbo_agent_runtime_create(&state->store);
@@ -1182,30 +1126,13 @@ static void remote_app_high_level_test_coro(coro_t *co, void *arg) {
     return;
   }
 
-  bridge_config.remote = state->remote;
-  bridge_config.path = "/v1/runtime/jsonrpc";
-  state->bridge = turbo_agent_runtime_remote_iris_create(&bridge_config);
-  if (!state->bridge || turbo_agent_runtime_remote_iris_mount(state->bridge, app) != 0) {
+  if (remote_app_test_server_start(&state->server, &state->server_initialized,
+                                   &state->server_started, state->remote,
+                                   endpoint_url, sizeof(endpoint_url)) != 0) {
     return;
   }
 
-  init_router();
-  state->server = iris_server_start(app, state->coro_ctx, port);
-  if (!state->server) {
-    return;
-  }
-
-  coro_yield();
-  coro_sleep(state->coro_ctx, 50);
-
-  written = snprintf(endpoint_url, sizeof(endpoint_url), "http://127.0.0.1:%u/v1/runtime/jsonrpc",
-                     (unsigned)port);
-  if (written <= 0 || (size_t)written >= sizeof(endpoint_url)) {
-    return;
-  }
-
-  if (remote_app_configure_session_rpc_client(&state->http_client, &state->rpc_client,
-                                              &session_config, endpoint_url) != 0) {
+  if (remote_app_configure_session_client(&session_config, endpoint_url) != 0) {
     return;
   }
   app_config.session_config = &session_config;
@@ -1321,11 +1248,6 @@ cleanup:
   turbo_runtime_json_destroy(messages);
   turbo_runtime_json_destroy(result_state);
 
-  if (state->server) {
-    state->server_stopped = 1;
-    coro_socket_destroy(state->server);
-    state->server = NULL;
-  }
   remote_app_test_state_cleanup(state);
 }
 
@@ -1334,27 +1256,14 @@ spec("turbo agent remote app api") {
 
   before_each() {
     memset(&state, 0, sizeof(state));
-    iris_app_reset_default();
-    reset_router();
-    iris_error_recovery_init();
   }
 
   after_each() {
     remote_app_test_state_cleanup(&state);
-    if (state.coro_ctx) {
-      coro_context_destroy(state.coro_ctx);
-      state.coro_ctx = NULL;
-    }
-    reset_router();
-    iris_app_reset_default();
   }
 
   it("should wrap one configured remote graph through an app facade") {
-    state.coro_ctx = coro_context_create(NULL);
-    check_not_null(state.coro_ctx);
-
-    coro_context_spawn(state.coro_ctx, remote_app_test_coro, &state);
-    coro_context_run(state.coro_ctx, TURBO_RUN_DEFAULT);
+    remote_app_test_coro(&state);
 
     check_true(state.accessors_ok);
     check_true(state.thread_state_ok);
@@ -1379,21 +1288,13 @@ spec("turbo agent remote app api") {
   }
 
   it("should expose committed handoff events through the remote app facade") {
-    state.coro_ctx = coro_context_create(NULL);
-    check_not_null(state.coro_ctx);
-
-    coro_context_spawn(state.coro_ctx, remote_app_committed_handoff_coro, &state);
-    coro_context_run(state.coro_ctx, TURBO_RUN_DEFAULT);
+    remote_app_committed_handoff_coro(&state);
 
     check_true(state.committed_handoff_event_ok);
   }
 
   it("should expose inspect helpers through the remote app facade") {
-    state.coro_ctx = coro_context_create(NULL);
-    check_not_null(state.coro_ctx);
-
-    coro_context_spawn(state.coro_ctx, remote_app_test_coro, &state);
-    coro_context_run(state.coro_ctx, TURBO_RUN_DEFAULT);
+    remote_app_test_coro(&state);
 
     check_true(state.inspect_thread_ok);
     check_true(state.inspect_latest_run_ok);
@@ -1401,11 +1302,7 @@ spec("turbo agent remote app api") {
   }
 
   it("should expose high-level helpers through the remote app facade") {
-    state.coro_ctx = coro_context_create(NULL);
-    check_not_null(state.coro_ctx);
-
-    coro_context_spawn(state.coro_ctx, remote_app_high_level_test_coro, &state);
-    coro_context_run(state.coro_ctx, TURBO_RUN_DEFAULT);
+    remote_app_high_level_test_coro(&state);
 
     check_true(state.high_level_helpers_ok);
   }
@@ -1413,19 +1310,9 @@ spec("turbo agent remote app api") {
   it("should expose memory helpers through the remote app facade") {
     remote_app_memory_test_state_t memory_state = {0};
 
-    memory_state.coro_ctx = coro_context_create(NULL);
-    check_not_null(memory_state.coro_ctx);
-
-    coro_context_spawn(memory_state.coro_ctx, remote_app_memory_test_coro, &memory_state);
-    coro_context_run(memory_state.coro_ctx, TURBO_RUN_DEFAULT);
+    remote_app_memory_test_coro(&memory_state);
 
     check_true(memory_state.memory_helpers_ok);
     remote_app_memory_test_state_cleanup(&memory_state);
-    if (memory_state.coro_ctx) {
-      coro_context_destroy(memory_state.coro_ctx);
-      memory_state.coro_ctx = NULL;
-    }
-    reset_router();
-    iris_app_reset_default();
   }
 }

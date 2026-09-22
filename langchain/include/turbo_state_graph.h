@@ -1,7 +1,7 @@
 #ifndef TURBO_STATE_GRAPH_H
 #define TURBO_STATE_GRAPH_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include <stddef.h>
 
@@ -72,7 +72,7 @@ typedef int (*turbo_state_graph_json_value_edge_predicate_fn)(
 
 typedef struct turbo_state_graph_channel_config_s {
   turbo_state_graph_reducer_kind_t reducer;
-  turbo_json_type_t value_kind;
+  json_type_t value_kind;
   const json_value_t *default_value;
   const char *description;
 } turbo_state_graph_channel_config_t;

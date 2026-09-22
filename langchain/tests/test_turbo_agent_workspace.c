@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #include "turbo_agent_workspace.h"
 
-#include <turbo_fs.h>
+#include <salts_fs.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,12 +27,12 @@ static int workspace_transport(const char *request_json, char **out_response_jso
 }
 
 static int workspace_write_text(const char *path, const char *text) {
-  turbo_fs_buf_t buffer = turbo_fs_buf_init((void *)text, strlen(text));
-  return turbo_fs_write_file(path, &buffer);
+  salts_fs_buf_t buffer = salts_fs_buf_init((void *)text, strlen(text));
+  return salts_fs_write_file(path, &buffer);
 }
 
 static int workspace_join(char *out, size_t out_size, const char *base, const char *path) {
-  return turbo_fs_path_join(out, out_size, base, path);
+  return salts_fs_path_join(out, out_size, base, path);
 }
 
 spec("turbo agent workspace") {
@@ -48,12 +48,12 @@ spec("turbo agent workspace") {
         "---\n"
         "Inspect relevant implementation and tests before reporting findings.\n";
     char *root = tt_make_temp_dir("turbo_workspace");
-    char src[TURBO_FS_MAX_PATH];
-    char skills[TURBO_FS_MAX_PATH];
-    char skill_dir[TURBO_FS_MAX_PATH];
-    char root_agents[TURBO_FS_MAX_PATH];
-    char nested_agents[TURBO_FS_MAX_PATH];
-    char skill_path[TURBO_FS_MAX_PATH];
+    char src[SALTS_FS_MAX_PATH];
+    char skills[SALTS_FS_MAX_PATH];
+    char skill_dir[SALTS_FS_MAX_PATH];
+    char root_agents[SALTS_FS_MAX_PATH];
+    char nested_agents[SALTS_FS_MAX_PATH];
+    char skill_path[SALTS_FS_MAX_PATH];
     turbo_agent_workspace_config_t config;
     turbo_agent_workspace_t *workspace = NULL;
     turbo_agent_workspace_selection_t *selection = NULL;
@@ -68,9 +68,9 @@ spec("turbo agent workspace") {
     check_int_eq(workspace_join(src, sizeof(src), root, "src"), 0);
     check_int_eq(workspace_join(skills, sizeof(skills), root, "skills"), 0);
     check_int_eq(workspace_join(skill_dir, sizeof(skill_dir), skills, "repo-review"), 0);
-    check_int_eq(turbo_fs_mkdir(src, 0700), 0);
-    check_int_eq(turbo_fs_mkdir(skills, 0700), 0);
-    check_int_eq(turbo_fs_mkdir(skill_dir, 0700), 0);
+    check_int_eq(salts_fs_mkdir(src, 0700), 0);
+    check_int_eq(salts_fs_mkdir(skills, 0700), 0);
+    check_int_eq(salts_fs_mkdir(skill_dir, 0700), 0);
     check_int_eq(workspace_join(root_agents, sizeof(root_agents), root, "AGENTS.md"), 0);
     check_int_eq(workspace_join(nested_agents, sizeof(nested_agents), src, "AGENTS.md"), 0);
     check_int_eq(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
@@ -124,9 +124,9 @@ spec("turbo agent workspace") {
                                      "---\n"
                                      "Run the configured build.\n";
     char *root = tt_make_temp_dir("turbo_workspace_missing");
-    char skills[TURBO_FS_MAX_PATH];
-    char skill_dir[TURBO_FS_MAX_PATH];
-    char skill_path[TURBO_FS_MAX_PATH];
+    char skills[SALTS_FS_MAX_PATH];
+    char skill_dir[SALTS_FS_MAX_PATH];
+    char skill_path[SALTS_FS_MAX_PATH];
     turbo_agent_workspace_config_t config;
     turbo_agent_policy_t policy = turbo_agent_policy_default();
     turbo_agent_workspace_tool_capability_t capability = {"build.run",
@@ -138,8 +138,8 @@ spec("turbo agent workspace") {
     check_not_null(root);
     check_int_eq(workspace_join(skills, sizeof(skills), root, "skills"), 0);
     check_int_eq(workspace_join(skill_dir, sizeof(skill_dir), skills, "build-helper"), 0);
-    check_int_eq(turbo_fs_mkdir(skills, 0700), 0);
-    check_int_eq(turbo_fs_mkdir(skill_dir, 0700), 0);
+    check_int_eq(salts_fs_mkdir(skills, 0700), 0);
+    check_int_eq(salts_fs_mkdir(skill_dir, 0700), 0);
     check_int_eq(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
     check_int_eq(workspace_write_text(skill_path, skill_text), 0);
     policy.allow_custom_tools = 0;
@@ -170,9 +170,9 @@ spec("turbo agent workspace") {
                                      "---\n"
                                      "Fetch the requested resource.\n";
     char *root = tt_make_temp_dir("turbo_workspace_policy");
-    char skills[TURBO_FS_MAX_PATH];
-    char skill_dir[TURBO_FS_MAX_PATH];
-    char skill_path[TURBO_FS_MAX_PATH];
+    char skills[SALTS_FS_MAX_PATH];
+    char skill_dir[SALTS_FS_MAX_PATH];
+    char skill_path[SALTS_FS_MAX_PATH];
     turbo_agent_workspace_config_t config;
     turbo_agent_policy_t policy = turbo_agent_policy_default();
     turbo_agent_workspace_t *workspace = NULL;
@@ -181,8 +181,8 @@ spec("turbo agent workspace") {
     check_not_null(root);
     check_int_eq(workspace_join(skills, sizeof(skills), root, "skills"), 0);
     check_int_eq(workspace_join(skill_dir, sizeof(skill_dir), skills, "network-helper"), 0);
-    check_int_eq(turbo_fs_mkdir(skills, 0700), 0);
-    check_int_eq(turbo_fs_mkdir(skill_dir, 0700), 0);
+    check_int_eq(salts_fs_mkdir(skills, 0700), 0);
+    check_int_eq(salts_fs_mkdir(skill_dir, 0700), 0);
     check_int_eq(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
     check_int_eq(workspace_write_text(skill_path, skill_text), 0);
     policy.allow_network = 0;

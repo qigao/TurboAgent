@@ -7,13 +7,13 @@
 
 #include "../src/turbo_agent_tool_executor_internal.h"
 
-#include <turbo_thread.h>
+#include <salts/thread.h>
 
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct tool_executor_probe_s {
-  turbo_mutex_t mutex;
+  salts_mutex_t mutex;
   int calls;
   int active;
   int max_active;
@@ -76,16 +76,16 @@ static char *tool_executor_strdup(const char *text) {
 static int tool_executor_probe_handler(const char *arguments_json, char **out_output,
                                        void *user_data) {
   tool_executor_probe_t *probe = (tool_executor_probe_t *)user_data;
-  turbo_mutex_lock(&probe->mutex);
+  salts_mutex_lock(&probe->mutex);
   ++probe->calls;
   ++probe->active;
   if (probe->active > probe->max_active) probe->max_active = probe->active;
-  turbo_mutex_unlock(&probe->mutex);
-  turbo_sleep_ms(20);
+  salts_mutex_unlock(&probe->mutex);
+  salts_sleep_ms(20);
   *out_output = tool_executor_strdup(arguments_json);
-  turbo_mutex_lock(&probe->mutex);
+  salts_mutex_lock(&probe->mutex);
   --probe->active;
-  turbo_mutex_unlock(&probe->mutex);
+  salts_mutex_unlock(&probe->mutex);
   return *out_output ? 0 : -1;
 }
 
@@ -143,7 +143,7 @@ spec("turbo agent tool executor") {
     json_value_t *state;
     turbo_graph_exec_ctx_t ctx = {0};
 
-    turbo_mutex_init(&probe.mutex);
+    salts_mutex_init(&probe.mutex);
     check_not_null(registry);
     check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     agent = tool_executor_agent(registry);
@@ -158,7 +158,7 @@ spec("turbo agent tool executor") {
     turbo_runtime_json_destroy(state);
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(registry);
-    turbo_mutex_destroy(&probe.mutex);
+    salts_mutex_destroy(&probe.mutex);
   }
 
   it("should overlap parallel-safe callbacks and commit outputs in call order") {
@@ -181,7 +181,7 @@ spec("turbo agent tool executor") {
     const json_value_t *outputs;
     turbo_graph_exec_ctx_t ctx = {0};
 
-    turbo_mutex_init(&probe.mutex);
+    salts_mutex_init(&probe.mutex);
     check_not_null(registry);
     check_int_eq(turbo_tool_registry_add_v2(registry, &definition), TURBO_TOOL_OK);
     agent = tool_executor_agent(registry);
@@ -189,7 +189,7 @@ spec("turbo agent tool executor") {
     turbo_agent_tool_executor_config_init(&executor_config);
     executor_config.max_workers = 3;
     executor_config.queue_capacity = 3;
-    check_int_eq(turbo_agent_tool_executor_configure(agent, &executor_config), TURBO_OK);
+    check_int_eq(turbo_agent_tool_executor_configure(agent, &executor_config), SALTS_OK);
     state = tool_executor_state(ids, names, args, 3, 0);
     check_not_null(state);
     ctx.state = state;
@@ -207,7 +207,7 @@ spec("turbo agent tool executor") {
     turbo_runtime_json_destroy(state);
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(registry);
-    turbo_mutex_destroy(&probe.mutex);
+    salts_mutex_destroy(&probe.mutex);
   }
 
   it("should enforce output bounds without committing oversized output") {
@@ -227,13 +227,13 @@ spec("turbo agent tool executor") {
     const char *output;
     turbo_graph_exec_ctx_t ctx = {0};
 
-    turbo_mutex_init(&probe.mutex);
+    salts_mutex_init(&probe.mutex);
     check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     agent = tool_executor_agent(registry);
     check_not_null(agent);
     turbo_agent_tool_executor_config_init(&executor_config);
     executor_config.max_output_bytes = 4;
-    check_int_eq(turbo_agent_tool_executor_configure(agent, &executor_config), TURBO_OK);
+    check_int_eq(turbo_agent_tool_executor_configure(agent, &executor_config), SALTS_OK);
     state = tool_executor_state(ids, names, args, 1, 0);
     ctx.state = state;
     check_int_eq(turbo_agent_tool_node(&ctx, agent), 0);
@@ -247,7 +247,7 @@ spec("turbo agent tool executor") {
     turbo_runtime_json_destroy(state);
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(registry);
-    turbo_mutex_destroy(&probe.mutex);
+    salts_mutex_destroy(&probe.mutex);
   }
 
   it("should reject denied capabilities before the first tool side effect") {
@@ -273,7 +273,7 @@ spec("turbo agent tool executor") {
     const char *output;
     turbo_graph_exec_ctx_t ctx = {0};
 
-    turbo_mutex_init(&probe.mutex);
+    salts_mutex_init(&probe.mutex);
     check_not_null(registry);
     check_int_eq(turbo_tool_registry_add_v3(registry, &definition), TURBO_TOOL_OK);
     agent = tool_executor_agent(registry);
@@ -297,7 +297,7 @@ spec("turbo agent tool executor") {
     turbo_runtime_json_destroy(state);
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(registry);
-    turbo_mutex_destroy(&probe.mutex);
+    salts_mutex_destroy(&probe.mutex);
   }
 
   it("should enforce capability policy inside the executor without a workflow precheck") {
@@ -321,14 +321,14 @@ spec("turbo agent tool executor") {
         {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
     call.turn_key = "0";
 
-    turbo_mutex_init(&probe.mutex);
+    salts_mutex_init(&probe.mutex);
     check_not_null(registry);
     check_int_eq(turbo_tool_registry_add_v3(registry, &definition), TURBO_TOOL_OK);
-    check_int_eq(turbo_agent_tool_executor_create(NULL, &executor), TURBO_OK);
+    check_int_eq(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     policy.allow_network = 0;
     check_int_eq(turbo_agent_tool_executor_execute(executor, NULL, NULL, NULL, NULL, registry,
                                                    &policy, &call, 1),
-                 TURBO_OK);
+                 SALTS_OK);
     check_int_eq(probe.calls, 0);
     check_int_eq(call.status, TURBO_TOOL_ERROR);
     check_str_eq(call.policy_reason, "network_disabled");
@@ -336,7 +336,7 @@ spec("turbo agent tool executor") {
     free(call.output);
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);
-    turbo_mutex_destroy(&probe.mutex);
+    salts_mutex_destroy(&probe.mutex);
   }
 
   it("should observe cancellation before invoking a synchronous callback") {
@@ -355,15 +355,15 @@ spec("turbo agent tool executor") {
         {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
     call.turn_key = "0";
 
-    turbo_mutex_init(&probe.mutex);
+    salts_mutex_init(&probe.mutex);
     check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
-    check_int_eq(turbo_agent_tool_executor_create(NULL, &executor), TURBO_OK);
-    check_int_eq(turbo_cancel_source_create(NULL, &source), TURBO_OK);
-    check_int_eq(turbo_cancel_source_token(source, &token), TURBO_OK);
-    check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), TURBO_OK);
+    check_int_eq(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
     check_int_eq(turbo_agent_tool_executor_execute(executor, NULL, token, NULL, NULL, registry,
                                                    NULL, &call, 1),
-                 TURBO_OK);
+                 SALTS_OK);
     check_int_eq(call.status, TURBO_TOOL_CANCELLED);
     check_int_eq(probe.calls, 0);
 
@@ -372,7 +372,7 @@ spec("turbo agent tool executor") {
     turbo_cancel_source_destroy(source);
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);
-    turbo_mutex_destroy(&probe.mutex);
+    salts_mutex_destroy(&probe.mutex);
   }
 
   it("should not retry a callback after a started journal loses its commit") {
@@ -398,7 +398,7 @@ spec("turbo agent tool executor") {
     first.turn_key = "0";
     recovered.turn_key = "0";
 
-    turbo_mutex_init(&probe.mutex);
+    salts_mutex_init(&probe.mutex);
     check_not_null(fault);
     fault->inner = turbo_agent_runtime_store_memory_create();
     fault->fail_committed_once = 1;
@@ -410,17 +410,17 @@ spec("turbo agent tool executor") {
     runtime = turbo_agent_runtime_create(&store);
     check_not_null(runtime);
     check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
-    check_int_eq(turbo_agent_tool_executor_create(NULL, &executor), TURBO_OK);
+    check_int_eq(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_int_eq(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
                                                    registry, NULL, &first, 1),
-                 TURBO_OK);
+                 SALTS_OK);
     check_int_eq(fault->puts, 3);
     check_int_eq(fault->committed_seen, 1);
     check_int_eq(first.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_int_eq(probe.calls, 1);
     check_int_eq(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
                                                    registry, NULL, &recovered, 1),
-                 TURBO_OK);
+                 SALTS_OK);
     check_int_eq(recovered.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_int_eq(probe.calls, 1);
 
@@ -429,7 +429,7 @@ spec("turbo agent tool executor") {
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);
     turbo_agent_runtime_destroy(runtime);
-    turbo_mutex_destroy(&probe.mutex);
+    salts_mutex_destroy(&probe.mutex);
   }
 
   it("should replay committed output and reject a changed call identity") {
@@ -466,27 +466,27 @@ spec("turbo agent tool executor") {
     changed.turn_key = "0";
     next_turn.turn_key = "1";
 
-    turbo_mutex_init(&probe.mutex);
+    salts_mutex_init(&probe.mutex);
     check_not_null(runtime);
     check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
-    check_int_eq(turbo_agent_tool_executor_create(NULL, &executor), TURBO_OK);
+    check_int_eq(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_int_eq(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
                                                    registry, NULL, &first, 1),
-                 TURBO_OK);
+                 SALTS_OK);
     check_int_eq(probe.calls, 1);
     check_int_eq(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
                                                    registry, NULL, &replay, 1),
-                 TURBO_OK);
+                 SALTS_OK);
     check_int_eq(probe.calls, 1);
     check_true(replay.replayed != 0);
     check_str_eq(replay.output, "{\"value\":1}");
     check_int_eq(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
                                                    registry, NULL, &next_turn, 1),
-                 TURBO_OK);
+                 SALTS_OK);
     check_int_eq(probe.calls, 2);
     check_int_eq(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
                                                    registry, NULL, &changed, 1),
-                 TURBO_EPROTO);
+                 SALTS_EPROTO);
     check_int_eq(probe.calls, 2);
 
     free(first.output);
@@ -496,6 +496,6 @@ spec("turbo agent tool executor") {
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);
     turbo_agent_runtime_destroy(runtime);
-    turbo_mutex_destroy(&probe.mutex);
+    salts_mutex_destroy(&probe.mutex);
   }
 }

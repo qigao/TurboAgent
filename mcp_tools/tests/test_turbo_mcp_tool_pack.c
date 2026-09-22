@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 typedef enum test_mcp_mode_e {
   TEST_MCP_JSON = 0,

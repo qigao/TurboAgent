@@ -6,8 +6,8 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <turbo_str.h>
-#include <turbo_thread.h>
+#include <tstr.h>
+#include <salts/thread.h>
 
 typedef struct harness_server_factory_s {
   turbo_threadpool_t *executor;
@@ -60,19 +60,19 @@ static void harness_server_wait_event_task(void *user_data) {
 static int harness_server_capture_frame(const uint8_t *frame, size_t frame_size, void *user_data) {
   harness_server_frame_capture_t *capture = (harness_server_frame_capture_t *)user_data;
   char *copy;
-  if (!frame || frame_size < 2 || !capture) return TURBO_EINVAL;
-  if (capture->fail_writes) return TURBO_EIO;
+  if (!frame || frame_size < 2 || !capture) return SALTS_EINVAL;
+  if (capture->fail_writes) return SALTS_EIO;
   if (frame[frame_size - 1] != '\n' || memchr(frame, '\r', frame_size - 1) ||
       memchr(frame, '\n', frame_size - 1)) {
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   if (capture->frame_count >= HARNESS_SERVER_CAPTURE_MAX_FRAMES) return TURBO_ENOBUFS;
   copy = (char *)malloc(frame_size);
-  if (!copy) return TURBO_ENOMEM;
+  if (!copy) return SALTS_ENOMEM;
   memcpy(copy, frame, frame_size - 1);
   copy[frame_size - 1] = '\0';
   capture->frames[capture->frame_count++] = copy;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static void harness_server_capture_destroy(harness_server_frame_capture_t *capture) {
@@ -89,18 +89,18 @@ static json_value_t *harness_server_parse_frame(const harness_server_frame_captu
   check_true(capture && index < capture->frame_count);
   check_int_eq(turbo_parse_json((const uint8_t *)capture->frames[index],
                                 strlen(capture->frames[index]), &value),
-               TURBO_OK);
+               SALTS_OK);
   return value;
 }
 
 static int harness_server_copy_response(const char *response, char **out_response_json) {
   size_t size;
-  if (!response || !out_response_json) return TURBO_EINVAL;
+  if (!response || !out_response_json) return SALTS_EINVAL;
   size = strlen(response) + 1;
   *out_response_json = (char *)malloc(size);
-  if (!*out_response_json) return TURBO_ENOMEM;
+  if (!*out_response_json) return SALTS_ENOMEM;
   memcpy(*out_response_json, response, size);
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int harness_server_success_transport(const char *request_json, char **out_response_json,
@@ -136,7 +136,7 @@ static int harness_server_gated_transport(const char *request_json, char **out_r
   (void)request_json;
   atomic_store_explicit(&gate->entered, 1, memory_order_release);
   while (!atomic_load_explicit(&gate->open, memory_order_acquire)) {
-    turbo_thread_yield();
+    salts_thread_yield();
   }
   return harness_server_success_transport(NULL, out_response_json, NULL);
 }
@@ -147,7 +147,7 @@ static int harness_server_thread_factory(const char *thread_id, turbo_agent_harn
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t harness_config;
-  if (!thread_id || !out_harness || !factory) return TURBO_EINVAL;
+  if (!thread_id || !out_harness || !factory) return SALTS_EINVAL;
   *out_harness = NULL;
   session_config.runtime_store = turbo_agent_runtime_store_memory_create();
   session_config.thread_id = thread_id;
@@ -160,7 +160,7 @@ static int harness_server_thread_factory(const char *thread_id, turbo_agent_harn
   harness_config.app_config = &app_config;
   harness_config.executor = factory->executor;
   *out_harness = turbo_agent_harness_create(&harness_config);
-  return *out_harness ? TURBO_OK : TURBO_EIO;
+  return *out_harness ? SALTS_OK : SALTS_EIO;
 }
 
 static turbo_agent_harness_server_t *harness_server_create(harness_server_factory_t *factory) {
@@ -185,7 +185,7 @@ static json_value_t *harness_server_rpc(turbo_agent_harness_connection_t *connec
   turbo_json_object_set_string(request, "method", method);
   if (params) turbo_json_object_add(request, "params", params);
   check_int_eq(turbo_agent_harness_connection_dispatch_json_value(connection, request, &response),
-               TURBO_OK);
+               SALTS_OK);
   turbo_runtime_json_destroy(request);
   return response;
 }
@@ -209,7 +209,7 @@ static void harness_server_ready(turbo_agent_harness_connection_t *connection) {
   turbo_json_object_add(notification, "params", notification_params);
   check_int_eq(turbo_agent_harness_connection_dispatch_json_value(connection, notification,
                                                                   &notification_response),
-               TURBO_OK);
+               SALTS_OK);
   check_null(notification_response);
   turbo_runtime_json_destroy(notification);
 }
@@ -268,7 +268,7 @@ static int harness_server_wait_for_event(turbo_agent_harness_connection_t *conne
     }
     turbo_runtime_json_destroy(response);
     if (found) return 1;
-    turbo_thread_yield();
+    salts_thread_yield();
   }
   return 0;
 }
@@ -313,12 +313,12 @@ static int harness_server_wait_for_events(turbo_agent_harness_connection_t *conn
       *inout_sequence = next;
     }
     turbo_runtime_json_destroy(response);
-    if (next_method < method_count) turbo_thread_yield();
+    if (next_method < method_count) salts_thread_yield();
   }
   return next_method == method_count;
 }
 
-static tstr_t harness_server_wait_for_approval(turbo_agent_harness_connection_t *connection,
+static tstr harness_server_wait_for_approval(turbo_agent_harness_connection_t *connection,
                                                uint64_t *inout_sequence) {
   size_t attempt;
   for (attempt = 0; attempt < 100000; ++attempt) {
@@ -328,7 +328,7 @@ static tstr_t harness_server_wait_for_approval(turbo_agent_harness_connection_t 
     const json_value_t *events;
     const json_value_t *next_json;
     uint64_t next;
-    tstr_t request_id = NULL;
+    tstr request_id = NULL;
     size_t index;
     turbo_json_object_set_number(params, "afterSequence", (double)*inout_sequence);
     response = harness_server_rpc(connection, 500 + (int)(attempt % 1000), "event/replay", params);
@@ -360,7 +360,7 @@ static tstr_t harness_server_wait_for_approval(turbo_agent_harness_connection_t 
     }
     turbo_runtime_json_destroy(response);
     if (request_id) return request_id;
-    turbo_thread_yield();
+    salts_thread_yield();
   }
   return NULL;
 }
@@ -381,8 +381,8 @@ spec("turbo agent harness server") {
     const json_value_t *result;
     const json_value_t *thread_json;
     const json_value_t *turn_json;
-    tstr_t thread_id;
-    tstr_t turn_id;
+    tstr thread_id;
+    tstr turn_id;
     uint64_t sequence = 0;
 
     check_not_null(pool);
@@ -446,8 +446,8 @@ spec("turbo agent harness server") {
     turbo_agent_harness_connection_t *observer;
     json_value_t *response;
     json_value_t *params;
-    tstr_t thread_id;
-    tstr_t turn_id;
+    tstr thread_id;
+    tstr turn_id;
     uint64_t sequence = 0;
 
     atomic_init(&gate.entered, 0);
@@ -468,7 +468,7 @@ spec("turbo agent harness server") {
         turbo_json_object_get(turbo_json_object_get(response, "result"), "turn"), "id"));
     turbo_runtime_json_destroy(response);
     while (!atomic_load_explicit(&gate.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
 
     observer = turbo_agent_harness_server_open_connection(server);
@@ -549,9 +549,9 @@ spec("turbo agent harness server") {
     json_value_t *params;
     json_value_t *interrupts;
     const json_value_t *turn_json;
-    tstr_t thread_id;
-    tstr_t turn_id;
-    tstr_t request_id;
+    tstr thread_id;
+    tstr turn_id;
+    tstr request_id;
     uint64_t sequence = 0;
 
     harness_server_ready(connection);
@@ -695,12 +695,12 @@ spec("turbo agent harness server") {
     turbo_agent_harness_connection_t *owner = turbo_agent_harness_server_open_connection(server);
     turbo_agent_harness_connection_t *observer = turbo_agent_harness_server_open_connection(server);
     harness_server_close_task_t close_task = {0};
-    turbo_thread_t closer = NULL;
+    salts_thread_t closer = NULL;
     json_value_t *response;
     json_value_t *params;
     const json_value_t *turn_json;
-    tstr_t thread_id;
-    tstr_t turn_id;
+    tstr thread_id;
+    tstr turn_id;
 
     atomic_init(&gate.entered, 0);
     atomic_init(&gate.open, 0);
@@ -718,20 +718,20 @@ spec("turbo agent harness server") {
         turbo_json_object_get(turbo_json_object_get(response, "result"), "turn"), "id"));
     turbo_runtime_json_destroy(response);
     while (!atomic_load_explicit(&gate.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
 
     close_task.connection = owner;
     atomic_init(&close_task.entered, 0);
     atomic_init(&close_task.done, 0);
-    check_int_eq(turbo_thread_create(&closer, harness_server_close_connection_task, &close_task),
+    check_int_eq(salts_thread_create(&closer, harness_server_close_connection_task, &close_task),
                  0);
     while (!atomic_load_explicit(&close_task.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
     atomic_store_explicit(&gate.open, 1, memory_order_release);
-    check_int_eq(turbo_thread_join(&closer), 0);
-    turbo_thread_destroy(&closer);
+    check_int_eq(salts_thread_join(&closer), 0);
+    salts_thread_destroy(&closer);
     check_true(atomic_load_explicit(&close_task.done, memory_order_acquire));
 
     params = turbo_json_create_object();
@@ -758,7 +758,7 @@ spec("turbo agent harness server") {
     turbo_agent_harness_connection_t *connection =
         turbo_agent_harness_server_open_connection(server);
     harness_server_event_wait_task_t wait_task = {0};
-    turbo_thread_t waiter = NULL;
+    salts_thread_t waiter = NULL;
     json_value_t *response;
     json_value_t *event = NULL;
     uint64_t sequence = 0;
@@ -769,16 +769,16 @@ spec("turbo agent harness server") {
     harness_server_ready(connection);
     wait_task.connection = connection;
     atomic_init(&wait_task.entered, 0);
-    check_int_eq(turbo_thread_create(&waiter, harness_server_wait_event_task, &wait_task), 0);
+    check_int_eq(salts_thread_create(&waiter, harness_server_wait_event_task, &wait_task), 0);
     while (!atomic_load_explicit(&wait_task.entered, memory_order_acquire))
-      turbo_thread_yield();
+      salts_thread_yield();
 
     response = harness_server_rpc(connection, 50, "thread/start", turbo_json_create_object());
     check_not_null(turbo_json_object_get(response, "result"));
     turbo_runtime_json_destroy(response);
-    check_int_eq(turbo_thread_join(&waiter), 0);
-    turbo_thread_destroy(&waiter);
-    check_int_eq(wait_task.rc, TURBO_OK);
+    check_int_eq(salts_thread_join(&waiter), 0);
+    salts_thread_destroy(&waiter);
+    check_int_eq(wait_task.rc, SALTS_OK);
     check_not_null(wait_task.event);
     check_str_eq(turbo_json_get_string(wait_task.event, "method"), "thread/started");
     check_true(wait_task.sequence == 1);
@@ -789,17 +789,17 @@ spec("turbo agent harness server") {
 
     check_int_eq(
         turbo_agent_harness_connection_wait_event_json_value(connection, 0, &event, &sequence),
-        TURBO_OK);
+        SALTS_OK);
     check_true(sequence == wait_task.sequence);
     turbo_runtime_json_destroy(event);
-    check_int_eq(turbo_agent_harness_connection_ack_events(connection, sequence), TURBO_OK);
+    check_int_eq(turbo_agent_harness_connection_ack_events(connection, sequence), SALTS_OK);
     event = NULL;
     sequence = 0;
     check_int_eq(
         turbo_agent_harness_connection_wait_event_json_value(connection, 0, &event, &sequence),
-        TURBO_ETIMEDOUT);
+        SALTS_ETIMEDOUT);
     check_null(event);
-    check_int_eq(turbo_agent_harness_connection_ack_events(connection, 2), TURBO_EINVAL);
+    check_int_eq(turbo_agent_harness_connection_ack_events(connection, 2), SALTS_EINVAL);
 
     turbo_agent_harness_connection_close(connection);
     turbo_agent_harness_server_destroy(server);
@@ -838,19 +838,19 @@ spec("turbo agent harness server") {
     check_not_null(transport);
 
     check_int_eq(turbo_agent_harness_jsonl_transport_dispatch_line(transport, initialize_line),
-                 TURBO_OK);
+                 SALTS_OK);
     check_true(capture.frame_count == 1);
     frame = harness_server_parse_frame(&capture, 0);
     check_not_null(turbo_json_object_get(frame, "result"));
     turbo_runtime_json_destroy(frame);
     check_int_eq(turbo_agent_harness_jsonl_transport_dispatch_line(transport, initialized_line),
-                 TURBO_OK);
+                 SALTS_OK);
     check_true(capture.frame_count == 1);
     check_int_eq(turbo_agent_harness_jsonl_transport_dispatch_line(transport, thread_start_line),
-                 TURBO_OK);
+                 SALTS_OK);
     check_true(capture.frame_count == 2);
     check_int_eq(turbo_agent_harness_jsonl_transport_pump_events(transport, 1000, &event_count),
-                 TURBO_OK);
+                 SALTS_OK);
     check_true(event_count == 1);
     check_true(capture.frame_count == 3);
     frame = harness_server_parse_frame(&capture, 2);
@@ -860,17 +860,17 @@ spec("turbo agent harness server") {
     turbo_runtime_json_destroy(frame);
 
     check_int_eq(turbo_agent_harness_jsonl_transport_dispatch_line(transport, thread_start_line),
-                 TURBO_OK);
+                 SALTS_OK);
     check_true(capture.frame_count == 4);
     capture.fail_writes = 1;
     event_count = 99;
     check_int_eq(turbo_agent_harness_jsonl_transport_pump_events(transport, 1000, &event_count),
-                 TURBO_EIO);
+                 SALTS_EIO);
     check_true(event_count == 0);
     check_true(capture.frame_count == 4);
     capture.fail_writes = 0;
     check_int_eq(turbo_agent_harness_jsonl_transport_pump_events(transport, 0, &event_count),
-                 TURBO_OK);
+                 SALTS_OK);
     check_true(event_count == 1);
     check_true(capture.frame_count == 5);
     frame = harness_server_parse_frame(&capture, 4);
@@ -881,16 +881,16 @@ spec("turbo agent harness server") {
 
     event_count = 99;
     check_int_eq(turbo_agent_harness_jsonl_transport_pump_events(transport, 0, &event_count),
-                 TURBO_ETIMEDOUT);
+                 SALTS_ETIMEDOUT);
     check_true(event_count == 0);
     check_int_eq(turbo_agent_harness_jsonl_transport_dispatch_line(
                      transport, "{\"method\":\"initialized\"}\n"),
-                 TURBO_EPROTO);
+                 SALTS_EPROTO);
 
     turbo_agent_harness_connection_close(connection);
     event_count = 99;
     check_int_eq(turbo_agent_harness_jsonl_transport_pump_events(transport, 0, &event_count),
-                 TURBO_ESHUTDOWN);
+                 SALTS_ESHUTDOWN);
     check_true(event_count == 0);
     turbo_agent_harness_jsonl_transport_destroy(transport);
     harness_server_capture_destroy(&capture);

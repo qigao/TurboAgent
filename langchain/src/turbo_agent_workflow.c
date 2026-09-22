@@ -2,7 +2,7 @@
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
 #include "turbo_agent_state_core_internal.h"
 
-#include <turbo_str.h>
+#include <tstr.h>
 
 static const char turbo_agent_planner_tool_node_suffix[] = ".tools";
 
@@ -20,9 +20,9 @@ static int turbo_agent_nested_has_pending_tool_calls(const turbo_graph_exec_ctx_
   return turbo_agent_state_pending_tool_calls(nested_state ? nested_state : ctx->state) > 0;
 }
 
-static tstr_t turbo_agent_planner_tool_node_name_create(const char *planner_node_name) {
-  tstr_t name;
-  tstr_t expanded;
+static tstr turbo_agent_planner_tool_node_name_create(const char *planner_node_name) {
+  tstr name;
+  tstr expanded;
 
   if (!planner_node_name) {
     return NULL;
@@ -84,7 +84,7 @@ turbo_graph_exec_status_t turbo_agent_workflow_add_planner_core(
     turbo_graph_t *graph, const char *planner_node_name, turbo_agent_t *planner_agent,
     const char *plan_commit_node_name, const char *plan_step_node_name) {
   turbo_graph_exec_status_t status;
-  tstr_t planner_tool_node_name;
+  tstr planner_tool_node_name;
 
   planner_tool_node_name = turbo_agent_planner_tool_node_name_create(planner_node_name);
   if (!planner_tool_node_name) {
@@ -252,7 +252,7 @@ turbo_graph_exec_status_t turbo_agent_workflow_connect_planner_path(
     const char *plan_commit_node_name, const char *plan_step_node_name,
     const char *next_node_name) {
   turbo_graph_exec_status_t status;
-  tstr_t planner_tool_node_name;
+  tstr planner_tool_node_name;
 
   planner_tool_node_name = turbo_agent_planner_tool_node_name_create(planner_node_name);
   if (!planner_tool_node_name) {

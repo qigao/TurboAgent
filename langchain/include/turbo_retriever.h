@@ -1,12 +1,12 @@
 #ifndef TURBO_RETRIEVER_H
 #define TURBO_RETRIEVER_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 #include <stddef.h>
 
 #include "turbo_agent_workflow.h"
 #include "turbo_graph.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -1,4 +1,5 @@
 #include "turbo_agent_harness.h"
+#include <json_parser.h>
 
 #include "turbo_agent_execution_internal.h"
 #include "turbo_agent_session_internal.h"
@@ -15,7 +16,7 @@ typedef enum turbo_agent_harness_operation_e {
 
 struct turbo_agent_harness_s {
   atomic_size_t ref_count;
-  turbo_mutex_t mutex;
+  salts_mutex_t mutex;
   turbo_agent_app_t *app;
   turbo_threadpool_t *executor;
   turbo_agent_execution_t *active_execution;
@@ -73,14 +74,14 @@ turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_conf
     return NULL;
   }
   atomic_init(&harness->ref_count, 1);
-  turbo_mutex_init(&harness->mutex);
+  salts_mutex_init(&harness->mutex);
   if (!harness->mutex) {
     free(harness);
     return NULL;
   }
   harness->app = turbo_agent_app_create(config->app_config);
   if (!harness->app) {
-    turbo_mutex_destroy(&harness->mutex);
+    salts_mutex_destroy(&harness->mutex);
     free(harness);
     return NULL;
   }
@@ -116,7 +117,7 @@ void turbo_agent_harness_release(turbo_agent_harness_t *harness) {
   atomic_thread_fence(memory_order_acquire);
   turbo_agent_execution_release(harness->active_execution);
   turbo_agent_app_destroy(harness->app);
-  turbo_mutex_destroy(&harness->mutex);
+  salts_mutex_destroy(&harness->mutex);
   free(harness);
 }
 
@@ -130,32 +131,32 @@ int turbo_agent_harness_get_capabilities(const turbo_agent_harness_t *harness,
   int rc;
 
   if (!harness || !out_capabilities_json) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   *out_capabilities_json = NULL;
   rc = turbo_agent_app_get_capabilities(harness->app, &capabilities);
-  if (rc != TURBO_OK || !capabilities) {
+  if (rc != SALTS_OK || !capabilities) {
     turbo_runtime_json_destroy(capabilities);
-    return rc != TURBO_OK ? rc : TURBO_EIO;
+    return rc != SALTS_OK ? rc : SALTS_EIO;
   }
-  turbo_json_object_set_bool(capabilities, "has_async_execution", 1);
-  turbo_json_object_set_bool(capabilities, "supports_start", 1);
-  turbo_json_object_set_bool(capabilities, "supports_resume", 1);
-  turbo_json_object_set_bool(capabilities, "supports_fork", 1);
-  turbo_json_object_set_bool(capabilities, "supports_cancel", 1);
-  turbo_json_object_set_bool(capabilities, "supports_deadline", 1);
-  turbo_json_object_set_bool(capabilities, "supports_event_sink", 1);
-  turbo_json_object_set_number(capabilities, "max_concurrent_executions", 1.0);
-  turbo_json_object_set_number(capabilities, "executor_queue_capacity",
+  json_object_set_bool(capabilities, "has_async_execution", 1);
+  json_object_set_bool(capabilities, "supports_start", 1);
+  json_object_set_bool(capabilities, "supports_resume", 1);
+  json_object_set_bool(capabilities, "supports_fork", 1);
+  json_object_set_bool(capabilities, "supports_cancel", 1);
+  json_object_set_bool(capabilities, "supports_deadline", 1);
+  json_object_set_bool(capabilities, "supports_event_sink", 1);
+  json_object_set_number(capabilities, "max_concurrent_executions", 1.0);
+  json_object_set_number(capabilities, "executor_queue_capacity",
                                (double)turbo_threadpool_capacity(harness->executor));
   *out_capabilities_json = capabilities;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_harness_get_tool_schemas(const turbo_agent_harness_t *harness,
                                          json_value_t **out_tool_schemas_json) {
   return harness ? turbo_agent_app_get_tool_schemas(harness->app, out_tool_schemas_json)
-                 : TURBO_EINVAL;
+                 : SALTS_EINVAL;
 }
 
 int turbo_agent_harness_get_startup_diagnostics(const turbo_agent_harness_t *harness,
@@ -165,28 +166,28 @@ int turbo_agent_harness_get_startup_diagnostics(const turbo_agent_harness_t *har
   int rc;
 
   if (!harness || !out_diagnostics_json) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   *out_diagnostics_json = NULL;
   rc = turbo_agent_app_get_startup_diagnostics(harness->app, &diagnostics);
-  if (rc != TURBO_OK || !diagnostics) {
+  if (rc != SALTS_OK || !diagnostics) {
     turbo_runtime_json_destroy(diagnostics);
-    return rc != TURBO_OK ? rc : TURBO_EIO;
+    return rc != SALTS_OK ? rc : SALTS_EIO;
   }
   rc = turbo_agent_harness_get_capabilities(harness, &capabilities);
-  if (rc != TURBO_OK || !capabilities) {
+  if (rc != SALTS_OK || !capabilities) {
     turbo_runtime_json_destroy(capabilities);
     turbo_runtime_json_destroy(diagnostics);
-    return rc != TURBO_OK ? rc : TURBO_EIO;
+    return rc != SALTS_OK ? rc : SALTS_EIO;
   }
   if (turbo_runtime_json_object_set(diagnostics, "harness", capabilities) !=
       TURBO_RUNTIME_JSON_OK) {
     turbo_runtime_json_destroy(capabilities);
     turbo_runtime_json_destroy(diagnostics);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   *out_diagnostics_json = diagnostics;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 turbo_agent_harness_execution_t *
@@ -230,7 +231,7 @@ static int turbo_agent_harness_complete(void *user_data, turbo_graph_t *graph,
   turbo_agent_session_t *session;
 
   if (!execution || !execution->harness) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   session = turbo_agent_app_session(execution->harness->app);
   return turbo_agent_session_complete_execution_internal(
@@ -248,44 +249,44 @@ static void turbo_agent_harness_terminal(void *user_data,
     return;
   }
   harness = execution->harness;
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   if (harness->active_execution == agent_execution) {
     active = harness->active_execution;
     harness->active_execution = NULL;
   } else {
     execution->terminal_before_publish = 1;
   }
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
   turbo_agent_execution_release(active);
   turbo_agent_harness_execution_release(execution);
 }
 
 static int turbo_agent_harness_begin_submit(turbo_agent_harness_t *harness) {
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
   turbo_agent_execution_t *terminal = NULL;
   turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_QUEUED;
 
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   if (harness->active_execution &&
-      turbo_agent_execution_get_status(harness->active_execution, &status) == TURBO_OK &&
+      turbo_agent_execution_get_status(harness->active_execution, &status) == SALTS_OK &&
       status >= TURBO_AGENT_EXECUTION_COMPLETED) {
     terminal = harness->active_execution;
     harness->active_execution = NULL;
   }
   if (harness->submitting || harness->active_execution) {
-    rc = TURBO_EBUSY;
+    rc = SALTS_EBUSY;
   } else {
     harness->submitting = 1;
   }
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
   turbo_agent_execution_release(terminal);
   return rc;
 }
 
 static void turbo_agent_harness_end_failed_submit(turbo_agent_harness_t *harness) {
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   harness->submitting = 0;
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
 }
 
 static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
@@ -306,19 +307,19 @@ static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
   int rc;
 
   if (!out_execution) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   *out_execution = NULL;
   if (!harness || !turbo_agent_harness_run_options_valid(options) ||
       (operation == TURBO_AGENT_HARNESS_START && !input) ||
       (operation != TURBO_AGENT_HARNESS_START && (!options || !options->session_options))) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   if (operation == TURBO_AGENT_HARNESS_START && options && options->session_options) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   rc = turbo_agent_harness_begin_submit(harness);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     return rc;
   }
 
@@ -327,13 +328,13 @@ static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
   graph =
       turbo_agent_session_create_preset_graph(session, turbo_agent_session_workflow_kind(session));
   if (!runtime || !graph) {
-    rc = TURBO_EINVAL;
+    rc = SALTS_EINVAL;
     goto fail;
   }
 
   execution = (turbo_agent_harness_execution_t *)calloc(1, sizeof(*execution));
   if (!execution) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto fail;
   }
   atomic_init(&execution->ref_count, 2);
@@ -342,7 +343,7 @@ static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
   execution->event_sink = options ? options->event_sink : NULL;
   execution->event_sink_user_data = options ? options->event_sink_user_data : NULL;
   if (!execution->harness) {
-    rc = TURBO_ERANGE;
+    rc = SALTS_ERANGE;
     goto fail_execution;
   }
 
@@ -355,7 +356,7 @@ static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
         session, options->session_options, execution->event_sink, execution->event_sink_user_data,
         &runtime_options);
   }
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     goto fail_execution;
   }
   if (options) {
@@ -378,32 +379,32 @@ static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
                                              options->graph_options, &runtime_options,
                                              &execution_options, &hooks, &execution->execution);
   }
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     goto fail_execution;
   }
 
   active_ref = turbo_agent_execution_retain(execution->execution);
   if (!active_ref) {
     (void)turbo_agent_execution_cancel(execution->execution, TURBO_CANCEL_SHUTDOWN);
-    rc = TURBO_ERANGE;
+    rc = SALTS_ERANGE;
     goto fail_running_execution;
   }
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   harness->submitting = 0;
   if (!execution->terminal_before_publish) {
     harness->active_execution = active_ref;
     active_ref = NULL;
   }
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
   turbo_agent_execution_release(active_ref);
 
   *out_execution = execution;
-  return TURBO_OK;
+  return SALTS_OK;
 
 fail_running_execution:
-  turbo_mutex_lock(&harness->mutex);
+  salts_mutex_lock(&harness->mutex);
   harness->submitting = 0;
-  turbo_mutex_unlock(&harness->mutex);
+  salts_mutex_unlock(&harness->mutex);
   turbo_agent_harness_execution_release(execution);
   return rc;
 
@@ -433,12 +434,12 @@ int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, const char *u
   int rc;
 
   if (!user_text || !out_execution) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   *out_execution = NULL;
   state = turbo_agent_session_create_input_state_json_value(user_text);
   if (!state) {
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = turbo_agent_harness_start_state(harness, state, options, out_execution);
   turbo_runtime_json_destroy(state);
@@ -465,29 +466,29 @@ const char *turbo_agent_harness_execution_id(const turbo_agent_harness_execution
 
 int turbo_agent_harness_execution_cancel(turbo_agent_harness_execution_t *execution,
                                          turbo_cancel_reason_t reason) {
-  return execution ? turbo_agent_execution_cancel(execution->execution, reason) : TURBO_EINVAL;
+  return execution ? turbo_agent_execution_cancel(execution->execution, reason) : SALTS_EINVAL;
 }
 
 int turbo_agent_harness_execution_wait(turbo_agent_harness_execution_t *execution,
                                        uint64_t timeout_ms) {
-  return execution ? turbo_agent_execution_wait(execution->execution, timeout_ms) : TURBO_EINVAL;
+  return execution ? turbo_agent_execution_wait(execution->execution, timeout_ms) : SALTS_EINVAL;
 }
 
 int turbo_agent_harness_execution_get_status(const turbo_agent_harness_execution_t *execution,
                                              turbo_agent_execution_status_t *out_status) {
   return execution ? turbo_agent_execution_get_status(execution->execution, out_status)
-                   : TURBO_EINVAL;
+                   : SALTS_EINVAL;
 }
 
 int turbo_agent_harness_execution_result_code(const turbo_agent_harness_execution_t *execution,
                                               int *out_result_code) {
   return execution ? turbo_agent_execution_result_code(execution->execution, out_result_code)
-                   : TURBO_EINVAL;
+                   : SALTS_EINVAL;
 }
 
 int turbo_agent_harness_execution_take_result(turbo_agent_harness_execution_t *execution,
                                               json_value_t **out_summary,
                                               json_value_t **out_state) {
   return execution ? turbo_agent_execution_take_result(execution->execution, out_summary, out_state)
-                   : TURBO_EINVAL;
+                   : SALTS_EINVAL;
 }

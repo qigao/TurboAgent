@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_GRAPH_H
 #define TURBO_AGENT_GRAPH_H
 
+#include <turbo_agent_api.h>
+
 #include "turbo_graph.h"
 #include "turbo_agent.h"
 

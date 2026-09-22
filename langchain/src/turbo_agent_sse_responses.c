@@ -1,7 +1,7 @@
 #include "turbo_agent_sse_state_internal.h"
 #include "turbo_agent_util_internal.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 #include <string.h>

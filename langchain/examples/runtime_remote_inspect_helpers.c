@@ -1,13 +1,11 @@
-#include "error_recovery.h"
-#include "iris_app.h"
-#include "server.h"
+#include <http_server/http.h>
 #include "turbo_agent_graph.h"
 #include "turbo_agent_remote_app.h"
 #include "turbo_agent_remote_session.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_runtime_remote.h"
 #include "turbo_agent_runtime_remote_client.h"
-#include "turbo_agent_runtime_remote_iris.h"
+#include "turbo_agent_runtime_remote_chttp.h"
 #include "turbo_agent_state.h"
 
 #include <stdio.h>
@@ -24,15 +22,14 @@ typedef struct {
 } runtime_remote_example_graph_registry_t;
 
 typedef struct {
-  coro_context_t *coro_ctx;
-  coro_socket_t *server;
-  int server_stopped;
+  chttp_server server;
+  int server_initialized;
+  int server_started;
   int exit_code;
   turbo_graph_t *graph;
   turbo_agent_runtime_store_t store;
   turbo_agent_runtime_t *runtime;
   turbo_agent_runtime_remote_t *remote;
-  turbo_agent_runtime_remote_iris_t *bridge;
   turbo_agent_runtime_remote_client_t *client;
   turbo_agent_remote_session_t *session;
   turbo_agent_remote_app_t *app;
@@ -48,7 +45,7 @@ static int runtime_remote_example_write_bool_json_value_node(turbo_graph_exec_ct
       (runtime_remote_example_bool_write_t *)user_data;
   json_value_t *value;
 
-  value = turbo_json_create_bool(write->value);
+  value = json_create_bool(write->value);
   if (!value) {
     return -1;
   }
@@ -64,7 +61,7 @@ static int runtime_remote_example_finalize_node(turbo_graph_exec_ctx_t *ctx, voi
   if (!ctx || !ctx->state || !final_output) {
     return -1;
   }
-  turbo_json_object_set_bool(ctx->state, "visited_end", true);
+  json_object_set_bool(ctx->state, "visited_end", true);
   return turbo_agent_state_set_final_answer(ctx->state, final_output);
 }
 
@@ -114,7 +111,7 @@ static json_value_t *runtime_remote_example_create_state_json_value(void) {
     turbo_free_json(&state);
     return NULL;
   }
-  bound = turbo_json_clone(state);
+  bound = json_clone(state);
   turbo_free_json(&state);
   return bound;
 }
@@ -122,20 +119,20 @@ static json_value_t *runtime_remote_example_create_state_json_value(void) {
 static json_value_t *runtime_remote_example_create_output_item(const char *thread_id,
                                                                const char *run_id,
                                                                const char *checkpoint_id) {
-  json_value_t *output_item = turbo_json_create_object();
+  json_value_t *output_item = json_create_object();
 
   if (!output_item) {
     return NULL;
   }
-  turbo_json_object_set_string(output_item, "child_thread_id", thread_id);
-  turbo_json_object_set_string(output_item, "child_run_id", run_id);
-  turbo_json_object_set_string(output_item, "child_checkpoint_id", checkpoint_id);
-  turbo_json_object_set_string(output_item, "child_status", "interrupted");
-  turbo_json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
-  turbo_json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
-  turbo_json_object_set_string(output_item, "parent_tool_name", "delegate");
-  turbo_json_object_set_string(output_item, "parent_graph_run_id", "run_parent");
-  turbo_json_object_set_string(output_item, "call_frame_id", "call_parent");
+  json_object_set_string(output_item, "child_thread_id", thread_id);
+  json_object_set_string(output_item, "child_run_id", run_id);
+  json_object_set_string(output_item, "child_checkpoint_id", checkpoint_id);
+  json_object_set_string(output_item, "child_status", "interrupted");
+  json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
+  json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
+  json_object_set_string(output_item, "parent_tool_name", "delegate");
+  json_object_set_string(output_item, "parent_graph_run_id", "run_parent");
+  json_object_set_string(output_item, "call_frame_id", "call_parent");
   return output_item;
 }
 
@@ -143,20 +140,20 @@ static void runtime_remote_example_print_supervisor(const char *label,
                                                     const json_value_t *inspect) {
   const json_value_t *supervisor;
 
-  supervisor = inspect ? turbo_json_object_get(inspect, "supervisor") : NULL;
+  supervisor = inspect ? json_object_get(inspect, "supervisor") : NULL;
   printf("%s supervisor active_agent: %s\n", label,
          runtime_remote_example_text(
-             supervisor ? turbo_json_get_string(supervisor, "active_agent") : NULL));
+             supervisor ? json_get_string(supervisor, "active_agent") : NULL));
 }
 
 static void runtime_remote_example_print_orchestration(const char *label,
                                                        const json_value_t *inspect) {
   const json_value_t *thread_lineage;
 
-  thread_lineage = inspect ? turbo_json_object_get(inspect, "thread_lineage") : NULL;
+  thread_lineage = inspect ? json_object_get(inspect, "thread_lineage") : NULL;
   printf("%s orchestration thread_id: %s\n", label,
          runtime_remote_example_text(
-             thread_lineage ? turbo_json_get_string(thread_lineage, "thread_id") : NULL));
+             thread_lineage ? json_get_string(thread_lineage, "thread_id") : NULL));
 }
 
 static void runtime_remote_example_print_child_multi_agent(const char *label,
@@ -164,36 +161,92 @@ static void runtime_remote_example_print_child_multi_agent(const char *label,
   const json_value_t *child_orchestration;
 
   child_orchestration =
-      inspect ? turbo_json_object_get(inspect, "child_orchestration_inspect") : NULL;
+      inspect ? json_object_get(inspect, "child_orchestration_inspect") : NULL;
   printf("%s child multi-agent parent_tool_name: %s\n", label,
          runtime_remote_example_text(child_orchestration
-                                         ? turbo_json_get_string(child_orchestration,
+                                         ? json_get_string(child_orchestration,
                                                                  "parent_tool_name")
                                          : NULL));
 }
 
-static void runtime_remote_example_drain_context(coro_context_t *ctx, uint64_t timeout_ms) {
-  uint64_t deadline;
+enum {
+  RUNTIME_REMOTE_EXAMPLE_CONNECTIONS = 4,
+  RUNTIME_REMOTE_EXAMPLE_COMMANDS = 32,
+  RUNTIME_REMOTE_EXAMPLE_SEND_BYTES = 64 * 1024,
+  RUNTIME_REMOTE_EXAMPLE_BUFFER_BYTES = 1024 * 1024,
+  RUNTIME_REMOTE_EXAMPLE_TIMEOUT_MS = 5000
+};
 
-  if (!ctx) {
-    return;
-  }
-  deadline = turbo_monotonic_ms() + timeout_ms;
-  while (coro_context_alive(ctx) && turbo_monotonic_ms() < deadline) {
-    coro_context_run(ctx, TURBO_RUN_NOWAIT);
-  }
+static chttp_server_config runtime_remote_example_server_config(void) {
+  chttp_server_config config = {0};
+  config.host = "127.0.0.1";
+  config.port = 0u;
+  config.backlog = RUNTIME_REMOTE_EXAMPLE_CONNECTIONS;
+#if defined(_WIN32)
+  config.network.backend = NATIVE_IO_BACKEND_IOCP;
+#elif defined(__linux__)
+  config.network.backend = NATIVE_IO_BACKEND_EPOLL;
+#else
+  config.network.backend = NATIVE_IO_BACKEND_KQUEUE;
+#endif
+  config.network.connection_capacity = RUNTIME_REMOTE_EXAMPLE_CONNECTIONS;
+  config.network.command_capacity = RUNTIME_REMOTE_EXAMPLE_COMMANDS;
+  config.network.request_capacity = RUNTIME_REMOTE_EXAMPLE_COMMANDS;
+  config.network.completion_batch_capacity = RUNTIME_REMOTE_EXAMPLE_CONNECTIONS;
+  config.network.event_capacity = RUNTIME_REMOTE_EXAMPLE_COMMANDS;
+  config.network.max_send_bytes = RUNTIME_REMOTE_EXAMPLE_SEND_BYTES;
+  config.network.receive_buffer_bytes = RUNTIME_REMOTE_EXAMPLE_SEND_BYTES;
+  config.network.connect_timeout_ms = RUNTIME_REMOTE_EXAMPLE_TIMEOUT_MS;
+  config.network.read_timeout_ms = RUNTIME_REMOTE_EXAMPLE_TIMEOUT_MS;
+  config.network.write_timeout_ms = RUNTIME_REMOTE_EXAMPLE_TIMEOUT_MS;
+  config.route_capacity = 4u;
+  config.middleware_capacity = 1u;
+  config.max_route_middleware_count = 1u;
+  config.max_route_param_count = 1u;
+  config.max_route_param_bytes = 256u;
+  config.max_target_bytes = 256u;
+  config.max_header_count = 32u;
+  config.max_header_bytes = 8192u;
+  config.max_request_body_bytes = RUNTIME_REMOTE_EXAMPLE_SEND_BYTES;
+  config.max_response_header_count = 32u;
+  config.max_response_header_bytes = 8192u;
+  config.max_response_body_bytes = RUNTIME_REMOTE_EXAMPLE_SEND_BYTES;
+  config.max_buffered_response_body_bytes = RUNTIME_REMOTE_EXAMPLE_SEND_BYTES;
+  config.buffer_capacity_bytes = RUNTIME_REMOTE_EXAMPLE_BUFFER_BYTES;
+  config.poll_slice_ms = 1u;
+  return config;
+}
+
+static int runtime_remote_example_server_start(runtime_remote_example_state_t *state,
+                                               char *endpoint_url,
+                                               size_t endpoint_capacity) {
+  chttp_server_config config;
+  uint16_t port = 0u;
+  int status;
+  int written;
+
+  if (!state || !state->remote || !endpoint_url || endpoint_capacity == 0u)
+    return -1;
+  config = runtime_remote_example_server_config();
+  status = chttp_server_init(&state->server, &config);
+  if (status != SALTS_OK) return -1;
+  state->server_initialized = 1;
+  status = turbo_agent_runtime_remote_chttp_mount(
+      state->remote, &state->server, "/v1/runtime/jsonrpc");
+  if (status != SALTS_OK) return -1;
+  status = chttp_server_start(&state->server);
+  if (status != SALTS_OK) return -1;
+  state->server_started = 1;
+  status = chttp_server_port(&state->server, &port);
+  if (status != SALTS_OK || port == 0u) return -1;
+  written = snprintf(endpoint_url, endpoint_capacity,
+                     "http://127.0.0.1:%u/v1/runtime/jsonrpc",
+                     (unsigned int)port);
+  return written > 0 && (size_t)written < endpoint_capacity ? 0 : -1;
 }
 
 static void runtime_remote_example_cleanup(runtime_remote_example_state_t *state) {
-  if (!state) {
-    return;
-  }
-  if (state->server) {
-    state->server_stopped = 1;
-    coro_socket_destroy(state->server);
-    state->server = NULL;
-    runtime_remote_example_drain_context(state->coro_ctx, 1000);
-  }
+  if (!state) return;
   if (state->app) {
     turbo_agent_remote_app_destroy(state->app);
     state->app = NULL;
@@ -206,9 +259,13 @@ static void runtime_remote_example_cleanup(runtime_remote_example_state_t *state
     turbo_agent_runtime_remote_client_destroy(state->client);
     state->client = NULL;
   }
-  if (state->bridge) {
-    turbo_agent_runtime_remote_iris_destroy(state->bridge);
-    state->bridge = NULL;
+  if (state->server_started) {
+    (void)chttp_server_stop(&state->server, RUNTIME_REMOTE_EXAMPLE_TIMEOUT_MS);
+    state->server_started = 0;
+  }
+  if (state->server_initialized) {
+    (void)chttp_server_destroy(&state->server);
+    state->server_initialized = 0;
   }
   if (state->remote) {
     turbo_agent_runtime_remote_destroy(state->remote);
@@ -222,15 +279,11 @@ static void runtime_remote_example_cleanup(runtime_remote_example_state_t *state
     turbo_graph_destroy(state->graph);
     state->graph = NULL;
   }
-  runtime_remote_example_drain_context(state->coro_ctx, 1000);
 }
 
-static void runtime_remote_example_coro(coro_t *co, void *arg) {
-  runtime_remote_example_state_t *state = (runtime_remote_example_state_t *)arg;
-  iris_app_t *app = iris_app_default();
+static void runtime_remote_example_run(runtime_remote_example_state_t *state) {
   runtime_remote_example_graph_registry_t registry = {0};
   turbo_agent_runtime_remote_config_t remote_config = {0};
-  turbo_agent_runtime_remote_iris_config_t bridge_config = {0};
   turbo_agent_runtime_remote_client_config_t client_config = {0};
   turbo_agent_remote_session_config_t session_config = {0};
   turbo_agent_remote_session_config_t app_session_config = {0};
@@ -248,11 +301,8 @@ static void runtime_remote_example_coro(coro_t *co, void *arg) {
   const char *thread_id;
   const char *run_id;
   const char *checkpoint_id;
-  int written;
-  const unsigned short port = 29891;
   static const char *interrupt_before_end[] = {"end"};
 
-  (void)co;
 
   state->exit_code = 1;
   state->store = turbo_agent_runtime_store_memory_create();
@@ -274,31 +324,9 @@ static void runtime_remote_example_coro(coro_t *co, void *arg) {
     goto cleanup;
   }
 
-  bridge_config.remote = state->remote;
-  bridge_config.path = "/v1/runtime/jsonrpc";
-  state->bridge = turbo_agent_runtime_remote_iris_create(&bridge_config);
-  if (!state->bridge || turbo_agent_runtime_remote_iris_mount(state->bridge, app) != 0) {
-    fprintf(stderr, "failed to mount remote runtime iris bridge\n");
-    goto cleanup;
-  }
-
-  if (init_router() != 0) {
-    fprintf(stderr, "init_router failed\n");
-    goto cleanup;
-  }
-  state->server = iris_server_start(app, state->coro_ctx, port);
-  if (!state->server) {
-    fprintf(stderr, "iris_server_start failed\n");
-    goto cleanup;
-  }
-
-  coro_yield();
-  coro_sleep(state->coro_ctx, 50);
-
-  written = snprintf(endpoint_url, sizeof(endpoint_url), "http://127.0.0.1:%u/v1/runtime/jsonrpc",
-                     (unsigned)port);
-  if (written <= 0 || (size_t)written >= sizeof(endpoint_url)) {
-    fprintf(stderr, "failed to format endpoint url\n");
+  if (runtime_remote_example_server_start(
+          state, endpoint_url, sizeof(endpoint_url)) != 0) {
+    fprintf(stderr, "failed to start CHTTP runtime remote server\n");
     goto cleanup;
   }
 
@@ -324,9 +352,9 @@ static void runtime_remote_example_coro(coro_t *co, void *arg) {
     goto cleanup;
   }
 
-  thread_id = turbo_json_get_string(summary_json, "thread_id");
-  run_id = turbo_json_get_string(summary_json, "run_id");
-  checkpoint_id = turbo_json_get_string(summary_json, "checkpoint_id");
+  thread_id = json_get_string(summary_json, "thread_id");
+  run_id = json_get_string(summary_json, "run_id");
+  checkpoint_id = json_get_string(summary_json, "checkpoint_id");
   if (!thread_id || !run_id || !checkpoint_id) {
     fprintf(stderr, "remote client summary missing ids\n");
     goto cleanup;
@@ -396,43 +424,12 @@ cleanup:
   turbo_free_json(&error_json);
   turbo_runtime_json_destroy(result_state);
   turbo_runtime_json_destroy(input_state);
-  coro_sleep(state->coro_ctx, 50);
-  if (state->server) {
-    state->server_stopped = 1;
-    coro_socket_destroy(state->server);
-    state->server = NULL;
-  }
 }
 
 int main(void) {
   runtime_remote_example_state_t state = {0};
-  int exit_code = 1;
 
-  iris_app_reset_default();
-  reset_router();
-  if (iris_error_recovery_init() != 0) {
-    fprintf(stderr, "iris_error_recovery_init failed\n");
-    return 1;
-  }
-
-  state.coro_ctx = coro_context_create(NULL);
-  if (!state.coro_ctx) {
-    fprintf(stderr, "coro_context_create failed\n");
-    iris_error_recovery_cleanup();
-    return 1;
-  }
-
-  coro_context_spawn(state.coro_ctx, runtime_remote_example_coro, &state);
-  coro_context_run(state.coro_ctx, TURBO_RUN_DEFAULT);
-  exit_code = state.exit_code;
-
+  runtime_remote_example_run(&state);
   runtime_remote_example_cleanup(&state);
-  if (state.coro_ctx) {
-    coro_context_destroy(state.coro_ctx);
-    state.coro_ctx = NULL;
-  }
-  reset_router();
-  iris_app_reset_default();
-  iris_error_recovery_cleanup();
-  return exit_code;
+  return state.exit_code;
 }

@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #include "turbo_agent_test_support.h"
 #include "turbo_agent_memory_store.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <platform.h>
 #include <stdlib.h>

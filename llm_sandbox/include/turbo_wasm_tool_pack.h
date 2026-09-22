@@ -1,7 +1,7 @@
 #ifndef TURBO_WASM_TOOL_PACK_H
 #define TURBO_WASM_TOOL_PACK_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_tool_registry.h"
 #include "turbo_tool_runtime_wasm.h"

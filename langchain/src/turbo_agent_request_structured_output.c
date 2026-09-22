@@ -1,6 +1,6 @@
 #include "turbo_agent_request_structured_output_internal.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <string.h>
 

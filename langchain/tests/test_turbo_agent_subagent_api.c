@@ -3,7 +3,7 @@
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_retriever.h"
 #include "turbo_agent_subagent.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdio.h>
 #include <stdlib.h>

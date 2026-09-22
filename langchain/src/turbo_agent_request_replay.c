@@ -9,7 +9,7 @@
 
 #include "turbo_prompt.h"
 
-#include <turbo_str.h>
+#include <tstr.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -250,7 +250,7 @@ CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages_with_option
 
   if (agent->context_projection_active) {
     char *summary_json;
-    tstr_t summary_text;
+    tstr summary_text;
     json_value_t *summary_message;
 
     if (!agent->context_summary) {

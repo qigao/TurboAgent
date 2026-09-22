@@ -1,7 +1,7 @@
 #ifndef TURBO_STATE_GRAPH_STORE_H
 #define TURBO_STATE_GRAPH_STORE_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_state_graph.h"
 

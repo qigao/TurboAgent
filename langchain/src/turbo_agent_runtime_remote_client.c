@@ -1,18 +1,41 @@
 #include "turbo_agent_runtime_remote_client.h"
 #include "turbo_agent_state.h"
 
+#include <uri_parser.h>
+
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct turbo_agent_runtime_remote_call_result_s {
+  int error_code;
+  unsigned int http_status;
+  const char *error_message;
+} turbo_agent_runtime_remote_call_result_t;
+
 struct turbo_agent_runtime_remote_client_s {
-  rpc_client_t *rpc_client;
-  int owns_rpc_client;
+  chttp_client *http_client;
+  int owns_http_client;
+  char connection_uri[640];
+  char authority[320];
+  char *target;
+  uint64_t next_request_id;
 };
 
+static native_io_backend_kind turbo_agent_runtime_remote_client_backend(void) {
+#if defined(_WIN32)
+  return NATIVE_IO_BACKEND_IOCP;
+#elif defined(__linux__)
+  return NATIVE_IO_BACKEND_EPOLL;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+  return NATIVE_IO_BACKEND_KQUEUE;
+#else
+  return (native_io_backend_kind)0;
+#endif
+}
+
 static int turbo_agent_runtime_remote_client_method_retryable(const char *method) {
-  if (!method) {
-    return 0;
-  }
+  if (!method) return 0;
   return strncmp(method, "runtime.get", 11) == 0 ||
          strncmp(method, "runtime.list", 12) == 0 ||
          strncmp(method, "runtime.load", 12) == 0 ||
@@ -23,14 +46,104 @@ static int turbo_agent_runtime_remote_client_method_retryable(const char *method
          strcmp(method, "memory.validateRecord") == 0;
 }
 
-static int turbo_agent_runtime_remote_client_transport_retryable(
-    int call_rc, const rpc_call_result_t *rpc_result) {
-  if (call_rc == 0 || (rpc_result && (rpc_result->success || rpc_result->result ||
-                                      rpc_result->error_message))) {
-    return 0;
+static int turbo_agent_runtime_remote_client_endpoint(
+    const char *url, char *connection_uri, size_t connection_capacity,
+    char *authority, size_t authority_capacity, char **out_target) {
+  uri_t uri;
+  const char *transport_scheme;
+  int default_port;
+  int port;
+  int is_ipv6;
+  int written;
+  char *target;
+  size_t path_length;
+  size_t query_length;
+  size_t target_length;
+
+  if (!url || !connection_uri || !authority || !out_target) return -1;
+  *out_target = NULL;
+  memset(&uri, 0, sizeof(uri));
+  if (!uri_parse(url, &uri) || !uri.valid || !uri.host[0] ||
+      (uri.component_flags & (URI_COMPONENT_USERINFO | URI_COMPONENT_FRAGMENT)) != 0u ||
+      (uri.overflow_flags & URI_OVERFLOW_PORT) != 0u) {
+    return -1;
   }
 
-  return call_rc != 0;
+  if (strcmp(uri.scheme, "https") == 0) {
+    transport_scheme = "tls";
+    default_port = 443;
+  } else if (strcmp(uri.scheme, "http") == 0) {
+    transport_scheme = "tcp";
+    default_port = 80;
+  } else {
+    return -1;
+  }
+
+  port = (uri.component_flags & URI_COMPONENT_PORT) != 0u ? uri.port : default_port;
+  if (port <= 0 || port > 65535) return -1;
+  is_ipv6 = uri.host_type == URI_HOST_IPV6ADDR;
+
+  written = is_ipv6
+                ? snprintf(connection_uri, connection_capacity, "%s://[%s]:%d",
+                           transport_scheme, uri.host, port)
+                : snprintf(connection_uri, connection_capacity, "%s://%s:%d",
+                           transport_scheme, uri.host, port);
+  if (written < 0 || (size_t)written >= connection_capacity) return -1;
+
+  if ((uri.component_flags & URI_COMPONENT_PORT) != 0u) {
+    written = is_ipv6 ? snprintf(authority, authority_capacity, "[%s]:%d", uri.host, port)
+                      : snprintf(authority, authority_capacity, "%s:%d", uri.host, port);
+  } else {
+    written = is_ipv6 ? snprintf(authority, authority_capacity, "[%s]", uri.host)
+                      : snprintf(authority, authority_capacity, "%s", uri.host);
+  }
+  if (written < 0 || (size_t)written >= authority_capacity) return -1;
+
+  path_length = strlen(uri.path[0] ? uri.path : "/");
+  query_length = (uri.component_flags & URI_COMPONENT_QUERY) != 0u ? strlen(uri.query) : 0u;
+  if (path_length > SIZE_MAX - query_length - 2u) return -1;
+  target_length = path_length +
+                  ((uri.component_flags & URI_COMPONENT_QUERY) != 0u ? 1u + query_length : 0u);
+  target = (char *)malloc(target_length + 1u);
+  if (!target) return -1;
+  memcpy(target, uri.path[0] ? uri.path : "/", path_length);
+  if ((uri.component_flags & URI_COMPONENT_QUERY) != 0u) {
+    target[path_length] = '?';
+    memcpy(target + path_length + 1u, uri.query, query_length);
+  }
+  target[target_length] = '\0';
+  *out_target = target;
+  return 0;
+}
+
+static chttp_client_config turbo_agent_runtime_remote_client_http_config(void) {
+  const cnet_client_config network = {
+      .backend = turbo_agent_runtime_remote_client_backend(),
+      .connection_capacity = 2u,
+      .command_capacity = 32u,
+      .request_capacity = 32u,
+      .completion_batch_capacity = 8u,
+      .event_capacity = 32u,
+      .max_send_bytes = 16u * 1024u * 1024u,
+      .receive_buffer_bytes = 256u * 1024u,
+      .connect_timeout_ms = 60000u,
+      .read_timeout_ms = 60000u,
+      .write_timeout_ms = 60000u,
+      .tls_io_buffer_bytes = 64u * 1024u,
+      .tls_handshake_timeout_ms = 60000u};
+  return (chttp_client_config){
+      .network = network,
+      .request_capacity = 2u,
+      .max_start_line_bytes = 8192u,
+      .max_header_count = 32u,
+      .max_header_bytes = 64u * 1024u,
+      .max_request_body_bytes = 16u * 1024u * 1024u,
+      .max_response_body_bytes = 64u * 1024u * 1024u,
+      .max_informational_responses = 4u,
+      .stream_chunk_bytes = 64u * 1024u,
+      .h2_input_buffer_bytes = 128u * 1024u,
+      .h2_hpack_dynamic_table_bytes = 4096u,
+      .h2_max_settings_count = 16u};
 }
 
 static int turbo_agent_runtime_remote_client_add_run_options_json(
@@ -287,22 +400,20 @@ static json_value_t *turbo_agent_runtime_remote_client_build_memory_query_params
 }
 
 static json_value_t *turbo_agent_runtime_remote_client_build_error_json(
-    const rpc_call_result_t *rpc_result, int transport_error, const char *fallback_message) {
+    const turbo_agent_runtime_remote_call_result_t *call_result,
+    int transport_error, const char *fallback_message) {
   json_value_t *error_json = turbo_json_create_object();
   const char *message = fallback_message ? fallback_message : "RPC call failed";
 
-  if (!error_json) {
-    return NULL;
+  if (!error_json) return NULL;
+  if (call_result && call_result->error_message && call_result->error_message[0] != '\0') {
+    message = call_result->error_message;
   }
-  if (rpc_result && rpc_result->error_message && rpc_result->error_message[0] != '\0') {
-    message = rpc_result->error_message;
-  }
-
   turbo_json_object_set_number(error_json, "code",
-                               rpc_result ? (double)rpc_result->error_code : 0.0);
+                               call_result ? (double)call_result->error_code : 0.0);
   turbo_json_object_set_string(error_json, "message", message);
   turbo_json_object_set_number(error_json, "http_status",
-                               rpc_result ? (double)rpc_result->http_status : 0.0);
+                               call_result ? (double)call_result->http_status : 0.0);
   turbo_json_object_set_bool(error_json, "transport_error", transport_error ? true : false);
   return error_json;
 }
@@ -310,120 +421,249 @@ static json_value_t *turbo_agent_runtime_remote_client_build_error_json(
 CXX_C_API turbo_agent_runtime_remote_client_t *turbo_agent_runtime_remote_client_create(
     const turbo_agent_runtime_remote_client_config_t *config) {
   turbo_agent_runtime_remote_client_t *client;
+  chttp_client_config http_config;
 
-  if (!config || (!config->rpc_client && (!config->url || !config->url[0]))) {
-    return NULL;
-  }
+  if (!config || !config->url || !config->url[0]) return NULL;
 
-  client = (turbo_agent_runtime_remote_client_t *)calloc(1, sizeof(*client));
-  if (!client) {
-    return NULL;
-  }
-
-  if (config->rpc_client) {
-    client->rpc_client = config->rpc_client;
-    client->owns_rpc_client = 0;
-    return client;
-  }
-
-  client->rpc_client = rpc_client_create_simple(config->url);
-  if (!client->rpc_client) {
+  client = (turbo_agent_runtime_remote_client_t *)calloc(1u, sizeof(*client));
+  if (!client) return NULL;
+  if (turbo_agent_runtime_remote_client_endpoint(
+          config->url, client->connection_uri, sizeof(client->connection_uri),
+          client->authority, sizeof(client->authority), &client->target) != 0) {
     free(client);
     return NULL;
   }
-  client->owns_rpc_client = 1;
+
+  if (config->http_client) {
+    client->http_client = config->http_client;
+    client->owns_http_client = 0;
+  } else {
+    client->http_client = (chttp_client *)calloc(1u, sizeof(*client->http_client));
+    if (!client->http_client) {
+      free(client->target);
+      free(client);
+      return NULL;
+    }
+    http_config = turbo_agent_runtime_remote_client_http_config();
+    if (http_config.network.backend == (native_io_backend_kind)0 ||
+        chttp_client_init(client->http_client, &http_config) != SALTS_OK) {
+      free(client->http_client);
+      free(client->target);
+      free(client);
+      return NULL;
+    }
+    client->owns_http_client = 1;
+  }
+
+  client->next_request_id = 1u;
   return client;
 }
 
 CXX_C_API void turbo_agent_runtime_remote_client_destroy(
     turbo_agent_runtime_remote_client_t *client) {
-  if (!client) {
-    return;
+  if (!client) return;
+  if (client->owns_http_client && client->http_client) {
+    (void)chttp_client_destroy(client->http_client, 0u);
+    free(client->http_client);
   }
-  if (client->owns_rpc_client && client->rpc_client) {
-    rpc_client_destroy(client->rpc_client);
-    client->rpc_client = NULL;
-  }
+  free(client->target);
   free(client);
+}
+
+static int turbo_agent_runtime_remote_client_response_id(
+    const json_value_t *response_json, uint64_t expected_id) {
+  const json_value_t *id;
+  const char *text;
+  char expected[32];
+  size_t length = 0u;
+  int written;
+
+  if (!response_json || json_type(response_json) != JSON_OBJECT) return -1;
+  id = json_object_get(response_json, "id");
+  if (!id || json_type(id) != JSON_NUMBER) return -1;
+  text = json_number_text(id, &length);
+  written = snprintf(expected, sizeof(expected), "%llu",
+                     (unsigned long long)expected_id);
+  if (!text || written < 0 || (size_t)written != length ||
+      memcmp(text, expected, length) != 0) {
+    return -1;
+  }
+  return 0;
 }
 
 CXX_C_API int turbo_agent_runtime_remote_client_call_json(
     turbo_agent_runtime_remote_client_t *client, const char *method,
     const json_value_t *params_json, json_value_t **out_result_json,
     json_value_t **out_error_json) {
-  rpc_call_result_t rpc_result;
-  char *params_json_text = NULL;
-  json_value_t *result_json = NULL;
-  int call_rc;
+  json_value_t *request_json = NULL;
+  json_value_t *response_json = NULL;
+  json_value_t *owned_params = NULL;
+  json_value_t *result_value;
+  json_value_t *remote_error;
+  json_value_t *error_code;
+  const char *error_message;
+  char *request_text = NULL;
+  size_t request_size = 0u;
+  uint64_t request_id;
+  chttp_header headers[2] = {
+      {.name = "Content-Type", .value = "application/json"},
+      {.name = "Accept", .value = "application/json"}};
+  chttp_options options;
+  chttp_response response = {0};
+  chttp_error error = {0};
+  turbo_agent_runtime_remote_call_result_t call_result = {0};
+  int status = SALTS_EINVAL;
   int attempt;
   int max_attempts;
 
-  if (out_result_json) {
-    *out_result_json = NULL;
-  }
-  if (out_error_json) {
-    *out_error_json = NULL;
-  }
-  if (!client || !client->rpc_client || !method || !method[0] ||
-      (!out_result_json && !out_error_json)) {
+  if (out_result_json) *out_result_json = NULL;
+  if (out_error_json) *out_error_json = NULL;
+  if (!client || !client->http_client || !method || !method[0] ||
+      (!out_result_json && !out_error_json) || client->next_request_id == 0u) {
     return -1;
   }
 
+  request_id = client->next_request_id++;
+  request_json = json_create_object();
+  if (!request_json) goto local_fail;
+  json_object_set_string(request_json, "jsonrpc", "2.0");
+  json_object_set_string(request_json, "method", method);
+  if (!json_object_add_checked(request_json, "id", json_create_uint64(request_id))) {
+    goto local_fail;
+  }
   if (params_json) {
-    params_json_text = turbo_json_serialize(params_json, NULL);
-    if (!params_json_text) {
-      if (out_error_json) {
-        *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
-            NULL, 1, "Failed to serialize RPC params");
-      }
-      return -1;
+    owned_params = json_clone(params_json);
+    if (!owned_params ||
+        !json_object_add_checked(request_json, "params", owned_params)) {
+      json_free(owned_params);
+      owned_params = NULL;
+      goto local_fail;
     }
+    owned_params = NULL;
   }
 
-  memset(&rpc_result, 0, sizeof(rpc_result));
+  request_text = json_serialize(request_json, &request_size);
+  json_free(request_json);
+  request_json = NULL;
+  if (!request_text) goto local_fail;
+
+  options = (chttp_options){
+      .connection_uri = client->connection_uri,
+      .authority = client->authority,
+      .target = client->target,
+      .headers = headers,
+      .header_count = sizeof(headers) / sizeof(headers[0]),
+      .body = request_text,
+      .body_size = request_size,
+      .timeout_ms = 60000u,
+      .protocol = CHTTP_HTTP_1_1};
+
   max_attempts = turbo_agent_runtime_remote_client_method_retryable(method) ? 3 : 2;
-  call_rc = -1;
   for (attempt = 0; attempt < max_attempts; ++attempt) {
-    memset(&rpc_result, 0, sizeof(rpc_result));
-    call_rc = rpc_client_call(client->rpc_client, method, params_json_text, &rpc_result);
-    if (call_rc == 0 || rpc_result.success || attempt + 1 >= max_attempts ||
-        !turbo_agent_runtime_remote_client_transport_retryable(call_rc, &rpc_result)) {
-      break;
-    }
-    rpc_result_free(&rpc_result);
-    rpc_client_disconnect(client->rpc_client);
+    memset(&response, 0, sizeof(response));
+    memset(&error, 0, sizeof(error));
+    status = chttp_post(client->http_client, &options, &response, &error);
+    if (status == SALTS_OK || attempt + 1 >= max_attempts) break;
+    chttp_response_destroy(&response);
   }
-  turbo_json_serialize_free(params_json_text);
+  json_serialize_free(request_text);
+  request_text = NULL;
 
-  if (rpc_result.success) {
-    if (!out_result_json) {
-      rpc_result_free(&rpc_result);
-      return 0;
+  if (status != SALTS_OK) {
+    call_result.error_code = error.status ? error.status : status;
+    call_result.http_status = response.status_code;
+    call_result.error_message = error.stage;
+    if (out_error_json) {
+      *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
+          &call_result, 1, "RPC transport failed");
     }
-    if (!rpc_result.result ||
-        turbo_parse_json((const uint8_t *)rpc_result.result, strlen(rpc_result.result), &result_json) !=
-            0 ||
-        !result_json) {
-      if (out_error_json) {
-        *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
-            &rpc_result, 1, "Failed to parse JSON-RPC result");
-      }
-      turbo_free_json(&result_json);
-      rpc_result_free(&rpc_result);
-      return -1;
+    chttp_response_destroy(&response);
+    return -1;
+  }
+
+  if (response.status_code < 200u || response.status_code >= 300u ||
+      !response.body || response.body_size == 0u) {
+    call_result.http_status = response.status_code;
+    call_result.error_message = "RPC endpoint returned non-success HTTP status";
+    if (out_error_json) {
+      *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
+          &call_result, 1, "RPC endpoint failed");
     }
-    *out_result_json = result_json;
-    rpc_result_free(&rpc_result);
+    chttp_response_destroy(&response);
+    return -1;
+  }
+
+  response_json = json_parse((const char *)response.body, response.body_size);
+  if (!response_json ||
+      turbo_agent_runtime_remote_client_response_id(response_json, request_id) != 0) {
+    call_result.http_status = response.status_code;
+    call_result.error_message = "Failed to parse JSON-RPC response";
+    if (out_error_json) {
+      *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
+          &call_result, 1, "Failed to parse JSON-RPC response");
+    }
+    json_free(response_json);
+    chttp_response_destroy(&response);
+    return -1;
+  }
+
+  remote_error = json_object_get(response_json, "error");
+  result_value = json_object_get(response_json, "result");
+  if (remote_error && json_type(remote_error) == JSON_OBJECT) {
+    error_code = json_object_get(remote_error, "code");
+    error_message = json_get_string(remote_error, "message");
+    call_result.error_code =
+        error_code && json_type(error_code) == JSON_NUMBER ? (int)json_number(error_code) : 0;
+    call_result.http_status = response.status_code;
+    call_result.error_message = error_message;
+    if (out_error_json) {
+      *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
+          &call_result, 0, "JSON-RPC method failed");
+    }
+    json_free(response_json);
+    chttp_response_destroy(&response);
     return 0;
   }
 
+  if (!result_value) {
+    call_result.http_status = response.status_code;
+    call_result.error_message = "JSON-RPC response has neither result nor error";
+    if (out_error_json) {
+      *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
+          &call_result, 1, "Malformed JSON-RPC response");
+    }
+    json_free(response_json);
+    chttp_response_destroy(&response);
+    return -1;
+  }
+
+  if (out_result_json) {
+    *out_result_json = json_clone(result_value);
+    if (!*out_result_json) {
+      if (out_error_json) {
+        call_result.http_status = response.status_code;
+        *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
+            &call_result, 1, "Failed to clone JSON-RPC result");
+      }
+      json_free(response_json);
+      chttp_response_destroy(&response);
+      return -1;
+    }
+  }
+
+  json_free(response_json);
+  chttp_response_destroy(&response);
+  return 0;
+
+local_fail:
+  json_free(owned_params);
+  json_free(request_json);
+  json_serialize_free(request_text);
   if (out_error_json) {
     *out_error_json = turbo_agent_runtime_remote_client_build_error_json(
-        &rpc_result, call_rc != 0 ? 1 : 0,
-        call_rc != 0 ? "RPC transport failed" : "JSON-RPC method failed");
+        NULL, 1, "Failed to build RPC request");
   }
-  rpc_result_free(&rpc_result);
-  return call_rc == 0 ? 0 : -1;
+  return -1;
 }
 
 CXX_C_API int turbo_agent_runtime_remote_client_get_startup_diagnostics(

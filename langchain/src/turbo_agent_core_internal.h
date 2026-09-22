@@ -14,11 +14,11 @@ typedef int (*turbo_agent_before_turn_fn)(turbo_agent_t *agent, json_value_t *st
 typedef int (*turbo_agent_context_overflow_fn)(turbo_agent_t *agent, json_value_t *state,
                                                int transport_status, const char *response_json,
                                                void *user_data);
-typedef struct coro_context_s coro_context_t;
 typedef struct turbo_agent_tool_executor_s turbo_agent_tool_executor_t;
 
 struct turbo_agent_s {
   char *api_key;
+  char *http_authorization;
   char *model;
   char *base_url;
   char *endpoint_path;
@@ -31,10 +31,8 @@ struct turbo_agent_s {
   int stream_response;
   int parallel_tool_calls;
   int owns_http_client;
-  int owns_http_context;
   int owns_tool_registry;
-  http_client_t *http_client;
-  coro_context_t *http_context;
+  chttp_client *http_client;
   turbo_tool_registry_t *tool_registry;
   turbo_agent_tool_executor_t *tool_executor;
   turbo_agent_policy_t tool_policy;

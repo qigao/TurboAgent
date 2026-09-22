@@ -5,8 +5,7 @@
 #include "turbo_agent_tool_executor_internal.h"
 #include "turbo_agent_transport_internal.h"
 
-#include "CoroNet/turbo_coro_context.h"
-#include "http_client.h"
+#include <http_client/http.h>
 #include "turbo_action_tool.h"
 #include "turbo_tool_registry.h"
 
@@ -62,10 +61,9 @@ static void turbo_agent_release_owned_resources(turbo_agent_t *agent) {
   }
 
   if (agent->owns_http_client && agent->http_client) {
-    http_client_destroy(agent->http_client);
-  }
-  if (agent->owns_http_context && agent->http_context) {
-    coro_context_destroy(agent->http_context);
+    (void)chttp_client_destroy(agent->http_client, 0u);
+    free(agent->http_client);
+    agent->http_client = NULL;
   }
   if (agent->owns_tool_registry && agent->tool_registry) {
     turbo_tool_registry_destroy(agent->tool_registry);
@@ -115,6 +113,7 @@ static void turbo_agent_free_strings(turbo_agent_t *agent) {
   }
 
   tstr_free(agent->api_key);
+  tstr_free(agent->http_authorization);
   tstr_free(agent->model);
   tstr_free(agent->base_url);
   tstr_free(agent->endpoint_path);

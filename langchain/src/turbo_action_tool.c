@@ -270,12 +270,14 @@ turbo_action_tool_registry_execute(const turbo_action_tool_registry_t *registry,
 
   rc = entry->definition.handler(args, out_result, entry->definition.user_data);
   if (rc != 0) {
-    turbo_free_json(out_result);
+    json_free(*out_result);
+    *out_result = NULL;
     return TURBO_ACTION_TOOL_ERROR;
   }
 
   if (!*out_result || turbo_action_result_validate(*out_result) != 0) {
-    turbo_free_json(out_result);
+    json_free(*out_result);
+    *out_result = NULL;
     return TURBO_ACTION_TOOL_ERROR;
   }
 

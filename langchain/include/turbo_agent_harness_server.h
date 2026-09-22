@@ -123,7 +123,7 @@ turbo_agent_harness_connection_dispatch_json_value(turbo_agent_harness_connectio
  * JSON text adapter over `dispatch_json_value` using TurboParser.
  *
  * A successful notification returns `SALTS_OK` and NULL output. A non-NULL
- * output is released with `turbo_json_serialize_free()`.
+ * output is released with `json_serialize_free()`.
  *
  * @param connection Live connection.
  * @param request_json_text Borrowed UTF-8 JSON text.

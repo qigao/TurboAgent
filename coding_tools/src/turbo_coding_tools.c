@@ -1,7 +1,7 @@
 #include "turbo_coding_tools.h"
 
 #include <salts_fs.h>
-#include <turbo_str_view.h>
+#include <vstr.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -159,7 +159,7 @@ static int turbo_coding_fs_read_json(const json_value_t *arguments, json_value_t
       metadata.size > binding->max_result_bytes || salts_fs_read_file(resolved, &buffer) != 0 ||
       buffer.len > binding->max_read_bytes || buffer.len > binding->max_result_bytes ||
       (buffer.len > 0 && memchr(buffer.base, '\0', buffer.len) != NULL) ||
-      !tstr_v_utf8_valid(tstr_v_from_buf(buffer.base, buffer.len))) {
+      !vstr_utf8_valid(vstr_from_buf(buffer.base, buffer.len))) {
     free(resolved);
     salts_fs_buf_free(&buffer);
     *out_result = turbo_coding_result(0, "failed", "file cannot be read within configured bounds");

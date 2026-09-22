@@ -45,7 +45,7 @@ static int runtime_remote_example_write_bool_json_value_node(turbo_graph_exec_ct
       (runtime_remote_example_bool_write_t *)user_data;
   json_value_t *value;
 
-  value = turbo_json_create_bool(write->value);
+  value = json_create_bool(write->value);
   if (!value) {
     return -1;
   }
@@ -61,7 +61,7 @@ static int runtime_remote_example_finalize_node(turbo_graph_exec_ctx_t *ctx, voi
   if (!ctx || !ctx->state || !final_output) {
     return -1;
   }
-  turbo_json_object_set_bool(ctx->state, "visited_end", true);
+  json_object_set_bool(ctx->state, "visited_end", true);
   return turbo_agent_state_set_final_answer(ctx->state, final_output);
 }
 
@@ -111,7 +111,7 @@ static json_value_t *runtime_remote_example_create_state_json_value(void) {
     turbo_free_json(&state);
     return NULL;
   }
-  bound = turbo_json_clone(state);
+  bound = json_clone(state);
   turbo_free_json(&state);
   return bound;
 }
@@ -119,20 +119,20 @@ static json_value_t *runtime_remote_example_create_state_json_value(void) {
 static json_value_t *runtime_remote_example_create_output_item(const char *thread_id,
                                                                const char *run_id,
                                                                const char *checkpoint_id) {
-  json_value_t *output_item = turbo_json_create_object();
+  json_value_t *output_item = json_create_object();
 
   if (!output_item) {
     return NULL;
   }
-  turbo_json_object_set_string(output_item, "child_thread_id", thread_id);
-  turbo_json_object_set_string(output_item, "child_run_id", run_id);
-  turbo_json_object_set_string(output_item, "child_checkpoint_id", checkpoint_id);
-  turbo_json_object_set_string(output_item, "child_status", "interrupted");
-  turbo_json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
-  turbo_json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
-  turbo_json_object_set_string(output_item, "parent_tool_name", "delegate");
-  turbo_json_object_set_string(output_item, "parent_graph_run_id", "run_parent");
-  turbo_json_object_set_string(output_item, "call_frame_id", "call_parent");
+  json_object_set_string(output_item, "child_thread_id", thread_id);
+  json_object_set_string(output_item, "child_run_id", run_id);
+  json_object_set_string(output_item, "child_checkpoint_id", checkpoint_id);
+  json_object_set_string(output_item, "child_status", "interrupted");
+  json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
+  json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
+  json_object_set_string(output_item, "parent_tool_name", "delegate");
+  json_object_set_string(output_item, "parent_graph_run_id", "run_parent");
+  json_object_set_string(output_item, "call_frame_id", "call_parent");
   return output_item;
 }
 
@@ -140,20 +140,20 @@ static void runtime_remote_example_print_supervisor(const char *label,
                                                     const json_value_t *inspect) {
   const json_value_t *supervisor;
 
-  supervisor = inspect ? turbo_json_object_get(inspect, "supervisor") : NULL;
+  supervisor = inspect ? json_object_get(inspect, "supervisor") : NULL;
   printf("%s supervisor active_agent: %s\n", label,
          runtime_remote_example_text(
-             supervisor ? turbo_json_get_string(supervisor, "active_agent") : NULL));
+             supervisor ? json_get_string(supervisor, "active_agent") : NULL));
 }
 
 static void runtime_remote_example_print_orchestration(const char *label,
                                                        const json_value_t *inspect) {
   const json_value_t *thread_lineage;
 
-  thread_lineage = inspect ? turbo_json_object_get(inspect, "thread_lineage") : NULL;
+  thread_lineage = inspect ? json_object_get(inspect, "thread_lineage") : NULL;
   printf("%s orchestration thread_id: %s\n", label,
          runtime_remote_example_text(
-             thread_lineage ? turbo_json_get_string(thread_lineage, "thread_id") : NULL));
+             thread_lineage ? json_get_string(thread_lineage, "thread_id") : NULL));
 }
 
 static void runtime_remote_example_print_child_multi_agent(const char *label,
@@ -161,10 +161,10 @@ static void runtime_remote_example_print_child_multi_agent(const char *label,
   const json_value_t *child_orchestration;
 
   child_orchestration =
-      inspect ? turbo_json_object_get(inspect, "child_orchestration_inspect") : NULL;
+      inspect ? json_object_get(inspect, "child_orchestration_inspect") : NULL;
   printf("%s child multi-agent parent_tool_name: %s\n", label,
          runtime_remote_example_text(child_orchestration
-                                         ? turbo_json_get_string(child_orchestration,
+                                         ? json_get_string(child_orchestration,
                                                                  "parent_tool_name")
                                          : NULL));
 }
@@ -352,9 +352,9 @@ static void runtime_remote_example_run(runtime_remote_example_state_t *state) {
     goto cleanup;
   }
 
-  thread_id = turbo_json_get_string(summary_json, "thread_id");
-  run_id = turbo_json_get_string(summary_json, "run_id");
-  checkpoint_id = turbo_json_get_string(summary_json, "checkpoint_id");
+  thread_id = json_get_string(summary_json, "thread_id");
+  run_id = json_get_string(summary_json, "run_id");
+  checkpoint_id = json_get_string(summary_json, "checkpoint_id");
   if (!thread_id || !run_id || !checkpoint_id) {
     fprintf(stderr, "remote client summary missing ids\n");
     goto cleanup;

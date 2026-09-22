@@ -162,9 +162,9 @@ static int turbo_agent_harness_connection_enqueue(turbo_agent_harness_connection
   int rc = SALTS_OK;
 
   if (!connection || !message) return SALTS_EINVAL;
-  serialized = turbo_json_serialize(message, &bytes);
+  serialized = json_serialize(message, &bytes);
   if (!serialized) return SALTS_ENOMEM;
-  turbo_json_serialize_free(serialized);
+  json_serialize_free(serialized);
   if (bytes > connection->server->config.max_single_event_bytes ||
       bytes > connection->server->config.max_event_bytes) {
     turbo_agent_harness_connection_set_stream_error(connection, SALTS_EMSGSIZE);
@@ -225,9 +225,9 @@ static int turbo_agent_harness_connection_enqueue_pair(turbo_agent_harness_conne
 
   if (!connection || !first || !second) return SALTS_EINVAL;
   for (index = 0; index < 2; ++index) {
-    char *serialized = turbo_json_serialize(messages[index], &pending[index].bytes);
+    char *serialized = json_serialize(messages[index], &pending[index].bytes);
     if (!serialized) return SALTS_ENOMEM;
-    turbo_json_serialize_free(serialized);
+    json_serialize_free(serialized);
     if (pending[index].bytes > connection->server->config.max_single_event_bytes ||
         pending[index].bytes > connection->server->config.max_event_bytes - total_bytes) {
       turbo_agent_harness_connection_set_stream_error(connection, SALTS_EMSGSIZE);
@@ -277,10 +277,10 @@ static json_value_t *turbo_agent_harness_notification_create(const char *method,
                                                              json_value_t *params) {
   json_value_t *notification;
   if (!method || !params) return NULL;
-  notification = turbo_json_create_object();
+  notification = json_create_object();
   if (!notification) return NULL;
-  turbo_json_object_set_string(notification, "method", method);
-  if (!turbo_json_object_add_checked(notification, "params", params)) {
+  json_object_set_string(notification, "method", method);
+  if (!json_object_add_checked(notification, "params", params)) {
     turbo_runtime_json_destroy(notification);
     return NULL;
   }
@@ -307,10 +307,10 @@ static int turbo_agent_harness_emit(turbo_agent_harness_connection_t *connection
 }
 
 static json_value_t *turbo_agent_harness_params_base(const turbo_agent_harness_turn_t *turn) {
-  json_value_t *params = turbo_json_create_object();
+  json_value_t *params = json_create_object();
   if (!params) return NULL;
-  turbo_json_object_set_string(params, "threadId", turn->thread->id);
-  turbo_json_object_set_string(params, "turnId", turn->id);
+  json_object_set_string(params, "threadId", turn->thread->id);
+  json_object_set_string(params, "turnId", turn->id);
   return params;
 }
 
@@ -321,8 +321,8 @@ static void turbo_agent_harness_turn_event_sink(const json_value_t *event, void 
   int rc;
   if (!turn || !event || !turn->connection) return;
   params = turbo_agent_harness_params_base(turn);
-  copy = turbo_json_clone(event);
-  if (!params || !copy || !turbo_json_object_add_checked(params, "item", copy)) {
+  copy = json_clone(event);
+  if (!params || !copy || !json_object_add_checked(params, "item", copy)) {
     turbo_runtime_json_destroy(copy);
     turbo_runtime_json_destroy(params);
     turbo_agent_harness_connection_set_stream_error(turn->connection, SALTS_ENOMEM);
@@ -458,7 +458,7 @@ static const char *turbo_agent_harness_turn_status_text(const turbo_agent_harnes
   if (!turn) return "notFound";
   if (turn->finalized) {
     const char *summary_status =
-        turn->summary ? turbo_json_get_string(turn->summary, "status") : NULL;
+        turn->summary ? json_get_string(turn->summary, "status") : NULL;
     if (turn->interrupt_requested) return "interrupted";
     if (summary_status && strcmp(summary_status, "completed") == 0) return "completed";
     if (summary_status && strcmp(summary_status, "cancelled") == 0) return "interrupted";
@@ -499,21 +499,21 @@ turbo_agent_harness_turn_snapshot_json(const turbo_agent_harness_turn_snapshot_t
   json_value_t *turn_json;
   json_value_t *items;
   if (!snapshot) return NULL;
-  turn_json = turbo_json_create_object();
+  turn_json = json_create_object();
   if (!turn_json) return NULL;
-  turbo_json_object_set_string(turn_json, "id", snapshot->id);
-  turbo_json_object_set_string(turn_json, "threadId", snapshot->thread_id);
-  turbo_json_object_set_string(turn_json, "status", snapshot->status);
-  items = turbo_json_create_array();
-  if (!items || !turbo_json_object_add_checked(turn_json, "items", items)) {
+  json_object_set_string(turn_json, "id", snapshot->id);
+  json_object_set_string(turn_json, "threadId", snapshot->thread_id);
+  json_object_set_string(turn_json, "status", snapshot->status);
+  items = json_create_array();
+  if (!items || !json_object_add_checked(turn_json, "items", items)) {
     turbo_runtime_json_destroy(items);
     turbo_runtime_json_destroy(turn_json);
     return NULL;
   }
   if (snapshot->approval_request_id[0]) {
-    turbo_json_object_set_string(turn_json, "approvalRequestId", snapshot->approval_request_id);
+    json_object_set_string(turn_json, "approvalRequestId", snapshot->approval_request_id);
   } else {
-    turbo_json_object_set_null(turn_json, "approvalRequestId");
+    json_object_set_null(turn_json, "approvalRequestId");
   }
   return turn_json;
 }
@@ -541,16 +541,16 @@ static json_value_t *turbo_agent_harness_thread_json(turbo_agent_harness_thread_
     memcpy(active_turn_id, thread->turn->id, strlen(thread->turn->id) + 1);
   }
   salts_mutex_unlock(&thread->mutex);
-  thread_json = turbo_json_create_object();
+  thread_json = json_create_object();
   if (!thread_json) return NULL;
-  turbo_json_object_set_string(thread_json, "id", thread->id);
-  turbo_json_object_set_string(thread_json, "sessionId", thread->id);
-  turbo_json_object_set_bool(thread_json, "loaded", 1);
-  turbo_json_object_set_string(thread_json, "status", status);
+  json_object_set_string(thread_json, "id", thread->id);
+  json_object_set_string(thread_json, "sessionId", thread->id);
+  json_object_set_bool(thread_json, "loaded", 1);
+  json_object_set_string(thread_json, "status", status);
   if (active_turn_id[0]) {
-    turbo_json_object_set_string(thread_json, "activeTurnId", active_turn_id);
+    json_object_set_string(thread_json, "activeTurnId", active_turn_id);
   } else {
-    turbo_json_object_set_null(thread_json, "activeTurnId");
+    json_object_set_null(thread_json, "activeTurnId");
   }
   return thread_json;
 }
@@ -565,8 +565,8 @@ static json_value_t *turbo_agent_harness_turn_completed_message(turbo_agent_harn
     turbo_runtime_json_destroy(params);
     return NULL;
   }
-  turbo_json_object_set_string(turn_json, "status", status);
-  if (!turbo_json_object_add_checked(params, "turn", turn_json)) {
+  json_object_set_string(turn_json, "status", status);
+  if (!json_object_add_checked(params, "turn", turn_json)) {
     turbo_runtime_json_destroy(turn_json);
     turbo_runtime_json_destroy(params);
     return NULL;
@@ -593,8 +593,8 @@ static int turbo_agent_harness_turn_emit_resolution_and_completed(turbo_agent_ha
   json_value_t *completed_message = NULL;
   int rc;
   if (resolved) {
-    turbo_json_object_set_string(resolved, "requestId", request_id);
-    turbo_json_object_set_string(resolved, "decision", decision);
+    json_object_set_string(resolved, "requestId", request_id);
+    json_object_set_string(resolved, "decision", decision);
     resolved_message = turbo_agent_harness_notification_create("serverRequest/resolved", resolved);
     if (!resolved_message) turbo_runtime_json_destroy(resolved);
   }
@@ -631,42 +631,42 @@ static int turbo_agent_harness_turn_emit_approval(turbo_agent_harness_turn_t *tu
   if (rc != SALTS_OK) return rc;
   owned_request_id = tstr_dup(request_id);
   if (!owned_request_id) return SALTS_ENOMEM;
-  if (note && turbo_parse_json((const uint8_t *)note, strlen(note), &note_json) == 0 && note_json &&
-      turbo_json_type(note_json) == TURBO_JSON_OBJECT &&
-      strcmp(turbo_json_get_string(note_json, "kind") ? turbo_json_get_string(note_json, "kind")
+  note_json = note ? json_parse(note, strlen(note)) : NULL;
+  if (note_json && json_type(note_json) == JSON_OBJECT &&
+      strcmp(json_get_string(note_json, "kind") ? json_get_string(note_json, "kind")
                                                       : "",
              "tool_approval") == 0) {
-    const char *call_id = turbo_json_get_string(note_json, "call_id");
-    const char *tool_name = turbo_json_get_string(note_json, "tool_name");
-    const char *arguments = turbo_json_get_string(note_json, "arguments");
+    const char *call_id = json_get_string(note_json, "call_id");
+    const char *tool_name = json_get_string(note_json, "tool_name");
+    const char *arguments = json_get_string(note_json, "arguments");
     method = "item/tool/requestApproval";
     if (call_id && call_id[0]) item_id = call_id;
     params = turbo_agent_harness_params_base(turn);
     if (params) {
-      turbo_json_object_set_string(params, "itemId", item_id);
-      if (tool_name) turbo_json_object_set_string(params, "toolName", tool_name);
-      if (arguments) turbo_json_object_set_string(params, "arguments", arguments);
+      json_object_set_string(params, "itemId", item_id);
+      if (tool_name) json_object_set_string(params, "toolName", tool_name);
+      if (arguments) json_object_set_string(params, "arguments", arguments);
     }
   } else {
     params = turbo_agent_harness_params_base(turn);
-    if (params) turbo_json_object_set_string(params, "itemId", item_id);
+    if (params) json_object_set_string(params, "itemId", item_id);
   }
   turbo_runtime_json_destroy(note_json);
   if (!params) {
     tstr_free(owned_request_id);
     return SALTS_ENOMEM;
   }
-  turbo_json_object_set_string(params, "requestId", request_id);
-  if (note) turbo_json_object_set_string(params, "reason", note);
-  decisions = turbo_json_create_array();
+  json_object_set_string(params, "requestId", request_id);
+  if (note) json_object_set_string(params, "reason", note);
+  decisions = json_create_array();
   if (!decisions) {
     turbo_runtime_json_destroy(params);
     tstr_free(owned_request_id);
     return SALTS_ENOMEM;
   }
-  turbo_json_array_add(decisions, turbo_json_create_string("approve_once"));
-  turbo_json_array_add(decisions, turbo_json_create_string("deny"));
-  turbo_json_object_add(params, "availableDecisions", decisions);
+  json_array_add(decisions, json_create_string("approve_once"));
+  json_array_add(decisions, json_create_string("deny"));
+  json_object_add(params, "availableDecisions", decisions);
   rc = turbo_agent_harness_emit(turn->connection, method, params, 0);
   if (rc == SALTS_OK) {
     *out_request_id = owned_request_id;
@@ -731,8 +731,8 @@ static int turbo_agent_harness_turn_refresh(turbo_agent_harness_thread_t *thread
     turn->summary = summary;
     turn->state = state;
   }
-  summary_status = turbo_json_get_string(turn->summary, "status");
-  pending_action = turbo_json_get_string(turn->summary, "pending_action");
+  summary_status = json_get_string(turn->summary, "status");
+  pending_action = json_get_string(turn->summary, "pending_action");
   if (summary_status && strcmp(summary_status, "interrupted") == 0 && pending_action &&
       strcmp(pending_action, "review") == 0 && !turn->interrupt_requested) {
     approval_pending = 1;
@@ -793,18 +793,18 @@ static void turbo_agent_harness_connection_refresh(turbo_agent_harness_connectio
 }
 
 static json_value_t *turbo_agent_harness_response_base(const json_value_t *request) {
-  json_value_t *response = turbo_json_create_object();
-  const json_value_t *id = request ? turbo_json_object_get(request, "id") : NULL;
+  json_value_t *response = json_create_object();
+  const json_value_t *id = request ? json_object_get(request, "id") : NULL;
   if (!response) return NULL;
   if (id) {
-    json_value_t *copy = turbo_json_clone(id);
-    if (!copy || !turbo_json_object_add_checked(response, "id", copy)) {
+    json_value_t *copy = json_clone(id);
+    if (!copy || !json_object_add_checked(response, "id", copy)) {
       turbo_runtime_json_destroy(copy);
       turbo_runtime_json_destroy(response);
       return NULL;
     }
   } else {
-    turbo_json_object_set_null(response, "id");
+    json_object_set_null(response, "id");
   }
   return response;
 }
@@ -817,7 +817,7 @@ static int turbo_agent_harness_response_success(const json_value_t *request, jso
     return SALTS_EINVAL;
   }
   response = turbo_agent_harness_response_base(request);
-  if (!response || !turbo_json_object_add_checked(response, "result", result)) {
+  if (!response || !json_object_add_checked(response, "result", result)) {
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(response);
     return SALTS_ENOMEM;
@@ -852,15 +852,15 @@ static const char *turbo_agent_harness_rpc_message(int code) {
 static int turbo_agent_harness_response_error(const json_value_t *request, int code,
                                               json_value_t **out_response) {
   json_value_t *response = turbo_agent_harness_response_base(request);
-  json_value_t *error = turbo_json_create_object();
+  json_value_t *error = json_create_object();
   if (!response || !error) {
     turbo_runtime_json_destroy(response);
     turbo_runtime_json_destroy(error);
     return SALTS_ENOMEM;
   }
-  turbo_json_object_set_number(error, "code", (double)code);
-  turbo_json_object_set_string(error, "message", turbo_agent_harness_rpc_message(code));
-  turbo_json_object_add(response, "error", error);
+  json_object_set_number(error, "code", (double)code);
+  json_object_set_string(error, "message", turbo_agent_harness_rpc_message(code));
+  json_object_add(response, "error", error);
   *out_response = response;
   return SALTS_OK;
 }
@@ -879,10 +879,10 @@ static int turbo_agent_harness_json_uint64(const json_value_t *value, uint64_t m
                                            uint64_t maximum, uint64_t *out_number) {
   double number;
   uint64_t converted;
-  if (!value || turbo_json_type(value) != TURBO_JSON_NUMBER || !out_number) {
+  if (!value || json_type(value) != JSON_NUMBER || !out_number) {
     return SALTS_EINVAL;
   }
-  number = turbo_json_number(value);
+  number = json_number(value);
   if (number < (double)minimum || number > (double)maximum) return SALTS_ERANGE;
   converted = (uint64_t)number;
   if ((double)converted != number) return SALTS_EINVAL;
@@ -899,23 +899,23 @@ static int turbo_agent_harness_input_text(const json_value_t *params, tstr *out_
   size_t offset = 0;
   if (!params || !out_text) return SALTS_EINVAL;
   *out_text = NULL;
-  input = turbo_json_object_get(params, "input");
-  if (!input || turbo_json_type(input) != TURBO_JSON_ARRAY ||
-      (count = turbo_json_array_size(input)) == 0) {
+  input = json_object_get(params, "input");
+  if (!input || json_type(input) != JSON_ARRAY ||
+      (count = json_array_size(input)) == 0) {
     return SALTS_EINVAL;
   }
   for (index = 0; index < count; ++index) {
-    const json_value_t *item = turbo_json_array_get(input, index);
+    const json_value_t *item = json_array_get(input, index);
     const json_value_t *text_json;
     const char *type;
     const char *value;
     size_t value_size;
-    if (!item || turbo_json_type(item) != TURBO_JSON_OBJECT ||
-        !(type = turbo_json_get_string(item, "type")) || strcmp(type, "text") != 0 ||
-        !(text_json = turbo_json_object_get(item, "text")) ||
-        turbo_json_type(text_json) != TURBO_JSON_STRING ||
-        !(value = turbo_json_string(text_json)) ||
-        (value_size = turbo_json_string_len(text_json)) == 0 || strlen(value) != value_size) {
+    if (!item || json_type(item) != JSON_OBJECT ||
+        !(type = json_get_string(item, "type")) || strcmp(type, "text") != 0 ||
+        !(text_json = json_object_get(item, "text")) ||
+        json_type(text_json) != JSON_STRING ||
+        !(value = json_string(text_json)) ||
+        (value_size = json_string_len(text_json)) == 0 || strlen(value) != value_size) {
       return SALTS_ENOTSUP;
     }
     if ((index > 0 && total_size == SIZE_MAX) ||
@@ -927,10 +927,10 @@ static int turbo_agent_harness_input_text(const json_value_t *params, tstr *out_
   text = tstr_new_len(NULL, total_size);
   if (!text) return SALTS_ENOMEM;
   for (index = 0; index < count; ++index) {
-    const json_value_t *item = turbo_json_array_get(input, index);
-    const json_value_t *text_json = turbo_json_object_get(item, "text");
-    const char *value = turbo_json_string(text_json);
-    size_t value_size = turbo_json_string_len(text_json);
+    const json_value_t *item = json_array_get(input, index);
+    const json_value_t *text_json = json_object_get(item, "text");
+    const char *value = json_string(text_json);
+    size_t value_size = json_string_len(text_json);
     if (index > 0) text[offset++] = '\n';
     memcpy(text + offset, value, value_size);
     offset += value_size;
@@ -941,7 +941,7 @@ static int turbo_agent_harness_input_text(const json_value_t *params, tstr *out_
 
 static int turbo_agent_harness_interrupt_nodes(const json_value_t *params, const char ***out_nodes,
                                                size_t *out_count) {
-  const json_value_t *array = params ? turbo_json_object_get(params, "interruptBeforeNodes") : NULL;
+  const json_value_t *array = params ? json_object_get(params, "interruptBeforeNodes") : NULL;
   const char **nodes = NULL;
   size_t count;
   size_t index;
@@ -949,15 +949,15 @@ static int turbo_agent_harness_interrupt_nodes(const json_value_t *params, const
   *out_nodes = NULL;
   *out_count = 0;
   if (!array) return SALTS_OK;
-  if (turbo_json_type(array) != TURBO_JSON_ARRAY ||
-      (count = turbo_json_array_size(array)) > TURBO_AGENT_HARNESS_MAX_INTERRUPT_NODES) {
+  if (json_type(array) != JSON_ARRAY ||
+      (count = json_array_size(array)) > TURBO_AGENT_HARNESS_MAX_INTERRUPT_NODES) {
     return SALTS_EINVAL;
   }
   if (count == 0) return SALTS_OK;
   nodes = (const char **)calloc(count, sizeof(*nodes));
   if (!nodes) return SALTS_ENOMEM;
   for (index = 0; index < count; ++index) {
-    nodes[index] = turbo_json_string(turbo_json_array_get(array, index));
+    nodes[index] = json_string(json_array_get(array, index));
     if (!nodes[index] || !nodes[index][0]) {
       free(nodes);
       return SALTS_EINVAL;
@@ -981,43 +981,43 @@ static int turbo_agent_harness_dispatch_initialize(turbo_agent_harness_connectio
   if (connection->state != TURBO_AGENT_HARNESS_CONNECTION_NEW) {
     return TURBO_AGENT_HARNESS_RPC_ALREADY_INITIALIZED;
   }
-  client_info = params ? turbo_json_object_get(params, "clientInfo") : NULL;
-  if (!client_info || turbo_json_type(client_info) != TURBO_JSON_OBJECT ||
-      !(name = turbo_json_get_string(client_info, "name")) || !name[0] ||
-      !(version = turbo_json_get_string(client_info, "version")) || !version[0]) {
+  client_info = params ? json_object_get(params, "clientInfo") : NULL;
+  if (!client_info || json_type(client_info) != JSON_OBJECT ||
+      !(name = json_get_string(client_info, "name")) || !name[0] ||
+      !(version = json_get_string(client_info, "version")) || !version[0]) {
     return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
-  capabilities = turbo_json_object_get(params, "capabilities");
-  if (capabilities && turbo_json_type(capabilities) != TURBO_JSON_OBJECT) {
+  capabilities = json_object_get(params, "capabilities");
+  if (capabilities && json_type(capabilities) != JSON_OBJECT) {
     return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
   connection->experimental_api =
-      capabilities ? (turbo_json_get_bool(capabilities, "experimentalApi", false) ? 1 : 0) : 0;
-  result = turbo_json_create_object();
-  server_info = turbo_json_create_object();
-  server_capabilities = turbo_json_create_object();
+      capabilities ? (json_get_bool(capabilities, "experimentalApi", false) ? 1 : 0) : 0;
+  result = json_create_object();
+  server_info = json_create_object();
+  server_capabilities = json_create_object();
   if (!result || !server_info || !server_capabilities) {
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(server_info);
     turbo_runtime_json_destroy(server_capabilities);
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
-  turbo_json_object_set_string(server_info, "name", "turbo_agent_harness_server");
-  turbo_json_object_set_string(server_info, "version", "1.0");
-  turbo_json_object_set_number(server_info, "protocolVersion", 1.0);
-  turbo_json_object_set_bool(server_capabilities, "supportsThreadStart", 1);
-  turbo_json_object_set_bool(server_capabilities, "supportsThreadResume", 1);
-  turbo_json_object_set_bool(server_capabilities, "supportsThreadFork", 0);
-  turbo_json_object_set_bool(server_capabilities, "supportsTurnSteer", 1);
-  turbo_json_object_set_bool(server_capabilities, "supportsTurnInterrupt", 1);
-  turbo_json_object_set_bool(server_capabilities, "supportsApproval", 1);
-  turbo_json_object_set_bool(server_capabilities, "supportsEventReplay", 1);
-  turbo_json_object_set_number(server_capabilities, "maxLoadedThreads",
+  json_object_set_string(server_info, "name", "turbo_agent_harness_server");
+  json_object_set_string(server_info, "version", "1.0");
+  json_object_set_number(server_info, "protocolVersion", 1.0);
+  json_object_set_bool(server_capabilities, "supportsThreadStart", 1);
+  json_object_set_bool(server_capabilities, "supportsThreadResume", 1);
+  json_object_set_bool(server_capabilities, "supportsThreadFork", 0);
+  json_object_set_bool(server_capabilities, "supportsTurnSteer", 1);
+  json_object_set_bool(server_capabilities, "supportsTurnInterrupt", 1);
+  json_object_set_bool(server_capabilities, "supportsApproval", 1);
+  json_object_set_bool(server_capabilities, "supportsEventReplay", 1);
+  json_object_set_number(server_capabilities, "maxLoadedThreads",
                                (double)connection->server->config.max_threads);
-  turbo_json_object_set_number(server_capabilities, "maxEventCount",
+  json_object_set_number(server_capabilities, "maxEventCount",
                                (double)connection->server->config.max_event_count);
-  turbo_json_object_add(result, "serverInfo", server_info);
-  turbo_json_object_add(result, "capabilities", server_capabilities);
+  json_object_add(result, "serverInfo", server_info);
+  json_object_add(result, "capabilities", server_capabilities);
   connection->state = TURBO_AGENT_HARNESS_CONNECTION_INITIALIZED;
   *out_result = result;
   return SALTS_OK;
@@ -1035,21 +1035,21 @@ static int turbo_agent_harness_dispatch_thread_load(turbo_agent_harness_connecti
   json_value_t *notify_params;
   int rc;
   if (create_new) {
-    if (params && turbo_json_object_size(params) != 0) {
+    if (params && json_object_size(params) != 0) {
       return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
     }
     rc = turbo_agent_harness_server_uuid(generated_id);
     if (rc != SALTS_OK) return TURBO_AGENT_HARNESS_RPC_INTERNAL;
     thread_id = generated_id;
   } else {
-    thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
+    thread_id = params ? json_get_string(params, "threadId") : NULL;
     if (!thread_id || !thread_id[0]) return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
   rc = turbo_agent_harness_server_load_thread(connection->server, thread_id, &thread);
   if (rc != SALTS_OK) return turbo_agent_harness_rpc_from_error(rc);
   thread_json = turbo_agent_harness_thread_json(thread);
-  result = turbo_json_create_object();
-  notify_params = turbo_json_create_object();
+  result = json_create_object();
+  notify_params = json_create_object();
   notify_thread = turbo_agent_harness_thread_json(thread);
   if (!thread_json || !result || !notify_params || !notify_thread) {
     turbo_runtime_json_destroy(thread_json);
@@ -1058,8 +1058,8 @@ static int turbo_agent_harness_dispatch_thread_load(turbo_agent_harness_connecti
     turbo_runtime_json_destroy(notify_thread);
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
-  turbo_json_object_add(result, "thread", thread_json);
-  turbo_json_object_add(notify_params, "thread", notify_thread);
+  json_object_add(result, "thread", thread_json);
+  json_object_add(notify_params, "thread", notify_thread);
   rc = turbo_agent_harness_emit(connection, "thread/started", notify_params, 0);
   if (rc != SALTS_OK) {
     turbo_runtime_json_destroy(result);
@@ -1072,7 +1072,7 @@ static int turbo_agent_harness_dispatch_thread_load(turbo_agent_harness_connecti
 static int turbo_agent_harness_dispatch_thread_get(turbo_agent_harness_connection_t *connection,
                                                    const json_value_t *params,
                                                    json_value_t **out_result) {
-  const char *thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
+  const char *thread_id = params ? json_get_string(params, "threadId") : NULL;
   turbo_agent_harness_thread_t *thread;
   json_value_t *result;
   json_value_t *thread_json;
@@ -1080,14 +1080,14 @@ static int turbo_agent_harness_dispatch_thread_get(turbo_agent_harness_connectio
   thread = turbo_agent_harness_server_find_thread(connection->server, thread_id);
   if (!thread) return TURBO_AGENT_HARNESS_RPC_NOT_FOUND;
   (void)turbo_agent_harness_turn_refresh(thread);
-  result = turbo_json_create_object();
+  result = json_create_object();
   thread_json = turbo_agent_harness_thread_json(thread);
   if (!result || !thread_json) {
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(thread_json);
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
-  turbo_json_object_add(result, "thread", thread_json);
+  json_object_add(result, "thread", thread_json);
   *out_result = result;
   return SALTS_OK;
 }
@@ -1100,11 +1100,11 @@ static int turbo_agent_harness_dispatch_thread_list(turbo_agent_harness_connecti
   turbo_agent_harness_thread_t **snapshot;
   size_t count;
   size_t index;
-  if (params && turbo_json_object_size(params) != 0) {
+  if (params && json_object_size(params) != 0) {
     return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
-  result = turbo_json_create_object();
-  threads = turbo_json_create_array();
+  result = json_create_object();
+  threads = json_create_array();
   if (!result || !threads) {
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(threads);
@@ -1126,7 +1126,7 @@ static int turbo_agent_harness_dispatch_thread_list(turbo_agent_harness_connecti
   salts_mutex_unlock(&connection->server->mutex);
   for (index = 0; index < count; ++index) {
     json_value_t *thread_json = turbo_agent_harness_thread_json(snapshot[index]);
-    if (!thread_json || !turbo_json_array_add_checked(threads, thread_json)) {
+    if (!thread_json || !json_array_add_checked(threads, thread_json)) {
       turbo_runtime_json_destroy(thread_json);
       free(snapshot);
       turbo_runtime_json_destroy(result);
@@ -1135,7 +1135,7 @@ static int turbo_agent_harness_dispatch_thread_list(turbo_agent_harness_connecti
     }
   }
   free(snapshot);
-  turbo_json_object_add(result, "threads", threads);
+  json_object_add(result, "threads", threads);
   *out_result = result;
   return SALTS_OK;
 }
@@ -1143,7 +1143,7 @@ static int turbo_agent_harness_dispatch_thread_list(turbo_agent_harness_connecti
 static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connection_t *connection,
                                                    const json_value_t *params,
                                                    json_value_t **out_result) {
-  const char *thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
+  const char *thread_id = params ? json_get_string(params, "threadId") : NULL;
   const json_value_t *deadline_json;
   const char **interrupt_nodes = NULL;
   size_t interrupt_count = 0;
@@ -1168,7 +1168,7 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
     return rc == SALTS_ENOMEM ? TURBO_AGENT_HARNESS_RPC_INTERNAL
                               : TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
-  deadline_json = turbo_json_object_get(params, "deadlineMonoMs");
+  deadline_json = json_object_get(params, "deadlineMonoMs");
   if (deadline_json) {
     if (turbo_agent_harness_json_uint64(deadline_json, 1,
                                         TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER,
@@ -1231,7 +1231,7 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
     rc = SALTS_ENOMEM;
     goto fail;
   }
-  turbo_json_object_add(notify_params, "turn", turn_json);
+  json_object_add(notify_params, "turn", turn_json);
   rc = turbo_agent_harness_emit(connection, "turn/started", notify_params, 0);
   if (rc != SALTS_OK) goto fail;
 
@@ -1249,7 +1249,7 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
   salts_mutex_lock(&thread->mutex);
   turn->starting = 0;
   salts_mutex_unlock(&thread->mutex);
-  result = turbo_json_create_object();
+  result = json_create_object();
   if (!result) {
     rc = SALTS_ENOMEM;
     goto fail_after_submit;
@@ -1260,7 +1260,7 @@ static int turbo_agent_harness_dispatch_turn_start(turbo_agent_harness_connectio
     rc = SALTS_ENOMEM;
     goto fail_after_submit;
   }
-  turbo_json_object_add(result, "turn", turn_json);
+  json_object_add(result, "turn", turn_json);
   *out_result = result;
   tstr_free(text);
   return SALTS_OK;
@@ -1291,8 +1291,8 @@ fail: {
 static int turbo_agent_harness_dispatch_turn_get(turbo_agent_harness_connection_t *connection,
                                                  const json_value_t *params,
                                                  json_value_t **out_result) {
-  const char *thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
-  const char *turn_id = params ? turbo_json_get_string(params, "turnId") : NULL;
+  const char *thread_id = params ? json_get_string(params, "threadId") : NULL;
+  const char *turn_id = params ? json_get_string(params, "turnId") : NULL;
   turbo_agent_harness_thread_t *thread;
   json_value_t *result;
   json_value_t *turn_json;
@@ -1312,13 +1312,13 @@ static int turbo_agent_harness_dispatch_turn_get(turbo_agent_harness_connection_
   }
   salts_mutex_unlock(&thread->mutex);
   turn_json = turbo_agent_harness_turn_snapshot_json(&snapshot);
-  result = turbo_json_create_object();
+  result = json_create_object();
   if (!result || !turn_json) {
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(turn_json);
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
-  turbo_json_object_add(result, "turn", turn_json);
+  json_object_add(result, "turn", turn_json);
   *out_result = result;
   return SALTS_OK;
 }
@@ -1326,8 +1326,8 @@ static int turbo_agent_harness_dispatch_turn_get(turbo_agent_harness_connection_
 static int turbo_agent_harness_dispatch_turn_interrupt(turbo_agent_harness_connection_t *connection,
                                                        const json_value_t *params,
                                                        json_value_t **out_result) {
-  const char *thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
-  const char *turn_id = params ? turbo_json_get_string(params, "turnId") : NULL;
+  const char *thread_id = params ? json_get_string(params, "threadId") : NULL;
+  const char *turn_id = params ? json_get_string(params, "turnId") : NULL;
   turbo_agent_harness_thread_t *thread;
   turbo_agent_harness_turn_t *turn;
   turbo_agent_harness_execution_t *execution;
@@ -1364,14 +1364,14 @@ static int turbo_agent_harness_dispatch_turn_interrupt(turbo_agent_harness_conne
       turn->interrupt_requested = 1;
       turn->finalized = 1;
       if (turn->summary) {
-        turbo_json_object_set_string(turn->summary, "status", "cancelled");
+        json_object_set_string(turn->summary, "status", "cancelled");
       }
     }
     turn->starting = 0;
     salts_mutex_unlock(&thread->mutex);
     tstr_free(approval_request_id);
     if (rc != SALTS_OK) return turbo_agent_harness_rpc_from_error(rc);
-    *out_result = turbo_json_create_object();
+    *out_result = json_create_object();
     return *out_result ? SALTS_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
   if (!turn->execution) {
@@ -1390,15 +1390,15 @@ static int turbo_agent_harness_dispatch_turn_interrupt(turbo_agent_harness_conne
     salts_mutex_unlock(&thread->mutex);
     return turbo_agent_harness_rpc_from_error(rc);
   }
-  *out_result = turbo_json_create_object();
+  *out_result = json_create_object();
   return *out_result ? SALTS_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
 }
 
 static int turbo_agent_harness_dispatch_turn_steer(turbo_agent_harness_connection_t *connection,
                                                    const json_value_t *params,
                                                    json_value_t **out_result) {
-  const char *thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
-  const char *expected_turn_id = params ? turbo_json_get_string(params, "expectedTurnId") : NULL;
+  const char *thread_id = params ? json_get_string(params, "threadId") : NULL;
+  const char *expected_turn_id = params ? json_get_string(params, "expectedTurnId") : NULL;
   turbo_agent_harness_thread_t *thread;
   json_value_t *message;
   json_value_t *result;
@@ -1423,26 +1423,26 @@ static int turbo_agent_harness_dispatch_turn_steer(turbo_agent_harness_connectio
     return TURBO_AGENT_HARNESS_RPC_BUSY;
   }
   salts_mutex_unlock(&thread->mutex);
-  message = turbo_json_create_object();
+  message = json_create_object();
   if (!message) {
     tstr_free(text);
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
-  turbo_json_object_set_string(message, "role", "user");
-  turbo_json_object_set_string(message, "content", text);
+  json_object_set_string(message, "role", "user");
+  json_object_set_string(message, "content", text);
   rc =
       turbo_agent_session_enqueue(turbo_agent_app_session(turbo_agent_harness_app(thread->harness)),
                                   TURBO_AGENT_INBOX_STEER, message, 0, &inbox_id);
   turbo_runtime_json_destroy(message);
   tstr_free(text);
   if (rc != SALTS_OK) return turbo_agent_harness_rpc_from_error(rc);
-  result = turbo_json_create_object();
+  result = json_create_object();
   if (!result) {
     free(inbox_id);
     return TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
-  turbo_json_object_set_string(result, "turnId", expected_turn_id);
-  turbo_json_object_set_string(result, "inboxId", inbox_id);
+  json_object_set_string(result, "turnId", expected_turn_id);
+  json_object_set_string(result, "inboxId", inbox_id);
   free(inbox_id);
   *out_result = result;
   return SALTS_OK;
@@ -1451,10 +1451,10 @@ static int turbo_agent_harness_dispatch_turn_steer(turbo_agent_harness_connectio
 static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_t *connection,
                                                  const json_value_t *params,
                                                  json_value_t **out_result) {
-  const char *thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
-  const char *turn_id = params ? turbo_json_get_string(params, "turnId") : NULL;
-  const char *request_id = params ? turbo_json_get_string(params, "requestId") : NULL;
-  const char *decision = params ? turbo_json_get_string(params, "decision") : NULL;
+  const char *thread_id = params ? json_get_string(params, "threadId") : NULL;
+  const char *turn_id = params ? json_get_string(params, "turnId") : NULL;
+  const char *request_id = params ? json_get_string(params, "requestId") : NULL;
+  const char *decision = params ? json_get_string(params, "decision") : NULL;
   turbo_agent_harness_thread_t *thread;
   turbo_agent_harness_turn_t *turn;
   turbo_agent_harness_execution_t *old_execution;
@@ -1473,10 +1473,10 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
   if (!thread) return TURBO_AGENT_HARNESS_RPC_NOT_FOUND;
   (void)turbo_agent_harness_turn_refresh(thread);
   if (strcmp(decision, "approve_once") == 0) {
-    command = turbo_json_create_object();
+    command = json_create_object();
     if (!command) return TURBO_AGENT_HARNESS_RPC_INTERNAL;
-    turbo_json_object_set_string(command, "kind", "approve_review");
-    turbo_json_object_set_bool(command, "approved", 1);
+    json_object_set_string(command, "kind", "approve_review");
+    json_object_set_bool(command, "approved", 1);
   }
   salts_mutex_lock(&thread->mutex);
   turn = thread->turn;
@@ -1497,7 +1497,7 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
       turn->awaiting_approval = 0;
       turn->finalized = 1;
       if (turn->summary) {
-        turbo_json_object_set_string(turn->summary, "status", "declined");
+        json_object_set_string(turn->summary, "status", "declined");
       }
     }
     turn->starting = 0;
@@ -1506,8 +1506,8 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
     salts_mutex_unlock(&thread->mutex);
     resolved = turbo_agent_harness_params_base(turn);
     if (resolved) {
-      turbo_json_object_set_string(resolved, "requestId", request_id);
-      turbo_json_object_set_string(resolved, "decision", decision);
+      json_object_set_string(resolved, "requestId", request_id);
+      json_object_set_string(resolved, "decision", decision);
     }
     if (!resolved) {
       salts_mutex_lock(&thread->mutex);
@@ -1550,7 +1550,7 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
       turn->awaiting_approval = 0;
       tstr_free(turn->approval_request_id);
       turn->approval_request_id = NULL;
-      if (turn->summary) turbo_json_object_set_string(turn->summary, "status", "failed");
+      if (turn->summary) json_object_set_string(turn->summary, "status", "failed");
     }
     if (rc == SALTS_OK) turn->starting = 0;
     salts_mutex_unlock(&thread->mutex);
@@ -1567,18 +1567,18 @@ static int turbo_agent_harness_dispatch_approval(turbo_agent_harness_connection_
   }
   if (rc != SALTS_OK) return turbo_agent_harness_rpc_from_error(rc);
   if (strcmp(decision, "deny") == 0) {
-    *out_result = turbo_json_create_object();
+    *out_result = json_create_object();
     return *out_result ? SALTS_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
   }
-  *out_result = turbo_json_create_object();
+  *out_result = json_create_object();
   return *out_result ? SALTS_OK : TURBO_AGENT_HARNESS_RPC_INTERNAL;
 }
 
 static int turbo_agent_harness_dispatch_event_replay(turbo_agent_harness_connection_t *connection,
                                                      const json_value_t *params,
                                                      json_value_t **out_result) {
-  const json_value_t *after_json = params ? turbo_json_object_get(params, "afterSequence") : NULL;
-  const json_value_t *limit_json = params ? turbo_json_object_get(params, "limit") : NULL;
+  const json_value_t *after_json = params ? json_object_get(params, "afterSequence") : NULL;
+  const json_value_t *limit_json = params ? json_object_get(params, "limit") : NULL;
   turbo_agent_harness_event_t **selected;
   json_value_t *result = NULL;
   json_value_t *events = NULL;
@@ -1626,26 +1626,26 @@ static int turbo_agent_harness_dispatch_event_replay(turbo_agent_harness_connect
     free(selected);
     return TURBO_AGENT_HARNESS_RPC_STREAM_FAILED;
   }
-  result = turbo_json_create_object();
-  events = turbo_json_create_array();
+  result = json_create_object();
+  events = json_create_array();
   if (!result || !events) goto fail;
   for (index = 0; index < selected_count; ++index) {
-    json_value_t *copy = turbo_json_clone(selected[index]->message);
-    json_value_t *copy_params = copy ? turbo_json_object_get(copy, "params") : NULL;
-    if (!copy || !copy_params || turbo_json_type(copy_params) != TURBO_JSON_OBJECT) {
+    json_value_t *copy = json_clone(selected[index]->message);
+    json_value_t *copy_params = copy ? json_object_get(copy, "params") : NULL;
+    if (!copy || !copy_params || json_type(copy_params) != JSON_OBJECT) {
       turbo_runtime_json_destroy(copy);
       goto fail;
     }
-    turbo_json_object_set_number(copy_params, "sequence", (double)selected[index]->sequence);
-    if (!turbo_json_array_add_checked(events, copy)) {
+    json_object_set_number(copy_params, "sequence", (double)selected[index]->sequence);
+    if (!json_array_add_checked(events, copy)) {
       turbo_runtime_json_destroy(copy);
       goto fail;
     }
   }
-  turbo_json_object_add(result, "events", events);
+  json_object_add(result, "events", events);
   events = NULL;
-  turbo_json_object_set_number(result, "nextSequence", (double)next);
-  turbo_json_object_set_bool(result, "hasMore", next < latest ? 1 : 0);
+  json_object_set_number(result, "nextSequence", (double)next);
+  json_object_set_bool(result, "hasMore", next < latest ? 1 : 0);
   free(selected);
   *out_result = result;
   return SALTS_OK;
@@ -1660,7 +1660,7 @@ static int turbo_agent_harness_dispatch_event_ack(turbo_agent_harness_connection
                                                   const json_value_t *params,
                                                   json_value_t **out_result) {
   const json_value_t *through_json =
-      params ? turbo_json_object_get(params, "throughSequence") : NULL;
+      params ? json_object_get(params, "throughSequence") : NULL;
   uint64_t through;
   json_value_t *result;
   if (turbo_agent_harness_json_uint64(through_json, 0, TURBO_AGENT_HARNESS_MAX_EXACT_JSON_INTEGER,
@@ -1670,9 +1670,9 @@ static int turbo_agent_harness_dispatch_event_ack(turbo_agent_harness_connection
   if (turbo_agent_harness_connection_ack_events(connection, through) != SALTS_OK) {
     return TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS;
   }
-  result = turbo_json_create_object();
+  result = json_create_object();
   if (!result) return TURBO_AGENT_HARNESS_RPC_INTERNAL;
-  turbo_json_object_set_number(result, "acknowledgedSequence", (double)through);
+  json_object_set_number(result, "acknowledgedSequence", (double)through);
   *out_result = result;
   return SALTS_OK;
 }
@@ -1914,15 +1914,15 @@ int turbo_agent_harness_connection_wait_event_json_value(
     }
 
     if (source) {
-      json_value_t *copy = turbo_json_clone(source);
-      json_value_t *params = copy ? turbo_json_object_get(copy, "params") : NULL;
+      json_value_t *copy = json_clone(source);
+      json_value_t *params = copy ? json_object_get(copy, "params") : NULL;
       if (!copy) {
         rc = SALTS_ENOMEM;
-      } else if (!params || turbo_json_type(params) != TURBO_JSON_OBJECT) {
+      } else if (!params || json_type(params) != JSON_OBJECT) {
         turbo_runtime_json_destroy(copy);
         rc = SALTS_EPROTO;
       } else {
-        turbo_json_object_set_number(params, "sequence", (double)sequence);
+        json_object_set_number(params, "sequence", (double)sequence);
         *out_event_json = copy;
         *out_sequence = sequence;
       }
@@ -1994,26 +1994,26 @@ int turbo_agent_harness_connection_dispatch_json_value(turbo_agent_harness_conne
     return SALTS_ESHUTDOWN;
   }
   salts_mutex_unlock(&connection->event_mutex);
-  if (turbo_json_type(request_json) != TURBO_JSON_OBJECT ||
-      !(method = turbo_json_get_string(request_json, "method")) || !method[0]) {
+  if (json_type(request_json) != JSON_OBJECT ||
+      !(method = json_get_string(request_json, "method")) || !method[0]) {
     rc = turbo_agent_harness_response_error(request_json, TURBO_AGENT_HARNESS_RPC_INVALID_REQUEST,
                                             out_response_json);
     salts_mutex_unlock(&connection->dispatch_mutex);
     return rc;
   }
-  params = turbo_json_object_get(request_json, "params");
-  if (params && turbo_json_type(params) != TURBO_JSON_OBJECT &&
-      turbo_json_type(params) != TURBO_JSON_NULL) {
+  params = json_object_get(request_json, "params");
+  if (params && json_type(params) != JSON_OBJECT &&
+      json_type(params) != JSON_NULL) {
     rc = turbo_agent_harness_response_error(request_json, TURBO_AGENT_HARNESS_RPC_INVALID_PARAMS,
                                             out_response_json);
     salts_mutex_unlock(&connection->dispatch_mutex);
     return rc;
   }
-  if (params && turbo_json_type(params) == TURBO_JSON_NULL) params = NULL;
-  id = turbo_json_object_get(request_json, "id");
+  if (params && json_type(params) == JSON_NULL) params = NULL;
+  id = json_object_get(request_json, "id");
   if (strcmp(method, "initialized") == 0) {
     if (id || connection->state != TURBO_AGENT_HARNESS_CONNECTION_INITIALIZED ||
-        (params && turbo_json_object_size(params) != 0)) {
+        (params && json_object_size(params) != 0)) {
       rc = turbo_agent_harness_response_error(request_json,
                                               connection->state ==
                                                       TURBO_AGENT_HARNESS_CONNECTION_READY
@@ -2055,9 +2055,8 @@ int turbo_agent_harness_connection_dispatch_text(turbo_agent_harness_connection_
   if (!out_response_json_text) return SALTS_EINVAL;
   *out_response_json_text = NULL;
   if (!connection || !request_json_text || !request_json_text[0]) return SALTS_EINVAL;
-  if (turbo_parse_json((const uint8_t *)request_json_text, strlen(request_json_text), &request) !=
-          0 ||
-      !request) {
+  request = json_parse(request_json_text, strlen(request_json_text));
+  if (!request) {
     turbo_runtime_json_destroy(request);
     return SALTS_EPROTO;
   }
@@ -2067,7 +2066,7 @@ int turbo_agent_harness_connection_dispatch_text(turbo_agent_harness_connection_
     turbo_runtime_json_destroy(response);
     return rc;
   }
-  serialized = turbo_json_serialize(response, NULL);
+  serialized = json_serialize(response, NULL);
   turbo_runtime_json_destroy(response);
   if (!serialized) return SALTS_ENOMEM;
   *out_response_json_text = serialized;

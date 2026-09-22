@@ -1,4 +1,5 @@
 #include "turbo_agent_resilience_internal.h"
+#include <json_parser.h>
 
 #include "turbo_agent_core_internal.h"
 #include "turbo_agent_runtime_internal.h"
@@ -97,27 +98,27 @@ static int turbo_agent_attempt_append(json_value_t *state, unsigned int attempt,
   json_value_t *attempts;
   json_value_t *record;
   if (!state) return SALTS_OK;
-  attempts = turbo_json_object_get(state, "provider_attempts");
+  attempts = json_object_get(state, "provider_attempts");
   if (!attempts) {
-    attempts = turbo_json_create_array();
+    attempts = json_create_array();
     if (!attempts) return SALTS_ENOMEM;
-    turbo_json_object_add(state, "provider_attempts", attempts);
+    json_object_add(state, "provider_attempts", attempts);
   }
-  if (turbo_json_type(attempts) != TURBO_JSON_ARRAY) return SALTS_EPROTO;
-  record = turbo_json_create_object();
+  if (json_type(attempts) != JSON_ARRAY) return SALTS_EPROTO;
+  record = json_create_object();
   if (!record) return SALTS_ENOMEM;
-  turbo_json_object_set_number(record, "schema_version", 1);
-  turbo_json_object_set_number(record, "attempt", attempt);
-  turbo_json_object_set_number(record, "transport_status", response->transport_status);
-  turbo_json_object_set_number(record, "http_status", response->http_status);
-  turbo_json_object_set_bool(record, "retryable", response->retryable);
-  turbo_json_object_set_number(record, "delay_ms", delay_ms);
-  turbo_json_object_set_number(record, "started_mono_ms", (double)started_ms);
-  turbo_json_object_set_number(record, "finished_mono_ms", (double)finished_ms);
-  turbo_json_object_set_string(record, "outcome", outcome);
+  json_object_set_number(record, "schema_version", 1);
+  json_object_set_number(record, "attempt", attempt);
+  json_object_set_number(record, "transport_status", response->transport_status);
+  json_object_set_number(record, "http_status", response->http_status);
+  json_object_set_bool(record, "retryable", response->retryable);
+  json_object_set_number(record, "delay_ms", delay_ms);
+  json_object_set_number(record, "started_mono_ms", (double)started_ms);
+  json_object_set_number(record, "finished_mono_ms", (double)finished_ms);
+  json_object_set_string(record, "outcome", outcome);
   if (response->provider_request_id)
-    turbo_json_object_set_string(record, "provider_request_id", response->provider_request_id);
-  turbo_json_array_add(attempts, record);
+    json_object_set_string(record, "provider_request_id", response->provider_request_id);
+  json_array_add(attempts, record);
   return SALTS_OK;
 }
 
@@ -201,8 +202,8 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
 static int turbo_agent_usage_exact_u64(const json_value_t *usage, const char *primary,
                                        const char *alternate, uint64_t *out_value) {
   double value;
-  const json_value_t *field = turbo_json_object_get(usage, primary);
-  if (!field && alternate) field = turbo_json_object_get(usage, alternate);
+  const json_value_t *field = json_object_get(usage, primary);
+  if (!field && alternate) field = json_object_get(usage, alternate);
   if (!field) {
     *out_value = 0;
     return SALTS_ENOENT;
@@ -230,8 +231,8 @@ int turbo_agent_usage_record(turbo_agent_t *agent, json_value_t *state,
   int total_rc;
   if (!agent || !state || !response) return SALTS_EINVAL;
   turbo_agent_execution_context_get(&context);
-  usage = turbo_json_object_get(response, "usage");
-  if (!usage || turbo_json_type(usage) != TURBO_JSON_OBJECT) return SALTS_OK;
+  usage = json_object_get(response, "usage");
+  if (!usage || json_type(usage) != JSON_OBJECT) return SALTS_OK;
   input_rc = turbo_agent_usage_exact_u64(usage, "input_tokens", "prompt_tokens", &input_tokens);
   output_rc =
       turbo_agent_usage_exact_u64(usage, "output_tokens", "completion_tokens", &output_tokens);
@@ -243,42 +244,42 @@ int turbo_agent_usage_record(turbo_agent_t *agent, json_value_t *state,
     total_tokens = input_tokens + output_tokens;
   }
   if (total_tokens > TURBO_AGENT_USAGE_MAX_EXACT_INTEGER) return SALTS_ERANGE;
-  records = turbo_json_object_get(state, "usage_records");
+  records = json_object_get(state, "usage_records");
   if (!records) {
-    records = turbo_json_create_array();
+    records = json_create_array();
     if (!records) return SALTS_ENOMEM;
-    turbo_json_object_add(state, "usage_records", records);
+    json_object_add(state, "usage_records", records);
   }
-  if (turbo_json_type(records) != TURBO_JSON_ARRAY) return SALTS_EPROTO;
-  record = turbo_json_create_object();
-  cost = turbo_json_create_object();
+  if (json_type(records) != JSON_ARRAY) return SALTS_EPROTO;
+  record = json_create_object();
+  cost = json_create_object();
   if (!record || !cost) {
     turbo_runtime_json_destroy(record);
     turbo_runtime_json_destroy(cost);
     return SALTS_ENOMEM;
   }
-  turbo_json_object_set_number(record, "schema_version", 1);
-  if (context.run_id) turbo_json_object_set_string(record, "run_id", context.run_id);
-  else turbo_json_object_set_null(record, "run_id");
-  if (context.thread_id) turbo_json_object_set_string(record, "thread_id", context.thread_id);
-  else turbo_json_object_set_null(record, "thread_id");
-  turbo_json_object_set_null(record, "turn_seq");
-  turbo_json_object_set_string(record, "operation", "model");
-  turbo_json_object_set_string(record, "provider", turbo_agent_provider_name(agent));
-  turbo_json_object_set_string(record, "model", agent->model);
+  json_object_set_number(record, "schema_version", 1);
+  if (context.run_id) json_object_set_string(record, "run_id", context.run_id);
+  else json_object_set_null(record, "run_id");
+  if (context.thread_id) json_object_set_string(record, "thread_id", context.thread_id);
+  else json_object_set_null(record, "thread_id");
+  json_object_set_null(record, "turn_seq");
+  json_object_set_string(record, "operation", "model");
+  json_object_set_string(record, "provider", turbo_agent_provider_name(agent));
+  json_object_set_string(record, "model", agent->model);
   if (agent->last_provider_request_id)
-    turbo_json_object_set_string(record, "provider_request_id", agent->last_provider_request_id);
-  turbo_json_object_set_number(record, "input_tokens", (double)input_tokens);
-  turbo_json_object_set_null(record, "cached_input_tokens");
-  turbo_json_object_set_number(record, "output_tokens", (double)output_tokens);
-  turbo_json_object_set_null(record, "reasoning_tokens");
-  turbo_json_object_set_number(record, "total_tokens", (double)total_tokens);
-  turbo_json_object_set_bool(record, "estimated", 0);
-  turbo_json_object_set_string(cost, "status", "unknown");
-  turbo_json_object_set_string(cost, "currency", "USD");
-  turbo_json_object_set_null(cost, "amount_micros");
-  turbo_json_object_set_null(cost, "price_catalog_version");
-  turbo_json_object_add(record, "cost", cost);
-  turbo_json_array_add(records, record);
+    json_object_set_string(record, "provider_request_id", agent->last_provider_request_id);
+  json_object_set_number(record, "input_tokens", (double)input_tokens);
+  json_object_set_null(record, "cached_input_tokens");
+  json_object_set_number(record, "output_tokens", (double)output_tokens);
+  json_object_set_null(record, "reasoning_tokens");
+  json_object_set_number(record, "total_tokens", (double)total_tokens);
+  json_object_set_bool(record, "estimated", 0);
+  json_object_set_string(cost, "status", "unknown");
+  json_object_set_string(cost, "currency", "USD");
+  json_object_set_null(cost, "amount_micros");
+  json_object_set_null(cost, "price_catalog_version");
+  json_object_add(record, "cost", cost);
+  json_array_add(records, record);
   return SALTS_OK;
 }

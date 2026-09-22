@@ -117,7 +117,20 @@ jobs:
           path: ~/.cache/vcpkg/archives
           key: turboagent-foundation-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_SHA }}-v1
 
+      - name: Record SDK cache toolchain
+        id: sdk-toolchain
+        shell: bash
+        run: echo "key=gcc-$(gcc -dumpfullversion -dumpversion)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore exact Salts SDK
+        id: salts-sdk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/salts-project/external/pkgs/salts/debug
+          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+
       - name: Build and install Salts
+        if: steps.salts-sdk-cache.outputs.cache-hit != 'true'
         working-directory: deps/salts
         env:
           PROJECT_ROOT: ${{ runner.temp }}/salts-project
@@ -135,11 +148,32 @@ jobs:
           done
           test -f build/linux-gcc-debug/CMakeCache.txt
           cmake --build build/linux-gcc-debug --target install -j2
+          test -f "$RUNNER_TEMP/salts-project/external/pkgs/salts/debug/lib/cmake/Salts/SaltsConfig.cmake"
+
+      - name: Save exact Salts SDK
+        if: steps.salts-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/salts-project/external/pkgs/salts/debug
+          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+
+      - name: Expose exact Salts SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
           package="$RUNNER_TEMP/salts-project/external/pkgs/salts/debug"
           test -f "$package/lib/cmake/Salts/SaltsConfig.cmake"
-          ln -sfn "$package" /opt/salts/debug
+          sudo ln -sfn "$package" /opt/salts/debug
+
+      - name: Restore exact SaltsUtils SDK
+        id: salts-utils-sdk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/turboagent-foundation-sdk/salts-utils/debug
+          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.SALTS_UTILS_SHA }}-salts-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Build host Lemon
+        if: steps.salts-utils-sdk-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -147,6 +181,7 @@ jobs:
           cmake --build deps/salts-utils/build/host-lemon --target lemon -j2
 
       - name: Build and install SaltsUtils
+        if: steps.salts-utils-sdk-cache.outputs.cache-hit != 'true'
         working-directory: deps/salts-utils
         env:
           SALTS_ROOT: /opt/salts/debug
@@ -154,20 +189,71 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"             -DDATABIND_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"
+          package="$RUNNER_TEMP/turboagent-foundation-sdk/salts-utils/debug"
+          mkdir -p "$package"
+          cmake --preset linux-dev-user             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"             -DDATABIND_HOST_LEMON_EXECUTABLE="$GITHUB_WORKSPACE/deps/salts-utils/build/host-lemon/lemon"             -DCMAKE_INSTALL_PREFIX="$package"
           cmake --build build/linux-gcc-debug --target install -j2
-          test -f /opt/salts-utils/debug/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake
+          test -f "$package/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+
+      - name: Save exact SaltsUtils SDK
+        if: steps.salts-utils-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/turboagent-foundation-sdk/salts-utils/debug
+          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.SALTS_UTILS_SHA }}-salts-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+
+      - name: Expose exact SaltsUtils SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          package="$RUNNER_TEMP/turboagent-foundation-sdk/salts-utils/debug"
+          test -f "$package/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          sudo ln -sfn "$package" /opt/salts-utils/debug
+
+      - name: Restore exact CHTTP SDK
+        id: chttp-sdk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/turboagent-foundation-sdk/chttp/debug
+          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.CHTTP_SHA }}-saltsutils-${{ env.SALTS_UTILS_SHA }}-salts-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Build and install CHTTP
+        if: steps.chttp-sdk-cache.outputs.cache-hit != 'true'
         env:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
         shell: bash
         run: |
           set -euxo pipefail
-          cmake -S deps/chttp -B deps/chttp/build/turboagent-foundation -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/chttp"             -DCMAKE_INSTALL_PREFIX=/opt/chttp/debug             -DSALTS_ROOT=/opt/salts/debug             -DSALTS_UTILS_ROOT=/opt/salts-utils/debug             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF
+          package="$RUNNER_TEMP/turboagent-foundation-sdk/chttp/debug"
+          mkdir -p "$package"
+          cmake -S deps/chttp -B deps/chttp/build/turboagent-foundation -G Ninja             -DCMAKE_BUILD_TYPE=Debug             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/chttp"             -DCMAKE_INSTALL_PREFIX="$package"             -DSALTS_ROOT=/opt/salts/debug             -DSALTS_UTILS_ROOT=/opt/salts-utils/debug             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF
           cmake --build deps/chttp/build/turboagent-foundation --target install -j2
-          test -f /opt/chttp/debug/lib/cmake/Chttp/ChttpConfig.cmake
+          test -f "$package/lib/cmake/Chttp/ChttpConfig.cmake"
+
+      - name: Save exact CHTTP SDK
+        if: steps.chttp-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/turboagent-foundation-sdk/chttp/debug
+          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.CHTTP_SHA }}-saltsutils-${{ env.SALTS_UTILS_SHA }}-salts-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+
+      - name: Expose exact CHTTP SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          package="$RUNNER_TEMP/turboagent-foundation-sdk/chttp/debug"
+          test -f "$package/lib/cmake/Chttp/ChttpConfig.cmake"
+          sudo ln -sfn "$package" /opt/chttp/debug
+
+      - name: Report SDK cache state
+        shell: bash
+        run: |
+          {
+            echo "Salts SDK cache hit: ${{ steps.salts-sdk-cache.outputs.cache-hit }}"
+            echo "SaltsUtils SDK cache hit: ${{ steps.salts-utils-sdk-cache.outputs.cache-hit }}"
+            echo "CHTTP SDK cache hit: ${{ steps.chttp-sdk-cache.outputs.cache-hit }}"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Configure TurboAgent foundation build
         env:

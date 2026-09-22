@@ -72,7 +72,7 @@ typedef int (*turbo_state_graph_json_value_edge_predicate_fn)(
 
 typedef struct turbo_state_graph_channel_config_s {
   turbo_state_graph_reducer_kind_t reducer;
-  turbo_json_type_t value_kind;
+  json_type_t value_kind;
   const json_value_t *default_value;
   const char *description;
 } turbo_state_graph_channel_config_t;

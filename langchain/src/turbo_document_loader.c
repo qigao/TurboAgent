@@ -1,4 +1,5 @@
 #include "turbo_document_loader.h"
+#include <json_parser.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -109,20 +110,20 @@ int turbo_document_loader_load_text_file(
     free(text);
     return -1;
   }
-  document = turbo_json_create_object();
+  document = json_create_object();
   if (!document) {
     free(hash);
     free(text);
     return -1;
   }
-  turbo_json_object_set_string(document, "id", path);
-  turbo_json_object_set_string(document, "uri", path);
-  turbo_json_object_set_string(document, "kind", kind ? kind : "file");
-  turbo_json_object_set_string(document, "title", path);
-  turbo_json_object_set_string(document, "text", text);
-  turbo_json_object_set_string(document, "content_hash", hash);
-  turbo_json_object_set_number(document, "size", (double)size);
-  turbo_json_object_set_number(document, "mtime", (double)mtime);
+  json_object_set_string(document, "id", path);
+  json_object_set_string(document, "uri", path);
+  json_object_set_string(document, "kind", kind ? kind : "file");
+  json_object_set_string(document, "title", path);
+  json_object_set_string(document, "text", text);
+  json_object_set_string(document, "content_hash", hash);
+  json_object_set_number(document, "size", (double)size);
+  json_object_set_number(document, "mtime", (double)mtime);
   free(hash);
   free(text);
   *out_document_json = document;

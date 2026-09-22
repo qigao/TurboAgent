@@ -3,6 +3,8 @@
 
 #include <turbo_agent_api.h>
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

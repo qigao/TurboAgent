@@ -264,9 +264,9 @@ static int turbo_coding_json_bridge(const char *arguments_json, char **out_outpu
   json_value_t *result = NULL;
   int rc;
   *out_output = NULL;
-  if (!arguments_json ||
-      turbo_parse_json((const uint8_t *)arguments_json, strlen(arguments_json), &arguments) != 0)
-    return -1;
+  if (!arguments_json) return -1;
+  arguments = json_parse(arguments_json, strlen(arguments_json));
+  if (!arguments) return -1;
   rc = handler(arguments, &result, user_data);
   turbo_runtime_json_destroy(arguments);
   if (rc != 0 || !result) {

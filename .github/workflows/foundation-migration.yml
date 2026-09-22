@@ -80,6 +80,18 @@ jobs:
           path: deps/chttp
           persist-credentials: false
 
+      - name: Record foundation source fingerprints
+        id: foundation-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          fingerprint() {
+            git -C "$1" archive --format=tar HEAD | sha256sum | cut -d' ' -f1
+          }
+          echo "salts=$(fingerprint deps/salts)" >> "$GITHUB_OUTPUT"
+          echo "saltsutils=$(fingerprint deps/salts-utils)" >> "$GITHUB_OUTPUT"
+          echo "chttp=$(fingerprint deps/chttp)" >> "$GITHUB_OUTPUT"
+
       - name: Checkout pinned vcpkg
         uses: actions/checkout@v4
         with:
@@ -124,7 +136,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/salts-project/external/pkgs/salts/debug
-          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ steps.foundation-source.outputs.salts }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Build and install Salts
         if: steps.salts-sdk-cache.outputs.cache-hit != 'true'
@@ -152,7 +164,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/salts-project/external/pkgs/salts/debug
-          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ steps.foundation-source.outputs.salts }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Expose Salts master SDK
         shell: bash
@@ -167,7 +179,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/turboagent-foundation-sdk/salts-utils/debug
-          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/salts-utils/**') }}-salts-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ steps.foundation-source.outputs.saltsutils }}-salts-${{ steps.foundation-source.outputs.salts }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Build host Lemon
         if: steps.salts-utils-sdk-cache.outputs.cache-hit != 'true'
@@ -197,7 +209,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/turboagent-foundation-sdk/salts-utils/debug
-          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/salts-utils/**') }}-salts-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ steps.foundation-source.outputs.saltsutils }}-salts-${{ steps.foundation-source.outputs.salts }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Expose SaltsUtils master SDK
         shell: bash
@@ -212,7 +224,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/turboagent-foundation-sdk/chttp/debug
-          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/chttp/**') }}-saltsutils-${{ hashFiles('deps/salts-utils/**') }}-salts-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ steps.foundation-source.outputs.chttp }}-saltsutils-${{ steps.foundation-source.outputs.saltsutils }}-salts-${{ steps.foundation-source.outputs.salts }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Build and install CHTTP
         if: steps.chttp-sdk-cache.outputs.cache-hit != 'true'
@@ -233,7 +245,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/turboagent-foundation-sdk/chttp/debug
-          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/chttp/**') }}-saltsutils-${{ hashFiles('deps/salts-utils/**') }}-salts-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ steps.foundation-source.outputs.chttp }}-saltsutils-${{ steps.foundation-source.outputs.saltsutils }}-salts-${{ steps.foundation-source.outputs.salts }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Expose CHTTP master SDK
         shell: bash

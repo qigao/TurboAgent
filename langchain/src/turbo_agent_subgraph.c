@@ -1,4 +1,5 @@
 #include "turbo_agent_subgraph.h"
+#include <json_parser.h>
 
 #include "turbo_agent_runtime_internal.h"
 
@@ -17,12 +18,12 @@ static int turbo_agent_subgraph_copy_summary_string(json_value_t *result,
   if (!result || !summary || !key) {
     return -1;
   }
-  value = turbo_json_object_get(summary, key);
-  if (value && turbo_json_type(value) == TURBO_JSON_STRING) {
-    text = turbo_json_get_string(summary, key);
-    turbo_json_object_set_string(result, key, text ? text : "");
+  value = json_object_get(summary, key);
+  if (value && json_type(value) == JSON_STRING) {
+    text = json_get_string(summary, key);
+    json_object_set_string(result, key, text ? text : "");
   } else {
-    turbo_json_object_set_null(result, key);
+    json_object_set_null(result, key);
   }
   return 0;
 }
@@ -38,12 +39,12 @@ static void turbo_agent_subgraph_add_pending_string(json_value_t *result,
     return;
   }
   if (is_interrupted && summary && summary_key) {
-    text = turbo_json_get_string(summary, summary_key);
+    text = json_get_string(summary, summary_key);
   }
   if (text && text[0] != '\0') {
-    turbo_json_object_set_string(result, result_key, text);
+    json_object_set_string(result, result_key, text);
   } else {
-    turbo_json_object_set_null(result, result_key);
+    json_object_set_null(result, result_key);
   }
 }
 
@@ -57,29 +58,29 @@ static json_value_t *turbo_agent_subgraph_result_json(
   int is_interrupted;
   int is_failed;
 
-  if (!summary || !state || turbo_json_type(summary) != TURBO_JSON_OBJECT) {
+  if (!summary || !state || json_type(summary) != JSON_OBJECT) {
     return NULL;
   }
 
-  result = turbo_json_create_object();
-  state_json = turbo_json_clone(state);
-  summary_clone = turbo_json_clone(summary);
+  result = json_create_object();
+  state_json = json_clone(state);
+  summary_clone = json_clone(summary);
   if (!result || !state_json || !summary_clone) {
-    turbo_free_json(&result);
-    turbo_free_json(&state_json);
-    turbo_free_json(&summary_clone);
+    json_free(result); result = NULL;
+    json_free(state_json); state_json = NULL;
+    json_free(summary_clone); summary_clone = NULL;
     return NULL;
   }
 
-  status = turbo_json_get_string(summary, "status");
+  status = json_get_string(summary, "status");
   is_completed = status && strcmp(status, "completed") == 0;
   is_interrupted = status && strcmp(status, "interrupted") == 0;
   is_failed = status && strcmp(status, "failed") == 0;
-  turbo_json_object_set_bool(result, "ok", is_completed || is_interrupted ? true : false);
-  turbo_json_object_set_string(result, "kind", "subgraph_result");
-  turbo_json_object_set_bool(result, "completed", is_completed ? true : false);
-  turbo_json_object_set_bool(result, "interrupted", is_interrupted ? true : false);
-  turbo_json_object_set_bool(result, "failed", is_failed ? true : false);
+  json_object_set_bool(result, "ok", is_completed || is_interrupted ? true : false);
+  json_object_set_string(result, "kind", "subgraph_result");
+  json_object_set_bool(result, "completed", is_completed ? true : false);
+  json_object_set_bool(result, "interrupted", is_interrupted ? true : false);
+  json_object_set_bool(result, "failed", is_failed ? true : false);
   turbo_agent_subgraph_copy_summary_string(result, summary, "status");
   turbo_agent_subgraph_copy_summary_string(result, summary, "thread_id");
   turbo_agent_subgraph_copy_summary_string(result, summary, "run_id");
@@ -93,9 +94,9 @@ static json_value_t *turbo_agent_subgraph_result_json(
                                           "checkpoint_id", is_interrupted);
   turbo_agent_subgraph_add_pending_string(result, summary, "pending_node", "pending_node",
                                           is_interrupted);
-  turbo_json_object_add(result, "summary", summary_clone);
+  json_object_add(result, "summary", summary_clone);
   summary_clone = NULL;
-  turbo_json_object_add(result, "state", state_json);
+  json_object_add(result, "state", state_json);
   state_json = NULL;
   return result;
 }
@@ -142,7 +143,7 @@ CXX_C_API int turbo_agent_subgraph_node(turbo_graph_exec_ctx_t *ctx, void *user_
   if (!result_json) {
     goto cleanup;
   }
-  result_json_value = turbo_json_clone(result_json);
+  result_json_value = json_clone(result_json);
   if (!result_json_value) {
     goto cleanup;
   }
@@ -155,8 +156,8 @@ CXX_C_API int turbo_agent_subgraph_node(turbo_graph_exec_ctx_t *ctx, void *user_
 
 cleanup:
   turbo_runtime_json_destroy(result_json_value);
-  turbo_free_json(&result_json);
-  turbo_free_json(&summary);
+  json_free(result_json); result_json = NULL;
+  json_free(summary); summary = NULL;
   turbo_runtime_json_destroy(child_state);
   return rc;
 }

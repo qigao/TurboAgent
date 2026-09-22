@@ -17,9 +17,6 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      SALTS_SHA: bd4377bde504193ec85cec4b4d8020793d5c5984
-      SALTS_UTILS_SHA: 58e462e60405a8420a07028d0ef7504302a92440
-      CHTTP_SHA: b6456f4ecb7e69a85a728523db36661215c31983
       VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
@@ -63,7 +60,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ${{ env.SALTS_SHA }}
+          ref: master
           path: deps/salts
           persist-credentials: false
 
@@ -71,7 +68,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_SHA }}
+          ref: master
           path: deps/salts-utils
           persist-credentials: false
 
@@ -79,7 +76,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/chttp
-          ref: ${{ env.CHTTP_SHA }}
+          ref: master
           path: deps/chttp
           persist-credentials: false
 
@@ -122,12 +119,12 @@ jobs:
         shell: bash
         run: echo "key=gcc-$(gcc -dumpfullversion -dumpversion)" >> "$GITHUB_OUTPUT"
 
-      - name: Restore exact Salts SDK
+      - name: Restore Salts master SDK
         id: salts-sdk-cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/salts-project/external/pkgs/salts/debug
-          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Build and install Salts
         if: steps.salts-sdk-cache.outputs.cache-hit != 'true'
@@ -150,14 +147,14 @@ jobs:
           cmake --build build/linux-gcc-debug --target install -j2
           test -f "$RUNNER_TEMP/salts-project/external/pkgs/salts/debug/lib/cmake/Salts/SaltsConfig.cmake"
 
-      - name: Save exact Salts SDK
+      - name: Save Salts master SDK
         if: steps.salts-sdk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/salts-project/external/pkgs/salts/debug
-          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-salts-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
 
-      - name: Expose exact Salts SDK
+      - name: Expose Salts master SDK
         shell: bash
         run: |
           set -euxo pipefail
@@ -165,12 +162,12 @@ jobs:
           test -f "$package/lib/cmake/Salts/SaltsConfig.cmake"
           sudo ln -sfn "$package" /opt/salts/debug
 
-      - name: Restore exact SaltsUtils SDK
+      - name: Restore SaltsUtils master SDK
         id: salts-utils-sdk-cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/turboagent-foundation-sdk/salts-utils/debug
-          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.SALTS_UTILS_SHA }}-salts-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/salts-utils/**') }}-salts-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Build host Lemon
         if: steps.salts-utils-sdk-cache.outputs.cache-hit != 'true'
@@ -195,14 +192,14 @@ jobs:
           cmake --build build/linux-gcc-debug --target install -j2
           test -f "$package/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
 
-      - name: Save exact SaltsUtils SDK
+      - name: Save SaltsUtils master SDK
         if: steps.salts-utils-sdk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/turboagent-foundation-sdk/salts-utils/debug
-          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.SALTS_UTILS_SHA }}-salts-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-saltsutils-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/salts-utils/**') }}-salts-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
 
-      - name: Expose exact SaltsUtils SDK
+      - name: Expose SaltsUtils master SDK
         shell: bash
         run: |
           set -euxo pipefail
@@ -210,12 +207,12 @@ jobs:
           test -f "$package/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
           sudo ln -sfn "$package" /opt/salts-utils/debug
 
-      - name: Restore exact CHTTP SDK
+      - name: Restore CHTTP master SDK
         id: chttp-sdk-cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/turboagent-foundation-sdk/chttp/debug
-          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.CHTTP_SHA }}-saltsutils-${{ env.SALTS_UTILS_SHA }}-salts-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/chttp/**') }}-saltsutils-${{ hashFiles('deps/salts-utils/**') }}-salts-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
 
       - name: Build and install CHTTP
         if: steps.chttp-sdk-cache.outputs.cache-hit != 'true'
@@ -231,14 +228,14 @@ jobs:
           cmake --build deps/chttp/build/turboagent-foundation --target install -j2
           test -f "$package/lib/cmake/Chttp/ChttpConfig.cmake"
 
-      - name: Save exact CHTTP SDK
+      - name: Save CHTTP master SDK
         if: steps.chttp-sdk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/turboagent-foundation-sdk/chttp/debug
-          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ env.CHTTP_SHA }}-saltsutils-${{ env.SALTS_UTILS_SHA }}-salts-${{ env.SALTS_SHA }}-vcpkg-${{ env.VCPKG_SHA }}
+          key: turboagent-foundation-chttp-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk-toolchain.outputs.key }}-debug-${{ hashFiles('deps/chttp/**') }}-saltsutils-${{ hashFiles('deps/salts-utils/**') }}-salts-${{ hashFiles('deps/salts/**') }}-vcpkg-${{ env.VCPKG_SHA }}
 
-      - name: Expose exact CHTTP SDK
+      - name: Expose CHTTP master SDK
         shell: bash
         run: |
           set -euxo pipefail

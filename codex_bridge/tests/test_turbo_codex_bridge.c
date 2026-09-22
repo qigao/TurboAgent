@@ -64,16 +64,16 @@ static int test_codex_write(const uint8_t *frame, size_t frame_size, void *user_
     turbo_free_json(&message);
     return SALTS_EPROTO;
   }
-  method = turbo_json_get_string(message, "method");
-  id = turbo_json_get_string(message, "id");
+  method = json_get_string(message, "method");
+  id = json_get_string(message, "id");
   if (method && !strcmp(method, "initialize")) {
     rc = test_codex_response(transport, id,
                              "{\"serverInfo\":{\"name\":\"codex-app-server\"}}");
   } else if (method && !strcmp(method, "initialized")) {
     transport->initialized = 1;
   } else if (method && (!strcmp(method, "thread/start") || !strcmp(method, "thread/resume"))) {
-    const json_value_t *params = turbo_json_object_get(message, "params");
-    const char *requested = params ? turbo_json_get_string(params, "threadId") : NULL;
+    const json_value_t *params = json_object_get(message, "params");
+    const char *requested = params ? json_get_string(params, "threadId") : NULL;
     char thread_id[64];
     if (requested) {
       snprintf(thread_id, sizeof(thread_id), "%s", requested);
@@ -87,8 +87,8 @@ static int test_codex_write(const uint8_t *frame, size_t frame_size, void *user_
              ? SALTS_EMSGSIZE
              : test_codex_response(transport, id, response);
   } else if (method && !strcmp(method, "turn/start")) {
-    const json_value_t *params = turbo_json_object_get(message, "params");
-    const char *thread_id = params ? turbo_json_get_string(params, "threadId") : NULL;
+    const json_value_t *params = json_object_get(message, "params");
+    const char *thread_id = params ? json_get_string(params, "threadId") : NULL;
     char turn_id[64];
     snprintf(turn_id, sizeof(turn_id), "turn-%u", ++transport->turn_counter);
     length = snprintf(response, sizeof(response),
@@ -124,11 +124,11 @@ static int test_codex_write(const uint8_t *frame, size_t frame_size, void *user_
                                                             : test_codex_enqueue(transport, response);
     }
   } else if (!method && id && !strcmp(id, "approval-1")) {
-    result = turbo_json_object_get(message, "result");
+    result = json_object_get(message, "result");
     transport->approval_response_seen = 1;
     transport->approval_declined =
-        result && turbo_json_get_string(result, "decision") &&
-        !strcmp(turbo_json_get_string(result, "decision"), "decline");
+        result && json_get_string(result, "decision") &&
+        !strcmp(json_get_string(result, "decision"), "decline");
   } else {
     rc = SALTS_EPROTO;
   }
@@ -191,9 +191,9 @@ static int test_codex_approve(const char *method, const json_value_t *params,
     return SALTS_EINVAL;
   }
   (*calls)++;
-  *out_result = turbo_json_create_object();
+  *out_result = json_create_object();
   if (!*out_result) return SALTS_ENOMEM;
-  turbo_json_object_set_string(*out_result, "decision", "accept");
+  json_object_set_string(*out_result, "decision", "accept");
   return SALTS_OK;
 }
 
@@ -225,7 +225,7 @@ spec("Codex App Server bridge") {
     check_not_null(client);
     check_int_eq(turbo_codex_client_initialize(client, &server_info), SALTS_OK);
     check_true(transport.initialized);
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(server_info, "serverInfo"), "name"),
+    check_str_eq(json_get_string(json_object_get(server_info, "serverInfo"), "name"),
                  "codex-app-server");
     check_int_eq(turbo_codex_client_initialize(client, NULL), SALTS_EALREADY);
     turbo_free_json(&server_info);
@@ -254,7 +254,7 @@ spec("Codex App Server bridge") {
     check_str_eq(thread_id, "thread-1");
     check_str_eq(turn_id, "turn-1");
     check_str_eq(text, "Codex completed the task");
-    check_str_eq(turbo_json_get_string(turn, "status"), "completed");
+    check_str_eq(json_get_string(turn, "status"), "completed");
     check_int_eq(approval_calls, 1);
     check_true(transport.approval_response_seen);
     check_false(transport.approval_declined);
@@ -312,7 +312,7 @@ spec("Codex App Server bridge") {
     check_int_eq(turbo_tool_registry_execute_json_value(registry, "codex.delegate", arguments,
                                                         &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_json_get_string(result, "text"), "Codex completed the task");
+    check_str_eq(json_get_string(result, "text"), "Codex completed the task");
     turbo_free_json(&result);
     turbo_free_json(&arguments);
     turbo_tool_registry_destroy(registry);

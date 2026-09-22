@@ -3,6 +3,8 @@
 
 #include "turbo_agent_core_internal.h"
 
+#include <http_client/http.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

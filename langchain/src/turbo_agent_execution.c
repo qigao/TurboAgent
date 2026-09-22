@@ -183,7 +183,7 @@ turbo_agent_execution_copy_runtime_options(const turbo_agent_runtime_exec_option
 
 static turbo_agent_execution_status_t
 turbo_agent_execution_status_from_summary(const json_value_t *summary) {
-  const char *status = summary ? turbo_json_get_string(summary, "status") : NULL;
+  const char *status = summary ? json_get_string(summary, "status") : NULL;
 
   if (!status) {
     return TURBO_AGENT_EXECUTION_FAILED;
@@ -343,7 +343,7 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
   }
 
   if (input) {
-    execution->input = turbo_json_clone(input);
+    execution->input = json_clone(input);
     if (!execution->input) {
       turbo_agent_execution_release(execution);
       return SALTS_ENOMEM;

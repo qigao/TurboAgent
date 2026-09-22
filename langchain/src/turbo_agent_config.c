@@ -3,6 +3,7 @@
 #include "turbo_agent_util_internal.h"
 
 #include <http_client/http.h>
+#include <dotenv.h>
 #include "turbo_model_provider.h"
 #include <json_parser.h>
 
@@ -456,9 +457,9 @@ CXX_C_API int turbo_agent_config_apply_env(turbo_agent_config_t *config, const c
   }
 
   if (env_path && env_path[0] != '\0') {
-    env_rc = turbo_dotenv_load(env_path, overwrite_env ? true : false);
+    env_rc = dotenv_load(env_path, overwrite_env ? true : false);
   } else {
-    env_rc = turbo_dotenv_load_default(overwrite_env ? true : false);
+    env_rc = dotenv_load_default(overwrite_env ? true : false);
   }
   turbo_agent_config_sync_process_env();
 

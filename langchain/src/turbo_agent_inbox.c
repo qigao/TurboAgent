@@ -176,22 +176,22 @@ static int turbo_agent_inbox_build_transition(const turbo_agent_inbox_t *inbox,
   if (turbo_agent_inbox_make_uuid(transition_id) != SALTS_OK ||
       turbo_agent_runtime_make_timestamp(timestamp, sizeof(timestamp)) != 0)
     return SALTS_EIO;
-  transition = turbo_json_create_object();
+  transition = json_create_object();
   if (!transition) return SALTS_ENOMEM;
-  turbo_json_object_set_number(transition, "schema_version", TURBO_AGENT_INBOX_SCHEMA_VERSION);
-  turbo_json_object_set_string(transition, "transition_id", transition_id);
-  turbo_json_object_set_string(transition, "inbox_id", inbox_id);
-  turbo_json_object_set_string(transition, "thread_id", inbox->thread_id);
-  turbo_json_object_set_string(transition, "status", turbo_agent_inbox_status_text(status));
-  turbo_json_object_set_string(transition, "action", action);
-  turbo_json_object_set_number(transition, "transition_seq", (double)transition_seq);
-  turbo_json_object_set_string(transition, "created_at", timestamp);
+  json_object_set_number(transition, "schema_version", TURBO_AGENT_INBOX_SCHEMA_VERSION);
+  json_object_set_string(transition, "transition_id", transition_id);
+  json_object_set_string(transition, "inbox_id", inbox_id);
+  json_object_set_string(transition, "thread_id", inbox->thread_id);
+  json_object_set_string(transition, "status", turbo_agent_inbox_status_text(status));
+  json_object_set_string(transition, "action", action);
+  json_object_set_number(transition, "transition_seq", (double)transition_seq);
+  json_object_set_string(transition, "created_at", timestamp);
   if (run_id && run_id[0] != '\0')
-    turbo_json_object_set_string(transition, "claimed_by_run_id", run_id);
-  else turbo_json_object_set_null(transition, "claimed_by_run_id");
+    json_object_set_string(transition, "claimed_by_run_id", run_id);
+  else json_object_set_null(transition, "claimed_by_run_id");
   if (event_id && event_id[0] != '\0')
-    turbo_json_object_set_string(transition, "applied_event_id", event_id);
-  else turbo_json_object_set_null(transition, "applied_event_id");
+    json_object_set_string(transition, "applied_event_id", event_id);
+  else json_object_set_null(transition, "applied_event_id");
   *out_transition = transition;
   return SALTS_OK;
 }
@@ -205,7 +205,7 @@ static int turbo_agent_inbox_persist_transition(turbo_agent_inbox_t *inbox, cons
   int rc = turbo_agent_inbox_build_transition(inbox, inbox_id, status, action, transition_seq,
                                               run_id, event_id, &transition);
   if (rc != SALTS_OK) return rc;
-  transition_id = turbo_json_get_string(transition, "transition_id");
+  transition_id = json_get_string(transition, "transition_id");
   rc = turbo_agent_runtime_store_put_json(inbox->runtime, TURBO_AGENT_INBOX_TRANSITIONS_COLLECTION,
                                           transition_id, transition) == 0
            ? SALTS_OK
@@ -224,16 +224,16 @@ static int turbo_agent_inbox_latest_transition(turbo_agent_inbox_t *inbox, const
   if (turbo_agent_runtime_store_list_json(inbox->runtime, TURBO_AGENT_INBOX_TRANSITIONS_COLLECTION,
                                           "inbox_id", inbox_id, &transitions) != 0)
     return SALTS_ENOENT;
-  for (index = 0; index < turbo_json_array_size(transitions); ++index) {
-    const json_value_t *candidate = turbo_json_array_get(transitions, index);
-    double value = turbo_json_get_double(candidate, "transition_seq", 0);
+  for (index = 0; index < json_array_size(transitions); ++index) {
+    const json_value_t *candidate = json_array_get(transitions, index);
+    double value = json_get_double(candidate, "transition_seq", 0);
     uint64_t seq = value > 0 ? (uint64_t)value : 0;
     if (seq > latest_seq) {
       latest = candidate;
       latest_seq = seq;
     }
   }
-  if (latest) *out_transition = turbo_json_clone(latest);
+  if (latest) *out_transition = json_clone(latest);
   turbo_runtime_json_destroy(transitions);
   return *out_transition ? SALTS_OK : SALTS_ENOENT;
 }
@@ -255,15 +255,15 @@ static int turbo_agent_inbox_load_ready(turbo_agent_inbox_t *inbox, const char *
   rc = turbo_agent_inbox_latest_transition(inbox, inbox_id, &transition);
   if (rc != SALTS_OK) goto cleanup;
   rc = SALTS_EIO;
-  thread_id = turbo_json_get_string(payload, "thread_id");
-  out_entry->kind = turbo_agent_inbox_kind_from_text(turbo_json_get_string(payload, "kind"));
-  *out_status = turbo_agent_inbox_status_from_text(turbo_json_get_string(transition, "status"));
-  bytes_value = turbo_json_get_double(payload, "payload_bytes", -1);
-  sequence_value = turbo_json_get_double(payload, "sequence", -1);
-  transition_value = turbo_json_get_double(transition, "transition_seq", -1);
+  thread_id = json_get_string(payload, "thread_id");
+  out_entry->kind = turbo_agent_inbox_kind_from_text(json_get_string(payload, "kind"));
+  *out_status = turbo_agent_inbox_status_from_text(json_get_string(transition, "status"));
+  bytes_value = json_get_double(payload, "payload_bytes", -1);
+  sequence_value = json_get_double(payload, "sequence", -1);
+  transition_value = json_get_double(transition, "transition_seq", -1);
   if (!thread_id || strcmp(thread_id, inbox->thread_id) != 0 ||
-      !turbo_json_get_string(transition, "thread_id") ||
-      strcmp(turbo_json_get_string(transition, "thread_id"), inbox->thread_id) != 0 ||
+      !json_get_string(transition, "thread_id") ||
+      strcmp(json_get_string(transition, "thread_id"), inbox->thread_id) != 0 ||
       !turbo_agent_inbox_kind_valid(out_entry->kind) || !*out_status || bytes_value < 0 ||
       bytes_value > (double)TURBO_AGENT_INBOX_MAX_EXACT_JSON_INTEGER ||
       bytes_value != (double)(size_t)bytes_value || sequence_value < 1 ||
@@ -296,9 +296,9 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
   if (turbo_agent_runtime_store_list_json(inbox->runtime, TURBO_AGENT_INBOX_PAYLOADS_COLLECTION,
                                           "thread_id", inbox->thread_id, &payloads) != 0)
     return SALTS_EIO;
-  for (index = 0; index < turbo_json_array_size(payloads); ++index) {
-    const json_value_t *payload = turbo_json_array_get(payloads, index);
-    const char *inbox_id = turbo_json_get_string(payload, "inbox_id");
+  for (index = 0; index < json_array_size(payloads); ++index) {
+    const json_value_t *payload = json_array_get(payloads, index);
+    const char *inbox_id = json_get_string(payload, "inbox_id");
     turbo_agent_inbox_ready_t entry;
     turbo_agent_inbox_status_t status = 0;
     int rc;
@@ -337,7 +337,7 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
         turbo_runtime_json_destroy(payloads);
         return SALTS_EIO;
       }
-      if (turbo_json_array_size(runs) > 0 && !events &&
+      if (json_array_size(runs) > 0 && !events &&
           turbo_agent_runtime_get_thread_head_state_json_value(inbox->runtime, inbox->thread_id,
                                                                &events) != 0) {
         turbo_agent_inbox_ready_reset(&entry);
@@ -346,18 +346,18 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
         turbo_runtime_json_destroy(payloads);
         return SALTS_EIO;
       }
-      state_events = events ? turbo_json_object_get(events, "events") : NULL;
-      for (event_index = 0; state_events && event_index < turbo_json_array_size(state_events);
+      state_events = events ? json_object_get(events, "events") : NULL;
+      for (event_index = 0; state_events && event_index < json_array_size(state_events);
            ++event_index) {
-        const json_value_t *event = turbo_json_array_get(state_events, event_index);
+        const json_value_t *event = json_array_get(state_events, event_index);
         if (event &&
-            strcmp(turbo_json_get_string(event, "kind") ? turbo_json_get_string(event, "kind") : "",
+            strcmp(json_get_string(event, "kind") ? json_get_string(event, "kind") : "",
                    "inbox_message") == 0 &&
-            strcmp(turbo_json_get_string(event, "inbox_id")
-                       ? turbo_json_get_string(event, "inbox_id")
+            strcmp(json_get_string(event, "inbox_id")
+                       ? json_get_string(event, "inbox_id")
                        : "",
                    inbox_id) == 0) {
-          event_id = turbo_json_get_string(event, "event_id");
+          event_id = json_get_string(event, "event_id");
           break;
         }
       }
@@ -486,13 +486,13 @@ int turbo_agent_inbox_enqueue(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind
   if (!out_inbox_id) return SALTS_EINVAL;
   *out_inbox_id = NULL;
   if (!inbox || !message || !turbo_agent_inbox_kind_valid(kind)) return SALTS_EINVAL;
-  if (turbo_json_type(message) != TURBO_JSON_OBJECT || !turbo_json_get_string(message, "role") ||
-      strcmp(turbo_json_get_string(message, "role"), "user") != 0 ||
-      !turbo_json_get_string(message, "content") ||
-      turbo_json_get_string(message, "content")[0] == '\0') {
+  if (json_type(message) != JSON_OBJECT || !json_get_string(message, "role") ||
+      strcmp(json_get_string(message, "role"), "user") != 0 ||
+      !json_get_string(message, "content") ||
+      json_get_string(message, "content")[0] == '\0') {
     return SALTS_EINVAL;
   }
-  payload_text = turbo_json_serialize(message, &payload_bytes);
+  payload_text = json_serialize(message, &payload_bytes);
   if (!payload_text) return SALTS_EINVAL;
   if (payload_bytes == 0 || payload_bytes > inbox->config.max_item_bytes ||
       payload_bytes > inbox->config.max_total_bytes) {
@@ -523,19 +523,19 @@ int turbo_agent_inbox_enqueue(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind
   }
   salts_mutex_unlock(&inbox->mutex);
   if (rc != SALTS_OK) goto cleanup;
-  record = turbo_json_create_object();
+  record = json_create_object();
   if (!record) {
     rc = SALTS_ENOMEM;
     goto cleanup;
   }
-  turbo_json_object_set_number(record, "schema_version", TURBO_AGENT_INBOX_SCHEMA_VERSION);
-  turbo_json_object_set_string(record, "inbox_id", inbox_id);
-  turbo_json_object_set_string(record, "thread_id", inbox->thread_id);
-  turbo_json_object_set_null(record, "execution_id");
-  turbo_json_object_set_string(record, "kind", turbo_agent_inbox_kind_text(kind));
-  turbo_json_object_set_number(record, "payload_bytes", (double)payload_bytes);
-  turbo_json_object_set_number(record, "sequence", (double)sequence);
-  turbo_json_object_set_string(record, "created_at", timestamp);
+  json_object_set_number(record, "schema_version", TURBO_AGENT_INBOX_SCHEMA_VERSION);
+  json_object_set_string(record, "inbox_id", inbox_id);
+  json_object_set_string(record, "thread_id", inbox->thread_id);
+  json_object_set_null(record, "execution_id");
+  json_object_set_string(record, "kind", turbo_agent_inbox_kind_text(kind));
+  json_object_set_number(record, "payload_bytes", (double)payload_bytes);
+  json_object_set_number(record, "sequence", (double)sequence);
+  json_object_set_string(record, "created_at", timestamp);
   if (turbo_agent_runtime_json_value_object_set_clone(record, "payload", payload_copy) != 0 ||
       turbo_agent_runtime_store_put_json(inbox->runtime, TURBO_AGENT_INBOX_PAYLOADS_COLLECTION,
                                          inbox_id, record) != 0 ||
@@ -574,7 +574,7 @@ cleanup:
   free(caller_id);
   turbo_runtime_json_destroy(record);
   turbo_runtime_json_destroy(payload_copy);
-  turbo_json_serialize_free(payload_text);
+  json_serialize_free(payload_text);
   return rc;
 }
 
@@ -592,18 +592,18 @@ int turbo_agent_inbox_status(turbo_agent_inbox_t *inbox, const char *inbox_id,
     turbo_runtime_json_destroy(transition);
     return SALTS_ENOENT;
   }
-  status = turbo_json_get_string(transition, "status");
-  if (!status || !turbo_json_get_string(payload, "thread_id") ||
-      strcmp(turbo_json_get_string(payload, "thread_id"), inbox->thread_id) != 0 ||
-      !turbo_json_get_string(transition, "thread_id") ||
-      strcmp(turbo_json_get_string(transition, "thread_id"), inbox->thread_id) != 0 ||
+  status = json_get_string(transition, "status");
+  if (!status || !json_get_string(payload, "thread_id") ||
+      strcmp(json_get_string(payload, "thread_id"), inbox->thread_id) != 0 ||
+      !json_get_string(transition, "thread_id") ||
+      strcmp(json_get_string(transition, "thread_id"), inbox->thread_id) != 0 ||
       turbo_agent_runtime_json_value_object_set_clone(payload, "latest_transition", transition) !=
           0) {
     turbo_runtime_json_destroy(payload);
     turbo_runtime_json_destroy(transition);
     return SALTS_EIO;
   }
-  turbo_json_object_set_string(payload, "status", status);
+  json_object_set_string(payload, "status", status);
   turbo_runtime_json_destroy(transition);
   *out_status = payload;
   return SALTS_OK;
@@ -658,7 +658,7 @@ int turbo_agent_inbox_claim(turbo_agent_inbox_t *inbox, turbo_agent_inbox_kind_t
     turbo_runtime_json_destroy(record);
     return rc;
   }
-  turbo_json_object_set_string(record, "status", "claimed");
+  json_object_set_string(record, "status", "claimed");
   *out_record = record;
   return SALTS_OK;
 }

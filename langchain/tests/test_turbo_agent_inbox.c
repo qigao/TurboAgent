@@ -234,7 +234,7 @@ spec("turbo agent inbox") {
     task.session = session;
     task.message = blocked;
     task.kind = TURBO_AGENT_INBOX_FOLLOW_UP;
-    task.result = TURBO_UNKNOWN;
+    task.result = SALTS_UNKNOWN;
     atomic_init(&task.entered, 0);
     check_equal(salts_thread_create(&producer, inbox_enqueue_task, &task), 0);
     while (!atomic_load_explicit(&task.entered, memory_order_acquire)) {
@@ -486,7 +486,7 @@ spec("turbo agent inbox") {
     tasks[1].message = second;
     tasks[1].kind = TURBO_AGENT_INBOX_STEER;
     for (index = 0; index < 2; ++index) {
-      tasks[index].result = TURBO_UNKNOWN;
+      tasks[index].result = SALTS_UNKNOWN;
       atomic_init(&tasks[index].entered, 0);
       check_equal(salts_thread_create(&producers[index], inbox_enqueue_task, &tasks[index]), 0);
     }

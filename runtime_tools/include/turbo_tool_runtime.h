@@ -1,6 +1,8 @@
 #ifndef TURBO_TOOL_RUNTIME_H
 #define TURBO_TOOL_RUNTIME_H
 
+#include <stddef.h>
+
 #include <turbo_agent_api.h>
 
 #include "turbo_tool.h"

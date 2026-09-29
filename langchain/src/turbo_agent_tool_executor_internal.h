@@ -20,6 +20,7 @@ typedef struct turbo_agent_tool_execution_s {
   turbo_tool_status_t status;
   char *output;
   json_value_t *detail;
+  int detail_capture_failed;
   int replayed;
   int approval_granted;
   int arguments_owned;

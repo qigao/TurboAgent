@@ -35,13 +35,13 @@ target_link_libraries(
          Salts::JsonParser
          Salts::UriParser
          Salts::DotEnvParser
-         Salts::CYaml
          CHttp::Client
          CHttp::Server
          Salts::Core
          Salts::Mustache
          unofficial::sqlite3::sqlite3
-  PRIVATE OpenSSL::Crypto)
+  PRIVATE OpenSSL::Crypto
+          Salts::CYaml)
 
 # Use the utility to configure common settings (Folder, Version, etc.)
 cmake_config_target(langchain FOLDER "LangChain" EXPORT_NAME LangChain

@@ -28,7 +28,7 @@ static int turbo_agent_request_array_add_clone(json_value_t *array, const json_v
     return -1;
   }
 
-  turbo_json_array_add(array, clone);
+  json_array_add(array, clone);
   return 0;
 }
 
@@ -45,12 +45,12 @@ static int turbo_agent_request_tool_result_output_fields(const json_value_t *out
     *output = NULL;
   }
 
-  if (!output_item || turbo_json_type(output_item) != TURBO_JSON_OBJECT) {
+  if (!output_item || json_type(output_item) != JSON_OBJECT) {
     return 0;
   }
 
-  call_id_value = turbo_json_get_string(output_item, "call_id");
-  output_value = turbo_json_get_string(output_item, "output");
+  call_id_value = json_get_string(output_item, "call_id");
+  output_value = json_get_string(output_item, "output");
   if (!call_id_value || !output_value) {
     return 0;
   }
@@ -66,7 +66,7 @@ static int turbo_agent_request_tool_result_output_fields(const json_value_t *out
 
 static int turbo_agent_request_message_event_inputs_valid(const json_value_t *event,
                                                           const json_value_t *messages) {
-  return messages && event && turbo_json_type(event) == TURBO_JSON_OBJECT ? 1 : 0;
+  return messages && event && json_type(event) == JSON_OBJECT ? 1 : 0;
 }
 
 static const json_value_t *
@@ -77,8 +77,8 @@ turbo_agent_request_tool_results_event_outputs(const json_value_t *event) {
     return NULL;
   }
 
-  outputs = turbo_json_object_get(event, "outputs");
-  return outputs && turbo_json_type(outputs) == TURBO_JSON_ARRAY ? outputs : NULL;
+  outputs = json_object_get(event, "outputs");
+  return outputs && json_type(outputs) == JSON_ARRAY ? outputs : NULL;
 }
 
 static int turbo_agent_request_append_chat_model_event_message(json_value_t *messages,
@@ -92,35 +92,35 @@ static int turbo_agent_request_append_chat_model_event_message(json_value_t *mes
   }
 
   if (tool_call_count > 0) {
-    json_value_t *assistant_tool_calls = turbo_json_create_array();
+    json_value_t *assistant_tool_calls = json_create_array();
     json_value_t *assistant = NULL;
     size_t j;
 
     if (!assistant_tool_calls) {
-      turbo_free_json(&assistant_tool_calls);
+      json_free(assistant_tool_calls); assistant_tool_calls = NULL;
       return -1;
     }
 
     for (j = 0; j < tool_call_count; ++j) {
-      const json_value_t *tool_call = turbo_json_array_get(tool_calls, j);
+      const json_value_t *tool_call = json_array_get(tool_calls, j);
       const char *call_id;
       const char *name;
       const char *arguments;
       json_value_t *chat_tool_call;
 
       if (!turbo_agent_tool_call_record_fields(tool_call, &call_id, &name, &arguments)) {
-        turbo_free_json(&assistant);
-        turbo_free_json(&assistant_tool_calls);
+        json_free(assistant); assistant = NULL;
+        json_free(assistant_tool_calls); assistant_tool_calls = NULL;
         return -1;
       }
 
       chat_tool_call = turbo_prompt_chat_tool_call_create(call_id, "function", name, arguments);
       if (!chat_tool_call) {
-        turbo_free_json(&assistant);
-        turbo_free_json(&assistant_tool_calls);
+        json_free(assistant); assistant = NULL;
+        json_free(assistant_tool_calls); assistant_tool_calls = NULL;
         return -1;
       }
-      turbo_json_array_add(assistant_tool_calls, chat_tool_call);
+      json_array_add(assistant_tool_calls, chat_tool_call);
     }
 
     assistant = turbo_prompt_chat_assistant_message_create(output_text, assistant_tool_calls);
@@ -128,7 +128,7 @@ static int turbo_agent_request_append_chat_model_event_message(json_value_t *mes
       return -1;
     }
 
-    turbo_json_array_add(messages, assistant);
+    json_array_add(messages, assistant);
     return 0;
   }
 
@@ -137,7 +137,7 @@ static int turbo_agent_request_append_chat_model_event_message(json_value_t *mes
     if (!assistant) {
       return -1;
     }
-    turbo_json_array_add(messages, assistant);
+    json_array_add(messages, assistant);
   }
 
   return 0;
@@ -156,8 +156,8 @@ static int turbo_agent_request_append_chat_tool_results_messages(json_value_t *m
     return -1;
   }
 
-  for (j = 0; j < turbo_json_array_size(outputs); ++j) {
-    const json_value_t *output = turbo_json_array_get(outputs, j);
+  for (j = 0; j < json_array_size(outputs); ++j) {
+    const json_value_t *output = json_array_get(outputs, j);
     const char *call_id;
     const char *content;
     json_value_t *tool_message;
@@ -170,7 +170,7 @@ static int turbo_agent_request_append_chat_tool_results_messages(json_value_t *m
     if (!tool_message) {
       return -1;
     }
-    turbo_json_array_add(messages, tool_message);
+    json_array_add(messages, tool_message);
   }
 
   return 0;
@@ -186,16 +186,16 @@ static int turbo_agent_request_replay_message_events(
     return -1;
   }
 
-  if (!events || turbo_json_type(events) != TURBO_JSON_ARRAY) {
+  if (!events || json_type(events) != JSON_ARRAY) {
     return 0;
   }
 
-  if (start > turbo_json_array_size(events)) {
+  if (start > json_array_size(events)) {
     return -1;
   }
 
-  for (i = start; i < turbo_json_array_size(events); ++i) {
-    const json_value_t *event = turbo_json_array_get(events, i);
+  for (i = start; i < json_array_size(events); ++i) {
+    const json_value_t *event = json_array_get(events, i);
     if (turbo_agent_event_kind_is(event, "model")) {
       if (!append_model_event || append_model_event(messages, event) != 0) {
         return -1;
@@ -232,7 +232,7 @@ CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages_with_option
     effective_instructions = turbo_agent_build_effective_instructions(agent, state);
     if ((agent->instructions || turbo_agent_state_memory_layer_count(state) > 0) &&
         !effective_instructions) {
-      turbo_free_json(&messages);
+      json_free(messages); messages = NULL;
       return NULL;
     }
   }
@@ -241,10 +241,10 @@ CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages_with_option
     json_value_t *system_message = turbo_prompt_message_create("system", effective_instructions);
     if (!system_message) {
       free(effective_instructions);
-      turbo_free_json(&messages);
+      json_free(messages); messages = NULL;
       return NULL;
     }
-    turbo_json_array_add(messages, system_message);
+    json_array_add(messages, system_message);
   }
   free(effective_instructions);
 
@@ -254,40 +254,40 @@ CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages_with_option
     json_value_t *summary_message;
 
     if (!agent->context_summary) {
-      turbo_free_json(&messages);
+      json_free(messages); messages = NULL;
       return NULL;
     }
-    summary_json = turbo_json_serialize(agent->context_summary, NULL);
+    summary_json = json_serialize(agent->context_summary, NULL);
     if (!summary_json) {
-      turbo_free_json(&messages);
+      json_free(messages); messages = NULL;
       return NULL;
     }
     summary_text = tstr_dup("Committed conversation summary:\n");
     if (summary_text) summary_text = tstr_cat(summary_text, summary_json);
-    turbo_json_serialize_free(summary_json);
+    json_serialize_free(summary_json);
     if (!summary_text) {
-      turbo_free_json(&messages);
+      json_free(messages); messages = NULL;
       return NULL;
     }
     summary_message = turbo_prompt_message_create("system", summary_text);
     tstr_free(summary_text);
     if (!summary_message) {
-      turbo_free_json(&messages);
+      json_free(messages); messages = NULL;
       return NULL;
     }
-    turbo_json_array_add(messages, summary_message);
+    json_array_add(messages, summary_message);
   }
 
   input = turbo_agent_state_get_array_const(state, "input");
   if (!input) {
-    turbo_free_json(&messages);
+    json_free(messages); messages = NULL;
     return NULL;
   }
 
-  for (i = 0; i < turbo_json_array_size(input); ++i) {
-    const json_value_t *message = turbo_json_array_get(input, i);
+  for (i = 0; i < json_array_size(input); ++i) {
+    const json_value_t *message = json_array_get(input, i);
     if (turbo_agent_request_array_add_clone(messages, message) != 0) {
-      turbo_free_json(&messages);
+      json_free(messages); messages = NULL;
       return NULL;
     }
   }
@@ -297,7 +297,7 @@ CXX_C_API json_value_t *turbo_agent_request_build_canonical_messages_with_option
           events, agent->context_projection_active ? agent->context_event_start : 0, messages,
           turbo_agent_request_append_chat_model_event_message,
           turbo_agent_request_append_chat_tool_results_messages) != 0) {
-    turbo_free_json(&messages);
+    json_free(messages); messages = NULL;
     return NULL;
   }
 

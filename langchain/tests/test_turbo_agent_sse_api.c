@@ -10,8 +10,8 @@ static json_value_t *parse_sse_response_or_fail(int rc, char **response_json) {
   check_int_eq(rc, 0);
   check_not_null(response_json);
   check_not_null(*response_json);
-  check_int_eq(
-      turbo_parse_json((const uint8_t *)*response_json, strlen(*response_json), &parsed), 0);
+  parsed = json_parse(*response_json, strlen(*response_json));
+    check_not_null(parsed);
   check_not_null(parsed);
   json_serialize_free(*response_json);
   *response_json = NULL;

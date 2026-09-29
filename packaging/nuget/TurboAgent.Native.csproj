@@ -3,8 +3,9 @@
     <TargetFramework>net8.0</TargetFramework>
     <IsPackable>true</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <PackageId>TurboAgent.Native</PackageId>
-    <PackageVersion Condition="'$(PackageVersion)' == ''">1.1.0</PackageVersion>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">1.1.1</PackageVersion>
     <Authors>qigao</Authors>
     <Description>TurboAgent native SDK for Linux x64, Windows x64, macOS arm64, and Android arm64-v8a.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
@@ -14,10 +15,6 @@
     <NoWarn>$(NoWarn);NU5128</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Salts.Native" Version="*" />
-    <PackageReference Include="SaltsUtils.Native" Version="*" />
-    <PackageReference Include="CHttp.Native" Version="*" />
-    <PackageReference Include="Praktor.Native" Version="*" />
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="$(PackageRoot)/sdk/**/*" Pack="true" PackagePath="sdk/" />
   </ItemGroup>

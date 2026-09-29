@@ -2,15 +2,12 @@
 
 TurboAgent 的 native SDK package，由 `qigao/TurboAgent` 自己构建、验证和发布。
 
-正式 Native 依赖不固定版本，NuGet restore 使用当前可用的兼容 package：
-
-- `Salts.Native`
-- `SaltsUtils.Native`
-- `CHttp.Native`
-- `Praktor.Native`
+TurboAgent.Native **不发布 NuGet dependency metadata**，因此 package 本身不保留
+Salts / SaltsUtils / CHttp / Praktor 的任何版本号。发布 CI 与仓库 CI 始终从各依赖仓库
+恢复当前 latest released SDK，再通过 CMake `find_dependency(... CONFIG)` 验证兼容性。
 
 TurboAgent 自身的第三方 C/C++ 依赖（例如 OpenSSL / sqlite）仍由项目的
-vcpkg manifest/toolchain 解析，不写死到 Native package 版本元数据中。
+vcpkg manifest/toolchain 解析，也不写入 Native package 的版本依赖元数据。
 
 ## SDK platforms
 

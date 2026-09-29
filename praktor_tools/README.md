@@ -1,54 +1,57 @@
 # TurboAgent Praktor Tools
 
 `TurboAgent::PraktorTools` exposes reviewed [Praktor](https://github.com/qigao/praktor)
-YAML workflows as normal TurboAgent tools.
+workflows as deterministic macro-tools for the TurboAgent harness.
 
-The boundary is intentionally narrow:
-
-```text
-LLM / TurboAgent Harness
-          |
-     Tool Registry
-          |
-   praktor_<capability>
-          |
-   fixed workflow path
-          |
-     Praktor C ABI
-          |
-       YAML DAG
+```mermaid
+flowchart TD
+  M[Model] --> H[TurboAgent Harness]
+  H --> T[Registered Praktor Tool]
+  T --> P[Immutable WorkflowPlan]
+  P --> D[YAML DAG Runtime]
+  D --> R[Structured result]
+  R --> T
 ```
 
-The model never supplies a workflow path. The host registers an existing
-absolute regular, non-symlink YAML file, input schema, execution policy, and
-policy capabilities before the agent starts. Invalid paths fail during
-registration rather than on the first model invocation.
+TurboAgent owns model turns, policy, approvals, durable thread/run state, and
+replanning. Praktor owns deterministic workflow execution.
+
+The model never supplies a workflow path.
 
 ## Build
-
-Praktor support is optional so existing TurboAgent builds do not gain a new
-mandatory dependency:
 
 ```cmake
 -DENABLE_PRAKTOR_TOOLS=ON
 -DPRAKTOR_ROOT=/path/to/praktor/install
 ```
 
-When enabled, configuration fails fast if `find_package(Praktor CONFIG REQUIRED)`
-cannot resolve the installed package. Praktor's transitive CMake dependencies
-(Salts, SaltsUtils, and TurboScript) must also be discoverable, typically through
-their installed prefixes / `CMAKE_PREFIX_PATH`.
-
-When TurboAgent itself is installed with `ENABLE_PRAKTOR_TOOLS=ON`, its
-generated package config conditionally calls `find_dependency(Praktor CONFIG)`
-before loading exported targets. Default builds keep Praktor completely
-optional.
-
-At runtime, the platform loader must be able to resolve the Praktor shared
-library and its runtime dependencies (for example through `PATH` on Windows or
-the deployment's normal loader/rpath configuration on Unix-like systems).
+Praktor support is optional. When enabled, `find_package(Praktor CONFIG REQUIRED)`
+must resolve the installed SDK and its transitive native dependencies.
 
 ## Register a workflow
+
+A harness-native workflow owns its public contract:
+
+```yaml
+input_policy: strict
+
+inputs:
+  preset:
+    type: string
+    required: true
+
+outputs:
+  artifact:
+    type: string
+    required: true
+    value: "{{ tasks.package.outputs.path }}"
+
+tasks:
+  - name: package
+    command: "./build-and-package {{ preset }}"
+```
+
+Registration can therefore omit a duplicate hand-authored tool schema:
 
 ```c
 turbo_praktor_tool_pack_config_t pack_config;
@@ -60,60 +63,85 @@ pack = turbo_praktor_tool_pack_create(&pack_config);
 
 turbo_praktor_workflow_config_init(&workflow);
 workflow.tool_name = "praktor_build";
-workflow.description = "Build and test the current project.";
+workflow.description = "Build and package the current project.";
 workflow.workflow_path = "/opt/workflows/build.yml";
-workflow.parameters_json =
-    "{\"type\":\"object\",\"properties\":{\"preset\":{\"type\":\"string\"}},"
-    "\"required\":[\"preset\"],\"additionalProperties\":false}";
 
 turbo_praktor_tool_pack_add_workflow(pack, &workflow);
 ```
 
-The pack registry can be attached directly to an agent or composed with MCP,
-Wasm, coding, or native registries through `turbo_tool_registry_compose()`.
+With a WorkflowPlan-capable Praktor SDK the adapter:
 
-## Security boundary
+1. compiles and owns the reviewed WorkflowPlan;
+2. registers the generated input schema;
+3. checks the harness-safe profile;
+4. derives policy capabilities from the effect manifest;
+5. executes the bound plan rather than re-selecting a path.
 
-The default workflow configuration requires:
+Older Praktor SDKs automatically use the legacy reviewed-path behavior.
 
-- `runtime_tools`
-- `network`
-- `shell`
-- `patch`
-- `outside_workspace`
+## Policy
 
-This is intentionally conservative because a Praktor workflow can contain
-commands, HTTP/file operations, scripts, and native calls. A NULL/zero
-capability list also resolves to these defaults, so zero-initializing the
-configuration cannot silently drop policy requirements. A host may replace the
-additional capability list only after reviewing the registered YAML and its
-transitive `uses` workflows. To request only `runtime_tools`, provide that
-capability explicitly.
+`runtime_tools` is always required. Plan effects are mapped conservatively:
 
-An agent cannot override the registered path or capability metadata through
-tool arguments. If a host narrows the default capability set, the registered
-YAML and every transitive `uses` dependency must also be immutable to the agent
-for the lifetime of the registration; otherwise a post-review file replacement
-would invalidate the host's capability classification.
+- network -> `network`
+- process/system control -> `shell`
+- filesystem write -> `patch`
+- outside-workspace access -> `outside_workspace`
+- plugin/native/model-provider effects -> `custom_tools`
 
-## Result semantics
+Host-supplied requirements are additional: they cannot remove capabilities
+derived from the workflow.
 
-Praktor success and workflow-level failure both return Praktor's canonical JSON
-object to the model. A workflow failure therefore remains inspectable through
-`workflow_status`, task states, outputs, and `error` instead of being reduced
-to a generic tool failure.
+Unknown effects widen admission to conservative requirements instead of silently
+narrowing policy.
 
-The pack implements both TurboAgent's string tool callback (the path used by the
-Agent Tool Executor) and the JSON-native registry callback. Both use the same
-Praktor execution core and result contract.
+Workflow config v2 requires `profiles.harness_safe.qualified=true` by default.
+Set `require_harness_safe = 0` only for an explicitly reviewed compatibility
+workflow. Config v1 callers retain legacy behavior.
 
-Adapter failures such as an oversized or malformed result remain tool errors.
+## Cancellation, deadlines, events, and lineage
 
-## Cancellation and deadlines
+TurboAgent Tool Definition v4 receives Tool Execution Context v2. The adapter
+propagates:
 
-Praktor ABI 2.1 supports cooperative execution control. TurboAgent currently
-does not pass cancellation/deadline context through the generic Tool Registry
-callback ABI, so this adapter intentionally uses the compatible synchronous
-Praktor entry point. End-to-end propagation should be added at the generic tool
-runtime boundary, after which this adapter can call the controlled Praktor ABI
-without a module-specific side channel.
+- cancellation;
+- deadlines;
+- `thread_id`;
+- `run_id`;
+- `turn_id`;
+- `tool_call_id`.
+
+When supported by Praktor, workflow/task lifecycle callbacks become canonical
+Turbo trace events.
+
+No lineage field is injected into workflow variables.
+
+## Result split
+
+Praktor keeps two result surfaces:
+
+```text
+canonical full result
+  ├─ tasks / stdout / stderr / diagnostics -> detail sink -> tool journal
+  └─ agent_output                         -> model-facing tool result
+```
+
+The model therefore receives only declared public outputs (or a compact
+structured failure) while full execution evidence remains available to the
+harness.
+
+If an older Praktor result has no `agent_output`, the adapter returns the
+canonical result for backward compatibility.
+
+## Immutable review
+
+WorkflowPlan binds the root workflow and transitive reviewed dependencies by
+content digest. If those bytes change after registration, execution fails with
+a plan mismatch before task side effects.
+
+This is the central harness invariant:
+
+> one reviewed workflow = one stable tool identity
+
+The registry can be attached directly to an agent or composed with MCP, Wasm,
+coding, and native tool registries through `turbo_tool_registry_compose()`.

@@ -15,6 +15,9 @@ target_link_libraries(mcp_tools PUBLIC TurboAgent::RuntimeTools
                                        Salts::JsonParser
                                        Salts::UriParser
                                        CHttp::Client)
+if(UNIX)
+  target_link_libraries(mcp_tools PRIVATE m)
+endif()
 
 cmake_config_target(mcp_tools FOLDER "MCP Tools" EXPORT_NAME McpTools
                     ALIAS TurboAgent::McpTools)

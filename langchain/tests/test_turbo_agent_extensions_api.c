@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent_extensions.h"
 #include "turbo_agent.h"
 #include <string.h>
@@ -24,7 +25,7 @@ static void capture_trace_json_value(turbo_agent_t *agent,
   check_not_null(event);
   check_not_null(capture);
   capture->count++;
-  name = turbo_runtime_json_value_as_string(turbo_json_object_get(event, "name"));
+  name = turbo_runtime_json_value_as_string(json_object_get(event, "name"));
   if (name) {
     strncpy(capture->last_name, name, sizeof(capture->last_name) - 1);
     capture->last_name[sizeof(capture->last_name) - 1] = '\0';
@@ -81,7 +82,7 @@ spec("turbo agent extensions api") {
     check_true(capture.count >= 2);
     check_str_eq(capture.last_name, "memory_load");
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 }

@@ -1,6 +1,8 @@
 #ifndef TURBO_TOOL_H
 #define TURBO_TOOL_H
 
+#include <stddef.h>
+
 #include <platform.h>
 
 #include "turbo_runtime_json.h"

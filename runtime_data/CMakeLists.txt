@@ -12,6 +12,9 @@ target_include_directories(
   runtime_data PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                       $<INSTALL_INTERFACE:include>)
 target_link_libraries(runtime_data PUBLIC Salts::JsonParser Salts::Core)
+if(UNIX)
+  target_link_libraries(runtime_data PRIVATE m)
+endif()
 
 cmake_config_target(runtime_data FOLDER "Runtime Data" EXPORT_NAME RuntimeData
                     ALIAS TurboAgent::RuntimeData)

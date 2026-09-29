@@ -1,4 +1,5 @@
 /* turbo_agent_runtime_v1_memory_store.c
+#include <json_parser.h>
  * Extracted from turbo_agent_runtime_v1.c  —  in-memory KV store backend
  * implementing turbo_agent_runtime_store_t via a singly-linked list. */
 #include "turbo_agent_runtime_v1_internal.h"
@@ -99,7 +100,7 @@ static int turbo_agent_runtime_memory_store_list(void *user_data, const char *co
     return -1;
   }
   *out_records_json = NULL;
-  records_json = turbo_json_create_array();
+  records_json = json_create_array();
   if (!records_json) {
     return -1;
   }
@@ -108,17 +109,17 @@ static int turbo_agent_runtime_memory_store_list(void *user_data, const char *co
       continue;
     }
     if (turbo_agent_runtime_parse_json_string(record->record_json, &record_json) != 0) {
-      turbo_free_json(&records_json);
+      json_free(records_json); records_json = NULL;
       return -1;
     }
     if (turbo_agent_runtime_json_matches_filter(record_json, filter_key, filter_value)) {
-      turbo_json_array_add(records_json, record_json);
+      json_array_add(records_json, record_json);
       record_json = NULL;
     }
-    turbo_free_json(&record_json);
+    json_free(record_json); record_json = NULL;
   }
-  *out_records_json = turbo_json_serialize(records_json, NULL);
-  turbo_free_json(&records_json);
+  *out_records_json = json_serialize(records_json, NULL);
+  json_free(records_json); records_json = NULL;
   return *out_records_json ? 0 : -1;
 }
 

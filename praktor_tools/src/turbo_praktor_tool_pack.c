@@ -89,9 +89,8 @@ static int turbo_praktor_schema_valid(const char *parameters_json) {
   const char *type;
   int valid;
   if (!parameters_json) return 1;
-  if (turbo_runtime_json_parse((const uint8_t *)parameters_json, strlen(parameters_json),
-                              &schema) != TURBO_RUNTIME_JSON_OK ||
-      !schema || json_type(schema) != JSON_OBJECT) {
+  schema = json_parse(parameters_json, strlen(parameters_json));
+  if (!schema || json_type(schema) != JSON_OBJECT) {
     turbo_runtime_json_destroy(schema);
     return 0;
   }
@@ -245,10 +244,8 @@ static turbo_tool_status_t turbo_praktor_execute_text(
 
   if (status == PRAKTOR_RESULT_SUCCESS ||
       status == PRAKTOR_RESULT_EXECUTION_FAILED) {
-    if (!output.data || !output.size ||
-        turbo_runtime_json_parse((const uint8_t *)output.data, output.size, &parsed) !=
-            TURBO_RUNTIME_JSON_OK ||
-        !parsed || json_type(parsed) != JSON_OBJECT ||
+    parsed = output.data && output.size ? json_parse(output.data, output.size) : NULL;
+    if (!parsed || json_type(parsed) != JSON_OBJECT ||
         turbo_praktor_copy_text(output.data, output.size, out_output) != 0) {
       tool_status = TURBO_TOOL_ERROR;
       goto cleanup;
@@ -330,10 +327,8 @@ static turbo_tool_status_t turbo_praktor_execute_json_common(
     free(output_json);
     return status;
   }
-  if (!output_json ||
-      turbo_runtime_json_parse((const uint8_t *)output_json, strlen(output_json), &parsed) !=
-          TURBO_RUNTIME_JSON_OK ||
-      !parsed || json_type(parsed) != JSON_OBJECT) {
+  parsed = output_json ? json_parse(output_json, strlen(output_json)) : NULL;
+  if (!parsed || json_type(parsed) != JSON_OBJECT) {
     free(output_json);
     turbo_runtime_json_destroy(parsed);
     return TURBO_TOOL_ERROR;

@@ -79,6 +79,14 @@ endif()
 if(ENABLE_LLM_SANDBOX)
   find_package(TurboWasm CONFIG REQUIRED PATHS "${TURBOWASM_ROOT}")
 endif()
+if(ENABLE_PRAKTOR_TOOLS)
+  if(PRAKTOR_ROOT)
+    find_package(Praktor CONFIG REQUIRED PATHS "${PRAKTOR_ROOT}"
+                 NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+  else()
+    find_package(Praktor CONFIG REQUIRED)
+  endif()
+endif()
 find_package(Threads REQUIRED)
 
 # Additional components
@@ -89,6 +97,10 @@ add_subdirectory(runtime_data)
 add_subdirectory(runtime_tools)
 if(ENABLE_MCP_TOOLS)
   add_subdirectory(mcp_tools)
+endif()
+
+if(ENABLE_PRAKTOR_TOOLS)
+  add_subdirectory(praktor_tools)
 endif()
 
 if(ENABLE_CODEX_BRIDGE)

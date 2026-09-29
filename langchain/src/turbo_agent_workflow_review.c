@@ -1,4 +1,5 @@
 #include "turbo_agent_graph.h"
+#include <json_parser.h>
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
 #include "turbo_agent_state_flow_domain_internal.h"
 #include "turbo_agent_state_snapshot_internal.h"
@@ -71,8 +72,8 @@ int turbo_agent_replan_prepare_node(turbo_graph_exec_ctx_t *ctx, void *user_data
            latest_executor_text && latest_executor_text[0] != '\0' ? latest_executor_text : "none",
            completed_steps_message ? completed_steps_message : "");
   tstr_free(completed_steps_message);
-  base_input = turbo_json_object_get(ctx->state, "input");
-  if (!base_input || turbo_json_type(base_input) != TURBO_JSON_ARRAY) {
+  base_input = json_object_get(ctx->state, "input");
+  if (!base_input || json_type(base_input) != JSON_ARRAY) {
     free(prompt);
     return -1;
   }
@@ -83,26 +84,26 @@ int turbo_agent_replan_prepare_node(turbo_graph_exec_ctx_t *ctx, void *user_data
     return -1;
   }
 
-  planner_events = turbo_json_create_array();
-  planner_history = turbo_json_create_array();
+  planner_events = json_create_array();
+  planner_history = json_create_array();
   planner_state = NULL;
   message = turbo_prompt_message_create("user", prompt);
   if (!message || !planner_events || !planner_history) {
     free(prompt);
-    turbo_free_json(&planner_input);
-    turbo_free_json(&message);
-    turbo_free_json(&planner_events);
-    turbo_free_json(&planner_history);
+    json_free(planner_input); planner_input = NULL;
+    json_free(message); message = NULL;
+    json_free(planner_events); planner_events = NULL;
+    json_free(planner_history); planner_history = NULL;
     return -1;
   }
 
   free(prompt);
-  turbo_json_array_add(planner_input, message);
+  json_array_add(planner_input, message);
   if (turbo_agent_state_append_array_version(ctx->state, "planner_event_versions",
                                              planner_history) != 0) {
-    turbo_free_json(&planner_input);
-    turbo_free_json(&planner_events);
-    turbo_free_json(&planner_history);
+    json_free(planner_input); planner_input = NULL;
+    json_free(planner_events); planner_events = NULL;
+    json_free(planner_history); planner_history = NULL;
     return -1;
   }
 
@@ -110,8 +111,8 @@ int turbo_agent_replan_prepare_node(turbo_graph_exec_ctx_t *ctx, void *user_data
   if (!planner_state ||
       turbo_agent_state_append_object_version(ctx->state, "planner_state_versions",
                                               planner_state) != 0) {
-    turbo_free_json(&planner_input);
-    turbo_free_json(&planner_events);
+    json_free(planner_input); planner_input = NULL;
+    json_free(planner_events); planner_events = NULL;
     return -1;
   }
 

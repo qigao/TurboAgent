@@ -2,43 +2,44 @@
 
 ## Decision context
 
-TurboAgent already owns model interaction, tool policy, approvals, durable
-thread/run/checkpoint state, MCP/Wasm/native tool composition, and bounded tool
-execution. Praktor owns a separate concern: deterministic YAML workflow
-orchestration.
+TurboAgent owns model interaction, tool policy, approvals, durable
+thread/run/checkpoint state, tool journaling, and bounded tool execution.
+Praktor owns deterministic YAML workflow orchestration.
 
 The integration must not create a second agent state machine or let model input
-select arbitrary executable workflow files.
+select executable workflow files.
 
 ## Selected boundary
 
 Each host-reviewed YAML workflow is registered as one ordinary TurboAgent tool.
-Registration requires an existing absolute regular file and rejects symlinks,
-so missing/indirect entry workflows fail fast before agent execution.
 
-```text
-TurboAgent policy / review
-          |
-     tool admission
-          |
-  fixed tool definition
-          |
-  fixed absolute YAML path
-          |
-      Praktor ABI
+With a WorkflowPlan-capable Praktor SDK, registration compiles the YAML into an
+immutable/revalidatable plan and binds the plan identity to the tool:
+
+```mermaid
+flowchart LR
+  H[TurboAgent policy / review] --> A[Tool admission]
+  A --> P[Praktor WorkflowPlan]
+  P --> D[Digest + dependency closure]
+  P --> S[Generated input schema]
+  P --> E[Effect manifest]
+  P --> Q[Harness-safe profile]
+  D --> T[Fixed tool identity]
+  S --> T
+  E --> T
+  Q --> T
 ```
 
-The tool arguments are serialized directly as Praktor workflow inputs. The
-workflow path is binding state owned by the registry callback and never appears
-in the tool schema.
+The workflow path is host registration state and never appears in model
+arguments. Older Praktor SDKs fall back to the existing reviewed absolute-path
+binding.
 
 ## Alternatives
 
 ### One generic run(path, inputs) tool
 
-Rejected. It makes filesystem path selection model-controlled, weakens tool
-admission, and collapses workflows with different side effects into one policy
-identity.
+Rejected. It makes filesystem path selection model-controlled and collapses
+workflows with different side effects into one policy identity.
 
 ### Make Praktor an Agent runtime
 
@@ -47,86 +48,115 @@ Praktor remains an execution backend only.
 
 ### Register one tool per reviewed workflow
 
-Selected. Tool schema, identity, execution policy, and capability requirements
-are fixed before inference, while the YAML retains full Praktor orchestration.
+Selected. Tool identity, schema, execution policy, capability requirements, and
+reviewed plan are fixed before inference.
 
 ## Ownership and lifecycle
 
 | Item | Contract |
 |---|---|
 | Pack | owns one tool registry and the linked Praktor API view |
-| Workflow binding | registry-owned; copies the absolute YAML path |
+| Workflow binding | owns an immutable WorkflowPlan when available; otherwise copies the reviewed absolute path |
 | Tool schema/name/description | copied by the Tool Registry |
-| Model arguments | borrowed for one callback, serialized to canonical JSON input |
-| Praktor result | Praktor-owned until `release_json`; parsed before release |
-| Returned JSON | TurboParser-owned by the caller after successful tool execution |
-| Destruction | dependent agents/projections must be destroyed before the pack |
+| Model arguments | borrowed for one callback and serialized as workflow inputs |
+| Praktor full result | published to Tool Execution Context v2 detail sink, then released |
+| Model-facing result | `agent_output` when provided by Praktor; canonical result is the legacy fallback |
+| Lifecycle events | translated from Praktor events into canonical Turbo trace events |
+| Destruction | releases the WorkflowPlan before destroying the binding |
 
-Praktor's ABI major and `PRAKTOR_CAPABILITY_JSON_WORKFLOW` are checked during
-pack creation.
+## Execution control and observability
 
-## Concurrency and side effects
+TurboAgent Tool Definition v4 is context-aware. Tool Execution Context v2
+carries:
 
-The default execution policy is `EXCLUSIVE + NONE`. Hosts may explicitly
-select another existing TurboAgent execution policy for a reviewed workflow.
+- cancel token;
+- monotonic deadline;
+- thread/run/turn/tool-call lineage;
+- canonical event sink;
+- full-detail sink.
 
-The pack has no queue or worker pool of its own. Bounded scheduling and tool
-journaling remain owned by TurboAgent's existing tool executor.
+The adapter maps cancel/deadline into Praktor execution control. When Praktor
+exposes lifecycle events, it calls observed WorkflowPlan execution and forwards
+lineage without injecting those values into workflow variables.
 
-Praktor ABI 2.1 exposes cooperative cancellation/deadline execution control.
-The current TurboAgent Tool Registry callback shape does not yet carry a
-cancellation/deadline context into arbitrary tool callbacks, so this adapter
-continues to use the compatible synchronous entry point. Wiring ABI 2.1 control
-requires a Tool Runtime execution-context contract rather than a Praktor-specific
-side channel.
+```mermaid
+sequenceDiagram
+  participant H as Harness
+  participant A as Praktor Adapter
+  participant P as Praktor Runtime
+  participant J as Tool Journal
+  participant M as Model
 
-The adapter registers both the string callback used by TurboAgent's Agent Tool
-Executor and the JSON-native registry callback. They share one execution core
-so result/error semantics do not diverge.
+  H->>A: tool call + execution context
+  A->>P: execute reviewed plan
+  P-->>H: workflow/task trace events
+  P-->>A: canonical result
+  A-->>J: full result via detail sink
+  A-->>M: agent_output projection
+```
 
-## Capacity and result bounds
-
-- `max_workflows` is a hard registration bound.
-- `max_result_bytes` is checked before parsing a Praktor-owned result.
-- Capacity failure is atomic and does not mutate the prior registry.
-
-Praktor itself owns execution-time task concurrency and any workflow-internal
-resource limits.
+The Tool Executor serializes event-sink delivery across parallel tool workers
+and persists backend detail in the durable tool journal. Committed replay
+restores compact output and detail without re-running side effects.
 
 ## Policy boundary
 
-Every registered workflow always requires `runtime_tools`.
+Every workflow requires `runtime_tools`.
 
-The default additional requirements are deliberately conservative:
-`network`, `shell`, `patch`, and `outside_workspace`. NULL/zero also
-resolves to this set, so zero-initialized configuration cannot silently reduce
-requirements. This prevents a newly registered Praktor workflow from bypassing
-TurboAgent policy simply because the host forgot to classify its YAML effects.
+With WorkflowPlan metadata, Praktor effects map conservatively into TurboAgent
+policy capabilities:
 
-A host may replace the additional list only after reviewing the workflow and
-its transitive reusable workflows. When capabilities are narrowed, those files
-must remain immutable to the agent for the lifetime of the registration; the
-pack fixes the path and policy metadata, not the bytes behind a mutable path.
+| Praktor effect | TurboAgent capability |
+|---|---|
+| `network` | `network` |
+| `process`, `system_control` | `shell` |
+| `filesystem_write` | `patch` |
+| `outside_workspace` | `outside_workspace` |
+| `plugin`, `native_extension`, `model_api` | `custom_tools` |
+| `filesystem_read` | no additional capability |
 
-## Failure semantics
+Unknown effects widen to the conservative legacy set plus `custom_tools`.
+Host-supplied capability requirements are unioned with discovered effects and
+therefore cannot narrow the Praktor analysis.
 
-Praktor success and `PRAKTOR_RESULT_EXECUTION_FAILED` both carry canonical
-JSON and are returned as normal tool output. This preserves task-level failure
-evidence for the model and host.
+Without WorkflowPlan support, the legacy conservative set remains
+`network + shell + patch + outside_workspace`.
 
-Negative Praktor ABI errors are converted to a structured object containing
-`workflow_status=error`, `result_code`, `error_phase`, and `error`.
-Malformed or oversized adapter results fail the tool boundary.
+## Harness-safe profile
 
-## Build and compatibility
+Workflow config v2 enables `require_harness_safe` by default. When plan
+metadata is available, registration requires
+`profiles.harness_safe.qualified=true`.
 
-The module is guarded by `ENABLE_PRAKTOR_TOOLS`, default OFF. Existing
-TurboAgent builds therefore remain unchanged. Enabling it requires an installed
-Praktor CMake package and links the adapter privately to `Praktor::Praktor`.
+The profile checks deterministic reviewability; it does not replace TurboAgent
+policy. Network/process/system-control workflows can still qualify and remain
+subject to the corresponding host capabilities and approvals.
 
-No existing TurboAgent public ABI, runtime record, protocol, or tool changes.
-When the optional module is built into an installed TurboAgent package, the
-generated package config conditionally resolves Praktor before importing
-TurboAgent targets; default builds add no Praktor package dependency.
+Workflow config v1 remains accepted and stays on the legacy execution path.
 
-Rollback is disabling the option and removing Praktor tool-pack registration.
+## Result semantics
+
+Praktor success and workflow-level failure are normal tool results.
+
+For harness-native workflows, the canonical result is split:
+
+- full `tasks` and diagnostic detail -> detail sink / durable journal;
+- declared public `agent_output` -> model-facing tool result.
+
+This avoids feeding raw task stdout/stderr to the model unless the workflow
+explicitly exports it.
+
+Negative request/plan/contract ABI errors are converted to structured error
+objects containing `workflow_status=error`, result code, error phase, and
+message. Plan mismatch is detected before workflow side effects.
+
+## Capacity and compatibility
+
+- `max_workflows` is a hard registration bound.
+- `max_result_bytes` bounds the canonical Praktor result before projection.
+- Tool Execution Context ABI v1 remains accepted; v2 adds observation sinks.
+- Workflow config ABI v1 remains accepted; v2 adds harness-safe admission.
+- Praktor WorkflowPlan/events are feature-detected at compile/runtime boundaries.
+- Older released Praktor SDKs retain conservative reviewed-path behavior.
+
+The module remains optional behind `ENABLE_PRAKTOR_TOOLS`.

@@ -13,7 +13,8 @@ extern "C" {
 #endif
 
 #define TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION 1u
-#define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION 1u
+#define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V1 1u
+#define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION 2u
 
 typedef struct turbo_praktor_tool_pack_s turbo_praktor_tool_pack_t;
 
@@ -42,15 +43,27 @@ typedef struct turbo_praktor_workflow_config_s {
   /**
    * Additional host-policy requirements.
    *
-   * runtime_tools is always required. Defaults are deliberately conservative:
-   * network, shell, patch, and outside_workspace. NULL + zero also resolves to
-   * these defaults, so a zero-initialized config does not silently reduce
-   * policy. A host may replace this list only after reviewing the registered
-   * workflow's effects; use an explicit {"runtime_tools"} list for runtime-only.
+   * runtime_tools is always required. With WorkflowPlan support these entries
+   * are additional requirements unioned with capabilities derived from the
+   * plan effect manifest; they can never narrow discovered effects. Without
+   * WorkflowPlan support NULL + zero falls back to the conservative legacy
+   * network/shell/patch/outside_workspace set.
    */
   const char *const *required_capabilities;
   size_t required_capability_count;
+
+  /**
+   * Require WorkflowPlan metadata to qualify for profiles.harness_safe.
+   *
+   * v2 init enables this by default. v1 callers retain legacy path behavior.
+   * When linked against a Praktor SDK without WorkflowPlan support the adapter
+   * falls back to the legacy reviewed-path contract.
+   */
+  int require_harness_safe;
 } turbo_praktor_workflow_config_t;
+
+#define TURBO_PRAKTOR_WORKFLOW_CONFIG_V1_SIZE \
+  offsetof(turbo_praktor_workflow_config_t, require_harness_safe)
 
 CXX_C_API void
 turbo_praktor_tool_pack_config_init(turbo_praktor_tool_pack_config_t *config);
@@ -71,10 +84,12 @@ CXX_C_API void turbo_praktor_tool_pack_destroy(turbo_praktor_tool_pack_t *pack);
 /**
  * Register one trusted workflow as one TurboAgent tool.
  *
- * workflow_path must be an existing regular non-symlink file and is copied
- * into the pack-owned binding. The model sees only tool_name, description,
- * parameters_json, and later the
- * canonical workflow result. Duplicate names and capacity failures are atomic.
+ * workflow_path must be an existing regular non-symlink file. When the linked
+ * Praktor exposes WorkflowPlan, registration compiles and owns an immutable
+ * plan, consumes its generated input schema/effect manifest/profile metadata,
+ * and later executes the bound plan. Legacy SDKs retain path-based execution.
+ * The model never receives workflow_path. Duplicate names and capacity failures
+ * are atomic.
  */
 CXX_C_API turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
     turbo_praktor_tool_pack_t *pack,
@@ -86,6 +101,17 @@ turbo_praktor_tool_pack_registry(turbo_praktor_tool_pack_t *pack);
 
 CXX_C_API size_t
 turbo_praktor_tool_pack_workflow_count(const turbo_praktor_tool_pack_t *pack);
+
+
+/** Return whether the linked Praktor exposes immutable WorkflowPlan contracts. */
+CXX_C_API int
+turbo_praktor_tool_pack_supports_workflow_plan(
+    const turbo_praktor_tool_pack_t *pack);
+
+/** Return whether the linked Praktor exposes lifecycle event callbacks. */
+CXX_C_API int
+turbo_praktor_tool_pack_supports_execution_events(
+    const turbo_praktor_tool_pack_t *pack);
 
 #ifdef __cplusplus
 }

@@ -26,9 +26,9 @@ CXX_C_API int turbo_agent_request_add_structured_output(const turbo_agent_t *age
     return 0;
   }
 
-  if (turbo_parse_json((const uint8_t *)agent->structured_output_schema_json,
-                       strlen(agent->structured_output_schema_json), &schema) != 0 ||
-      !schema || json_type(schema) != JSON_OBJECT) {
+  schema = json_parse(agent->structured_output_schema_json,
+                      strlen(agent->structured_output_schema_json));
+  if (!schema || json_type(schema) != JSON_OBJECT) {
     json_free(schema); schema = NULL;
     return -1;
   }

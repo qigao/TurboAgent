@@ -11,6 +11,7 @@
 #include <salts/thread.h>
 #include <salts/clock.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -123,15 +124,22 @@ static turbo_tool_status_t tool_executor_context_handler(
 
 typedef struct tool_executor_observation_capture_s {
   int events;
-  const char *last_kind;
+  char last_kind[32];
 } tool_executor_observation_capture_t;
 
 static void tool_executor_event_capture(const json_value_t *event, void *user_data) {
   tool_executor_observation_capture_t *capture =
       (tool_executor_observation_capture_t *)user_data;
   if (!capture || !event) return;
-  ++capture->events;
-  capture->last_kind = json_get_string(event, "kind");
+  {
+    const char *kind = json_get_string(event, "kind");
+    ++capture->events;
+    if (kind) {
+      snprintf(capture->last_kind, sizeof(capture->last_kind), "%s", kind);
+    } else {
+      capture->last_kind[0] = '\0';
+    }
+  }
 }
 
 static turbo_tool_status_t tool_executor_observation_handler(

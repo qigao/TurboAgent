@@ -18,7 +18,8 @@ static json_value_t *parse_request_json_or_fail(const char *request_json) {
   json_value_t *parsed = NULL;
 
   check_not_null(request_json);
-  check_int_eq(turbo_parse_json((const uint8_t *)request_json, strlen(request_json), &parsed), 0);
+  parsed = json_parse(request_json, strlen(request_json));
+    check_not_null(parsed);
   check_not_null(parsed);
   return parsed;
 }

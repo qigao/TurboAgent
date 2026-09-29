@@ -129,7 +129,7 @@ static turbo_agent_memory_store_t malformed_query_only_memory_store_create(void)
 static char *memory_store_temp_root(void) {
   int needed;
   char *path;
-  unsigned long long tick = (unsigned long long)turbo_hrtime();
+  unsigned long long tick = (unsigned long long)salts_hrtime();
 
 #ifdef _WIN32
   char temp_dir[MAX_PATH];

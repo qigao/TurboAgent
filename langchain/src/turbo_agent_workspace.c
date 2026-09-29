@@ -5,6 +5,7 @@
 #include <salts_fs.h>
 #include <json_parser.h>
 #include <cyaml.h>
+#include <cyaml_json_adapter.h>
 #include <tstr.h>
 #include <cstl/vec.h>
 
@@ -584,18 +585,19 @@ turbo_agent_workspace_parse_skill(turbo_agent_workspace_t *workspace, const char
     goto cleanup;
   }
   if (frontmatter > 0) {
-    turbo_yaml_doc_t *yaml = NULL;
+    cyaml_doc_t *yaml = NULL;
     json_value_t *metadata = NULL;
     const char *name;
     const char *description;
-    if (turbo_parse_yaml((const uint8_t *)file + yaml_begin, yaml_len, &yaml) != 0 || !yaml) {
+    yaml = cyaml_parse((const char *)file + yaml_begin, yaml_len, NULL, NULL);
+    if (!yaml) {
       turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,
                                       "skill frontmatter", path);
       status = TURBO_AGENT_WORKSPACE_PARSE_ERROR;
       goto cleanup;
     }
-    metadata = turbo_yaml_to_json(yaml);
-    turbo_free_yaml(&yaml);
+    metadata = json_value_from_cyaml(yaml);
+    cyaml_free(yaml);
     if (!metadata || json_type(metadata) != JSON_OBJECT) {
       json_free(metadata); metadata = NULL;
       turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,

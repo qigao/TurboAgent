@@ -1,5 +1,0 @@
-<person abc:fish="kote">
-        <gender>female</gender>
-        <firstname>Anna</firstname>
-        <lastname>Smith</lastname>
-</person>

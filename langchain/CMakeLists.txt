@@ -35,6 +35,7 @@ target_link_libraries(
          Salts::JsonParser
          Salts::UriParser
          Salts::DotEnvParser
+         Salts::CYaml
          CHttp::Client
          CHttp::Server
          Salts::Core

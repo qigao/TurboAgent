@@ -117,6 +117,7 @@ jobs:
           test -f "$salts_root/lib/cmake/Salts/SaltsConfig.cmake"
           test -f "$utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
           test -f "$chttp_root/lib/cmake/Chttp/ChttpConfig.cmake"
+          test -f "$salts_root/lib/libcnet.so.1"
 
           ln -sfn "$salts_root" /opt/salts/debug
           ln -sfn "$utils_root" /opt/salts-utils/debug
@@ -162,6 +163,10 @@ jobs:
         run: |
           set -euxo pipefail
           cmake --build build/foundation -j2
+          vcpkg_libs="$(find "$GITHUB_WORKSPACE/vcpkg_installed/foundation" -type d \
+            \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
+          export LD_LIBRARY_PATH="/opt/chttp/debug/lib:/opt/salts-utils/debug/lib:/opt/salts/debug/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          test -f /opt/salts/debug/lib/libcnet.so.1
           ctest --test-dir build/foundation --no-tests=error --output-on-failure
 
       - name: Install TurboAgent

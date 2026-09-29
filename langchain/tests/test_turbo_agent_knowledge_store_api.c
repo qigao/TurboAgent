@@ -470,8 +470,8 @@ spec("turbo agent knowledge store") {
                                              arguments_json, &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output), &output_json),
-                 0);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
     check_true(json_get_bool(output_json, "ok", false));
     check_str_eq(json_get_string(output_json, "uri"), json_text_path);
     json_free(output_json); output_json = NULL;
@@ -487,9 +487,8 @@ spec("turbo agent knowledge store") {
                      arguments_json, &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
     check_true(json_get_bool(output_json, "ok", false));
     check_int_eq(json_get_int(json_object_get(output_json, "stats"),
                                     "indexed", -1),
@@ -507,9 +506,8 @@ spec("turbo agent knowledge store") {
                      &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
     check_true(json_get_bool(output_json, "ok", false));
     check_str_eq(json_get_string(output_json, "document_id"),
                  "memory://tool-memory");
@@ -522,9 +520,8 @@ spec("turbo agent knowledge store") {
                                              "{}", &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
     check_true(json_get_bool(output_json, "ok", false));
     {
       const json_value_t *stats_json = json_object_get(output_json, "stats");
@@ -549,9 +546,8 @@ spec("turbo agent knowledge store") {
                                              "{}", &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
     check_true(json_get_bool(output_json, "ok", false));
     check_true(json_array_size(json_object_get(
                    json_object_get(output_json, "graph"), "edges")) >= 7);
@@ -564,9 +560,8 @@ spec("turbo agent knowledge store") {
                                              &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
     check_true(json_get_bool(output_json, "ok", false));
     check_int_eq((int)json_array_size(
                      json_object_get(output_json, "documents")),
@@ -581,9 +576,8 @@ spec("turbo agent knowledge store") {
                                              arguments_json, &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
     check_true(json_get_bool(output_json, "ok", false));
     check_str_eq(json_get_string(json_object_get(output_json, "document"),
                                        "id"),
@@ -632,9 +626,8 @@ spec("turbo agent knowledge store") {
                                              arguments_json, &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
     check_true(json_get_bool(output_json, "ok", false));
     check_str_eq(json_get_string(output_json, "document_id"), json_text_path);
     json_free(output_json); output_json = NULL;

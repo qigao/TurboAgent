@@ -1,4 +1,5 @@
 #include "turbo_prompt.h"
+#include <json_parser.h>
 #include "turbo_agent_util_internal.h"
 #include <fmt.h>
 #include <mustache.h>
@@ -39,7 +40,7 @@ static int turbo_prompt_schema_object_put(json_value_t *object, const char *key,
 static json_value_t *turbo_prompt_schema_type_node(const char *value);
 
 static json_value_t *turbo_prompt_schema_string_node(const char *value) {
-  return turbo_json_create_string(value);
+  return json_create_string(value);
 }
 
 static int turbo_prompt_schema_object_put(json_value_t *object, const char *key,
@@ -58,7 +59,7 @@ static int turbo_prompt_schema_object_put(json_value_t *object, const char *key,
 }
 
 static json_value_t *turbo_prompt_schema_type_node(const char *value) {
-  json_value_t *schema = turbo_json_create_object();
+  json_value_t *schema = json_create_object();
 
   if (!schema) {
     return NULL;
@@ -90,36 +91,36 @@ static json_value_t *turbo_prompt_content_part_to_json(
   const char *type_name;
   json_value_t *json_part;
 
-  if (!part || turbo_json_type(part) != TURBO_JSON_OBJECT) {
+  if (!part || json_type(part) != JSON_OBJECT) {
     return NULL;
   }
 
   type_name = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(part, "type"));
+      json_object_get(part, "type"));
   if (!type_name) {
     return NULL;
   }
 
-  json_part = turbo_json_clone(part);
+  json_part = json_clone(part);
   if (!json_part) {
     return NULL;
   }
 
   if (strcmp(type_name, "tool_use") == 0) {
     const json_value_t *input =
-        turbo_json_object_get(part, "input");
+        json_object_get(part, "input");
     json_value_t *input_json;
 
     if (!input) {
-      turbo_free_json(&json_part);
+      json_free(json_part); json_part = NULL;
       return NULL;
     }
-    input_json = turbo_json_clone(input);
+    input_json = json_clone(input);
     if (!input_json) {
-      turbo_free_json(&json_part);
+      json_free(json_part); json_part = NULL;
       return NULL;
     }
-    turbo_json_object_add(json_part, "input", input_json);
+    json_object_add(json_part, "input", input_json);
   }
 
   return json_part;
@@ -134,26 +135,26 @@ static json_value_t *turbo_prompt_content_json_value_to_json(
     return NULL;
   }
 
-  switch (turbo_json_type(content)) {
-    case TURBO_JSON_NULL:
-      return turbo_json_create_null();
-    case TURBO_JSON_STRING:
-      return turbo_json_create_string(turbo_runtime_json_value_as_string(content));
-    case TURBO_JSON_ARRAY:
-      json_content = turbo_json_create_array();
+  switch (json_type(content)) {
+    case JSON_NULL:
+      return json_create_null();
+    case JSON_STRING:
+      return json_create_string(turbo_runtime_json_value_as_string(content));
+    case JSON_ARRAY:
+      json_content = json_create_array();
       if (!json_content) {
         return NULL;
       }
       for (i = 0; i < turbo_runtime_json_value_size(content); ++i) {
         const json_value_t *part =
-            turbo_json_array_get(content, i);
+            json_array_get(content, i);
         json_value_t *json_part = turbo_prompt_content_part_to_json(part);
 
         if (!json_part) {
-          turbo_free_json(&json_content);
+          json_free(json_content); json_content = NULL;
           return NULL;
         }
-        turbo_json_array_add(json_content, json_part);
+        json_array_add(json_content, json_part);
       }
       return json_content;
     default:
@@ -163,7 +164,7 @@ static json_value_t *turbo_prompt_content_json_value_to_json(
 
 static json_value_t *turbo_prompt_tool_call_to_json(
     const json_value_t *tool_call) {
-  return turbo_json_clone(tool_call);
+  return json_clone(tool_call);
 }
 
 static json_value_t *turbo_prompt_message_to_openai_chat_json(
@@ -180,49 +181,49 @@ static json_value_t *turbo_prompt_message_to_openai_chat_json(
     return NULL;
   }
 
-  role = turbo_runtime_json_value_as_string(turbo_json_object_get(message, "role"));
-  content = turbo_json_object_get(message, "content");
-  tool_calls = turbo_json_object_get(message, "tool_calls");
-  tool_call_id = turbo_json_object_get(message, "tool_call_id");
+  role = turbo_runtime_json_value_as_string(json_object_get(message, "role"));
+  content = json_object_get(message, "content");
+  tool_calls = json_object_get(message, "tool_calls");
+  tool_call_id = json_object_get(message, "tool_call_id");
   if (!role || !content) {
     return NULL;
   }
 
-  json_message = turbo_json_create_object();
+  json_message = json_create_object();
   if (!json_message) {
     return NULL;
   }
 
-  turbo_json_object_set_string(json_message, "role", role);
+  json_object_set_string(json_message, "role", role);
   json_content = turbo_prompt_content_json_value_to_json(content);
   if (!json_content) {
-    turbo_free_json(&json_message);
+    json_free(json_message); json_message = NULL;
     return NULL;
   }
-  turbo_json_object_add(json_message, "content", json_content);
+  json_object_add(json_message, "content", json_content);
 
   if (tool_call_id) {
-    turbo_json_object_set_string(
+    json_object_set_string(
         json_message, "tool_call_id", turbo_runtime_json_value_as_string(tool_call_id));
   }
 
   if (tool_calls) {
-    json_value_t *json_tool_calls = turbo_json_create_array();
+    json_value_t *json_tool_calls = json_create_array();
     if (!json_tool_calls) {
-      turbo_free_json(&json_message);
+      json_free(json_message); json_message = NULL;
       return NULL;
     }
     for (i = 0; i < turbo_runtime_json_value_size(tool_calls); ++i) {
       json_value_t *json_tool_call = turbo_prompt_tool_call_to_json(
-          turbo_json_array_get(tool_calls, i));
+          json_array_get(tool_calls, i));
       if (!json_tool_call) {
-        turbo_free_json(&json_tool_calls);
-        turbo_free_json(&json_message);
+        json_free(json_tool_calls); json_tool_calls = NULL;
+        json_free(json_message); json_message = NULL;
         return NULL;
       }
-      turbo_json_array_add(json_tool_calls, json_tool_call);
+      json_array_add(json_tool_calls, json_tool_call);
     }
-    turbo_json_object_add(json_message, "tool_calls", json_tool_calls);
+    json_object_add(json_message, "tool_calls", json_tool_calls);
   }
 
   return json_message;
@@ -239,41 +240,41 @@ static json_value_t *turbo_prompt_tool_call_to_anthropic_part(
     return NULL;
   }
 
-  function_value = turbo_json_object_get(tool_call, "function");
+  function_value = json_object_get(tool_call, "function");
   arguments_value = function_value
-                        ? turbo_json_object_get(function_value, "arguments")
+                        ? json_object_get(function_value, "arguments")
                         : NULL;
   if (!function_value || !arguments_value) {
     return NULL;
   }
 
-  part = turbo_json_create_object();
+  part = json_create_object();
   if (!part) {
     return NULL;
   }
 
-  turbo_json_object_set_string(part, "type", "tool_use");
-  turbo_json_object_set_string(
+  json_object_set_string(part, "type", "tool_use");
+  json_object_set_string(
       part, "id",
-      turbo_runtime_json_value_as_string(turbo_json_object_get(tool_call, "id")));
-  turbo_json_object_set_string(
+      turbo_runtime_json_value_as_string(json_object_get(tool_call, "id")));
+  json_object_set_string(
       part, "name",
-      turbo_runtime_json_value_as_string(turbo_json_object_get(function_value, "name")));
+      turbo_runtime_json_value_as_string(json_object_get(function_value, "name")));
 
-  if (turbo_json_type(arguments_value) == TURBO_JSON_STRING) {
-    if (turbo_parse_json(
-            (const uint8_t *)turbo_runtime_json_value_as_string(arguments_value),
-            strlen(turbo_runtime_json_value_as_string(arguments_value)), &input_json) != 0) {
-      input_json = turbo_json_create_object();
+  if (json_type(arguments_value) == JSON_STRING) {
+    input_json = json_parse(turbo_runtime_json_value_as_string(arguments_value),
+                            strlen(turbo_runtime_json_value_as_string(arguments_value)));
+    if (!input_json) {
+      input_json = json_create_object();
     }
   } else {
-    input_json = turbo_json_clone(arguments_value);
+    input_json = json_clone(arguments_value);
   }
   if (!input_json) {
-    turbo_free_json(&part);
+    json_free(part); part = NULL;
     return NULL;
   }
-  turbo_json_object_add(part, "input", input_json);
+  json_object_add(part, "input", input_json);
   return part;
 }
 
@@ -291,66 +292,66 @@ static json_value_t *turbo_prompt_message_to_anthropic_json(
     return NULL;
   }
 
-  role = turbo_runtime_json_value_as_string(turbo_json_object_get(message, "role"));
-  content = turbo_json_object_get(message, "content");
-  tool_calls = turbo_json_object_get(message, "tool_calls");
-  tool_call_id = turbo_json_object_get(message, "tool_call_id");
+  role = turbo_runtime_json_value_as_string(json_object_get(message, "role"));
+  content = json_object_get(message, "content");
+  tool_calls = json_object_get(message, "tool_calls");
+  tool_call_id = json_object_get(message, "tool_call_id");
   if (!role || !content || strcmp(role, "system") == 0) {
     return NULL;
   }
 
-  json_message = turbo_json_create_object();
+  json_message = json_create_object();
   if (!json_message) {
     return NULL;
   }
 
   if (strcmp(role, "assistant") == 0) {
-    turbo_json_object_set_string(json_message, "role", "assistant");
+    json_object_set_string(json_message, "role", "assistant");
     if (tool_calls) {
-      json_content = turbo_json_create_array();
+      json_content = json_create_array();
       if (!json_content) {
-        turbo_free_json(&json_message);
+        json_free(json_message); json_message = NULL;
         return NULL;
       }
-      if (turbo_json_type(content) == TURBO_JSON_STRING &&
+      if (json_type(content) == JSON_STRING &&
           turbo_runtime_json_value_as_string(content) &&
           turbo_runtime_json_value_as_string(content)[0] != '\0') {
         json_value_t *text_part =
             turbo_prompt_content_text_part_create(turbo_runtime_json_value_as_string(content));
         if (!text_part) {
-          turbo_free_json(&json_content);
-          turbo_free_json(&json_message);
+          json_free(json_content); json_content = NULL;
+          json_free(json_message); json_message = NULL;
           return NULL;
         }
-        turbo_json_array_add(json_content, text_part);
-      } else if (turbo_json_type(content) ==
-                 TURBO_JSON_ARRAY) {
+        json_array_add(json_content, text_part);
+      } else if (json_type(content) ==
+                 JSON_ARRAY) {
         size_t part_index;
         for (part_index = 0; part_index < turbo_runtime_json_value_size(content); ++part_index) {
           json_value_t *json_part = turbo_prompt_content_part_to_json(
-              turbo_json_array_get(content, part_index));
+              json_array_get(content, part_index));
           if (!json_part) {
-            turbo_free_json(&json_content);
-            turbo_free_json(&json_message);
+            json_free(json_content); json_content = NULL;
+            json_free(json_message); json_message = NULL;
             return NULL;
           }
-          turbo_json_array_add(json_content, json_part);
+          json_array_add(json_content, json_part);
         }
       }
       for (i = 0; i < turbo_runtime_json_value_size(tool_calls); ++i) {
         json_value_t *tool_use_part = turbo_prompt_tool_call_to_anthropic_part(
-            turbo_json_array_get(tool_calls, i));
+            json_array_get(tool_calls, i));
         if (!tool_use_part) {
-          turbo_free_json(&json_content);
-          turbo_free_json(&json_message);
+          json_free(json_content); json_content = NULL;
+          json_free(json_message); json_message = NULL;
           return NULL;
         }
-        turbo_json_array_add(json_content, tool_use_part);
+        json_array_add(json_content, tool_use_part);
       }
     } else {
       json_content = turbo_prompt_content_json_value_to_json(content);
       if (!json_content) {
-        turbo_free_json(&json_message);
+        json_free(json_message); json_message = NULL;
         return NULL;
       }
     }
@@ -358,35 +359,35 @@ static json_value_t *turbo_prompt_message_to_anthropic_json(
     const char *tool_result_text = turbo_runtime_json_value_as_string(content);
 
     if (!tool_call_id || !tool_result_text) {
-      turbo_free_json(&json_message);
+      json_free(json_message); json_message = NULL;
       return NULL;
     }
-    turbo_json_object_set_string(json_message, "role", "user");
-    json_content = turbo_json_create_array();
+    json_object_set_string(json_message, "role", "user");
+    json_content = json_create_array();
     if (!json_content) {
-      turbo_free_json(&json_message);
+      json_free(json_message); json_message = NULL;
       return NULL;
     }
-    turbo_json_array_add(
+    json_array_add(
         json_content, turbo_prompt_tool_result_part_create(
                           turbo_runtime_json_value_as_string(tool_call_id), tool_result_text));
   } else {
-    turbo_json_object_set_string(json_message, "role", "user");
+    json_object_set_string(json_message, "role", "user");
     json_content = turbo_prompt_content_json_value_to_json(content);
     if (!json_content) {
-      turbo_free_json(&json_message);
+      json_free(json_message); json_message = NULL;
       return NULL;
     }
   }
 
-  turbo_json_object_add(json_message, "content", json_content);
+  json_object_add(json_message, "content", json_content);
   return json_message;
 }
 
 json_value_t *turbo_prompt_content_part_schema_json_value(void) {
-  json_value_t *schema = turbo_json_create_object();
-  json_value_t *properties = turbo_json_create_object();
-  json_value_t *required = turbo_json_create_array();
+  json_value_t *schema = json_create_object();
+  json_value_t *properties = json_create_object();
+  json_value_t *required = json_create_array();
   json_value_t *type_schema = turbo_prompt_schema_type_node("string");
 
   if (!schema || !properties || !required || !type_schema) {
@@ -416,7 +417,7 @@ json_value_t *turbo_prompt_content_part_schema_json_value(void) {
       turbo_prompt_schema_object_put(schema, "properties", properties) != 0 ||
       turbo_prompt_schema_object_put(schema, "required", required) != 0 ||
       turbo_prompt_schema_object_put(schema, "additionalProperties",
-                                     turbo_json_create_bool(0)) != 0) {
+                                     json_create_bool(0)) != 0) {
     turbo_runtime_json_destroy(schema);
     turbo_runtime_json_destroy(properties);
     turbo_runtime_json_destroy(required);
@@ -428,17 +429,17 @@ json_value_t *turbo_prompt_content_part_schema_json_value(void) {
 }
 
 json_value_t *turbo_prompt_tool_call_schema_json_value(void) {
-  json_value_t *schema = turbo_json_create_object();
-  json_value_t *properties = turbo_json_create_object();
-  json_value_t *required = turbo_json_create_array();
-  json_value_t *function = turbo_json_create_object();
+  json_value_t *schema = json_create_object();
+  json_value_t *properties = json_create_object();
+  json_value_t *required = json_create_array();
+  json_value_t *function = json_create_object();
   json_value_t *function_properties =
-      turbo_json_create_object();
+      json_create_object();
   json_value_t *function_required =
-      turbo_json_create_array();
+      json_create_array();
   json_value_t *arguments_variants =
-      turbo_json_create_array();
-  json_value_t *arguments_schema = turbo_json_create_object();
+      json_create_array();
+  json_value_t *arguments_schema = json_create_object();
 
   if (!schema || !properties || !required || !function || !function_properties ||
       !function_required || !arguments_variants || !arguments_schema) {
@@ -471,7 +472,7 @@ json_value_t *turbo_prompt_tool_call_schema_json_value(void) {
       turbo_prompt_schema_object_put(function, "properties", function_properties) != 0 ||
       turbo_prompt_schema_object_put(function, "required", function_required) != 0 ||
       turbo_prompt_schema_object_put(function, "additionalProperties",
-                                     turbo_json_create_bool(0)) != 0 ||
+                                     json_create_bool(0)) != 0 ||
       turbo_prompt_schema_object_put(properties, "id",
                                      turbo_prompt_schema_type_node("string")) != 0 ||
       turbo_prompt_schema_object_put(properties, "type",
@@ -485,7 +486,7 @@ json_value_t *turbo_prompt_tool_call_schema_json_value(void) {
       turbo_prompt_schema_object_put(schema, "properties", properties) != 0 ||
       turbo_prompt_schema_object_put(schema, "required", required) != 0 ||
       turbo_prompt_schema_object_put(schema, "additionalProperties",
-                                     turbo_json_create_bool(0)) != 0) {
+                                     json_create_bool(0)) != 0) {
     turbo_runtime_json_destroy(schema);
     turbo_runtime_json_destroy(properties);
     turbo_runtime_json_destroy(required);
@@ -501,16 +502,16 @@ json_value_t *turbo_prompt_tool_call_schema_json_value(void) {
 }
 
 json_value_t *turbo_prompt_message_schema_json_value(void) {
-  json_value_t *schema = turbo_json_create_object();
-  json_value_t *properties = turbo_json_create_object();
-  json_value_t *required = turbo_json_create_array();
+  json_value_t *schema = json_create_object();
+  json_value_t *properties = json_create_object();
+  json_value_t *required = json_create_array();
   json_value_t *role = turbo_prompt_schema_type_node("string");
-  json_value_t *content = turbo_json_create_object();
+  json_value_t *content = json_create_object();
   json_value_t *content_variants =
-      turbo_json_create_array();
-  json_value_t *content_parts = turbo_json_create_object();
+      json_create_array();
+  json_value_t *content_parts = json_create_object();
   json_value_t *content_part_schema = turbo_prompt_content_part_schema_json_value();
-  json_value_t *tool_calls = turbo_json_create_object();
+  json_value_t *tool_calls = json_create_object();
   json_value_t *tool_calls_items = turbo_prompt_tool_call_schema_json_value();
   json_value_t *tool_call_id = turbo_prompt_schema_type_node("string");
 
@@ -554,7 +555,7 @@ json_value_t *turbo_prompt_message_schema_json_value(void) {
       turbo_prompt_schema_object_put(schema, "properties", properties) != 0 ||
       turbo_prompt_schema_object_put(schema, "required", required) != 0 ||
       turbo_prompt_schema_object_put(schema, "additionalProperties",
-                                     turbo_json_create_bool(0)) != 0) {
+                                     json_create_bool(0)) != 0) {
     turbo_runtime_json_destroy(schema);
     turbo_runtime_json_destroy(properties);
     turbo_runtime_json_destroy(required);
@@ -576,7 +577,7 @@ json_value_t *turbo_prompt_messages_schema_json_value(void) {
   json_value_t *schema = NULL;
   json_value_t *items = NULL;
 
-  schema = turbo_json_create_object();
+  schema = json_create_object();
   if (!schema) {
     return NULL;
   }
@@ -602,37 +603,37 @@ turbo_prompt_message_validate_json_value(const json_value_t *message) {
   size_t i;
 
   if (!message ||
-      turbo_json_type(message) != TURBO_JSON_OBJECT) {
+      json_type(message) != JSON_OBJECT) {
     return TURBO_PROMPT_INVALID_ARGUMENT;
   }
 
-  role = turbo_json_object_get(message, "role");
-  content = turbo_json_object_get(message, "content");
+  role = json_object_get(message, "role");
+  content = json_object_get(message, "content");
   if (!role || !content ||
-      turbo_json_type(role) != TURBO_JSON_STRING) {
+      json_type(role) != JSON_STRING) {
     return TURBO_PROMPT_INVALID_ARGUMENT;
   }
 
-  if (turbo_json_type(content) != TURBO_JSON_STRING &&
-      turbo_json_type(content) != TURBO_JSON_NULL &&
-      turbo_json_type(content) != TURBO_JSON_ARRAY) {
+  if (json_type(content) != JSON_STRING &&
+      json_type(content) != JSON_NULL &&
+      json_type(content) != JSON_ARRAY) {
     return TURBO_PROMPT_INVALID_ARGUMENT;
   }
 
-  if (turbo_json_type(content) == TURBO_JSON_ARRAY) {
+  if (json_type(content) == JSON_ARRAY) {
     for (i = 0; i < turbo_runtime_json_value_size(content); ++i) {
       const json_value_t *part =
-          turbo_json_array_get(content, i);
+          json_array_get(content, i);
       const json_value_t *part_type;
       const char *part_type_name;
 
       if (!part ||
-          turbo_json_type(part) != TURBO_JSON_OBJECT) {
+          json_type(part) != JSON_OBJECT) {
         return TURBO_PROMPT_INVALID_ARGUMENT;
       }
-      part_type = turbo_json_object_get(part, "type");
+      part_type = json_object_get(part, "type");
       if (!part_type ||
-          turbo_json_type(part_type) != TURBO_JSON_STRING) {
+          json_type(part_type) != JSON_STRING) {
         return TURBO_PROMPT_INVALID_ARGUMENT;
       }
       part_type_name = turbo_runtime_json_value_as_string(part_type);
@@ -641,38 +642,38 @@ turbo_prompt_message_validate_json_value(const json_value_t *message) {
       }
       if (strcmp(part_type_name, "text") == 0) {
         const json_value_t *text =
-            turbo_json_object_get(part, "text");
+            json_object_get(part, "text");
         if (!text ||
-            turbo_json_type(text) != TURBO_JSON_STRING) {
+            json_type(text) != JSON_STRING) {
           return TURBO_PROMPT_INVALID_ARGUMENT;
         }
       } else if (strcmp(part_type_name, "tool_use") == 0) {
         const json_value_t *id_value =
-            turbo_json_object_get(part, "id");
+            json_object_get(part, "id");
         const json_value_t *name_value =
-            turbo_json_object_get(part, "name");
+            json_object_get(part, "name");
         const json_value_t *input_value =
-            turbo_json_object_get(part, "input");
+            json_object_get(part, "input");
 
         if (!id_value || !name_value || !input_value ||
-            turbo_json_type(id_value) != TURBO_JSON_STRING ||
-            turbo_json_type(name_value) !=
-                TURBO_JSON_STRING ||
-            turbo_json_type(input_value) !=
-                TURBO_JSON_OBJECT) {
+            json_type(id_value) != JSON_STRING ||
+            json_type(name_value) !=
+                JSON_STRING ||
+            json_type(input_value) !=
+                JSON_OBJECT) {
           return TURBO_PROMPT_INVALID_ARGUMENT;
         }
       } else if (strcmp(part_type_name, "tool_result") == 0) {
         const json_value_t *tool_use_id =
-            turbo_json_object_get(part, "tool_use_id");
+            json_object_get(part, "tool_use_id");
         const json_value_t *part_content =
-            turbo_json_object_get(part, "content");
+            json_object_get(part, "content");
 
         if (!tool_use_id || !part_content ||
-            turbo_json_type(tool_use_id) !=
-                TURBO_JSON_STRING ||
-            turbo_json_type(part_content) !=
-                TURBO_JSON_STRING) {
+            json_type(tool_use_id) !=
+                JSON_STRING ||
+            json_type(part_content) !=
+                JSON_STRING) {
           return TURBO_PROMPT_INVALID_ARGUMENT;
         }
       } else {
@@ -681,20 +682,20 @@ turbo_prompt_message_validate_json_value(const json_value_t *message) {
     }
   }
 
-  tool_call_id = turbo_json_object_get(message, "tool_call_id");
+  tool_call_id = json_object_get(message, "tool_call_id");
   if (tool_call_id &&
-      turbo_json_type(tool_call_id) != TURBO_JSON_STRING) {
+      json_type(tool_call_id) != JSON_STRING) {
     return TURBO_PROMPT_INVALID_ARGUMENT;
   }
 
-  tool_calls = turbo_json_object_get(message, "tool_calls");
+  tool_calls = json_object_get(message, "tool_calls");
   if (tool_calls) {
-    if (turbo_json_type(tool_calls) != TURBO_JSON_ARRAY) {
+    if (json_type(tool_calls) != JSON_ARRAY) {
       return TURBO_PROMPT_INVALID_ARGUMENT;
     }
     for (i = 0; i < turbo_runtime_json_value_size(tool_calls); ++i) {
       const json_value_t *tool_call =
-          turbo_json_array_get(tool_calls, i);
+          json_array_get(tool_calls, i);
       const json_value_t *id_value;
       const json_value_t *type_value;
       const json_value_t *function_value;
@@ -702,27 +703,27 @@ turbo_prompt_message_validate_json_value(const json_value_t *message) {
       const json_value_t *arguments_value;
 
       if (!tool_call ||
-          turbo_json_type(tool_call) != TURBO_JSON_OBJECT) {
+          json_type(tool_call) != JSON_OBJECT) {
         return TURBO_PROMPT_INVALID_ARGUMENT;
       }
-      id_value = turbo_json_object_get(tool_call, "id");
-      type_value = turbo_json_object_get(tool_call, "type");
-      function_value = turbo_json_object_get(tool_call, "function");
+      id_value = json_object_get(tool_call, "id");
+      type_value = json_object_get(tool_call, "type");
+      function_value = json_object_get(tool_call, "function");
       if (!id_value || !type_value || !function_value ||
-          turbo_json_type(id_value) != TURBO_JSON_STRING ||
-          turbo_json_type(type_value) != TURBO_JSON_STRING ||
-          turbo_json_type(function_value) != TURBO_JSON_OBJECT) {
+          json_type(id_value) != JSON_STRING ||
+          json_type(type_value) != JSON_STRING ||
+          json_type(function_value) != JSON_OBJECT) {
         return TURBO_PROMPT_INVALID_ARGUMENT;
       }
-      name_value = turbo_json_object_get(function_value, "name");
-      arguments_value = turbo_json_object_get(function_value, "arguments");
+      name_value = json_object_get(function_value, "name");
+      arguments_value = json_object_get(function_value, "arguments");
       if (!name_value || !arguments_value ||
-          turbo_json_type(name_value) !=
-              TURBO_JSON_STRING ||
-          (turbo_json_type(arguments_value) !=
-               TURBO_JSON_STRING &&
-           turbo_json_type(arguments_value) !=
-               TURBO_JSON_OBJECT)) {
+          json_type(name_value) !=
+              JSON_STRING ||
+          (json_type(arguments_value) !=
+               JSON_STRING &&
+           json_type(arguments_value) !=
+               JSON_OBJECT)) {
         return TURBO_PROMPT_INVALID_ARGUMENT;
       }
     }
@@ -737,23 +738,23 @@ json_value_t *turbo_prompt_messages_to_openai_chat_json(
   size_t i;
 
   if (!messages ||
-      turbo_json_type(messages) != TURBO_JSON_ARRAY) {
+      json_type(messages) != JSON_ARRAY) {
     return NULL;
   }
 
-  json_messages = turbo_json_create_array();
+  json_messages = json_create_array();
   if (!json_messages) {
     return NULL;
   }
 
   for (i = 0; i < turbo_runtime_json_value_size(messages); ++i) {
     json_value_t *json_message = turbo_prompt_message_to_openai_chat_json(
-        turbo_json_array_get(messages, i));
+        json_array_get(messages, i));
     if (!json_message) {
-      turbo_free_json(&json_messages);
+      json_free(json_messages); json_messages = NULL;
       return NULL;
     }
-    turbo_json_array_add(json_messages, json_message);
+    json_array_add(json_messages, json_message);
   }
 
   return json_messages;
@@ -773,7 +774,7 @@ turbo_prompt_messages_to_anthropic_json(
   size_t i;
 
   if (!messages || !out_messages ||
-      turbo_json_type(messages) != TURBO_JSON_ARRAY) {
+      json_type(messages) != JSON_ARRAY) {
     return TURBO_PROMPT_INVALID_ARGUMENT;
   }
 
@@ -782,38 +783,38 @@ turbo_prompt_messages_to_anthropic_json(
     *out_system = NULL;
   }
 
-  json_messages = turbo_json_create_array();
+  json_messages = json_create_array();
   if (!json_messages) {
     return TURBO_PROMPT_OUT_OF_MEMORY;
   }
 
   for (i = 0; i < turbo_runtime_json_value_size(messages); ++i) {
     const json_value_t *message =
-        turbo_json_array_get(messages, i);
+        json_array_get(messages, i);
     const char *role;
 
     if (turbo_prompt_message_validate_json_value(message) != TURBO_PROMPT_OK) {
-      turbo_free_json(&json_messages);
+      json_free(json_messages); json_messages = NULL;
       tstr_free(system_text);
       return TURBO_PROMPT_INVALID_ARGUMENT;
     }
 
     role = turbo_runtime_json_value_as_string(
-        turbo_json_object_get(message, "role"));
+        json_object_get(message, "role"));
     if (role && strcmp(role, "system") == 0) {
       const char *content_text = turbo_runtime_json_value_as_string(
-          turbo_json_object_get(message, "content"));
+          json_object_get(message, "content"));
       char *joined;
 
       if (!content_text) {
-        turbo_free_json(&json_messages);
+        json_free(json_messages); json_messages = NULL;
         tstr_free(system_text);
         return TURBO_PROMPT_INVALID_ARGUMENT;
       }
       joined = system_text ? turbo_prompt_join_strings(system_text, "\n\n", content_text)
                            : turbo_prompt_strdup(content_text);
       if (!joined) {
-        turbo_free_json(&json_messages);
+        json_free(json_messages); json_messages = NULL;
         tstr_free(system_text);
         return TURBO_PROMPT_OUT_OF_MEMORY;
       }
@@ -825,11 +826,11 @@ turbo_prompt_messages_to_anthropic_json(
     {
       json_value_t *json_message = turbo_prompt_message_to_anthropic_json(message);
       if (!json_message) {
-        turbo_free_json(&json_messages);
+        json_free(json_messages); json_messages = NULL;
         tstr_free(system_text);
         return TURBO_PROMPT_OUT_OF_MEMORY;
       }
-      turbo_json_array_add(json_messages, json_message);
+      json_array_add(json_messages, json_message);
     }
   }
 
@@ -839,7 +840,7 @@ turbo_prompt_messages_to_anthropic_json(
       *out_system = tstr_to_cstr(system_text);
       tstr_free(system_text);
       if (!*out_system) {
-        turbo_free_json(&json_messages);
+        json_free(json_messages); json_messages = NULL;
         *out_messages = NULL;
         return TURBO_PROMPT_OUT_OF_MEMORY;
       }
@@ -855,11 +856,11 @@ static char *turbo_prompt_render_value(const json_value_t *value) {
     return turbo_prompt_strdup("");
   }
 
-  if (turbo_json_type(value) == TURBO_JSON_STRING) {
-    return turbo_prompt_strdup(turbo_json_string(value));
+  if (json_type(value) == JSON_STRING) {
+    return turbo_prompt_strdup(json_string(value));
   }
 
-  return turbo_json_serialize(value, NULL);
+  return json_serialize(value, NULL);
 }
 
 static char *turbo_prompt_render_json_value(const json_value_t *value) {
@@ -913,7 +914,7 @@ char *turbo_prompt_render_template(const char *template_text, const json_value_t
   }
 
   if (!render_input) {
-    empty_input = turbo_json_create_object();
+    empty_input = json_create_object();
     if (!empty_input) {
       mustache_release(templ);
       return NULL;
@@ -922,13 +923,13 @@ char *turbo_prompt_render_template(const char *template_text, const json_value_t
   }
 
   /* Parsed number nodes retain the lexical form required by Mustache's JSON adapter. */
-  normalized_text = turbo_json_serialize(render_input, NULL);
-  if (!normalized_text ||
-      turbo_parse_json((const uint8_t *)normalized_text, strlen(normalized_text),
-                       &normalized_input) != 0 ||
-      !normalized_input) {
+  normalized_text = json_serialize(render_input, NULL);
+  if (normalized_text) {
+    normalized_input = json_parse(normalized_text, strlen(normalized_text));
+  }
+  if (!normalized_text || !normalized_input) {
     free(normalized_text);
-    turbo_free_json(&empty_input);
+    json_free(empty_input); empty_input = NULL;
     mustache_release(templ);
     return NULL;
   }
@@ -941,9 +942,9 @@ char *turbo_prompt_render_template(const char *template_text, const json_value_t
     mustache_string_renderer_free(&renderer);
   }
 
-  turbo_free_json(&normalized_input);
+  json_free(normalized_input); normalized_input = NULL;
   free(normalized_text);
-  turbo_free_json(&empty_input);
+  json_free(empty_input); empty_input = NULL;
   mustache_release(templ);
   return result;
 }
@@ -957,34 +958,34 @@ char *turbo_prompt_render_template_json_value(const char *template_text,
     return turbo_prompt_cstrdup("");
   }
 
-  json_input = turbo_json_clone(input);
+  json_input = json_clone(input);
   result = turbo_prompt_render_template(template_text, json_input);
-  turbo_free_json(&json_input);
+  json_free(json_input); json_input = NULL;
 
   return result;
 }
 
-json_value_t *turbo_prompt_messages_create(void) { return turbo_json_create_array(); }
+json_value_t *turbo_prompt_messages_create(void) { return json_create_array(); }
 
 json_value_t *turbo_prompt_messages_create_json_value(void) {
-  return turbo_json_create_array();
+  return json_create_array();
 }
 
 json_value_t *turbo_prompt_message_create(const char *role, const char *content) {
-  json_value_t *message = turbo_json_create_object();
+  json_value_t *message = json_create_object();
 
   if (!message) {
     return NULL;
   }
 
-  turbo_json_object_set_string(message, "role", role ? role : "user");
-  turbo_json_object_set_string(message, "content", content ? content : "");
+  json_object_set_string(message, "role", role ? role : "user");
+  json_object_set_string(message, "content", content ? content : "");
   return message;
 }
 
 json_value_t *turbo_prompt_message_create_json_value(const char *role,
                                                                   const char *content) {
-  json_value_t *message = turbo_json_create_object();
+  json_value_t *message = json_create_object();
   json_value_t *role_value = NULL;
   json_value_t *content_value = NULL;
 
@@ -992,8 +993,8 @@ json_value_t *turbo_prompt_message_create_json_value(const char *role,
     return NULL;
   }
 
-  role_value = turbo_json_create_string(role ? role : "user");
-  content_value = turbo_json_create_string(content ? content : "");
+  role_value = json_create_string(role ? role : "user");
+  content_value = json_create_string(content ? content : "");
   if (!role_value || !content_value ||
       turbo_runtime_json_object_set(message, "role", role_value) !=
           TURBO_RUNTIME_JSON_OK ||
@@ -1019,7 +1020,7 @@ json_value_t *turbo_prompt_chat_assistant_message_create_json_value(
   }
   if (!content || content[0] == '\0') {
     if (turbo_runtime_json_object_set(message, "content",
-                                           turbo_json_create_null()) !=
+                                           json_create_null()) !=
         TURBO_RUNTIME_JSON_OK) {
       turbo_runtime_json_destroy(tool_calls);
       turbo_runtime_json_destroy(message);
@@ -1048,7 +1049,7 @@ json_value_t *turbo_prompt_chat_tool_message_create_json_value(
     return NULL;
   }
   if (turbo_runtime_json_object_set(message, "tool_call_id",
-                                         turbo_json_create_string(tool_call_id)) !=
+                                         json_create_string(tool_call_id)) !=
       TURBO_RUNTIME_JSON_OK) {
     turbo_runtime_json_destroy(message);
     return NULL;
@@ -1058,8 +1059,8 @@ json_value_t *turbo_prompt_chat_tool_message_create_json_value(
 
 json_value_t *turbo_prompt_chat_tool_call_create_json_value(
     const char *id, const char *type, const char *name, const char *arguments) {
-  json_value_t *tool_call = turbo_json_create_object();
-  json_value_t *function_object = turbo_json_create_object();
+  json_value_t *tool_call = json_create_object();
+  json_value_t *function_object = json_create_object();
 
   if (!id || !name || !arguments || !tool_call || !function_object) {
     turbo_runtime_json_destroy(tool_call);
@@ -1067,18 +1068,18 @@ json_value_t *turbo_prompt_chat_tool_call_create_json_value(
     return NULL;
   }
   if (turbo_runtime_json_object_set(tool_call, "id",
-                                         turbo_json_create_string(id)) !=
+                                         json_create_string(id)) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(
           tool_call, "type",
-          turbo_json_create_string(type ? type : "function")) !=
+          json_create_string(type ? type : "function")) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(function_object, "name",
-                                         turbo_json_create_string(name)) !=
+                                         json_create_string(name)) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(
           function_object, "arguments",
-          turbo_json_create_string(arguments)) !=
+          json_create_string(arguments)) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(tool_call, "function", function_object) !=
           TURBO_RUNTIME_JSON_OK) {
@@ -1096,14 +1097,14 @@ json_value_t *turbo_prompt_message_with_content_create_json_value(
   if (!content) {
     return NULL;
   }
-  message = turbo_json_create_object();
+  message = json_create_object();
   if (!message) {
     turbo_runtime_json_destroy(content);
     return NULL;
   }
   if (turbo_runtime_json_object_set(
           message, "role",
-          turbo_json_create_string(role ? role : "user")) !=
+          json_create_string(role ? role : "user")) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(message, "content", content) !=
           TURBO_RUNTIME_JSON_OK) {
@@ -1115,17 +1116,17 @@ json_value_t *turbo_prompt_message_with_content_create_json_value(
 }
 
 json_value_t *turbo_prompt_content_text_part_create_json_value(const char *text) {
-  json_value_t *part = turbo_json_create_object();
+  json_value_t *part = json_create_object();
 
   if (!text || !part) {
     turbo_runtime_json_destroy(part);
     return NULL;
   }
   if (turbo_runtime_json_object_set(part, "type",
-                                         turbo_json_create_string("text")) !=
+                                         json_create_string("text")) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(part, "text",
-                                         turbo_json_create_string(text)) !=
+                                         json_create_string(text)) !=
           TURBO_RUNTIME_JSON_OK) {
     turbo_runtime_json_destroy(part);
     return NULL;
@@ -1135,7 +1136,7 @@ json_value_t *turbo_prompt_content_text_part_create_json_value(const char *text)
 
 json_value_t *turbo_prompt_tool_use_part_create_json_value(
     const char *id, const char *name, json_value_t *input) {
-  json_value_t *part = turbo_json_create_object();
+  json_value_t *part = json_create_object();
 
   if (!id || !name || !input || !part) {
     turbo_runtime_json_destroy(input);
@@ -1143,13 +1144,13 @@ json_value_t *turbo_prompt_tool_use_part_create_json_value(
     return NULL;
   }
   if (turbo_runtime_json_object_set(part, "type",
-                                         turbo_json_create_string("tool_use")) !=
+                                         json_create_string("tool_use")) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(part, "id",
-                                         turbo_json_create_string(id)) !=
+                                         json_create_string(id)) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(part, "name",
-                                         turbo_json_create_string(name)) !=
+                                         json_create_string(name)) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(part, "input", input) !=
           TURBO_RUNTIME_JSON_OK) {
@@ -1162,7 +1163,7 @@ json_value_t *turbo_prompt_tool_use_part_create_json_value(
 
 json_value_t *turbo_prompt_tool_result_part_create_json_value(
     const char *tool_use_id, const char *content) {
-  json_value_t *part = turbo_json_create_object();
+  json_value_t *part = json_create_object();
 
   if (!tool_use_id || !content || !part) {
     turbo_runtime_json_destroy(part);
@@ -1170,14 +1171,14 @@ json_value_t *turbo_prompt_tool_result_part_create_json_value(
   }
   if (turbo_runtime_json_object_set(
           part, "type",
-          turbo_json_create_string("tool_result")) !=
+          json_create_string("tool_result")) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(
           part, "tool_use_id",
-          turbo_json_create_string(tool_use_id)) !=
+          json_create_string(tool_use_id)) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set(part, "content",
-                                         turbo_json_create_string(content)) !=
+                                         json_create_string(content)) !=
           TURBO_RUNTIME_JSON_OK) {
     turbo_runtime_json_destroy(part);
     return NULL;
@@ -1190,16 +1191,16 @@ json_value_t *turbo_prompt_chat_assistant_message_create(const char *content,
   json_value_t *message = turbo_prompt_message_create("assistant", content ? content : "");
 
   if (!message) {
-    turbo_free_json(&tool_calls);
+    json_free(tool_calls); tool_calls = NULL;
     return NULL;
   }
 
   if (!content || content[0] == '\0') {
-    turbo_json_object_set_null(message, "content");
+    json_object_set_null(message, "content");
   }
 
   if (tool_calls) {
-    turbo_json_object_add(message, "tool_calls", tool_calls);
+    json_object_add(message, "tool_calls", tool_calls);
   }
 
   return message;
@@ -1218,7 +1219,7 @@ json_value_t *turbo_prompt_chat_tool_message_create(const char *tool_call_id,
     return NULL;
   }
 
-  turbo_json_object_set_string(message, "tool_call_id", tool_call_id);
+  json_object_set_string(message, "tool_call_id", tool_call_id);
   return message;
 }
 
@@ -1232,19 +1233,19 @@ json_value_t *turbo_prompt_chat_tool_call_create(const char *id, const char *typ
     return NULL;
   }
 
-  tool_call = turbo_json_create_object();
-  function_object = turbo_json_create_object();
+  tool_call = json_create_object();
+  function_object = json_create_object();
   if (!tool_call || !function_object) {
-    turbo_free_json(&tool_call);
-    turbo_free_json(&function_object);
+    json_free(tool_call); tool_call = NULL;
+    json_free(function_object); function_object = NULL;
     return NULL;
   }
 
-  turbo_json_object_set_string(tool_call, "id", id);
-  turbo_json_object_set_string(tool_call, "type", type ? type : "function");
-  turbo_json_object_set_string(function_object, "name", name);
-  turbo_json_object_set_string(function_object, "arguments", arguments);
-  turbo_json_object_add(tool_call, "function", function_object);
+  json_object_set_string(tool_call, "id", id);
+  json_object_set_string(tool_call, "type", type ? type : "function");
+  json_object_set_string(function_object, "name", name);
+  json_object_set_string(function_object, "arguments", arguments);
+  json_object_add(tool_call, "function", function_object);
   return tool_call;
 }
 
@@ -1252,18 +1253,18 @@ json_value_t *turbo_prompt_message_with_content_create(const char *role, json_va
   json_value_t *message;
 
   if (!content) {
-    turbo_free_json(&content);
+    json_free(content); content = NULL;
     return NULL;
   }
 
-  message = turbo_json_create_object();
+  message = json_create_object();
   if (!message) {
-    turbo_free_json(&content);
+    json_free(content); content = NULL;
     return NULL;
   }
 
-  turbo_json_object_set_string(message, "role", role ? role : "user");
-  turbo_json_object_add(message, "content", content);
+  json_object_set_string(message, "role", role ? role : "user");
+  json_object_add(message, "content", content);
   return message;
 }
 
@@ -1274,13 +1275,13 @@ json_value_t *turbo_prompt_content_text_part_create(const char *text) {
     return NULL;
   }
 
-  part = turbo_json_create_object();
+  part = json_create_object();
   if (!part) {
     return NULL;
   }
 
-  turbo_json_object_set_string(part, "type", "text");
-  turbo_json_object_set_string(part, "text", text);
+  json_object_set_string(part, "type", "text");
+  json_object_set_string(part, "text", text);
   return part;
 }
 
@@ -1289,20 +1290,20 @@ json_value_t *turbo_prompt_tool_use_part_create(const char *id, const char *name
   json_value_t *part;
 
   if (!id || !name || !input) {
-    turbo_free_json(&input);
+    json_free(input); input = NULL;
     return NULL;
   }
 
-  part = turbo_json_create_object();
+  part = json_create_object();
   if (!part) {
-    turbo_free_json(&input);
+    json_free(input); input = NULL;
     return NULL;
   }
 
-  turbo_json_object_set_string(part, "type", "tool_use");
-  turbo_json_object_set_string(part, "id", id);
-  turbo_json_object_set_string(part, "name", name);
-  turbo_json_object_add(part, "input", input);
+  json_object_set_string(part, "type", "tool_use");
+  json_object_set_string(part, "id", id);
+  json_object_set_string(part, "name", name);
+  json_object_add(part, "input", input);
   return part;
 }
 
@@ -1314,14 +1315,14 @@ json_value_t *turbo_prompt_tool_result_part_create(const char *tool_use_id,
     return NULL;
   }
 
-  part = turbo_json_create_object();
+  part = json_create_object();
   if (!part) {
     return NULL;
   }
 
-  turbo_json_object_set_string(part, "type", "tool_result");
-  turbo_json_object_set_string(part, "tool_use_id", tool_use_id);
-  turbo_json_object_set_string(part, "content", content);
+  json_object_set_string(part, "type", "tool_result");
+  json_object_set_string(part, "tool_use_id", tool_use_id);
+  json_object_set_string(part, "content", content);
   return part;
 }
 
@@ -1329,7 +1330,7 @@ turbo_prompt_status_t turbo_prompt_messages_append(json_value_t *messages, const
                                                    const char *content) {
   json_value_t *message;
 
-  if (!messages || turbo_json_type(messages) != TURBO_JSON_ARRAY) {
+  if (!messages || json_type(messages) != JSON_ARRAY) {
     return TURBO_PROMPT_INVALID_ARGUMENT;
   }
 
@@ -1338,7 +1339,7 @@ turbo_prompt_status_t turbo_prompt_messages_append(json_value_t *messages, const
     return TURBO_PROMPT_OUT_OF_MEMORY;
   }
 
-  turbo_json_array_add(messages, message);
+  json_array_add(messages, message);
   return TURBO_PROMPT_OK;
 }
 
@@ -1348,7 +1349,7 @@ turbo_prompt_messages_append_json_value(json_value_t *messages, const char *role
   json_value_t *message;
 
   if (!messages ||
-      turbo_json_type(messages) != TURBO_JSON_ARRAY) {
+      json_type(messages) != JSON_ARRAY) {
     return TURBO_PROMPT_INVALID_ARGUMENT;
   }
 

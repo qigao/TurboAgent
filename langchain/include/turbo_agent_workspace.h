@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_WORKSPACE_H
 #define TURBO_AGENT_WORKSPACE_H
 
+#include <stddef.h>
+
 #include <turbo_agent_api.h>
 
 #include "turbo_agent.h"

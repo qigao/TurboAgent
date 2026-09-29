@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent_policy.h"
 #include "turbo_tool_registry.h"
 
@@ -20,15 +21,15 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_OBSERVE,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
 
     policy.workspace_root = "C:\\workspace";
     check_not_null(args);
-    turbo_json_object_set_string(args, "path", "C:\\workspace\\src\\main.c");
+    json_object_set_string(args, "path", "C:\\workspace\\src\\main.c");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, NULL),
                  TURBO_AGENT_POLICY_ALLOW);
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 
   it("should allow slash-normalized paths inside workspace") {
@@ -40,15 +41,15 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_OBSERVE,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
 
     policy.workspace_root = "C:\\workspace";
     check_not_null(args);
-    turbo_json_object_set_string(args, "path", "C:/workspace/src/main.c");
+    json_object_set_string(args, "path", "C:/workspace/src/main.c");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, NULL),
                  TURBO_AGENT_POLICY_ALLOW);
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 
   it("should reject patch outside workspace") {
@@ -60,17 +61,17 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_MUTATE,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
     const char *reason = NULL;
 
     policy.workspace_root = "C:\\workspace";
     check_not_null(args);
-    turbo_json_object_set_string(args, "path", "D:\\other\\file.c");
+    json_object_set_string(args, "path", "D:\\other\\file.c");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, &reason),
                  TURBO_AGENT_POLICY_DENY);
     check_str_eq(reason, "path_outside_workspace");
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 
   it("should reject paths that escape workspace through parent segments") {
@@ -82,17 +83,17 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_MUTATE,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
     const char *reason = NULL;
 
     policy.workspace_root = "C:\\workspace";
     check_not_null(args);
-    turbo_json_object_set_string(args, "path", "C:\\workspace\\..\\outside\\file.c");
+    json_object_set_string(args, "path", "C:\\workspace\\..\\outside\\file.c");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, &reason),
                  TURBO_AGENT_POLICY_DENY);
     check_str_eq(reason, "path_outside_workspace");
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 
   it("should allow paths normalized inside workspace") {
@@ -104,15 +105,15 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_OBSERVE,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
 
     policy.workspace_root = "C:\\workspace";
     check_not_null(args);
-    turbo_json_object_set_string(args, "path", "C:\\workspace\\.\\src\\..\\src\\main.c");
+    json_object_set_string(args, "path", "C:\\workspace\\.\\src\\..\\src\\main.c");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, NULL),
                  TURBO_AGENT_POLICY_ALLOW);
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 
   it("should reject directory roots outside workspace") {
@@ -124,17 +125,17 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_OBSERVE,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
     const char *reason = NULL;
 
     policy.workspace_root = "C:\\workspace";
     check_not_null(args);
-    turbo_json_object_set_string(args, "root_dir", "D:\\other\\docs");
+    json_object_set_string(args, "root_dir", "D:\\other\\docs");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, &reason),
                  TURBO_AGENT_POLICY_DENY);
     check_str_eq(reason, "path_outside_workspace");
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 
 #ifndef _WIN32
@@ -147,17 +148,17 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_OBSERVE,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
     const char *reason = NULL;
 
     policy.workspace_root = "/workspace";
     check_not_null(args);
-    turbo_json_object_set_string(args, "path", "/Workspace/src/main.c");
+    json_object_set_string(args, "path", "/Workspace/src/main.c");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, &reason),
                  TURBO_AGENT_POLICY_DENY);
     check_str_eq(reason, "path_outside_workspace");
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 #endif
 
@@ -170,17 +171,17 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_DANGEROUS,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
     const char *reason = NULL;
 
     check_not_null(args);
-    turbo_json_object_set_string(args, "command", "git reset --hard HEAD");
+    json_object_set_string(args, "command", "git reset --hard HEAD");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, &reason),
                  TURBO_AGENT_POLICY_REQUIRE_APPROVAL);
     check_str_eq(reason, "dangerous_command");
     check_true(turbo_agent_policy_requires_approval(&policy, &definition, args));
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 
   it("should match dangerous shell commands case-insensitively") {
@@ -192,16 +193,16 @@ spec("turbo agent policy") {
         .kind = TURBO_ACTION_DANGEROUS,
         .handler = (turbo_action_tool_handler_fn)1,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
     const char *reason = NULL;
 
     check_not_null(args);
-    turbo_json_object_set_string(args, "command", "RM -rf build");
+    json_object_set_string(args, "command", "RM -rf build");
     check_int_eq(turbo_agent_policy_check_action(&policy, &definition, args, &reason),
                  TURBO_AGENT_POLICY_REQUIRE_APPROVAL);
     check_str_eq(reason, "dangerous_command");
 
-    turbo_free_json(&args);
+    json_free(args); args = NULL;
   }
 
   it("should deny shell actions when disabled") {

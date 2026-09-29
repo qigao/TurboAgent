@@ -29,8 +29,8 @@ static char *turbo_agent_state_strdup_malloc_local(const char *src) {
 
 static const json_value_t *turbo_agent_state_failure_array_last_const(
     const json_value_t *array) {
-  return array && turbo_json_type(array) == TURBO_JSON_ARRAY && turbo_json_array_size(array) > 0
-             ? turbo_json_array_get(array, turbo_json_array_size(array) - 1)
+  return array && json_type(array) == JSON_ARRAY && json_array_size(array) > 0
+             ? json_array_get(array, json_array_size(array) - 1)
              : NULL;
 }
 
@@ -48,8 +48,8 @@ static const json_value_t *turbo_agent_state_tool_results_event_outputs_local(
     return NULL;
   }
 
-  outputs = turbo_json_object_get(event, "outputs");
-  return outputs && turbo_json_type(outputs) == TURBO_JSON_ARRAY ? outputs : NULL;
+  outputs = json_object_get(event, "outputs");
+  return outputs && json_type(outputs) == JSON_ARRAY ? outputs : NULL;
 }
 
 static int turbo_agent_state_tool_result_output_fields_local(const json_value_t *output_item,
@@ -65,12 +65,12 @@ static int turbo_agent_state_tool_result_output_fields_local(const json_value_t 
     *output = NULL;
   }
 
-  if (!output_item || turbo_json_type(output_item) != TURBO_JSON_OBJECT) {
+  if (!output_item || json_type(output_item) != JSON_OBJECT) {
     return 0;
   }
 
-  call_id_value = turbo_json_get_string(output_item, "call_id");
-  output_value = turbo_json_get_string(output_item, "output");
+  call_id_value = json_get_string(output_item, "call_id");
+  output_value = json_get_string(output_item, "output");
   if (!call_id_value || !output_value) {
     return 0;
   }
@@ -85,21 +85,21 @@ static int turbo_agent_state_tool_result_output_fields_local(const json_value_t 
 }
 
 static int turbo_agent_state_tool_result_json_failed_local(const json_value_t *tool_json) {
-  return tool_json && turbo_json_type(tool_json) == TURBO_JSON_OBJECT &&
-                 !turbo_json_get_bool(tool_json, "ok", true)
+  return tool_json && json_type(tool_json) == JSON_OBJECT &&
+                 !json_get_bool(tool_json, "ok", true)
               ? 1
               : 0;
 }
 
 static int turbo_agent_state_tool_result_json_like_local(const json_value_t *value) {
-  return value && turbo_json_type(value) == TURBO_JSON_OBJECT &&
-                 (turbo_json_object_get(value, "ok") || turbo_json_object_get(value, "summary")) &&
-                 (turbo_json_object_get(value, "matches") ||
-                  turbo_json_object_get(value, "content") ||
-                  turbo_json_object_get(value, "stdout") ||
-                  turbo_json_object_get(value, "stderr") ||
-                  turbo_json_object_get(value, "changed_files") ||
-                  turbo_json_object_get(value, "artifacts"))
+  return value && json_type(value) == JSON_OBJECT &&
+                 (json_object_get(value, "ok") || json_object_get(value, "summary")) &&
+                 (json_object_get(value, "matches") ||
+                  json_object_get(value, "content") ||
+                  json_object_get(value, "stdout") ||
+                  json_object_get(value, "stderr") ||
+                  json_object_get(value, "changed_files") ||
+                  json_object_get(value, "artifacts"))
               ? 1
               : 0;
 }
@@ -129,7 +129,8 @@ turbo_agent_state_tool_result_output_parse_json_local(const json_value_t *output
     return NULL;
   }
 
-  if (turbo_parse_json((const uint8_t *)output_text, strlen(output_text), &output_json) != 0) {
+  output_json = json_parse(output_text, strlen(output_text));
+  if (!output_json) {
     if (out_reason) {
       *out_reason = turbo_agent_state_strdup_malloc_local("tool output was not valid JSON");
     }
@@ -142,7 +143,7 @@ turbo_agent_state_tool_result_output_parse_json_local(const json_value_t *output
           turbo_agent_state_strdup_malloc_local(
               "tool output did not match canonical result envelope");
     }
-    turbo_free_json(&output_json);
+    json_free(output_json); output_json = NULL;
     return NULL;
   }
 
@@ -157,12 +158,12 @@ static char *turbo_agent_state_tool_result_failure_reason_local(const json_value
     return NULL;
   }
 
-  summary = turbo_json_get_string(tool_json, "summary");
+  summary = json_get_string(tool_json, "summary");
   if (summary && summary[0] != '\0') {
     return turbo_agent_state_strdup_malloc_local(summary);
   }
 
-  stderr_text = turbo_json_get_string(tool_json, "stderr");
+  stderr_text = json_get_string(tool_json, "stderr");
   if (stderr_text && stderr_text[0] != '\0') {
     return turbo_agent_state_strdup_malloc_local(stderr_text);
   }
@@ -179,8 +180,8 @@ static int turbo_agent_state_tool_results_event_failed_local(const json_value_t 
     return 0;
   }
 
-  for (j = 0; j < turbo_json_array_size(outputs); ++j) {
-    const json_value_t *output_item = turbo_json_array_get(outputs, j);
+  for (j = 0; j < json_array_size(outputs); ++j) {
+    const json_value_t *output_item = json_array_get(outputs, j);
     char *parse_reason = NULL;
     json_value_t *output_json =
         turbo_agent_state_tool_result_output_parse_json_local(output_item, &parse_reason);
@@ -191,13 +192,13 @@ static int turbo_agent_state_tool_results_event_failed_local(const json_value_t 
     }
 
     if (turbo_agent_state_tool_result_json_failed_local(output_json)) {
-      turbo_free_json(&output_json);
+      json_free(output_json); output_json = NULL;
       free(parse_reason);
       return 1;
     }
 
     free(parse_reason);
-    turbo_free_json(&output_json);
+    json_free(output_json); output_json = NULL;
   }
 
   return 0;
@@ -211,20 +212,21 @@ static int turbo_agent_state_output_looks_like_tool_result_json_local(const char
     return 0;
   }
 
-  if (turbo_parse_json((const uint8_t *)text, strlen(text), &value) != 0) {
+  value = json_parse(text, strlen(text));
+  if (!value) {
     return 0;
   }
 
-  if (value && turbo_json_type(value) == TURBO_JSON_OBJECT &&
-      (turbo_json_object_get(value, "ok") || turbo_json_object_get(value, "summary")) &&
-      (turbo_json_object_get(value, "matches") || turbo_json_object_get(value, "content") ||
-       turbo_json_object_get(value, "stdout") || turbo_json_object_get(value, "stderr") ||
-       turbo_json_object_get(value, "changed_files") ||
-       turbo_json_object_get(value, "artifacts"))) {
+  if (value && json_type(value) == JSON_OBJECT &&
+      (json_object_get(value, "ok") || json_object_get(value, "summary")) &&
+      (json_object_get(value, "matches") || json_object_get(value, "content") ||
+       json_object_get(value, "stdout") || json_object_get(value, "stderr") ||
+       json_object_get(value, "changed_files") ||
+       json_object_get(value, "artifacts"))) {
     is_tool_result = 1;
   }
 
-  turbo_free_json(&value);
+  json_free(value); value = NULL;
   return is_tool_result;
 }
 
@@ -233,12 +235,12 @@ int turbo_agent_state_executor_tool_results_failed_impl(const json_value_t *stat
   const json_value_t *event;
   size_t i;
 
-  if (!events || turbo_json_type(events) != TURBO_JSON_ARRAY) {
+  if (!events || json_type(events) != JSON_ARRAY) {
     return 0;
   }
 
   event = turbo_agent_state_failure_array_last_const(events);
-  if (!event || turbo_json_type(event) != TURBO_JSON_OBJECT) {
+  if (!event || json_type(event) != JSON_OBJECT) {
     return 0;
   }
 
@@ -247,13 +249,13 @@ int turbo_agent_state_executor_tool_results_failed_impl(const json_value_t *stat
   }
 
   if (!turbo_agent_event_kind_is(event, "model") ||
-      !turbo_agent_contains_failure_marker(turbo_json_get_string(event, "output_text"))) {
+      !turbo_agent_contains_failure_marker(json_get_string(event, "output_text"))) {
     return 0;
   }
 
-  for (i = turbo_json_array_size(events) - 1; i > 0; --i) {
-    const json_value_t *previous = turbo_json_array_get(events, i - 1);
-    if (!previous || turbo_json_type(previous) != TURBO_JSON_OBJECT) {
+  for (i = json_array_size(events) - 1; i > 0; --i) {
+    const json_value_t *previous = json_array_get(events, i - 1);
+    if (!previous || json_type(previous) != JSON_OBJECT) {
       continue;
     }
 
@@ -274,9 +276,9 @@ CXX_C_API char *turbo_agent_executor_failure_reason(const json_value_t *state) {
   const char *output_text = turbo_agent_state_latest_executor_output_text(state);
   size_t i;
 
-  if (events && turbo_json_type(events) == TURBO_JSON_ARRAY) {
-    for (i = 0; i < turbo_json_array_size(events); ++i) {
-      const json_value_t *event = turbo_json_array_get(events, i);
+  if (events && json_type(events) == JSON_ARRAY) {
+    for (i = 0; i < json_array_size(events); ++i) {
+      const json_value_t *event = json_array_get(events, i);
       const json_value_t *outputs;
       size_t j;
 
@@ -285,8 +287,8 @@ CXX_C_API char *turbo_agent_executor_failure_reason(const json_value_t *state) {
         continue;
       }
 
-      for (j = 0; j < turbo_json_array_size(outputs); ++j) {
-        const json_value_t *output_item = turbo_json_array_get(outputs, j);
+      for (j = 0; j < json_array_size(outputs); ++j) {
+        const json_value_t *output_item = json_array_get(outputs, j);
         char *parse_reason = NULL;
         json_value_t *tool_json =
             turbo_agent_state_tool_result_output_parse_json_local(output_item, &parse_reason);
@@ -301,12 +303,12 @@ CXX_C_API char *turbo_agent_executor_failure_reason(const json_value_t *state) {
 
         reason = turbo_agent_state_tool_result_failure_reason_local(tool_json);
         if (!reason) {
-          turbo_free_json(&tool_json);
+          json_free(tool_json); tool_json = NULL;
           free(parse_reason);
           continue;
         }
 
-        turbo_free_json(&tool_json);
+        json_free(tool_json); tool_json = NULL;
         free(parse_reason);
         return reason;
       }
@@ -357,5 +359,6 @@ int turbo_agent_state_parse_final_output_json_impl(const json_value_t *state,
     return -1;
   }
 
-  return turbo_parse_json((const uint8_t *)text, strlen(text), out_json) == 0 ? 0 : -1;
+  *out_json = json_parse(text, strlen(text));
+  return *out_json ? 0 : -1;
 }

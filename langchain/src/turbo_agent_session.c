@@ -432,9 +432,10 @@ turbo_agent_session_get_structured_output_diagnostics(const turbo_agent_session_
   configured = schema_json && schema_json[0] != '\0';
   json_object_set_bool(diagnostics, "configured", configured ? true : false);
 
-  if (configured &&
-      (turbo_parse_json((const uint8_t *)schema_json, strlen(schema_json), &schema) != 0 ||
-       !schema || json_type(schema) != JSON_OBJECT)) {
+  if (configured) {
+    schema = json_parse(schema_json, strlen(schema_json));
+  }
+  if (configured && (!schema || json_type(schema) != JSON_OBJECT)) {
     error_code = "invalid_structured_output_schema";
   }
 

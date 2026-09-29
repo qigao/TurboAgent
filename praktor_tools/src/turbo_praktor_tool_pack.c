@@ -707,10 +707,9 @@ void turbo_praktor_workflow_config_init(
   config->abi_version = TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION;
   config->execution_policy.mode = TURBO_TOOL_EXECUTION_EXCLUSIVE;
   config->execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
-  config->required_capabilities = turbo_praktor_default_capabilities;
-  config->required_capability_count =
-      sizeof(turbo_praktor_default_capabilities) /
-      sizeof(turbo_praktor_default_capabilities[0]);
+  config->required_capabilities = NULL;
+  config->required_capability_count = 0;
+  config->require_harness_safe = 1;
 }
 
 turbo_praktor_tool_pack_t *
@@ -746,52 +745,64 @@ void turbo_praktor_tool_pack_destroy(turbo_praktor_tool_pack_t *pack) {
 
 static turbo_tool_status_t turbo_praktor_effective_capabilities(
     const turbo_praktor_workflow_config_t *config,
-    const char ***out_capabilities, size_t *out_count) {
+    const json_value_t *plan_description, int plan_bound,
+    turbo_praktor_capability_list_t *out) {
   const char *const *requested;
   size_t requested_count;
-  const char **capabilities;
   size_t index;
-  size_t count = 1;
+  turbo_tool_status_t status;
 
-  if (!config || !out_capabilities || !out_count) return TURBO_TOOL_INVALID_ARGUMENT;
+  if (!config || !out) return TURBO_TOOL_INVALID_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+
+  status = turbo_praktor_capability_add(out, "runtime_tools");
+  if (status != TURBO_TOOL_OK) return status;
+
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  if (plan_bound) {
+    status = turbo_praktor_effect_capabilities(plan_description, out);
+    if (status != TURBO_TOOL_OK) goto fail;
+  } else
+#endif
+  {
+    status = turbo_praktor_add_conservative_capabilities(out);
+    if (status != TURBO_TOOL_OK) goto fail;
+  }
+
   requested = config->required_capabilities;
   requested_count = config->required_capability_count;
-  if (!requested && requested_count == 0) {
-    requested = turbo_praktor_default_capabilities;
-    requested_count = sizeof(turbo_praktor_default_capabilities) /
-                      sizeof(turbo_praktor_default_capabilities[0]);
-  }
   if (!turbo_praktor_capabilities_valid(requested, requested_count)) {
-    return TURBO_TOOL_INVALID_ARGUMENT;
+    status = TURBO_TOOL_INVALID_ARGUMENT;
+    goto fail;
   }
   for (index = 0; index < requested_count; ++index) {
-    if (strcmp(requested[index], "runtime_tools") != 0) ++count;
+    status = turbo_praktor_capability_add(out, requested[index]);
+    if (status != TURBO_TOOL_OK) goto fail;
   }
-  capabilities = (const char **)calloc(count, sizeof(*capabilities));
-  if (!capabilities) return TURBO_TOOL_OUT_OF_MEMORY;
-  capabilities[0] = "runtime_tools";
-  count = 1;
-  for (index = 0; index < requested_count; ++index) {
-    if (strcmp(requested[index], "runtime_tools") == 0) continue;
-    capabilities[count++] = requested[index];
-  }
-  *out_capabilities = capabilities;
-  *out_count = count;
   return TURBO_TOOL_OK;
+
+fail:
+  turbo_praktor_capability_list_destroy(out);
+  return status;
 }
 
 turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
     turbo_praktor_tool_pack_t *pack,
     const turbo_praktor_workflow_config_t *config) {
-  turbo_praktor_binding_t *binding;
+  turbo_praktor_binding_t *binding = NULL;
   turbo_tool_definition_v4_t definition;
   salts_fs_stat_t metadata;
-  const char **capabilities = NULL;
-  size_t capability_count = 0;
+  turbo_praktor_capability_list_t capabilities;
   turbo_tool_status_t status;
+  const char *parameters_json;
+  char *generated_schema = NULL;
+  json_value_t *plan_description = NULL;
+  int plan_bound = 0;
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  praktor_workflow_plan *plan = NULL;
+#endif
 
-  if (!pack || !config || config->struct_size < sizeof(*config) ||
-      config->abi_version != TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION ||
+  if (!pack || !turbo_praktor_workflow_config_valid(config) ||
       !turbo_praktor_tool_name_valid(config->tool_name) ||
       !config->description || !config->description[0] ||
       !config->workflow_path || !config->workflow_path[0] ||
@@ -807,22 +818,60 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
     return TURBO_TOOL_BACKPRESSURE;
   }
 
-  status = turbo_praktor_effective_capabilities(config, &capabilities,
-                                                 &capability_count);
-  if (status != TURBO_TOOL_OK) return status;
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  if ((pack->api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
+      pack->api->compile_workflow && pack->api->describe_workflow_plan &&
+      pack->api->execute_workflow_plan && pack->api->release_workflow_plan) {
+    status = turbo_praktor_compile_plan(
+        pack->api, config->workflow_path, &plan, &plan_description);
+    if (status != TURBO_TOOL_OK) return status;
+    plan_bound = 1;
+    if (!turbo_praktor_plan_metadata_valid(
+            plan_description, turbo_praktor_require_harness_safe(config))) {
+      turbo_runtime_json_destroy(plan_description);
+      pack->api->release_workflow_plan(plan);
+      return TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+    }
+  }
+#endif
+
+  status = turbo_praktor_effective_capabilities(
+      config, plan_description, plan_bound, &capabilities);
+  if (status != TURBO_TOOL_OK) goto cleanup;
+
+  parameters_json = config->parameters_json
+                        ? config->parameters_json
+                        : turbo_praktor_default_parameters;
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  if (plan_bound &&
+      (turbo_praktor_require_harness_safe(config) ||
+       !config->parameters_json)) {
+    const json_value_t *schema =
+        json_object_get(plan_description, "input_schema");
+    generated_schema = schema ? json_serialize(schema, NULL) : NULL;
+    if (!generated_schema) {
+      status = TURBO_TOOL_OUT_OF_MEMORY;
+      goto cleanup;
+    }
+    parameters_json = generated_schema;
+  }
+#endif
 
   binding = (turbo_praktor_binding_t *)calloc(1, sizeof(*binding));
   if (!binding) {
-    free(capabilities);
-    return TURBO_TOOL_OUT_OF_MEMORY;
+    status = TURBO_TOOL_OUT_OF_MEMORY;
+    goto cleanup;
   }
   binding->api = pack->api;
   binding->workflow_path = tstr_dup(config->workflow_path);
   binding->max_result_bytes = pack->max_result_bytes;
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  binding->plan = plan;
+  plan = NULL;
+#endif
   if (!binding->workflow_path) {
-    free(capabilities);
-    turbo_praktor_binding_destroy(binding);
-    return TURBO_TOOL_OUT_OF_MEMORY;
+    status = TURBO_TOOL_OUT_OF_MEMORY;
+    goto cleanup;
   }
 
   memset(&definition, 0, sizeof(definition));
@@ -830,9 +879,7 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
   definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
   definition.definition.name = config->tool_name;
   definition.definition.description = config->description;
-  definition.definition.parameters_json =
-      config->parameters_json ? config->parameters_json
-                              : turbo_praktor_default_parameters;
+  definition.definition.parameters_json = parameters_json;
   definition.definition.strict = config->strict;
   definition.definition.handler = turbo_praktor_execute_string;
   definition.definition.json_value_handler = turbo_praktor_execute;
@@ -841,17 +888,24 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
   definition.definition.user_data = binding;
   definition.definition.user_data_free = turbo_praktor_binding_destroy;
   definition.execution_policy = config->execution_policy;
-  definition.required_capabilities = capabilities;
-  definition.required_capability_count = capability_count;
+  definition.required_capabilities = capabilities.items;
+  definition.required_capability_count = capabilities.count;
 
   status = turbo_tool_registry_add_v4(pack->registry, &definition);
-  free(capabilities);
-  if (status != TURBO_TOOL_OK) {
-    turbo_praktor_binding_destroy(binding);
-    return status;
-  }
+  if (status != TURBO_TOOL_OK) goto cleanup;
+
+  binding = NULL;
   ++pack->workflow_count;
-  return TURBO_TOOL_OK;
+
+cleanup:
+  if (binding) turbo_praktor_binding_destroy(binding);
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  if (plan) pack->api->release_workflow_plan(plan);
+#endif
+  turbo_runtime_json_destroy(plan_description);
+  if (generated_schema) json_serialize_free(generated_schema);
+  turbo_praktor_capability_list_destroy(&capabilities);
+  return status;
 }
 
 turbo_tool_registry_t *

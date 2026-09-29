@@ -1,11 +1,11 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(Salts 1.8.3 EXACT CONFIG)
-find_dependency(SaltsUtils 4.1.3 EXACT CONFIG)
+find_dependency(Salts CONFIG)
+find_dependency(SaltsUtils CONFIG)
 
 if("@ENABLE_MCP_TOOLS@" STREQUAL "ON" OR "@ENABLE_LANGCHAIN@" STREQUAL "ON")
-  find_dependency(Chttp 1.1.4 EXACT CONFIG)
+  find_dependency(Chttp CONFIG)
 endif()
 if("@ENABLE_LLM_SANDBOX@" STREQUAL "ON")
   find_dependency(TurboWasm CONFIG)

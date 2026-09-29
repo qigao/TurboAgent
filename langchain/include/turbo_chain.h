@@ -1,6 +1,8 @@
 #ifndef TURBO_CHAIN_H
 #define TURBO_CHAIN_H
 
+#include <stddef.h>
+
 #include <turbo_agent_api.h>
 #include <json_parser.h>
 

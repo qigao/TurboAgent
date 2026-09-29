@@ -37,6 +37,7 @@ typedef struct turbo_praktor_binding_s {
   const praktor_api *api;
   tstr workflow_path;
   size_t max_result_bytes;
+  int project_agent_output;
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
   praktor_workflow_plan *plan;
 #endif
@@ -578,7 +579,9 @@ static turbo_tool_status_t turbo_praktor_execute_text(
       context->detail_sink(parsed, context->detail_sink_user_data);
     }
 
-    projection = json_object_get(parsed, "agent_output");
+    projection = binding->project_agent_output
+                     ? json_object_get(parsed, "agent_output")
+                     : NULL;
     if (projection && json_type(projection) == JSON_OBJECT) {
       serialized = json_serialize(projection, &serialized_size);
       if (!serialized || serialized_size > binding->max_result_bytes ||
@@ -776,6 +779,19 @@ static turbo_tool_status_t turbo_praktor_effective_capabilities(
 
   requested = config->required_capabilities;
   requested_count = config->required_capability_count;
+
+  /*
+   * Compatibility mode preserves the pre-WorkflowPlan conservative default
+   * unless the host explicitly supplies its reviewed requirements. Harness-safe
+   * mode may rely on the plan-derived manifest because profile qualification is
+   * mandatory.
+   */
+  if (plan_bound && !turbo_praktor_require_harness_safe(config) &&
+      requested_count == 0) {
+    status = turbo_praktor_add_conservative_capabilities(out);
+    if (status != TURBO_TOOL_OK) goto fail;
+  }
+
   if (!turbo_praktor_capabilities_valid(requested, requested_count)) {
     status = TURBO_TOOL_INVALID_ARGUMENT;
     goto fail;
@@ -871,6 +887,8 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
   binding->api = pack->api;
   binding->workflow_path = tstr_dup(config->workflow_path);
   binding->max_result_bytes = pack->max_result_bytes;
+  binding->project_agent_output =
+      plan_bound && turbo_praktor_require_harness_safe(config);
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
   binding->plan = plan;
   plan = NULL;

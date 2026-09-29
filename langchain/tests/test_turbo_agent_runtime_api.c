@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent_test_support.h"
 #include "turbo_event.h"
 #include "turbo_agent_graph.h"
@@ -153,7 +154,7 @@ static int runtime_write_bool_json_value_node(turbo_graph_exec_ctx_t *ctx, void 
   runtime_bool_write_t *write = (runtime_bool_write_t *)user_data;
   json_value_t *value;
 
-  value = turbo_json_create_bool(write->value);
+  value = json_create_bool(write->value);
   check_not_null(value);
   return turbo_runtime_json_object_set(ctx->json_value_state, write->key, value) ==
                  TURBO_RUNTIME_JSON_OK
@@ -169,7 +170,7 @@ static int runtime_supervisor_planner_handoff_node(turbo_graph_exec_ctx_t *ctx, 
   check_str_eq(turbo_agent_state_active_agent(ctx->state), "planner");
   check_null(turbo_agent_state_handoff_target_agent(ctx->state));
   check_null(turbo_agent_state_handoff_reason(ctx->state));
-  turbo_json_object_set_bool(ctx->state, "planner_requested_handoff", 1);
+  json_object_set_bool(ctx->state, "planner_requested_handoff", 1);
   return turbo_agent_state_request_handoff(ctx->state, "executor", "delegate execution");
 }
 
@@ -182,17 +183,17 @@ static int runtime_supervisor_executor_complete_node(turbo_graph_exec_ctx_t *ctx
   check_not_null(ctx);
   check_not_null(ctx->state);
   history = turbo_agent_state_supervisor_handoff_history(ctx->state);
-  entry = history ? turbo_json_array_get(history, 0) : NULL;
+  entry = history ? json_array_get(history, 0) : NULL;
   check_str_eq(turbo_agent_state_active_agent(ctx->state), "executor");
   check_null(turbo_agent_state_handoff_target_agent(ctx->state));
   check_null(turbo_agent_state_handoff_reason(ctx->state));
   check_not_null(history);
-  check_size_eq(turbo_json_array_size(history), 1);
+  check_size_eq(json_array_size(history), 1);
   check_not_null(entry);
-  check_str_eq(turbo_json_get_string(entry, "from_agent"), "planner");
-  check_str_eq(turbo_json_get_string(entry, "target_agent"), "executor");
-  check_str_eq(turbo_json_get_string(entry, "reason"), "delegate execution");
-  turbo_json_object_set_bool(ctx->state, "executor_completed", 1);
+  check_str_eq(json_get_string(entry, "from_agent"), "planner");
+  check_str_eq(json_get_string(entry, "target_agent"), "executor");
+  check_str_eq(json_get_string(entry, "reason"), "delegate execution");
+  json_object_set_bool(ctx->state, "executor_completed", 1);
   return 0;
 }
 
@@ -286,8 +287,8 @@ static json_value_t *create_review_state_json_value(int approved) {
   check_not_null(state);
   check_int_eq(turbo_agent_state_request_review(state, "need review"), 0);
   check_int_eq(turbo_agent_state_set_review_approved(state, approved), 0);
-  bound = turbo_json_clone(state);
-  turbo_free_json(&state);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
   return bound;
 }
 
@@ -300,8 +301,8 @@ static json_value_t *create_supervisor_review_state_json_value(void) {
   check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
   check_int_eq(turbo_agent_state_request_review(state, "need review"), 0);
   check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
-  bound = turbo_json_clone(state);
-  turbo_free_json(&state);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
   return bound;
 }
 
@@ -311,8 +312,8 @@ static json_value_t *create_supervisor_handoff_state_json_value(void) {
 
   check_not_null(state);
   check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
-  bound = turbo_json_clone(state);
-  turbo_free_json(&state);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
   return bound;
 }
 
@@ -325,8 +326,8 @@ static json_value_t *create_replan_error_state_json_value(void) {
   check_int_eq(turbo_agent_state_set_model_error(state, "transport", "timeout"), 0);
   check_int_eq(turbo_agent_state_set_guardrail_rejection(state, "after_tool", "unsafe output"),
                0);
-  bound = turbo_json_clone(state);
-  turbo_free_json(&state);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
   return bound;
 }
 
@@ -335,22 +336,22 @@ static const json_value_t *find_runtime_observability_index(const json_value_t *
   size_t count;
   size_t i;
 
-  if (!indexes_json || turbo_json_type(indexes_json) != TURBO_JSON_ARRAY || !thread_id) {
+  if (!indexes_json || json_type(indexes_json) != JSON_ARRAY || !thread_id) {
     return NULL;
   }
-  count = turbo_json_array_size(indexes_json);
+  count = json_array_size(indexes_json);
   for (i = 0; i < count; ++i) {
-    const json_value_t *item_json = turbo_json_array_get(indexes_json, i);
+    const json_value_t *item_json = json_array_get(indexes_json, i);
     const json_value_t *thread_json;
     const char *item_thread_id;
 
-    if (!item_json || turbo_json_type(item_json) != TURBO_JSON_OBJECT) {
+    if (!item_json || json_type(item_json) != JSON_OBJECT) {
       continue;
     }
-    thread_json = turbo_json_object_get(item_json, "thread");
+    thread_json = json_object_get(item_json, "thread");
     item_thread_id =
-        (thread_json && turbo_json_type(thread_json) == TURBO_JSON_OBJECT)
-            ? turbo_json_get_string(thread_json, "id")
+        (thread_json && json_type(thread_json) == JSON_OBJECT)
+            ? json_get_string(thread_json, "id")
             : NULL;
     if (item_thread_id && strcmp(item_thread_id, thread_id) == 0) {
       return item_json;
@@ -364,32 +365,32 @@ static json_value_t *runtime_observability_thread_ids_json(const json_value_t *i
   size_t count;
   size_t i;
 
-  if (!indexes_json || turbo_json_type(indexes_json) != TURBO_JSON_ARRAY) {
+  if (!indexes_json || json_type(indexes_json) != JSON_ARRAY) {
     return NULL;
   }
-  thread_ids_json = turbo_json_create_array();
+  thread_ids_json = json_create_array();
   if (!thread_ids_json) {
     return NULL;
   }
-  count = turbo_json_array_size(indexes_json);
+  count = json_array_size(indexes_json);
   for (i = 0; i < count; ++i) {
-    const json_value_t *item_json = turbo_json_array_get(indexes_json, i);
+    const json_value_t *item_json = json_array_get(indexes_json, i);
     const json_value_t *thread_json;
     const char *thread_id;
 
-    if (!item_json || turbo_json_type(item_json) != TURBO_JSON_OBJECT) {
-      turbo_free_json(&thread_ids_json);
+    if (!item_json || json_type(item_json) != JSON_OBJECT) {
+      json_free(thread_ids_json); thread_ids_json = NULL;
       return NULL;
     }
-    thread_json = turbo_json_object_get(item_json, "thread");
-    thread_id = (thread_json && turbo_json_type(thread_json) == TURBO_JSON_OBJECT)
-                    ? turbo_json_get_string(thread_json, "id")
+    thread_json = json_object_get(item_json, "thread");
+    thread_id = (thread_json && json_type(thread_json) == JSON_OBJECT)
+                    ? json_get_string(thread_json, "id")
                     : NULL;
     if (!thread_id) {
-      turbo_free_json(&thread_ids_json);
+      json_free(thread_ids_json); thread_ids_json = NULL;
       return NULL;
     }
-    turbo_json_array_add(thread_ids_json, turbo_json_create_string(thread_id));
+    json_array_add(thread_ids_json, json_create_string(thread_id));
   }
   return thread_ids_json;
 }
@@ -408,9 +409,9 @@ static json_value_t *create_trace_seed_state_json_value(void) {
 
 static int runtime_patch_state_write_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   runtime_patch_state_write_t *write = (runtime_patch_state_write_t *)user_data;
-  json_value_t *profile = turbo_json_create_object();
-  json_value_t *settings = turbo_json_create_object();
-  json_value_t *labels = turbo_json_create_array();
+  json_value_t *profile = json_create_object();
+  json_value_t *settings = json_create_object();
+  json_value_t *labels = json_create_array();
 
   (void)write;
   check_not_null(profile);
@@ -418,25 +419,25 @@ static int runtime_patch_state_write_node(turbo_graph_exec_ctx_t *ctx, void *use
   check_not_null(labels);
   check_int_eq(turbo_runtime_json_object_set(
                    ctx->json_value_state, "visited_start",
-                   turbo_json_create_bool(1)),
+                   json_create_bool(1)),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(
-                   profile, "name", turbo_json_create_string("alpha")),
+                   profile, "name", json_create_string("alpha")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(
-                   settings, "theme", turbo_json_create_string("light")),
+                   settings, "theme", json_create_string("light")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(
-                   settings, "locale", turbo_json_create_string("en")),
+                   settings, "locale", json_create_string("en")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(
-                   settings, "notes", turbo_json_create_string("keep")),
+                   settings, "notes", json_create_string("keep")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(profile, "settings", settings),
                TURBO_RUNTIME_JSON_OK);
   settings = NULL;
   check_int_eq(turbo_runtime_json_array_append(
-                   labels, turbo_json_create_string("seed")),
+                   labels, json_create_string("seed")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(profile, "labels", labels),
                TURBO_RUNTIME_JSON_OK);
@@ -468,10 +469,10 @@ static turbo_graph_t *create_runtime_state_patch_graph(void) {
 }
 
 static json_value_t *create_runtime_state_patch_json_value(void) {
-  json_value_t *patch = turbo_json_create_object();
-  json_value_t *profile = turbo_json_create_object();
-  json_value_t *settings = turbo_json_create_object();
-  json_value_t *labels = turbo_json_create_array();
+  json_value_t *patch = json_create_object();
+  json_value_t *profile = json_create_object();
+  json_value_t *settings = json_create_object();
+  json_value_t *labels = json_create_array();
   json_value_t *flags_array;
 
   check_not_null(patch);
@@ -479,19 +480,19 @@ static json_value_t *create_runtime_state_patch_json_value(void) {
   check_not_null(settings);
   check_not_null(labels);
   check_int_eq(turbo_runtime_json_object_set(
-                   settings, "theme", turbo_json_create_string("dark")),
+                   settings, "theme", json_create_string("dark")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(
-                   settings, "extra", turbo_json_create_string("enabled")),
+                   settings, "extra", json_create_string("enabled")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(settings, "notes",
-                                                  turbo_json_create_null()),
+                                                  json_create_null()),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_array_append(
-                   labels, turbo_json_create_string("patched")),
+                   labels, json_create_string("patched")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_array_append(
-                   labels, turbo_json_create_string("v3")),
+                   labels, json_create_string("v3")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(profile, "settings", settings),
                TURBO_RUNTIME_JSON_OK);
@@ -503,34 +504,34 @@ static json_value_t *create_runtime_state_patch_json_value(void) {
                TURBO_RUNTIME_JSON_OK);
   profile = NULL;
   check_int_eq(turbo_runtime_json_object_set(
-                   patch, "flags", turbo_json_create_array()),
+                   patch, "flags", json_create_array()),
                TURBO_RUNTIME_JSON_OK);
-  flags_array = (json_value_t *)turbo_json_object_get(patch,
+  flags_array = (json_value_t *)json_object_get(patch,
                                                                                       "flags");
   check_not_null(flags_array);
   check_int_eq(turbo_runtime_json_array_append(
                    flags_array,
-                   turbo_json_create_string("flag-a")),
+                   json_create_string("flag-a")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_array_append(
                    flags_array,
-                   turbo_json_create_string("flag-b")),
+                   json_create_string("flag-b")),
                TURBO_RUNTIME_JSON_OK);
   check_int_eq(turbo_runtime_json_object_set(
-                   patch, "patch_version", turbo_json_create_int64(3)),
+                   patch, "patch_version", json_create_int64(3)),
                TURBO_RUNTIME_JSON_OK);
   return patch;
 }
 
 static json_value_t *
 create_override_from_result(const json_value_t *result_state, int approved) {
-  json_value_t *state = turbo_json_clone(result_state);
+  json_value_t *state = json_clone(result_state);
   json_value_t *bound;
 
   check_not_null(state);
   check_int_eq(turbo_agent_state_set_review_approved(state, approved), 0);
-  bound = turbo_json_clone(state);
-  turbo_free_json(&state);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
   return bound;
 }
 
@@ -565,19 +566,19 @@ static void runtime_check_completed_supervisor_handoff_state(const json_value_t 
   const json_value_t *entry;
 
   check_not_null(state_json);
-  check_true(turbo_json_get_bool(state_json, "planner_requested_handoff", false));
-  check_true(turbo_json_get_bool(state_json, "executor_completed", false));
+  check_true(json_get_bool(state_json, "planner_requested_handoff", false));
+  check_true(json_get_bool(state_json, "executor_completed", false));
   check_str_eq(turbo_agent_state_active_agent(state_json), "executor");
   check_null(turbo_agent_state_handoff_target_agent(state_json));
   check_null(turbo_agent_state_handoff_reason(state_json));
   history = turbo_agent_state_supervisor_handoff_history(state_json);
   check_not_null(history);
-  check_size_eq(turbo_json_array_size(history), 1);
-  entry = turbo_json_array_get(history, 0);
+  check_size_eq(json_array_size(history), 1);
+  entry = json_array_get(history, 0);
   check_not_null(entry);
-  check_str_eq(turbo_json_get_string(entry, "from_agent"), "planner");
-  check_str_eq(turbo_json_get_string(entry, "target_agent"), "executor");
-  check_str_eq(turbo_json_get_string(entry, "reason"), "delegate execution");
+  check_str_eq(json_get_string(entry, "from_agent"), "planner");
+  check_str_eq(json_get_string(entry, "target_agent"), "executor");
+  check_str_eq(json_get_string(entry, "reason"), "delegate execution");
 }
 
 static char *runtime_test_record_file(const char *root, const char *collection, const char *id) {
@@ -621,18 +622,18 @@ spec("turbo agent runtime api") {
     check_not_null(state);
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, NULL, &(turbo_agent_runtime_exec_options_t){ .thread_id = "" }, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
-    check_true(strncmp(turbo_json_get_string(summary, "thread_id"), "thr_", 4) == 0);
-    check_true(turbo_json_type(turbo_json_object_get(summary, "checkpoint_id")) == TURBO_JSON_NULL);
+    check_str_eq(json_get_string(summary, "status"), "completed");
+    check_true(strncmp(json_get_string(summary, "thread_id"), "thr_", 4) == 0);
+    check_true(json_type(json_object_get(summary, "checkpoint_id")) == JSON_NULL);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(result_state, "visited_end"), 0));
-    check_int_eq(turbo_agent_runtime_list_runs(runtime, turbo_json_get_string(summary, "thread_id"),
+        json_object_get(result_state, "visited_end"), 0));
+    check_int_eq(turbo_agent_runtime_list_runs(runtime, json_get_string(summary, "thread_id"),
                                                &runs),
                  0);
-    check_size_eq(turbo_json_array_size(runs), 1);
+    check_size_eq(json_array_size(runs), 1);
 
-    turbo_free_json(&runs);
-    turbo_free_json(&summary);
+    json_free(runs); runs = NULL;
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -666,12 +667,12 @@ spec("turbo agent runtime api") {
                                                                "controlled-thread"},
                      token, &cancelled_summary, &cancelled_state),
                  0);
-    check_str_eq(turbo_json_get_string(cancelled_summary, "status"),
+    check_str_eq(json_get_string(cancelled_summary, "status"),
                  "cancelled");
-    checkpoint_id = turbo_json_get_string(cancelled_summary, "checkpoint_id");
+    checkpoint_id = json_get_string(cancelled_summary, "checkpoint_id");
     check_not_null(checkpoint_id);
     check_false(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(cancelled_state, "visited_start"), 0));
+        json_object_get(cancelled_state, "visited_start"), 0));
 
     check_int_eq(turbo_agent_runtime_exec_resume(
                      runtime, graph, NULL, NULL,
@@ -681,16 +682,16 @@ spec("turbo agent runtime api") {
                          .checkpoint_id = checkpoint_id},
                      &resumed_summary, &resumed_state),
                  0);
-    check_str_eq(turbo_json_get_string(resumed_summary, "status"),
+    check_str_eq(json_get_string(resumed_summary, "status"),
                  "completed");
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(resumed_state, "visited_end"), 0));
+        json_object_get(resumed_state, "visited_end"), 0));
 
     turbo_cancel_token_release(token);
     turbo_cancel_source_destroy(source);
-    turbo_free_json(&resumed_summary);
+    json_free(resumed_summary); resumed_summary = NULL;
     turbo_runtime_json_destroy(resumed_state);
-    turbo_free_json(&cancelled_summary);
+    json_free(cancelled_summary); cancelled_summary = NULL;
     turbo_runtime_json_destroy(cancelled_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -720,55 +721,55 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, &(turbo_agent_runtime_exec_options_t){ .thread_id = "" }, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
 
     check_int_eq(turbo_agent_runtime_get_thread_timeline_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &timeline),
+                     runtime, json_get_string(summary, "thread_id"), &timeline),
                  0);
     check_int_eq(turbo_agent_runtime_load_thread_history_events_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &history_events),
+                     runtime, json_get_string(summary, "thread_id"), &history_events),
                  0);
     check_int_eq(turbo_agent_runtime_replay_thread_history_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"),
+                     runtime, json_get_string(summary, "thread_id"),
                      runtime_capture_replayed_history_event, &replay),
                  0);
     check_size_eq(replay.count, turbo_runtime_json_value_size(history_events));
     check_true(replay.count >= 1);
-    runtime_check_thread_timeline_json_value(timeline, turbo_json_get_string(summary, "thread_id"),
-                                       turbo_json_get_string(summary, "run_id"),
-                                       turbo_json_get_string(summary, "checkpoint_id"), 1, 1, 1,
+    runtime_check_thread_timeline_json_value(timeline, json_get_string(summary, "thread_id"),
+                                       json_get_string(summary, "run_id"),
+                                       json_get_string(summary, "checkpoint_id"), 1, 1, 1,
                                        1);
     check_int_eq(turbo_agent_runtime_list_thread_lineage(runtime,
-                                                         turbo_json_get_string(summary, "thread_id"),
+                                                         json_get_string(summary, "thread_id"),
                                                          &lineage),
                  0);
-    runtime_check_thread_lineage_json_value(lineage, turbo_json_get_string(summary, "thread_id"),
-                                      turbo_json_get_string(summary, "run_id"),
-                                      turbo_json_get_string(summary, "run_id"),
-                                      turbo_json_get_string(summary, "checkpoint_id"));
-    check_size_eq(turbo_json_array_size(turbo_json_object_get(lineage, "branches")), 1);
-    runtime_check_lineage_branch(turbo_json_array_get(turbo_json_object_get(lineage, "branches"), 0),
+    runtime_check_thread_lineage_json_value(lineage, json_get_string(summary, "thread_id"),
+                                      json_get_string(summary, "run_id"),
+                                      json_get_string(summary, "run_id"),
+                                      json_get_string(summary, "checkpoint_id"));
+    check_size_eq(json_array_size(json_object_get(lineage, "branches")), 1);
+    runtime_check_lineage_branch(json_array_get(json_object_get(lineage, "branches"), 0),
                                  NULL, NULL, NULL,
-                                 turbo_json_get_string(summary, "checkpoint_id"));
-    check_int_eq(turbo_agent_runtime_get_branch_tree(runtime, turbo_json_get_string(summary, "thread_id"),
+                                 json_get_string(summary, "checkpoint_id"));
+    check_int_eq(turbo_agent_runtime_get_branch_tree(runtime, json_get_string(summary, "thread_id"),
                                                      &branch_tree),
                  0);
-    runtime_check_branch_tree(branch_tree, turbo_json_get_string(summary, "thread_id"),
-                              turbo_json_get_string(summary, "run_id"),
-                              turbo_json_get_string(summary, "run_id"),
-                              turbo_json_get_string(summary, "run_id"),
-                              turbo_json_get_string(summary, "checkpoint_id"), 1, 0);
+    runtime_check_branch_tree(branch_tree, json_get_string(summary, "thread_id"),
+                              json_get_string(summary, "run_id"),
+                              json_get_string(summary, "run_id"),
+                              json_get_string(summary, "run_id"),
+                              json_get_string(summary, "checkpoint_id"), 1, 0);
     runtime_check_branch_tree_branch(
-        runtime_find_branch_tree_branch(turbo_json_object_get(branch_tree, "branches"),
-                                        turbo_json_get_string(summary, "run_id")),
-        turbo_json_get_string(summary, "run_id"), NULL, NULL,
-        turbo_json_get_string(summary, "checkpoint_id"));
+        runtime_find_branch_tree_branch(json_object_get(branch_tree, "branches"),
+                                        json_get_string(summary, "run_id")),
+        json_get_string(summary, "run_id"), NULL, NULL,
+        json_get_string(summary, "checkpoint_id"));
 
-    turbo_free_json(&branch_tree);
-    turbo_free_json(&lineage);
+    json_free(branch_tree); branch_tree = NULL;
+    json_free(lineage); lineage = NULL;
     turbo_runtime_json_destroy(history_events);
     turbo_runtime_json_destroy(timeline);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -797,7 +798,7 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, &(turbo_agent_runtime_exec_options_t){ .thread_id = "" }, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
 
     thread_sink.callback = runtime_capture_observer_event;
     thread_sink.user_data = &thread_capture;
@@ -805,10 +806,10 @@ spec("turbo agent runtime api") {
     checkpoint_sink.user_data = &checkpoint_capture;
 
     check_int_eq(turbo_agent_runtime_observe_thread_history_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &thread_sink),
+                     runtime, json_get_string(summary, "thread_id"), &thread_sink),
                  0);
     check_int_eq(turbo_agent_runtime_observe_history_json_value(
-                     runtime, NULL, turbo_json_get_string(summary, "checkpoint_id"),
+                     runtime, NULL, json_get_string(summary, "checkpoint_id"),
                      &checkpoint_sink),
                  0);
     check_true(thread_capture.count >= 1);
@@ -816,7 +817,7 @@ spec("turbo agent runtime api") {
     check_size_eq(checkpoint_capture.count, thread_capture.count);
     check_size_eq(checkpoint_capture.interrupted_count, thread_capture.interrupted_count);
 
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -852,21 +853,21 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, &(turbo_agent_runtime_exec_options_t){ .thread_id = NULL, .event_sink = runtime_capture_replayed_history_event, .event_sink_user_data = &start_capture }, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
     check_true(start_capture.count >= 1);
     check_true(start_capture.trace_count + start_capture.model_count +
                    start_capture.tool_result_count >=
                1);
-    checkpoint_id = turbo_json_get_string(summary, "checkpoint_id");
-    run_id = turbo_json_get_string(summary, "run_id");
+    checkpoint_id = json_get_string(summary, "checkpoint_id");
+    run_id = json_get_string(summary, "run_id");
     check_not_null(checkpoint_id);
     check_not_null(run_id);
 
-    command = turbo_json_create_object();
+    command = json_create_object();
     check_not_null(command);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("approve_review")),
+                     json_create_string("approve_review")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_agent_runtime_prepare_checkpoint_command_override_json_value(runtime, checkpoint_id, command,
                                                                    &override),
@@ -878,8 +879,8 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 0;
     check_int_eq(turbo_agent_runtime_exec_resume(runtime, graph, override, &options, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = checkpoint_id, .event_sink = runtime_capture_replayed_history_event, .event_sink_user_data = &resume_capture }, &resumed_summary, &resumed_state),
                  0);
-    check_str_eq(turbo_json_get_string(resumed_summary, "status"), "completed");
-    check_str_eq(turbo_json_get_string(resumed_summary, "run_id"), run_id);
+    check_str_eq(json_get_string(resumed_summary, "status"), "completed");
+    check_str_eq(json_get_string(resumed_summary, "run_id"), run_id);
     check_true(resume_capture.count >= 1);
     check_true(resume_capture.trace_count + resume_capture.model_count +
                    resume_capture.tool_result_count >=
@@ -887,15 +888,15 @@ spec("turbo agent runtime api") {
 
     check_int_eq(turbo_agent_runtime_exec_fork(runtime, graph, override, &options, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = checkpoint_id, .event_sink = runtime_capture_replayed_history_event, .event_sink_user_data = &fork_capture }, &forked_summary, &forked_state),
                  0);
-    check_str_eq(turbo_json_get_string(forked_summary, "status"), "completed");
-    check_true(strcmp(turbo_json_get_string(forked_summary, "run_id"), run_id) != 0);
+    check_str_eq(json_get_string(forked_summary, "status"), "completed");
+    check_true(strcmp(json_get_string(forked_summary, "run_id"), run_id) != 0);
     check_true(fork_capture.count >= 1);
     check_true(fork_capture.trace_count + fork_capture.model_count + fork_capture.tool_result_count >=
                1);
 
-    turbo_free_json(&forked_summary);
-    turbo_free_json(&resumed_summary);
-    turbo_free_json(&summary);
+    json_free(forked_summary); forked_summary = NULL;
+    json_free(resumed_summary); resumed_summary = NULL;
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(forked_state);
     turbo_runtime_json_destroy(resumed_state);
     turbo_runtime_json_destroy(override);
@@ -928,49 +929,49 @@ spec("turbo agent runtime api") {
 
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, NULL, &(turbo_agent_runtime_exec_options_t){ .thread_id = "" }, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
-    check_true(turbo_json_type(turbo_json_object_get(summary, "checkpoint_id")) == TURBO_JSON_NULL);
+    check_str_eq(json_get_string(summary, "status"), "completed");
+    check_true(json_type(json_object_get(summary, "checkpoint_id")) == JSON_NULL);
 
     check_int_eq(turbo_agent_runtime_get_thread_timeline_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &timeline),
+                     runtime, json_get_string(summary, "thread_id"), &timeline),
                  0);
     check_int_eq(turbo_agent_runtime_replay_thread_history_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"),
+                     runtime, json_get_string(summary, "thread_id"),
                      runtime_capture_replayed_history_event, &replay),
                  0);
     check_size_eq(replay.count, 0);
-    runtime_check_thread_timeline_json_value(timeline, turbo_json_get_string(summary, "thread_id"),
-                                       turbo_json_get_string(summary, "run_id"), NULL, 0, 1, 0,
+    runtime_check_thread_timeline_json_value(timeline, json_get_string(summary, "thread_id"),
+                                       json_get_string(summary, "run_id"), NULL, 0, 1, 0,
                                        0);
     check_int_eq(turbo_agent_runtime_get_thread_state_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &thread_state),
+                     runtime, json_get_string(summary, "thread_id"), &thread_state),
                  0);
     check_int_eq(
-        turbo_agent_runtime_get_run_state_json_value(runtime, turbo_json_get_string(summary, "run_id"),
+        turbo_agent_runtime_get_run_state_json_value(runtime, json_get_string(summary, "run_id"),
                                                &run_state),
         0);
     replay_override = thread_state;
     check_true(turbo_agent_runtime_resume_thread_json_value_graph(
-                   runtime, graph, turbo_json_get_string(summary, "thread_id"), replay_override,
+                   runtime, graph, json_get_string(summary, "thread_id"), replay_override,
                    NULL, &replay_summary, &replay_state) != 0);
     check_null(replay_summary);
     check_null(replay_state);
-    check_int_eq(turbo_agent_runtime_get_branch_tree(runtime, turbo_json_get_string(summary, "thread_id"),
+    check_int_eq(turbo_agent_runtime_get_branch_tree(runtime, json_get_string(summary, "thread_id"),
                                                      &branch_tree),
                  0);
-    runtime_check_branch_tree(branch_tree, turbo_json_get_string(summary, "thread_id"),
-                              turbo_json_get_string(summary, "run_id"),
-                              turbo_json_get_string(summary, "run_id"), NULL, NULL, 1, 0);
+    runtime_check_branch_tree(branch_tree, json_get_string(summary, "thread_id"),
+                              json_get_string(summary, "run_id"),
+                              json_get_string(summary, "run_id"), NULL, NULL, 1, 0);
     runtime_check_branch_tree_branch(
-        runtime_find_branch_tree_branch(turbo_json_object_get(branch_tree, "branches"),
-                                        turbo_json_get_string(summary, "run_id")),
-        turbo_json_get_string(summary, "run_id"), NULL, NULL, NULL);
+        runtime_find_branch_tree_branch(json_object_get(branch_tree, "branches"),
+                                        json_get_string(summary, "run_id")),
+        json_get_string(summary, "run_id"), NULL, NULL, NULL);
 
-    turbo_free_json(&branch_tree);
+    json_free(branch_tree); branch_tree = NULL;
     turbo_runtime_json_destroy(timeline);
     turbo_runtime_json_destroy(run_state);
     turbo_runtime_json_destroy(thread_state);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -1003,67 +1004,67 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, &(turbo_agent_runtime_exec_options_t){ .thread_id = "" }, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
 
     check_int_eq(turbo_agent_runtime_get_thread_observability_index(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &index_json),
+                     runtime, json_get_string(summary, "thread_id"), &index_json),
                  0);
     check_not_null(index_json);
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(index_json, "thread"), "id"),
-                 turbo_json_get_string(summary, "thread_id"));
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(index_json, "latest_run"), "id"),
-                 turbo_json_get_string(summary, "run_id"));
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(index_json, "pending_run"), "id"),
-                 turbo_json_get_string(summary, "run_id"));
+    check_str_eq(json_get_string(json_object_get(index_json, "thread"), "id"),
+                 json_get_string(summary, "thread_id"));
+    check_str_eq(json_get_string(json_object_get(index_json, "latest_run"), "id"),
+                 json_get_string(summary, "run_id"));
+    check_str_eq(json_get_string(json_object_get(index_json, "pending_run"), "id"),
+                 json_get_string(summary, "run_id"));
 
-    thread_timeline = turbo_json_object_get(index_json, "thread_timeline");
-    thread_lineage = turbo_json_object_get(index_json, "thread_lineage");
-    branch_tree = turbo_json_object_get(index_json, "branch_tree");
-    history_events = turbo_json_object_get(index_json, "history_events");
-    trace_events = turbo_json_object_get(index_json, "trace_events");
-    counts = turbo_json_object_get(index_json, "counts");
+    thread_timeline = json_object_get(index_json, "thread_timeline");
+    thread_lineage = json_object_get(index_json, "thread_lineage");
+    branch_tree = json_object_get(index_json, "branch_tree");
+    history_events = json_object_get(index_json, "history_events");
+    trace_events = json_object_get(index_json, "trace_events");
+    counts = json_object_get(index_json, "counts");
     check_not_null(thread_timeline);
     check_not_null(thread_lineage);
     check_not_null(branch_tree);
-    check_true(turbo_json_type(history_events) == TURBO_JSON_ARRAY);
-    check_true(turbo_json_type(trace_events) == TURBO_JSON_ARRAY);
-    check_str_eq(turbo_json_get_string(index_json, "current_status"), "interrupted");
-    check_str_eq(turbo_json_get_string(index_json, "current_interrupt_reason"),
+    check_true(json_type(history_events) == JSON_ARRAY);
+    check_true(json_type(trace_events) == JSON_ARRAY);
+    check_str_eq(json_get_string(index_json, "current_status"), "interrupted");
+    check_str_eq(json_get_string(index_json, "current_interrupt_reason"),
                  "review_required");
-    check_str_eq(turbo_json_get_string(index_json, "current_pending_action"), "review");
-    current_checkpoint_summary = turbo_json_object_get(index_json, "current_checkpoint_summary");
+    check_str_eq(json_get_string(index_json, "current_pending_action"), "review");
+    current_checkpoint_summary = json_object_get(index_json, "current_checkpoint_summary");
     check_not_null(current_checkpoint_summary);
-    check_str_eq(turbo_json_get_string(current_checkpoint_summary, "id"),
-                 turbo_json_get_string(summary, "checkpoint_id"));
-    check_str_eq(turbo_json_get_string(index_json, "latest_run_status"), "interrupted");
-    check_not_null(turbo_json_get_string(index_json, "latest_run_updated_at"));
-    check_str_eq(turbo_json_get_string(index_json, "pending_run_id"),
-                 turbo_json_get_string(summary, "run_id"));
-    check_str_eq(turbo_json_get_string(index_json, "pending_checkpoint_id"),
-                 turbo_json_get_string(summary, "checkpoint_id"));
-    check_false(turbo_json_get_bool(index_json, "has_failure", true));
-    check_false(turbo_json_get_bool(index_json, "has_model_error", true));
-    check_false(turbo_json_get_bool(index_json, "has_guardrail_rejection", true));
-    check_false(turbo_json_get_bool(index_json, "replan_requested", true));
-    check_true(turbo_json_is_null(turbo_json_object_get(index_json, "current_failure_reason")));
-    check_str_eq(turbo_json_get_string(index_json, "current_review_note"), "need review");
-    check_true(turbo_json_get_bool(index_json, "has_pending_review", false));
-    check_true(turbo_json_get_bool(index_json, "has_handoff", false));
-    check_str_eq(turbo_json_get_string(index_json, "active_agent"), "planner");
+    check_str_eq(json_get_string(current_checkpoint_summary, "id"),
+                 json_get_string(summary, "checkpoint_id"));
+    check_str_eq(json_get_string(index_json, "latest_run_status"), "interrupted");
+    check_not_null(json_get_string(index_json, "latest_run_updated_at"));
+    check_str_eq(json_get_string(index_json, "pending_run_id"),
+                 json_get_string(summary, "run_id"));
+    check_str_eq(json_get_string(index_json, "pending_checkpoint_id"),
+                 json_get_string(summary, "checkpoint_id"));
+    check_false(json_get_bool(index_json, "has_failure", true));
+    check_false(json_get_bool(index_json, "has_model_error", true));
+    check_false(json_get_bool(index_json, "has_guardrail_rejection", true));
+    check_false(json_get_bool(index_json, "replan_requested", true));
+    check_true(json_is_null(json_object_get(index_json, "current_failure_reason")));
+    check_str_eq(json_get_string(index_json, "current_review_note"), "need review");
+    check_true(json_get_bool(index_json, "has_pending_review", false));
+    check_true(json_get_bool(index_json, "has_handoff", false));
+    check_str_eq(json_get_string(index_json, "active_agent"), "planner");
     check_not_null(counts);
-    check_int_eq(turbo_json_get_int(counts, "runs", -1), 1);
-    check_int_eq(turbo_json_get_int(counts, "interrupted_runs", -1), 1);
-    check_int_eq(turbo_json_get_int(counts, "completed_runs", -1), 0);
-    check_int_eq(turbo_json_get_int(counts, "current_run_checkpoints", -1), 1);
-    check_int_eq(turbo_json_get_int(counts, "branches", -1), 1);
-    check_int_eq(turbo_json_get_int(counts, "edges", -1), 0);
-    check_int_eq(turbo_json_get_int(counts, "history_events", -1),
-                 (int)turbo_json_array_size(history_events));
-    check_int_eq(turbo_json_get_int(counts, "trace_events", -1),
-                 (int)turbo_json_array_size(trace_events));
+    check_int_eq(json_get_int(counts, "runs", -1), 1);
+    check_int_eq(json_get_int(counts, "interrupted_runs", -1), 1);
+    check_int_eq(json_get_int(counts, "completed_runs", -1), 0);
+    check_int_eq(json_get_int(counts, "current_run_checkpoints", -1), 1);
+    check_int_eq(json_get_int(counts, "branches", -1), 1);
+    check_int_eq(json_get_int(counts, "edges", -1), 0);
+    check_int_eq(json_get_int(counts, "history_events", -1),
+                 (int)json_array_size(history_events));
+    check_int_eq(json_get_int(counts, "trace_events", -1),
+                 (int)json_array_size(trace_events));
 
-    turbo_free_json(&index_json);
-    turbo_free_json(&summary);
+    json_free(index_json); index_json = NULL;
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -1097,52 +1098,52 @@ spec("turbo agent runtime api") {
                  0);
     turbo_runtime_json_destroy(result_state);
     result_state = NULL;
-    check_str_eq(turbo_json_get_string(interrupted_summary, "status"), "interrupted");
+    check_str_eq(json_get_string(interrupted_summary, "status"), "interrupted");
 
     options.interrupt_before_nodes = NULL;
     options.interrupt_before_count = 0;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, completed_state, &options, &(turbo_agent_runtime_exec_options_t){ .thread_id = "thread_complete" }, &completed_summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(completed_summary, "status"), "completed");
+    check_str_eq(json_get_string(completed_summary, "status"), "completed");
 
     check_int_eq(turbo_agent_runtime_list_observability_indexes(runtime, &indexes_json), 0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
-    check_true(turbo_json_array_size(indexes_json) >= 2);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
+    check_true(json_array_size(indexes_json) >= 2);
 
     interrupted_index = find_runtime_observability_index(indexes_json, "thread_interrupt");
     completed_index = find_runtime_observability_index(indexes_json, "thread_complete");
     check_not_null(interrupted_index);
     check_not_null(completed_index);
 
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(interrupted_index, "thread"), "id"),
+    check_str_eq(json_get_string(json_object_get(interrupted_index, "thread"), "id"),
                  "thread_interrupt");
     check_str_eq(
-        turbo_json_get_string(turbo_json_object_get(interrupted_index, "latest_run"), "id"),
-        turbo_json_get_string(interrupted_summary, "run_id"));
-    check_str_eq(turbo_json_get_string(interrupted_index, "current_status"), "interrupted");
-    check_str_eq(turbo_json_get_string(interrupted_index, "current_interrupt_reason"),
+        json_get_string(json_object_get(interrupted_index, "latest_run"), "id"),
+        json_get_string(interrupted_summary, "run_id"));
+    check_str_eq(json_get_string(interrupted_index, "current_status"), "interrupted");
+    check_str_eq(json_get_string(interrupted_index, "current_interrupt_reason"),
                  "review_required");
-    check_str_eq(turbo_json_get_string(interrupted_index, "pending_run_id"),
-                 turbo_json_get_string(interrupted_summary, "run_id"));
+    check_str_eq(json_get_string(interrupted_index, "pending_run_id"),
+                 json_get_string(interrupted_summary, "run_id"));
     check_str_eq(
-        turbo_json_get_string(turbo_json_object_get(interrupted_index, "current_checkpoint_summary"),
+        json_get_string(json_object_get(interrupted_index, "current_checkpoint_summary"),
                               "id"),
-        turbo_json_get_string(interrupted_summary, "checkpoint_id"));
-    interrupted_counts = turbo_json_object_get(interrupted_index, "counts");
+        json_get_string(interrupted_summary, "checkpoint_id"));
+    interrupted_counts = json_object_get(interrupted_index, "counts");
     check_not_null(interrupted_counts);
-    check_int_eq(turbo_json_get_int(interrupted_counts, "runs", -1), 1);
+    check_int_eq(json_get_int(interrupted_counts, "runs", -1), 1);
 
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(completed_index, "thread"), "id"),
+    check_str_eq(json_get_string(json_object_get(completed_index, "thread"), "id"),
                  "thread_complete");
-    check_str_eq(turbo_json_get_string(completed_index, "current_status"), "completed");
-    check_str_eq(turbo_json_get_string(completed_index, "latest_run_status"), "completed");
-    check_true(turbo_json_is_null(turbo_json_object_get(completed_index, "pending_run")));
+    check_str_eq(json_get_string(completed_index, "current_status"), "completed");
+    check_str_eq(json_get_string(completed_index, "latest_run_status"), "completed");
+    check_true(json_is_null(json_object_get(completed_index, "pending_run")));
     check_true(
-        turbo_json_is_null(turbo_json_object_get(completed_index, "current_checkpoint_summary")));
+        json_is_null(json_object_get(completed_index, "current_checkpoint_summary")));
 
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&completed_summary);
-    turbo_free_json(&interrupted_summary);
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(completed_summary); completed_summary = NULL;
+    json_free(interrupted_summary); interrupted_summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(completed_state);
     turbo_runtime_json_destroy(interrupted_state);
@@ -1206,144 +1207,144 @@ spec("turbo agent runtime api") {
     query_fixture =
         turbo_agent_test_find_named_fixture_entry(query_fixture_root, "review_threads_sorted");
     check_not_null(query_fixture);
-    filters_json = turbo_json_clone(turbo_json_object_get(query_fixture, "filters"));
+    filters_json = json_clone(json_object_get(query_fixture, "filters"));
     check_not_null(filters_json);
     check_int_eq(
         turbo_agent_runtime_list_observability_indexes_filtered(runtime, filters_json, &indexes_json),
         0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
     thread_ids_json = runtime_observability_thread_ids_json(indexes_json);
     check_not_null(thread_ids_json);
     runtime_check_string_array_equals_fixture(thread_ids_json,
-                                              turbo_json_object_get(query_fixture,
+                                              json_object_get(query_fixture,
                                                                     "expected_thread_ids"));
     matched_index = find_runtime_observability_index(indexes_json, "thread_interrupt");
     check_not_null(matched_index);
-    check_str_eq(turbo_json_get_string(matched_index, "current_status"), "interrupted");
-    check_true(turbo_json_get_bool(matched_index, "has_pending_review", false));
-    check_true(turbo_json_get_bool(matched_index, "has_handoff", false));
-    check_str_eq(turbo_json_get_string(matched_index, "active_agent"), "planner");
-    turbo_free_json(&thread_ids_json);
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&filters_json);
+    check_str_eq(json_get_string(matched_index, "current_status"), "interrupted");
+    check_true(json_get_bool(matched_index, "has_pending_review", false));
+    check_true(json_get_bool(matched_index, "has_handoff", false));
+    check_str_eq(json_get_string(matched_index, "active_agent"), "planner");
+    json_free(thread_ids_json); thread_ids_json = NULL;
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(filters_json); filters_json = NULL;
 
-    filters_json = turbo_json_create_object();
+    filters_json = json_create_object();
     check_not_null(filters_json);
-    turbo_json_object_set_string(filters_json, "status", "completed");
-    turbo_json_object_set_bool(filters_json, "has_handoff", false);
+    json_object_set_string(filters_json, "status", "completed");
+    json_object_set_bool(filters_json, "has_handoff", false);
     check_int_eq(
         turbo_agent_runtime_list_observability_indexes_filtered(runtime, filters_json, &indexes_json),
         0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
-    check_int_eq((int)turbo_json_array_size(indexes_json), 1);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
+    check_int_eq((int)json_array_size(indexes_json), 1);
     matched_index = find_runtime_observability_index(indexes_json, "thread_complete");
     check_not_null(matched_index);
-    check_str_eq(turbo_json_get_string(matched_index, "current_status"), "completed");
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&filters_json);
+    check_str_eq(json_get_string(matched_index, "current_status"), "completed");
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(filters_json); filters_json = NULL;
 
     query_fixture =
         turbo_agent_test_find_named_fixture_entry(query_fixture_root, "replan_error_threads");
     check_not_null(query_fixture);
-    filters_json = turbo_json_clone(turbo_json_object_get(query_fixture, "filters"));
+    filters_json = json_clone(json_object_get(query_fixture, "filters"));
     check_not_null(filters_json);
     check_int_eq(
         turbo_agent_runtime_list_observability_indexes_filtered(runtime, filters_json, &indexes_json),
         0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
     thread_ids_json = runtime_observability_thread_ids_json(indexes_json);
     check_not_null(thread_ids_json);
     runtime_check_string_array_equals_fixture(thread_ids_json,
-                                              turbo_json_object_get(query_fixture,
+                                              json_object_get(query_fixture,
                                                                     "expected_thread_ids"));
     matched_index = find_runtime_observability_index(indexes_json, "thread_replan");
     check_not_null(matched_index);
-    check_true(turbo_json_get_bool(matched_index, "has_model_error", false));
-    check_true(turbo_json_get_bool(matched_index, "has_guardrail_rejection", false));
-    check_true(turbo_json_get_bool(matched_index, "replan_requested", false));
-    check_str_eq(turbo_json_get_string(matched_index, "current_interrupt_reason"),
+    check_true(json_get_bool(matched_index, "has_model_error", false));
+    check_true(json_get_bool(matched_index, "has_guardrail_rejection", false));
+    check_true(json_get_bool(matched_index, "replan_requested", false));
+    check_str_eq(json_get_string(matched_index, "current_interrupt_reason"),
                  "replan_requested");
-    check_str_eq(turbo_json_get_string(matched_index, "latest_run_status"), "interrupted");
-    turbo_free_json(&thread_ids_json);
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&filters_json);
+    check_str_eq(json_get_string(matched_index, "latest_run_status"), "interrupted");
+    json_free(thread_ids_json); thread_ids_json = NULL;
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(filters_json); filters_json = NULL;
 
-    filters_json = turbo_json_create_object();
+    filters_json = json_create_object();
     check_not_null(filters_json);
-    turbo_json_object_set_string(filters_json, "thread_id_prefix", "thread_rep");
+    json_object_set_string(filters_json, "thread_id_prefix", "thread_rep");
     check_int_eq(
         turbo_agent_runtime_list_observability_indexes_filtered(runtime, filters_json, &indexes_json),
         0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
-    check_int_eq((int)turbo_json_array_size(indexes_json), 1);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
+    check_int_eq((int)json_array_size(indexes_json), 1);
     matched_index = find_runtime_observability_index(indexes_json, "thread_replan");
     check_not_null(matched_index);
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&filters_json);
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(filters_json); filters_json = NULL;
 
-    filters_json = turbo_json_create_object();
+    filters_json = json_create_object();
     check_not_null(filters_json);
-    turbo_json_object_set_string(filters_json, "latest_run_updated_after",
+    json_object_set_string(filters_json, "latest_run_updated_after",
                                  "9999-12-31T23:59:59Z");
     check_int_eq(
         turbo_agent_runtime_list_observability_indexes_filtered(runtime, filters_json, &indexes_json),
         0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
-    check_int_eq((int)turbo_json_array_size(indexes_json), 0);
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&filters_json);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
+    check_int_eq((int)json_array_size(indexes_json), 0);
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(filters_json); filters_json = NULL;
 
     query_fixture =
         turbo_agent_test_find_named_fixture_entry(query_fixture_root, "thread_id_sorted_limit");
     check_not_null(query_fixture);
-    filters_json = turbo_json_clone(turbo_json_object_get(query_fixture, "filters"));
+    filters_json = json_clone(json_object_get(query_fixture, "filters"));
     check_not_null(filters_json);
     check_int_eq(
         turbo_agent_runtime_list_observability_indexes_filtered(runtime, filters_json, &indexes_json),
         0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
     thread_ids_json = runtime_observability_thread_ids_json(indexes_json);
     check_not_null(thread_ids_json);
     runtime_check_string_array_equals_fixture(thread_ids_json,
-                                              turbo_json_object_get(query_fixture,
+                                              json_object_get(query_fixture,
                                                                     "expected_thread_ids"));
-    turbo_free_json(&thread_ids_json);
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&filters_json);
+    json_free(thread_ids_json); thread_ids_json = NULL;
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(filters_json); filters_json = NULL;
 
-    filters_json = turbo_json_create_object();
+    filters_json = json_create_object();
     check_not_null(filters_json);
-    turbo_json_object_set_string(filters_json, "sort_by", "thread_id");
-    turbo_json_object_set_string(filters_json, "sort_order", "desc");
-    turbo_json_object_set_number(filters_json, "limit", 1);
+    json_object_set_string(filters_json, "sort_by", "thread_id");
+    json_object_set_string(filters_json, "sort_order", "desc");
+    json_object_set_number(filters_json, "limit", 1);
     check_int_eq(
         turbo_agent_runtime_list_observability_indexes_filtered(runtime, filters_json, &indexes_json),
         0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
-    check_int_eq((int)turbo_json_array_size(indexes_json), 1);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
+    check_int_eq((int)json_array_size(indexes_json), 1);
     check_str_eq(
-        turbo_json_get_string(turbo_json_object_get(turbo_json_array_get(indexes_json, 0), "thread"),
+        json_get_string(json_object_get(json_array_get(indexes_json, 0), "thread"),
                               "id"),
         "thread_replan");
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&filters_json);
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(filters_json); filters_json = NULL;
 
-    filters_json = turbo_json_create_object();
+    filters_json = json_create_object();
     check_not_null(filters_json);
-    turbo_json_object_set_string(filters_json, "latest_run_updated_before",
+    json_object_set_string(filters_json, "latest_run_updated_before",
                                  "0000-01-01T00:00:00Z");
     check_int_eq(
         turbo_agent_runtime_list_observability_indexes_filtered(runtime, filters_json, &indexes_json),
         0);
-    check_true(turbo_json_type(indexes_json) == TURBO_JSON_ARRAY);
-    check_int_eq((int)turbo_json_array_size(indexes_json), 0);
+    check_true(json_type(indexes_json) == JSON_ARRAY);
+    check_int_eq((int)json_array_size(indexes_json), 0);
 
-    turbo_free_json(&indexes_json);
-    turbo_free_json(&filters_json);
-    turbo_free_json(&query_fixture_root);
-    turbo_free_json(&replan_summary);
-    turbo_free_json(&completed_summary);
-    turbo_free_json(&interrupted_summary);
+    json_free(indexes_json); indexes_json = NULL;
+    json_free(filters_json); filters_json = NULL;
+    json_free(query_fixture_root); query_fixture_root = NULL;
+    json_free(replan_summary); replan_summary = NULL;
+    json_free(completed_summary); completed_summary = NULL;
+    json_free(interrupted_summary); interrupted_summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(replan_error_state);
     turbo_runtime_json_destroy(completed_state);
@@ -1370,23 +1371,23 @@ spec("turbo agent runtime api") {
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, NULL, &(turbo_agent_runtime_exec_options_t){ .thread_id = "" }, &summary, &result_state),
                  0);
     check_int_eq(turbo_agent_runtime_get_thread_trace_events_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &thread_trace_events),
+                     runtime, json_get_string(summary, "thread_id"), &thread_trace_events),
                  0);
     check_not_null(thread_trace_events);
     check_size_eq(turbo_runtime_json_value_size(thread_trace_events), 1);
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(
-                         turbo_json_array_get(thread_trace_events, 0), "name")),
+                     json_object_get(
+                         json_array_get(thread_trace_events, 0), "name")),
                  "seed_trace");
     check_int_eq(turbo_agent_runtime_get_run_trace_events_json_value(
-                     runtime, turbo_json_get_string(summary, "run_id"), &run_trace_events),
+                     runtime, json_get_string(summary, "run_id"), &run_trace_events),
                  0);
     check_not_null(run_trace_events);
     check_size_eq(turbo_runtime_json_value_size(run_trace_events), 1);
 
     turbo_runtime_json_destroy(run_trace_events);
     turbo_runtime_json_destroy(thread_trace_events);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -1403,7 +1404,7 @@ spec("turbo agent runtime api") {
         runtime_load_fixture_json("observability_queries.golden.json");
     json_value_t *subgraph_result_fixture =
         runtime_load_fixture_json("subgraph_result.golden.json");
-    json_value_t *timeline = turbo_json_clone(timeline_json);
+    json_value_t *timeline = json_clone(timeline_json);
     const json_value_t *query_fixture;
     const json_value_t *subgraph_completed_fixture;
     const json_value_t *subgraph_interrupted_fixture;
@@ -1419,42 +1420,42 @@ spec("turbo agent runtime api") {
     runtime_check_thread_timeline_json_value(timeline, "thr_123", "run_123", "ckpt_123", 1, 1, 1, 1);
     runtime_check_branch_tree(branch_tree, "thr_123", "run_456", "run_456", NULL, NULL, 2, 1);
     runtime_check_branch_tree_branch(
-        runtime_find_branch_tree_branch(turbo_json_object_get(branch_tree, "branches"), "run_123"),
+        runtime_find_branch_tree_branch(json_object_get(branch_tree, "branches"), "run_123"),
         "run_123", NULL, NULL, "ckpt_123");
     runtime_check_branch_tree_branch(
-        runtime_find_branch_tree_branch(turbo_json_object_get(branch_tree, "branches"), "run_456"),
+        runtime_find_branch_tree_branch(json_object_get(branch_tree, "branches"), "run_456"),
         "run_456", "run_123", "ckpt_123", "ckpt_123");
     runtime_check_branch_tree_edge(
-        runtime_find_branch_tree_edge(turbo_json_object_get(branch_tree, "edges"), "ckpt_123",
+        runtime_find_branch_tree_edge(json_object_get(branch_tree, "edges"), "ckpt_123",
                                       "run_456"),
         "ckpt_123", "run_456");
     query_fixture =
         turbo_agent_test_find_named_fixture_entry(observability_queries, "thread_id_sorted_limit");
     check_not_null(query_fixture);
-    check_true(turbo_json_type(turbo_json_object_get(query_fixture, "filters")) ==
-               TURBO_JSON_OBJECT);
-    check_true(turbo_json_type(turbo_json_object_get(query_fixture, "expected_thread_ids")) ==
-               TURBO_JSON_ARRAY);
+    check_true(json_type(json_object_get(query_fixture, "filters")) ==
+               JSON_OBJECT);
+    check_true(json_type(json_object_get(query_fixture, "expected_thread_ids")) ==
+               JSON_ARRAY);
     subgraph_completed_fixture =
         turbo_agent_test_find_named_fixture_entry(subgraph_result_fixture, "completed");
     subgraph_interrupted_fixture =
         turbo_agent_test_find_named_fixture_entry(subgraph_result_fixture, "interrupted");
     check_not_null(subgraph_completed_fixture);
     check_not_null(subgraph_interrupted_fixture);
-    check_str_eq(turbo_json_get_string(subgraph_completed_fixture, "kind"), "subgraph_result");
-    check_true(turbo_json_get_bool(subgraph_completed_fixture, "completed", false));
-    check_true(turbo_json_is_null(
-        turbo_json_object_get(subgraph_completed_fixture, "pending_checkpoint_id")));
-    check_str_eq(turbo_json_get_string(subgraph_interrupted_fixture, "status"), "interrupted");
-    check_true(turbo_json_get_bool(subgraph_interrupted_fixture, "interrupted", false));
-    check_str_eq(turbo_json_get_string(subgraph_interrupted_fixture, "pending_node"), "review");
+    check_str_eq(json_get_string(subgraph_completed_fixture, "kind"), "subgraph_result");
+    check_true(json_get_bool(subgraph_completed_fixture, "completed", false));
+    check_true(json_is_null(
+        json_object_get(subgraph_completed_fixture, "pending_checkpoint_id")));
+    check_str_eq(json_get_string(subgraph_interrupted_fixture, "status"), "interrupted");
+    check_true(json_get_bool(subgraph_interrupted_fixture, "interrupted", false));
+    check_str_eq(json_get_string(subgraph_interrupted_fixture, "pending_node"), "review");
 
     turbo_runtime_json_destroy(timeline);
-    turbo_free_json(&subgraph_result_fixture);
-    turbo_free_json(&observability_queries);
-    turbo_free_json(&timeline_json);
-    turbo_free_json(&branch_tree);
-    turbo_free_json(&checkpoint_context);
+    json_free(subgraph_result_fixture); subgraph_result_fixture = NULL;
+    json_free(observability_queries); observability_queries = NULL;
+    json_free(timeline_json); timeline_json = NULL;
+    json_free(branch_tree); branch_tree = NULL;
+    json_free(checkpoint_context); checkpoint_context = NULL;
   }
 
   it("should merge TurboParser JSON-native state patches through checkpoint replay convenience") {
@@ -1485,81 +1486,81 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
-    checkpoint_id = turbo_json_get_string(summary, "checkpoint_id");
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
+    checkpoint_id = json_get_string(summary, "checkpoint_id");
     check_not_null(checkpoint_id);
 
     check_int_eq(turbo_agent_runtime_prepare_checkpoint_state_override_json_value(runtime, checkpoint_id, patch,
                                                                   &patched_state),
                  0);
     check_not_null(patched_state);
-    profile = turbo_json_object_get(patched_state, "profile");
-    settings = profile ? turbo_json_object_get(profile, "settings") : NULL;
-    labels = profile ? turbo_json_object_get(profile, "labels") : NULL;
-    flags = turbo_json_object_get(patched_state, "flags");
+    profile = json_object_get(patched_state, "profile");
+    settings = profile ? json_object_get(profile, "settings") : NULL;
+    labels = profile ? json_object_get(profile, "labels") : NULL;
+    flags = json_object_get(patched_state, "flags");
     check_not_null(profile);
     check_not_null(settings);
     check_not_null(labels);
     check_not_null(flags);
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(profile, "name")),
+                     json_object_get(profile, "name")),
                  "alpha");
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(settings, "theme")),
+                     json_object_get(settings, "theme")),
                  "dark");
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(settings, "locale")),
+                     json_object_get(settings, "locale")),
                  "en");
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(settings, "extra")),
+                     json_object_get(settings, "extra")),
                  "enabled");
-    check_true(turbo_json_type(
-                   turbo_json_object_get(settings, "notes")) ==
-               TURBO_JSON_NULL);
+    check_true(json_type(
+                   json_object_get(settings, "notes")) ==
+               JSON_NULL);
     check_size_eq(turbo_runtime_json_value_size(labels), 2);
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_array_get(labels, 0)),
+                     json_array_get(labels, 0)),
                  "patched");
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_array_get(labels, 1)),
+                     json_array_get(labels, 1)),
                  "v3");
     check_size_eq(turbo_runtime_json_value_size(flags), 2);
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_array_get(flags, 0)),
+                     json_array_get(flags, 0)),
                  "flag-a");
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_array_get(flags, 1)),
+                     json_array_get(flags, 1)),
                  "flag-b");
     check_true(turbo_runtime_json_value_as_int64(
-                   turbo_json_object_get(patched_state, "patch_version"), 0) == 3);
+                   json_object_get(patched_state, "patch_version"), 0) == 3);
 
     options.interrupt_before_nodes = NULL;
     options.interrupt_before_count = 0;
     check_int_eq(turbo_agent_runtime_resume_state_patch_json_value_graph(
                      runtime, graph, checkpoint_id, patch, &options, &resumed_summary, &resumed_state),
                  0);
-    check_str_eq(turbo_json_get_string(resumed_summary, "status"), "completed");
+    check_str_eq(json_get_string(resumed_summary, "status"), "completed");
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(resumed_state, "visited_end"), 0));
+        json_object_get(resumed_state, "visited_end"), 0));
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(
-                         turbo_json_object_get(
-                             turbo_json_object_get(resumed_state, "profile"),
+                     json_object_get(
+                         json_object_get(
+                             json_object_get(resumed_state, "profile"),
                              "settings"),
                          "theme")),
                  "dark");
-    check_true(turbo_json_type(
-                   turbo_json_object_get(
-                       turbo_json_object_get(
-                           turbo_json_object_get(resumed_state, "profile"),
+    check_true(json_type(
+                   json_object_get(
+                       json_object_get(
+                           json_object_get(resumed_state, "profile"),
                            "settings"),
-                       "notes")) == TURBO_JSON_NULL);
+                       "notes")) == JSON_NULL);
 
     turbo_runtime_json_destroy(resumed_state);
     turbo_runtime_json_destroy(patched_state);
     turbo_runtime_json_destroy(patch);
-    turbo_free_json(&resumed_summary);
-    turbo_free_json(&summary);
+    json_free(resumed_summary); resumed_summary = NULL;
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -1588,25 +1589,25 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
     check_int_eq(turbo_agent_runtime_get_thread_state_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &thread_state),
+                     runtime, json_get_string(summary, "thread_id"), &thread_state),
                  0);
     replay_override = create_override_from_result(thread_state, 1);
     check_not_null(replay_override);
     check_int_eq(turbo_agent_runtime_resume_thread_json_value_graph(
-                     runtime, graph, turbo_json_get_string(summary, "thread_id"), replay_override,
+                     runtime, graph, json_get_string(summary, "thread_id"), replay_override,
                      NULL, &replay_summary, &replay_state),
                  0);
-    check_str_eq(turbo_json_get_string(replay_summary, "status"), "completed");
+    check_str_eq(json_get_string(replay_summary, "status"), "completed");
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(replay_state, "visited_end"), 0));
+        json_object_get(replay_state, "visited_end"), 0));
 
-    turbo_free_json(&replay_summary);
+    json_free(replay_summary); replay_summary = NULL;
     turbo_runtime_json_destroy(replay_state);
     turbo_runtime_json_destroy(replay_override);
     turbo_runtime_json_destroy(thread_state);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -1648,13 +1649,13 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
-    check_str_eq(turbo_json_get_string(summary, "interrupt_reason"), "review_required");
-    check_str_eq(turbo_json_get_string(summary, "pending_node"), "review");
-    check_str_eq(turbo_json_get_string(summary, "pending_action"), "review");
-    check_size_eq(turbo_json_array_size(turbo_json_object_get(summary, "available_commands")), 6);
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
+    check_str_eq(json_get_string(summary, "interrupt_reason"), "review_required");
+    check_str_eq(json_get_string(summary, "pending_node"), "review");
+    check_str_eq(json_get_string(summary, "pending_action"), "review");
+    check_size_eq(json_array_size(json_object_get(summary, "available_commands")), 6);
     check_size_eq(
-        turbo_json_array_size(turbo_json_object_get(summary, "available_command_descriptors")), 6);
+        json_array_size(json_object_get(summary, "available_command_descriptors")), 6);
     {
       const json_value_t *approve_descriptor =
           runtime_find_command_descriptor(summary, "approve_review");
@@ -1680,80 +1681,80 @@ spec("turbo agent runtime api") {
       check_not_null(request_replan_descriptor);
       check_not_null(append_feedback_descriptor);
       check_not_null(override_descriptor);
-      check_str_eq(turbo_json_get_string(approve_descriptor, "label"), "Approve Review");
-      check_str_eq(turbo_json_get_string(approve_descriptor, "category"), "review");
-      check_str_eq(turbo_json_get_string(approve_descriptor, "input_mode"), "none");
-      check_false(turbo_json_get_bool(approve_descriptor, "requires_input", true));
-      check_str_eq(turbo_json_get_string(approve_descriptor, "suggested_title"),
+      check_str_eq(json_get_string(approve_descriptor, "label"), "Approve Review");
+      check_str_eq(json_get_string(approve_descriptor, "category"), "review");
+      check_str_eq(json_get_string(approve_descriptor, "input_mode"), "none");
+      check_false(json_get_bool(approve_descriptor, "requires_input", true));
+      check_str_eq(json_get_string(approve_descriptor, "suggested_title"),
                    "Approve Review");
-      check_str_eq(turbo_json_get_string(approve_descriptor, "resume_mode"), "resume_or_fork");
-      approve_args_schema = turbo_json_object_get(approve_descriptor, "args_schema");
-      check_str_eq(turbo_json_get_string(approve_args_schema, "type"), "object");
-      check_str_eq(turbo_json_get_string(request_replan_descriptor, "primary_key"), "reason");
+      check_str_eq(json_get_string(approve_descriptor, "resume_mode"), "resume_or_fork");
+      approve_args_schema = json_object_get(approve_descriptor, "args_schema");
+      check_str_eq(json_get_string(approve_args_schema, "type"), "object");
+      check_str_eq(json_get_string(request_replan_descriptor, "primary_key"), "reason");
       request_replan_accepted_keys =
-          turbo_json_object_get(request_replan_descriptor, "accepted_keys");
+          json_object_get(request_replan_descriptor, "accepted_keys");
       check_not_null(request_replan_accepted_keys);
       runtime_check_string_array_contains_all(request_replan_accepted_keys,
                                               request_replan_expected_accepts,
                                               sizeof(request_replan_expected_accepts) /
                                                   sizeof(request_replan_expected_accepts[0]));
-      check_false(turbo_json_get_bool(request_replan_descriptor, "supports_json_value", true));
+      check_false(json_get_bool(request_replan_descriptor, "supports_json_value", true));
       runtime_check_command_descriptor_fixture(request_replan_descriptor,
                                                "command_descriptors.golden.json",
                                                "request_replan");
-      check_str_eq(turbo_json_get_string(append_feedback_descriptor, "category"), "input");
-      check_str_eq(turbo_json_get_string(append_feedback_descriptor, "input_mode"), "text");
-      check_true(turbo_json_get_bool(append_feedback_descriptor, "requires_input", false));
-      check_str_eq(turbo_json_get_string(append_feedback_descriptor, "primary_key"), "text");
-      check_str_eq(turbo_json_get_string(append_feedback_descriptor, "suggested_title"),
+      check_str_eq(json_get_string(append_feedback_descriptor, "category"), "input");
+      check_str_eq(json_get_string(append_feedback_descriptor, "input_mode"), "text");
+      check_true(json_get_bool(append_feedback_descriptor, "requires_input", false));
+      check_str_eq(json_get_string(append_feedback_descriptor, "primary_key"), "text");
+      check_str_eq(json_get_string(append_feedback_descriptor, "suggested_title"),
                    "Append Feedback");
-      check_str_eq(turbo_json_get_string(append_feedback_descriptor, "placeholder"),
+      check_str_eq(json_get_string(append_feedback_descriptor, "placeholder"),
                    "Add one short feedback message for the next run.");
-      check_str_eq(turbo_json_get_string(append_feedback_descriptor, "success_state_hint"),
+      check_str_eq(json_get_string(append_feedback_descriptor, "success_state_hint"),
                    "Appends one user-visible feedback message to the canonical input.");
       append_feedback_accepted_keys =
-          turbo_json_object_get(append_feedback_descriptor, "accepted_keys");
+          json_object_get(append_feedback_descriptor, "accepted_keys");
       check_not_null(append_feedback_accepted_keys);
       runtime_check_string_array_contains_all(append_feedback_accepted_keys,
                                               append_feedback_expected_accepts,
                                               sizeof(append_feedback_expected_accepts) /
                                                   sizeof(append_feedback_expected_accepts[0]));
-      check_false(turbo_json_get_bool(append_feedback_descriptor, "supports_json_value", true));
+      check_false(json_get_bool(append_feedback_descriptor, "supports_json_value", true));
       feedback_required =
-          turbo_json_object_get(turbo_json_object_get(append_feedback_descriptor, "args_schema"),
+          json_object_get(json_object_get(append_feedback_descriptor, "args_schema"),
                                 "required");
-      check_size_eq(turbo_json_array_size(feedback_required), 1);
-      check_str_eq(turbo_json_string(turbo_json_array_get(feedback_required, 0)), "text");
-      feedback_example_payload = turbo_json_object_get(append_feedback_descriptor, "example_payload");
-      check_true(turbo_json_type(feedback_example_payload) == TURBO_JSON_OBJECT);
-      check_str_eq(turbo_json_get_string(feedback_example_payload, "kind"), "append_feedback");
-      check_str_eq(turbo_json_get_string(feedback_example_payload, "text"), "please add tests");
-      check_str_eq(turbo_json_get_string(override_descriptor, "category"), "output");
-      check_str_eq(turbo_json_get_string(override_descriptor, "input_mode"), "text_or_json");
-      check_true(turbo_json_get_bool(override_descriptor, "requires_input", false));
-      check_str_eq(turbo_json_get_string(override_descriptor, "primary_key"), "text");
-      check_str_eq(turbo_json_get_string(override_descriptor, "suggested_title"),
+      check_size_eq(json_array_size(feedback_required), 1);
+      check_str_eq(json_string(json_array_get(feedback_required, 0)), "text");
+      feedback_example_payload = json_object_get(append_feedback_descriptor, "example_payload");
+      check_true(json_type(feedback_example_payload) == JSON_OBJECT);
+      check_str_eq(json_get_string(feedback_example_payload, "kind"), "append_feedback");
+      check_str_eq(json_get_string(feedback_example_payload, "text"), "please add tests");
+      check_str_eq(json_get_string(override_descriptor, "category"), "output");
+      check_str_eq(json_get_string(override_descriptor, "input_mode"), "text_or_json");
+      check_true(json_get_bool(override_descriptor, "requires_input", false));
+      check_str_eq(json_get_string(override_descriptor, "primary_key"), "text");
+      check_str_eq(json_get_string(override_descriptor, "suggested_title"),
                    "Override Final Output");
-      check_str_eq(turbo_json_get_string(override_descriptor, "placeholder"),
+      check_str_eq(json_get_string(override_descriptor, "placeholder"),
                    "Replace the final output text or provide structured output_json.");
-      check_str_eq(turbo_json_get_string(override_descriptor, "success_state_hint"),
+      check_str_eq(json_get_string(override_descriptor, "success_state_hint"),
                    "Overrides the current final answer with host-provided content.");
-      override_accepted_keys = turbo_json_object_get(override_descriptor, "accepted_keys");
+      override_accepted_keys = json_object_get(override_descriptor, "accepted_keys");
       check_not_null(override_accepted_keys);
       runtime_check_string_array_contains_all(override_accepted_keys, override_expected_accepts,
                                               sizeof(override_expected_accepts) /
                                                   sizeof(override_expected_accepts[0]));
-      check_true(turbo_json_get_bool(override_descriptor, "supports_json_value", false));
-      override_example_payload = turbo_json_object_get(override_descriptor, "example_payload");
-      check_true(turbo_json_type(override_example_payload) == TURBO_JSON_OBJECT);
-      check_str_eq(turbo_json_get_string(override_example_payload, "kind"),
+      check_true(json_get_bool(override_descriptor, "supports_json_value", false));
+      override_example_payload = json_object_get(override_descriptor, "example_payload");
+      check_true(json_type(override_example_payload) == JSON_OBJECT);
+      check_str_eq(json_get_string(override_example_payload, "kind"),
                    "override_final_output");
-      check_str_eq(turbo_json_get_string(override_example_payload, "text"), "Ship it.");
+      check_str_eq(json_get_string(override_example_payload, "text"), "Ship it.");
       override_properties =
-          turbo_json_object_get(turbo_json_object_get(override_descriptor, "args_schema"),
+          json_object_get(json_object_get(override_descriptor, "args_schema"),
                                 "properties");
       check_str_eq(
-          turbo_json_get_string(turbo_json_object_get(override_properties, "output_json"), "type"),
+          json_get_string(json_object_get(override_properties, "output_json"), "type"),
           "object");
       runtime_check_command_descriptor_fixture(append_feedback_descriptor,
                                                "command_descriptors.golden.json",
@@ -1762,14 +1763,14 @@ spec("turbo agent runtime api") {
                                                "command_descriptors.golden.json",
                                                "override_final_output");
     }
-    first_checkpoint_id = turbo_json_get_string(summary, "checkpoint_id");
-    run_id = turbo_json_get_string(summary, "run_id");
+    first_checkpoint_id = json_get_string(summary, "checkpoint_id");
+    run_id = json_get_string(summary, "run_id");
     check_not_null(first_checkpoint_id);
     check_int_eq(turbo_agent_runtime_get_checkpoint(runtime, first_checkpoint_id, &checkpoint), 0);
-    check_not_null(turbo_json_object_get(checkpoint, "control_snapshot"));
-    check_not_null(turbo_json_object_get(checkpoint, "workflow_snapshot"));
-    check_not_null(turbo_json_object_get(checkpoint, "events"));
-    turbo_free_json(&checkpoint);
+    check_not_null(json_object_get(checkpoint, "control_snapshot"));
+    check_not_null(json_object_get(checkpoint, "workflow_snapshot"));
+    check_not_null(json_object_get(checkpoint, "events"));
+    json_free(checkpoint); checkpoint = NULL;
 
     override = create_override_from_result(result_state, 1);
     turbo_runtime_json_destroy(result_state);
@@ -1779,13 +1780,13 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_resume(runtime, graph, override, &options, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = first_checkpoint_id }, &summary2, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary2, "status"), "interrupted");
-    second_checkpoint_id = turbo_json_get_string(summary2, "checkpoint_id");
+    check_str_eq(json_get_string(summary2, "status"), "interrupted");
+    second_checkpoint_id = json_get_string(summary2, "checkpoint_id");
     check_not_null(second_checkpoint_id);
     check_int_eq(turbo_agent_runtime_get_checkpoint(runtime, second_checkpoint_id, &checkpoint), 0);
-    check_str_eq(turbo_json_get_string(checkpoint, "parent_checkpoint_id"), first_checkpoint_id);
-    check_int_eq((int)turbo_json_get_double(checkpoint, "seq", 0), 2);
-    turbo_free_json(&checkpoint);
+    check_str_eq(json_get_string(checkpoint, "parent_checkpoint_id"), first_checkpoint_id);
+    check_int_eq((int)json_get_double(checkpoint, "seq", 0), 2);
+    json_free(checkpoint); checkpoint = NULL;
 
     check_int_eq(turbo_agent_runtime_load_history_events_json_value(runtime, run_id, NULL, &history), 0);
     check_size_eq(turbo_runtime_json_value_size(history), 6);
@@ -1798,7 +1799,7 @@ spec("turbo agent runtime api") {
     turbo_runtime_json_destroy(history);
     history = NULL;
     check_int_eq(turbo_agent_runtime_load_thread_history_events_json_value(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &history),
+                     runtime, json_get_string(summary, "thread_id"), &history),
                  0);
     check_size_eq(turbo_runtime_json_value_size(history), 6);
     turbo_runtime_json_destroy(history);
@@ -1807,9 +1808,9 @@ spec("turbo agent runtime api") {
     check_int_eq(turbo_agent_runtime_get_checkpoint_context(runtime, second_checkpoint_id,
                                                             &checkpoint_context),
                  0);
-    runtime_check_checkpoint_context(checkpoint_context, turbo_json_get_string(summary, "thread_id"),
+    runtime_check_checkpoint_context(checkpoint_context, json_get_string(summary, "thread_id"),
                                      run_id, second_checkpoint_id, first_checkpoint_id, 1);
-    turbo_free_json(&checkpoint_context);
+    json_free(checkpoint_context); checkpoint_context = NULL;
     checkpoint_context = NULL;
 
     turbo_runtime_json_destroy(result_state);
@@ -1818,84 +1819,84 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 0;
     check_int_eq(turbo_agent_runtime_exec_fork(runtime, graph, override, &options, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = first_checkpoint_id }, &summary3, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary3, "status"), "completed");
-    check_true(turbo_json_is_null(turbo_json_object_get(summary3, "interrupt_reason")));
-    check_true(turbo_json_is_null(turbo_json_object_get(summary3, "pending_action")));
-    check_true(turbo_json_is_null(turbo_json_object_get(summary3, "pending_node")));
-    check_size_eq(turbo_json_array_size(turbo_json_object_get(summary3, "available_commands")), 0);
+    check_str_eq(json_get_string(summary3, "status"), "completed");
+    check_true(json_is_null(json_object_get(summary3, "interrupt_reason")));
+    check_true(json_is_null(json_object_get(summary3, "pending_action")));
+    check_true(json_is_null(json_object_get(summary3, "pending_node")));
+    check_size_eq(json_array_size(json_object_get(summary3, "available_commands")), 0);
     check_size_eq(
-        turbo_json_array_size(turbo_json_object_get(summary3, "available_command_descriptors")), 0);
-    check_true(strcmp(turbo_json_get_string(summary3, "run_id"), run_id) != 0);
-    check_int_eq(turbo_agent_runtime_get_run(runtime, turbo_json_get_string(summary3, "run_id"),
+        json_array_size(json_object_get(summary3, "available_command_descriptors")), 0);
+    check_true(strcmp(json_get_string(summary3, "run_id"), run_id) != 0);
+    check_int_eq(turbo_agent_runtime_get_run(runtime, json_get_string(summary3, "run_id"),
                                              &run),
                  0);
-    check_str_eq(turbo_json_get_string(run, "parent_run_id"), run_id);
-    check_str_eq(turbo_json_get_string(run, "forked_from_checkpoint_id"), first_checkpoint_id);
-    turbo_free_json(&run);
+    check_str_eq(json_get_string(run, "parent_run_id"), run_id);
+    check_str_eq(json_get_string(run, "forked_from_checkpoint_id"), first_checkpoint_id);
+    json_free(run); run = NULL;
 
     check_int_eq(turbo_agent_runtime_get_run(runtime, run_id, &run), 0);
-    check_str_eq(turbo_json_get_string(run, "latest_checkpoint_id"), second_checkpoint_id);
-    turbo_free_json(&run);
+    check_str_eq(json_get_string(run, "latest_checkpoint_id"), second_checkpoint_id);
+    json_free(run); run = NULL;
 
     check_int_eq(turbo_agent_runtime_get_latest_run(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &latest_run),
+                     runtime, json_get_string(summary, "thread_id"), &latest_run),
                  0);
-    check_str_eq(turbo_json_get_string(latest_run, "id"), turbo_json_get_string(summary3, "run_id"));
-    turbo_free_json(&latest_run);
+    check_str_eq(json_get_string(latest_run, "id"), json_get_string(summary3, "run_id"));
+    json_free(latest_run); latest_run = NULL;
 
     check_int_eq(turbo_agent_runtime_get_pending_run(
-                     runtime, turbo_json_get_string(summary, "thread_id"), &pending_run),
+                     runtime, json_get_string(summary, "thread_id"), &pending_run),
                  0);
-    check_str_eq(turbo_json_get_string(pending_run, "id"), run_id);
-    turbo_free_json(&pending_run);
+    check_str_eq(json_get_string(pending_run, "id"), run_id);
+    json_free(pending_run); pending_run = NULL;
 
     check_int_eq(turbo_agent_runtime_get_latest_checkpoint(runtime, run_id, &latest_checkpoint), 0);
-    check_str_eq(turbo_json_get_string(latest_checkpoint, "id"), second_checkpoint_id);
-    turbo_free_json(&latest_checkpoint);
+    check_str_eq(json_get_string(latest_checkpoint, "id"), second_checkpoint_id);
+    json_free(latest_checkpoint); latest_checkpoint = NULL;
 
     check_int_eq(turbo_agent_runtime_list_checkpoints(runtime, run_id, &checkpoints), 0);
-    check_size_eq(turbo_json_array_size(checkpoints), 2);
+    check_size_eq(json_array_size(checkpoints), 2);
     check_int_eq(turbo_agent_runtime_list_thread_lineage(runtime,
-                                                         turbo_json_get_string(summary, "thread_id"),
+                                                         json_get_string(summary, "thread_id"),
                                                          &lineage),
                  0);
-    runtime_check_thread_lineage_json_value(lineage, turbo_json_get_string(summary, "thread_id"),
-                                      turbo_json_get_string(summary3, "run_id"), run_id,
+    runtime_check_thread_lineage_json_value(lineage, json_get_string(summary, "thread_id"),
+                                      json_get_string(summary3, "run_id"), run_id,
                                       first_checkpoint_id);
-    check_true(turbo_json_array_size(turbo_json_object_get(lineage, "branches")) >= 2);
+    check_true(json_array_size(json_object_get(lineage, "branches")) >= 2);
     runtime_check_lineage_branch(runtime_find_lineage_branch(
-                                     turbo_json_object_get(lineage, "branches"), NULL),
+                                     json_object_get(lineage, "branches"), NULL),
                                  NULL, NULL, NULL, first_checkpoint_id);
     runtime_check_lineage_branch(runtime_find_lineage_branch(
-                                     turbo_json_object_get(lineage, "branches"), run_id),
+                                     json_object_get(lineage, "branches"), run_id),
                                  run_id, first_checkpoint_id, first_checkpoint_id,
                                  first_checkpoint_id);
-    check_int_eq(turbo_agent_runtime_get_branch_tree(runtime, turbo_json_get_string(summary, "thread_id"),
+    check_int_eq(turbo_agent_runtime_get_branch_tree(runtime, json_get_string(summary, "thread_id"),
                                                      &branch_tree),
                  0);
-    runtime_check_branch_tree(branch_tree, turbo_json_get_string(summary, "thread_id"),
-                              turbo_json_get_string(summary3, "run_id"),
-                              turbo_json_get_string(summary3, "run_id"), NULL, NULL, 2, 1);
+    runtime_check_branch_tree(branch_tree, json_get_string(summary, "thread_id"),
+                              json_get_string(summary3, "run_id"),
+                              json_get_string(summary3, "run_id"), NULL, NULL, 2, 1);
     runtime_check_branch_tree_branch(
-        runtime_find_branch_tree_branch(turbo_json_object_get(branch_tree, "branches"), run_id),
+        runtime_find_branch_tree_branch(json_object_get(branch_tree, "branches"), run_id),
         run_id, NULL, NULL, first_checkpoint_id);
     runtime_check_branch_tree_branch(
-        runtime_find_branch_tree_branch(turbo_json_object_get(branch_tree, "branches"),
-                                        turbo_json_get_string(summary3, "run_id")),
-        turbo_json_get_string(summary3, "run_id"), run_id, first_checkpoint_id,
+        runtime_find_branch_tree_branch(json_object_get(branch_tree, "branches"),
+                                        json_get_string(summary3, "run_id")),
+        json_get_string(summary3, "run_id"), run_id, first_checkpoint_id,
         first_checkpoint_id);
     runtime_check_branch_tree_edge(
-        runtime_find_branch_tree_edge(turbo_json_object_get(branch_tree, "edges"),
+        runtime_find_branch_tree_edge(json_object_get(branch_tree, "edges"),
                                       first_checkpoint_id,
-                                      turbo_json_get_string(summary3, "run_id")),
-        first_checkpoint_id, turbo_json_get_string(summary3, "run_id"));
+                                      json_get_string(summary3, "run_id")),
+        first_checkpoint_id, json_get_string(summary3, "run_id"));
 
-    turbo_free_json(&branch_tree);
-    turbo_free_json(&lineage);
-    turbo_free_json(&checkpoints);
-    turbo_free_json(&summary3);
-    turbo_free_json(&summary2);
-    turbo_free_json(&summary);
+    json_free(branch_tree); branch_tree = NULL;
+    json_free(lineage); lineage = NULL;
+    json_free(checkpoints); checkpoints = NULL;
+    json_free(summary3); summary3 = NULL;
+    json_free(summary2); summary2 = NULL;
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(override);
     turbo_runtime_json_destroy(state);
@@ -1921,12 +1922,12 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
-    check_str_eq(turbo_json_get_string(summary, "active_agent"), "planner");
-    check_str_eq(turbo_json_get_string(summary, "handoff_target_agent"), "executor");
-    check_str_eq(turbo_json_get_string(summary, "handoff_reason"), "delegate execution");
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
+    check_str_eq(json_get_string(summary, "active_agent"), "planner");
+    check_str_eq(json_get_string(summary, "handoff_target_agent"), "executor");
+    check_str_eq(json_get_string(summary, "handoff_reason"), "delegate execution");
 
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -1954,25 +1955,25 @@ spec("turbo agent runtime api") {
 
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, NULL, NULL, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
-    check_true(turbo_json_is_null(turbo_json_object_get(summary, "checkpoint_id")));
-    check_str_eq(turbo_json_get_string(summary, "active_agent"), "executor");
-    check_true(turbo_json_is_null(turbo_json_object_get(summary, "handoff_target_agent")));
-    check_true(turbo_json_is_null(turbo_json_object_get(summary, "handoff_reason")));
+    check_str_eq(json_get_string(summary, "status"), "completed");
+    check_true(json_is_null(json_object_get(summary, "checkpoint_id")));
+    check_str_eq(json_get_string(summary, "active_agent"), "executor");
+    check_true(json_is_null(json_object_get(summary, "handoff_target_agent")));
+    check_true(json_is_null(json_object_get(summary, "handoff_reason")));
 
-    result_json = turbo_json_clone(result_state);
+    result_json = json_clone(result_state);
     check_not_null(result_json);
     runtime_check_completed_supervisor_handoff_state(result_json);
-    check_str_eq(turbo_json_get_string(summary, "active_agent"),
+    check_str_eq(json_get_string(summary, "active_agent"),
                  turbo_agent_state_active_agent(result_json));
 
-    thread_id = turbo_json_get_string(summary, "thread_id");
-    run_id = turbo_json_get_string(summary, "run_id");
+    thread_id = json_get_string(summary, "thread_id");
+    run_id = json_get_string(summary, "run_id");
     check_int_eq(turbo_agent_runtime_get_thread_state_json_value(runtime, thread_id, &thread_state), 0);
     check_int_eq(turbo_agent_runtime_get_run_state_json_value(runtime, run_id, &run_state), 0);
 
-    thread_json = turbo_json_clone(thread_state);
-    run_json = turbo_json_clone(run_state);
+    thread_json = json_clone(thread_state);
+    run_json = json_clone(run_state);
     check_not_null(thread_json);
     check_not_null(run_json);
     runtime_check_completed_supervisor_handoff_state(thread_json);
@@ -1982,10 +1983,10 @@ spec("turbo agent runtime api") {
     check_str_eq(turbo_agent_state_active_agent(run_json),
                  turbo_agent_state_active_agent(result_json));
 
-    turbo_free_json(&run_json);
-    turbo_free_json(&thread_json);
-    turbo_free_json(&result_json);
-    turbo_free_json(&summary);
+    json_free(run_json); run_json = NULL;
+    json_free(thread_json); thread_json = NULL;
+    json_free(result_json); result_json = NULL;
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(run_state);
     turbo_runtime_json_destroy(thread_state);
     turbo_runtime_json_destroy(result_state);
@@ -2018,9 +2019,9 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "interrupted");
-    checkpoint_id = turbo_json_get_string(summary, "checkpoint_id");
-    run_id = turbo_json_get_string(summary, "run_id");
+    check_str_eq(json_get_string(summary, "status"), "interrupted");
+    checkpoint_id = json_get_string(summary, "checkpoint_id");
+    run_id = json_get_string(summary, "run_id");
     check_not_null(checkpoint_id);
 
     override = create_override_from_result(result_state, 1);
@@ -2032,26 +2033,26 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 0;
     check_int_eq(turbo_agent_runtime_exec_resume(runtime, graph, override, &options, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = checkpoint_id }, &resume_summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(resume_summary, "status"), "completed");
-    check_str_eq(turbo_json_get_string(resume_summary, "run_id"), run_id);
+    check_str_eq(json_get_string(resume_summary, "status"), "completed");
+    check_str_eq(json_get_string(resume_summary, "run_id"), run_id);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(result_state, "visited_end"), 0));
+        json_object_get(result_state, "visited_end"), 0));
 
     turbo_runtime_json_destroy(result_state);
     result_state = NULL;
     check_int_eq(turbo_agent_runtime_exec_fork(runtime, graph, override, &options, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = checkpoint_id }, &fork_summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(fork_summary, "status"), "completed");
-    check_true(strcmp(turbo_json_get_string(fork_summary, "run_id"), run_id) != 0);
-    check_int_eq(turbo_agent_runtime_get_run(runtime, turbo_json_get_string(fork_summary, "run_id"),
+    check_str_eq(json_get_string(fork_summary, "status"), "completed");
+    check_true(strcmp(json_get_string(fork_summary, "run_id"), run_id) != 0);
+    check_int_eq(turbo_agent_runtime_get_run(runtime, json_get_string(fork_summary, "run_id"),
                                              &run),
                  0);
-    check_str_eq(turbo_json_get_string(run, "forked_from_checkpoint_id"), checkpoint_id);
+    check_str_eq(json_get_string(run, "forked_from_checkpoint_id"), checkpoint_id);
 
-    turbo_free_json(&run);
-    turbo_free_json(&fork_summary);
-    turbo_free_json(&resume_summary);
-    turbo_free_json(&summary);
+    json_free(run); run = NULL;
+    json_free(fork_summary); fork_summary = NULL;
+    json_free(resume_summary); resume_summary = NULL;
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(override);
     turbo_runtime_json_destroy(state);
@@ -2082,13 +2083,13 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state),
                  0);
-    checkpoint_id = runtime_test_strdup(turbo_json_get_string(summary, "checkpoint_id"));
+    checkpoint_id = runtime_test_strdup(json_get_string(summary, "checkpoint_id"));
     check_not_null(checkpoint_id);
     override = create_override_from_result(result_state, 1);
 
     turbo_runtime_json_destroy(result_state);
     result_state = NULL;
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_agent_runtime_destroy(runtime);
 
     store = turbo_agent_runtime_store_file_create(root_dir);
@@ -2098,13 +2099,13 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 0;
     check_int_eq(turbo_agent_runtime_exec_resume(runtime, graph, override, &options, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = checkpoint_id }, &summary2, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary2, "status"), "completed");
+    check_str_eq(json_get_string(summary2, "status"), "completed");
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(result_state, "visited_end"), 0));
+        json_object_get(result_state, "visited_end"), 0));
 
     free(checkpoint_id);
     free(root_dir);
-    turbo_free_json(&summary2);
+    json_free(summary2); summary2 = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(override);
     turbo_runtime_json_destroy(state);
@@ -2137,43 +2138,43 @@ spec("turbo agent runtime api") {
                                                              NULL, &parent_link, &summary,
                                                              &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "parent_agent_run_id"), "run_parent");
-    check_str_eq(turbo_json_get_string(summary, "parent_tool_call_id"), "call_parent");
-    check_str_eq(turbo_json_get_string(summary, "parent_tool_name"), "delegate");
-    check_str_eq(turbo_json_get_string(summary, "parent_graph_run_id"), "run_graph_parent");
-    check_str_eq(turbo_json_get_string(summary, "call_frame_id"), "frame_parent");
-    check_int_eq(turbo_agent_runtime_get_run(runtime, turbo_json_get_string(summary, "run_id"),
+    check_str_eq(json_get_string(summary, "parent_agent_run_id"), "run_parent");
+    check_str_eq(json_get_string(summary, "parent_tool_call_id"), "call_parent");
+    check_str_eq(json_get_string(summary, "parent_tool_name"), "delegate");
+    check_str_eq(json_get_string(summary, "parent_graph_run_id"), "run_graph_parent");
+    check_str_eq(json_get_string(summary, "call_frame_id"), "frame_parent");
+    check_int_eq(turbo_agent_runtime_get_run(runtime, json_get_string(summary, "run_id"),
                                              &run),
                  0);
-    check_str_eq(turbo_json_get_string(run, "parent_agent_run_id"), "run_parent");
-    check_str_eq(turbo_json_get_string(run, "parent_tool_call_id"), "call_parent");
-    check_str_eq(turbo_json_get_string(run, "parent_tool_name"), "delegate");
-    check_str_eq(turbo_json_get_string(run, "parent_graph_run_id"), "run_graph_parent");
-    check_str_eq(turbo_json_get_string(run, "call_frame_id"), "frame_parent");
+    check_str_eq(json_get_string(run, "parent_agent_run_id"), "run_parent");
+    check_str_eq(json_get_string(run, "parent_tool_call_id"), "call_parent");
+    check_str_eq(json_get_string(run, "parent_tool_name"), "delegate");
+    check_str_eq(json_get_string(run, "parent_graph_run_id"), "run_graph_parent");
+    check_str_eq(json_get_string(run, "call_frame_id"), "frame_parent");
 
     check_int_eq(turbo_agent_runtime_get_checkpoint(
-                     runtime, turbo_json_get_string(summary, "checkpoint_id"), &checkpoint),
+                     runtime, json_get_string(summary, "checkpoint_id"), &checkpoint),
                  0);
-    check_str_eq(turbo_json_get_string(checkpoint, "parent_agent_run_id"), "run_parent");
-    check_str_eq(turbo_json_get_string(checkpoint, "parent_tool_call_id"), "call_parent");
-    check_str_eq(turbo_json_get_string(checkpoint, "parent_tool_name"), "delegate");
-    check_str_eq(turbo_json_get_string(checkpoint, "parent_graph_run_id"),
+    check_str_eq(json_get_string(checkpoint, "parent_agent_run_id"), "run_parent");
+    check_str_eq(json_get_string(checkpoint, "parent_tool_call_id"), "call_parent");
+    check_str_eq(json_get_string(checkpoint, "parent_tool_name"), "delegate");
+    check_str_eq(json_get_string(checkpoint, "parent_graph_run_id"),
                  "run_graph_parent");
-    check_str_eq(turbo_json_get_string(checkpoint, "call_frame_id"), "frame_parent");
+    check_str_eq(json_get_string(checkpoint, "call_frame_id"), "frame_parent");
 
     check_int_eq(turbo_agent_runtime_list_child_runs(runtime, "run_parent", &runs), 0);
-    check_size_eq(turbo_json_array_size(runs), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(runs, 0), "id"),
-                 turbo_json_get_string(summary, "run_id"));
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(runs, 0), "parent_graph_run_id"),
+    check_size_eq(json_array_size(runs), 1);
+    check_str_eq(json_get_string(json_array_get(runs, 0), "id"),
+                 json_get_string(summary, "run_id"));
+    check_str_eq(json_get_string(json_array_get(runs, 0), "parent_graph_run_id"),
                  "run_graph_parent");
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(runs, 0), "call_frame_id"),
+    check_str_eq(json_get_string(json_array_get(runs, 0), "call_frame_id"),
                  "frame_parent");
 
-    turbo_free_json(&runs);
-    turbo_free_json(&checkpoint);
-    turbo_free_json(&run);
-    turbo_free_json(&summary);
+    json_free(runs); runs = NULL;
+    json_free(checkpoint); checkpoint = NULL;
+    json_free(run); run = NULL;
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);
@@ -2208,64 +2209,64 @@ spec("turbo agent runtime api") {
 
     check_int_eq(turbo_agent_runtime_exec_start(runtime, parent_graph, state, NULL, NULL, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
-    parent_run_id = turbo_json_get_string(summary, "run_id");
+    check_str_eq(json_get_string(summary, "status"), "completed");
+    parent_run_id = json_get_string(summary, "run_id");
     check_not_null(parent_run_id);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(result_state, "after_subgraph"), 0));
+        json_object_get(result_state, "after_subgraph"), 0));
 
-    subgraph_result = turbo_json_object_get(result_state, "child_call_result");
+    subgraph_result = json_object_get(result_state, "child_call_result");
     check_not_null(subgraph_result);
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(subgraph_result, "kind")),
+                     json_object_get(subgraph_result, "kind")),
                  "subgraph_result");
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(subgraph_result, "ok"), 0));
+        json_object_get(subgraph_result, "ok"), 0));
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(subgraph_result, "completed"), 0));
+        json_object_get(subgraph_result, "completed"), 0));
     check_false(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(subgraph_result, "interrupted"), 1));
+        json_object_get(subgraph_result, "interrupted"), 1));
     check_false(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(subgraph_result, "failed"), 1));
+        json_object_get(subgraph_result, "failed"), 1));
     check_null(turbo_runtime_json_value_as_string(
-        turbo_json_object_get(subgraph_result, "pending_checkpoint_id")));
+        json_object_get(subgraph_result, "pending_checkpoint_id")));
     check_null(turbo_runtime_json_value_as_string(
-        turbo_json_object_get(subgraph_result, "pending_node")));
+        json_object_get(subgraph_result, "pending_node")));
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(subgraph_result, "parent_agent_run_id")),
+                     json_object_get(subgraph_result, "parent_agent_run_id")),
                  parent_run_id);
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(subgraph_result, "parent_graph_run_id")),
+                     json_object_get(subgraph_result, "parent_graph_run_id")),
                  parent_run_id);
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(subgraph_result, "parent_tool_call_id")),
+                     json_object_get(subgraph_result, "parent_tool_call_id")),
                  "frame_child_call");
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(subgraph_result, "call_frame_id")),
+                     json_object_get(subgraph_result, "call_frame_id")),
                  "frame_child_call");
     child_run_id = turbo_runtime_json_value_as_string(
-        turbo_json_object_get(subgraph_result, "run_id"));
+        json_object_get(subgraph_result, "run_id"));
     check_not_null(child_run_id);
-    child_state = turbo_json_object_get(subgraph_result, "state");
+    child_state = json_object_get(subgraph_result, "state");
     check_not_null(child_state);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(child_state, "child_visited"), 0));
+        json_object_get(child_state, "child_visited"), 0));
 
     check_int_eq(turbo_agent_runtime_get_run(runtime, child_run_id, &child_run), 0);
-    check_str_eq(turbo_json_get_string(child_run, "parent_agent_run_id"), parent_run_id);
-    check_str_eq(turbo_json_get_string(child_run, "parent_graph_run_id"), parent_run_id);
-    check_str_eq(turbo_json_get_string(child_run, "parent_tool_call_id"), "frame_child_call");
-    check_str_eq(turbo_json_get_string(child_run, "call_frame_id"), "frame_child_call");
+    check_str_eq(json_get_string(child_run, "parent_agent_run_id"), parent_run_id);
+    check_str_eq(json_get_string(child_run, "parent_graph_run_id"), parent_run_id);
+    check_str_eq(json_get_string(child_run, "parent_tool_call_id"), "frame_child_call");
+    check_str_eq(json_get_string(child_run, "call_frame_id"), "frame_child_call");
     check_int_eq(turbo_agent_runtime_list_child_runs(runtime, parent_run_id, &child_runs), 0);
-    check_size_eq(turbo_json_array_size(child_runs), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(child_runs, 0), "id"),
+    check_size_eq(json_array_size(child_runs), 1);
+    check_str_eq(json_get_string(json_array_get(child_runs, 0), "id"),
                  child_run_id);
 
-    turbo_free_json(&child_runs);
-    turbo_free_json(&child_run);
+    json_free(child_runs); child_runs = NULL;
+    json_free(child_run); child_run = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_graph_destroy(parent_graph);
     turbo_graph_destroy(child_graph);
     turbo_agent_runtime_destroy(runtime);
@@ -2307,70 +2308,70 @@ spec("turbo agent runtime api") {
 
     check_int_eq(turbo_agent_runtime_exec_start(runtime, parent_graph, state, NULL, NULL, &summary, &result_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
-    parent_run_id = turbo_json_get_string(summary, "run_id");
+    check_str_eq(json_get_string(summary, "status"), "completed");
+    parent_run_id = json_get_string(summary, "run_id");
     check_not_null(parent_run_id);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(result_state, "after_subgraph"), 0));
+        json_object_get(result_state, "after_subgraph"), 0));
 
-    subgraph_result = turbo_json_object_get(result_state, "child_call_result");
+    subgraph_result = json_object_get(result_state, "child_call_result");
     check_not_null(subgraph_result);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(subgraph_result, "ok"), 0));
+        json_object_get(subgraph_result, "ok"), 0));
     check_false(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(subgraph_result, "completed"), 1));
+        json_object_get(subgraph_result, "completed"), 1));
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(subgraph_result, "interrupted"), 0));
+        json_object_get(subgraph_result, "interrupted"), 0));
     check_false(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(subgraph_result, "failed"), 1));
+        json_object_get(subgraph_result, "failed"), 1));
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(subgraph_result, "status")),
+                     json_object_get(subgraph_result, "status")),
                  "interrupted");
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(subgraph_result, "pending_node")),
+                     json_object_get(subgraph_result, "pending_node")),
                  "review");
     child_checkpoint_id = turbo_runtime_json_value_as_string(
-        turbo_json_object_get(subgraph_result, "pending_checkpoint_id"));
+        json_object_get(subgraph_result, "pending_checkpoint_id"));
     check_not_null(child_checkpoint_id);
     check_str_eq(child_checkpoint_id,
                  turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(subgraph_result, "checkpoint_id")));
+                     json_object_get(subgraph_result, "checkpoint_id")));
     child_run_id = turbo_runtime_json_value_as_string(
-        turbo_json_object_get(subgraph_result, "run_id"));
+        json_object_get(subgraph_result, "run_id"));
     check_not_null(child_run_id);
-    child_state = turbo_json_object_get(subgraph_result, "state");
+    child_state = json_object_get(subgraph_result, "state");
     check_not_null(child_state);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(child_state, "visited_start"), 0));
+        json_object_get(child_state, "visited_start"), 0));
 
     check_int_eq(turbo_agent_runtime_get_run(runtime, child_run_id, &child_run), 0);
-    check_str_eq(turbo_json_get_string(child_run, "status"), "interrupted");
-    check_str_eq(turbo_json_get_string(child_run, "parent_agent_run_id"), parent_run_id);
-    check_str_eq(turbo_json_get_string(child_run, "parent_graph_run_id"), parent_run_id);
-    check_str_eq(turbo_json_get_string(child_run, "parent_tool_call_id"),
+    check_str_eq(json_get_string(child_run, "status"), "interrupted");
+    check_str_eq(json_get_string(child_run, "parent_agent_run_id"), parent_run_id);
+    check_str_eq(json_get_string(child_run, "parent_graph_run_id"), parent_run_id);
+    check_str_eq(json_get_string(child_run, "parent_tool_call_id"),
                  "frame_child_interrupt");
-    check_str_eq(turbo_json_get_string(child_run, "call_frame_id"), "frame_child_interrupt");
+    check_str_eq(json_get_string(child_run, "call_frame_id"), "frame_child_interrupt");
 
     check_int_eq(turbo_agent_runtime_exec_resume(runtime, child_graph, NULL, NULL, &(turbo_agent_runtime_exec_options_t){ .scope = TURBO_RUNTIME_SCOPE_CHECKPOINT, .input_kind = TURBO_RUNTIME_INPUT_OVERRIDE, .checkpoint_id = child_checkpoint_id }, &resumed_summary, &resumed_child_state),
                  0);
-    check_str_eq(turbo_json_get_string(resumed_summary, "status"), "completed");
-    check_str_eq(turbo_json_get_string(resumed_summary, "run_id"), child_run_id);
-    check_str_eq(turbo_json_get_string(resumed_summary, "parent_agent_run_id"), parent_run_id);
+    check_str_eq(json_get_string(resumed_summary, "status"), "completed");
+    check_str_eq(json_get_string(resumed_summary, "run_id"), child_run_id);
+    check_str_eq(json_get_string(resumed_summary, "parent_agent_run_id"), parent_run_id);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(resumed_child_state, "visited_end"), 0));
+        json_object_get(resumed_child_state, "visited_end"), 0));
 
     check_int_eq(turbo_agent_runtime_list_child_runs(runtime, parent_run_id, &child_runs), 0);
-    check_size_eq(turbo_json_array_size(child_runs), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(child_runs, 0), "id"),
+    check_size_eq(json_array_size(child_runs), 1);
+    check_str_eq(json_get_string(json_array_get(child_runs, 0), "id"),
                  child_run_id);
 
-    turbo_free_json(&child_runs);
-    turbo_free_json(&child_run);
+    json_free(child_runs); child_runs = NULL;
+    json_free(child_run); child_run = NULL;
     turbo_runtime_json_destroy(resumed_child_state);
-    turbo_free_json(&resumed_summary);
+    json_free(resumed_summary); resumed_summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_graph_destroy(parent_graph);
     turbo_graph_destroy(child_graph);
     turbo_agent_runtime_destroy(runtime);
@@ -2421,21 +2422,21 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state),
                  0);
-    checkpoint_id = turbo_json_get_string(summary, "checkpoint_id");
-    run_id = turbo_json_get_string(summary, "run_id");
-    thread_id = turbo_json_get_string(summary, "thread_id");
+    checkpoint_id = json_get_string(summary, "checkpoint_id");
+    run_id = json_get_string(summary, "run_id");
+    thread_id = json_get_string(summary, "thread_id");
     check_not_null(checkpoint_id);
     check_not_null(run_id);
     check_not_null(thread_id);
 
     check_int_eq(turbo_agent_runtime_get_thread_state_json_value(runtime, thread_id, &thread_state), 0);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(thread_state, "visited_start"), 0));
+        json_object_get(thread_state, "visited_start"), 0));
     check_int_eq(turbo_agent_runtime_get_thread_head_state_json_value(runtime, thread_id,
                                                                 &thread_head_state),
                  0);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(thread_head_state, "visited_start"), 0));
+        json_object_get(thread_head_state, "visited_start"), 0));
     check_int_eq(turbo_agent_runtime_get_thread_trace_events_json_value(runtime, thread_id,
                                                                   &thread_trace_events),
                  0);
@@ -2447,13 +2448,13 @@ spec("turbo agent runtime api") {
 
     check_int_eq(turbo_agent_runtime_get_run_state_json_value(runtime, run_id, &run_state), 0);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(run_state, "visited_start"), 0));
+        json_object_get(run_state, "visited_start"), 0));
 
     check_int_eq(turbo_agent_runtime_get_checkpoint_state_json_value(runtime, checkpoint_id,
                                                                &checkpoint_state),
                  0);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(checkpoint_state, "visited_start"), 0));
+        json_object_get(checkpoint_state, "visited_start"), 0));
 
     state_patch = create_runtime_state_patch_json_value();
     check_not_null(state_patch);
@@ -2464,57 +2465,57 @@ spec("turbo agent runtime api") {
     check_int_eq(turbo_agent_runtime_prepare_thread_state_override_json_value(runtime, thread_id, state_patch,
                                                               &legacy_state_override),
                  0);
-    check_str_eq(turbo_runtime_json_value_as_string(turbo_json_object_get(
-                     turbo_json_object_get(
-                         turbo_json_object_get(prepared_state_override, "profile"),
+    check_str_eq(turbo_runtime_json_value_as_string(json_object_get(
+                     json_object_get(
+                         json_object_get(prepared_state_override, "profile"),
                          "settings"),
                      "theme")),
                  "dark");
-    check_str_eq(turbo_runtime_json_value_as_string(turbo_json_object_get(
-                     turbo_json_object_get(
-                         turbo_json_object_get(legacy_state_override, "profile"),
+    check_str_eq(turbo_runtime_json_value_as_string(json_object_get(
+                     json_object_get(
+                         json_object_get(legacy_state_override, "profile"),
                          "settings"),
                      "theme")),
                  "dark");
     turbo_runtime_json_destroy(thread_state);
     thread_state = NULL;
     check_int_eq(turbo_agent_runtime_get_thread_state_json_value(runtime, thread_id, &thread_state), 0);
-    check_null(turbo_json_object_get(thread_state, "profile"));
+    check_null(json_object_get(thread_state, "profile"));
 
-    command = turbo_json_create_object();
+    command = json_create_object();
     check_not_null(command);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("approve_review")),
+                     json_create_string("approve_review")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(
         turbo_agent_runtime_prepare_thread_command_override_json_value(runtime, thread_id, command, &approved_override),
         0);
-    override_json = turbo_json_clone(approved_override);
+    override_json = json_clone(approved_override);
     check_not_null(override_json);
     check_true(turbo_agent_state_review_approved(override_json));
-    turbo_free_json(&override_json);
+    json_free(override_json); override_json = NULL;
     turbo_runtime_json_destroy(command);
     command = NULL;
 
-    command = turbo_json_create_object();
+    command = json_create_object();
     check_not_null(command);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("request_replan")),
+                     json_create_string("request_replan")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "reason",
-                     turbo_json_create_string("manual review requested")),
+                     json_create_string("manual review requested")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_agent_runtime_prepare_checkpoint_command_override_json_value(
                      runtime, checkpoint_id, command, &prepared_command_override),
                  0);
-    override_json = turbo_json_clone(prepared_command_override);
+    override_json = json_clone(prepared_command_override);
     check_not_null(override_json);
     check_true(turbo_agent_state_replan_requested(override_json));
     check_str_eq(turbo_agent_state_replan_reason(override_json), "manual review requested");
-    turbo_free_json(&override_json);
+    json_free(override_json); override_json = NULL;
     turbo_runtime_json_destroy(command);
     command = NULL;
     turbo_runtime_json_destroy(checkpoint_state);
@@ -2522,114 +2523,114 @@ spec("turbo agent runtime api") {
     check_int_eq(turbo_agent_runtime_get_checkpoint_state_json_value(runtime, checkpoint_id,
                                                                &checkpoint_state),
                  0);
-    override_json = turbo_json_clone(checkpoint_state);
+    override_json = json_clone(checkpoint_state);
     check_not_null(override_json);
     check_false(turbo_agent_state_replan_requested(override_json));
-    turbo_free_json(&override_json);
+    json_free(override_json); override_json = NULL;
     override_json = NULL;
 
-    command = turbo_json_create_object();
+    command = json_create_object();
     check_not_null(command);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("approve_review")),
+                     json_create_string("approve_review")),
                  TURBO_RUNTIME_JSON_OK);
     options.interrupt_before_nodes = NULL;
     options.interrupt_before_count = 0;
     check_int_eq(turbo_agent_runtime_resume_thread_command_json_value(runtime, graph, thread_id, command,
                                                                 &options, &summary2, &resumed_state),
                  0);
-    check_str_eq(turbo_json_get_string(summary2, "status"), "completed");
+    check_str_eq(json_get_string(summary2, "status"), "completed");
     turbo_runtime_json_destroy(command);
     command = NULL;
     turbo_runtime_json_destroy(run_state);
     run_state = NULL;
     check_int_eq(turbo_agent_runtime_get_run_state_json_value(runtime, run_id, &run_state), 0);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(run_state, "visited_end"), 0));
+        json_object_get(run_state, "visited_end"), 0));
 
-    command = turbo_json_create_object();
+    command = json_create_object();
     check_not_null(command);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("request_replan")),
+                     json_create_string("request_replan")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "reason",
-                     turbo_json_create_string("manual review requested")),
+                     json_create_string("manual review requested")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(
         turbo_agent_runtime_prepare_thread_command_override_json_value(runtime, thread_id, command, &replan_override),
         0);
-    override_json = turbo_json_clone(replan_override);
+    override_json = json_clone(replan_override);
     check_not_null(override_json);
     check_true(turbo_agent_state_replan_requested(override_json));
     check_str_eq(turbo_agent_state_replan_reason(override_json), "manual review requested");
-    turbo_free_json(&override_json);
+    json_free(override_json); override_json = NULL;
     turbo_runtime_json_destroy(command);
     command = NULL;
 
-    command = turbo_json_create_object();
+    command = json_create_object();
     check_not_null(command);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("reject_review")),
+                     json_create_string("reject_review")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "reason",
-                     turbo_json_create_string("needs another pass")),
+                     json_create_string("needs another pass")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_agent_runtime_prepare_checkpoint_command_override_json_value(runtime, checkpoint_id, command,
                                                                    &rejected_override),
                  0);
-    override_json = turbo_json_clone(rejected_override);
+    override_json = json_clone(rejected_override);
     check_not_null(override_json);
     check_true(turbo_agent_state_review_required(override_json));
     check_false(turbo_agent_state_review_approved(override_json));
     check_str_eq(turbo_agent_state_review_note(override_json), "needs another pass");
-    turbo_free_json(&override_json);
+    json_free(override_json); override_json = NULL;
     turbo_runtime_json_destroy(command);
     command = NULL;
 
-    command = turbo_json_create_object();
+    command = json_create_object();
     check_not_null(command);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("append_feedback")),
+                     json_create_string("append_feedback")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "text",
-                     turbo_json_create_string("please add tests")),
+                     json_create_string("please add tests")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(
         turbo_agent_runtime_prepare_thread_command_override_json_value(runtime, thread_id, command, &feedback_override),
         0);
-    override_json = turbo_json_clone(feedback_override);
+    override_json = json_clone(feedback_override);
     check_not_null(override_json);
-    input_json = turbo_json_object_get(override_json, "input");
+    input_json = json_object_get(override_json, "input");
     check_not_null(input_json);
-    check_true(turbo_json_array_size(input_json) >= 1);
-    message_json = turbo_json_array_get(input_json, turbo_json_array_size(input_json) - 1);
+    check_true(json_array_size(input_json) >= 1);
+    message_json = json_array_get(input_json, json_array_size(input_json) - 1);
     check_not_null(message_json);
-    check_str_eq(turbo_json_get_string(message_json, "role"), "user");
-    check_str_eq(turbo_json_get_string(message_json, "content"), "please add tests");
-    turbo_free_json(&override_json);
+    check_str_eq(json_get_string(message_json, "role"), "user");
+    check_str_eq(json_get_string(message_json, "content"), "please add tests");
+    json_free(override_json); override_json = NULL;
     turbo_runtime_json_destroy(command);
     command = NULL;
 
-    command = turbo_json_create_object();
-    payload = turbo_json_create_object();
+    command = json_create_object();
+    payload = json_create_object();
     check_not_null(command);
     check_not_null(payload);
     check_int_eq(turbo_runtime_json_object_set(
-                     payload, "ok", turbo_json_create_bool(1)),
+                     payload, "ok", json_create_bool(1)),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_runtime_json_object_set(
-                     payload, "value", turbo_json_create_int64(9)),
+                     payload, "value", json_create_int64(9)),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("override_final_output")),
+                     json_create_string("override_final_output")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_runtime_json_object_set(command, "output_json", payload),
                  TURBO_RUNTIME_JSON_OK);
@@ -2637,26 +2638,26 @@ spec("turbo agent runtime api") {
     check_int_eq(turbo_agent_runtime_prepare_checkpoint_command_override_json_value(runtime, checkpoint_id, command,
                                                         &final_output_override),
                  0);
-    override_json = turbo_json_clone(final_output_override);
+    override_json = json_clone(final_output_override);
     check_not_null(override_json);
     check_str_eq(turbo_agent_state_final_answer_text(override_json), "{\"ok\":true,\"value\":9}");
 
-    turbo_free_json(&override_json);
+    json_free(override_json); override_json = NULL;
     override_json = NULL;
     turbo_runtime_json_destroy(command);
     command = NULL;
-    command = turbo_json_create_object();
+    command = json_create_object();
     check_not_null(command);
     check_int_eq(turbo_runtime_json_object_set(
                      command, "kind",
-                     turbo_json_create_string("approve_review")),
+                     json_create_string("approve_review")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_agent_runtime_fork_command_json_value(runtime, graph, checkpoint_id,
                                                                   command, NULL, &fork_summary,
                                                                   &fork_state),
                  0);
-    check_str_eq(turbo_json_get_string(fork_summary, "status"), "completed");
-    check_false(strcmp(turbo_json_get_string(fork_summary, "run_id"), run_id) == 0);
+    check_str_eq(json_get_string(fork_summary, "status"), "completed");
+    check_false(strcmp(json_get_string(fork_summary, "run_id"), run_id) == 0);
 
     turbo_runtime_json_destroy(command);
     command = NULL;
@@ -2680,9 +2681,9 @@ spec("turbo agent runtime api") {
     turbo_runtime_json_destroy(thread_state);
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
-    turbo_free_json(&fork_summary);
-    turbo_free_json(&summary2);
-    turbo_free_json(&summary);
+    json_free(fork_summary); fork_summary = NULL;
+    json_free(summary2); summary2 = NULL;
+    json_free(summary); summary = NULL;
     turbo_graph_destroy(graph);
     turbo_agent_runtime_destroy(runtime);
   }
@@ -2712,15 +2713,15 @@ spec("turbo agent runtime api") {
     options.interrupt_before_count = 1;
     check_int_eq(turbo_agent_runtime_exec_start(runtime, graph, state, &options, NULL, &summary, &result_state),
                  0);
-    checkpoint_id = runtime_test_strdup(turbo_json_get_string(summary, "checkpoint_id"));
+    checkpoint_id = runtime_test_strdup(json_get_string(summary, "checkpoint_id"));
     check_not_null(checkpoint_id);
     check_int_eq(turbo_agent_runtime_get_checkpoint(runtime, checkpoint_id, &checkpoint), 0);
-    run_id = runtime_test_strdup(turbo_json_get_string(checkpoint, "run_id"));
+    run_id = runtime_test_strdup(json_get_string(checkpoint, "run_id"));
     check_not_null(run_id);
-    turbo_free_json(&checkpoint);
+    json_free(checkpoint); checkpoint = NULL;
     turbo_runtime_json_destroy(result_state);
     result_state = NULL;
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_agent_runtime_destroy(runtime);
 
     checkpoint_filename = runtime_test_record_file(root_dir, "checkpoints", checkpoint_id);
@@ -2740,7 +2741,7 @@ spec("turbo agent runtime api") {
     free(checkpoint_id);
     free(run_id);
     free(root_dir);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(state);
     turbo_graph_destroy(graph);

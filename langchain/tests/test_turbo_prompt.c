@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_prompt.h"
 
 #include <stdlib.h>
@@ -8,19 +9,19 @@ spec("turbo prompt helpers") {
   describe("template rendering") {
 
     it("should render placeholders from an input object") {
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       char *rendered;
 
       check_not_null(input);
-      turbo_json_object_set_string(input, "task", "inspect code");
-      turbo_json_object_set_number(input, "count", 2);
+      json_object_set_string(input, "task", "inspect code");
+      json_object_set_number(input, "count", 2);
 
       rendered = turbo_prompt_render_template("Do {{task}} in {{count}} steps.", input);
       check_not_null(rendered);
       check_str_eq(rendered, "Do inspect code in 2 steps.");
 
       free(rendered);
-      turbo_free_json(&input);
+      json_free(input); input = NULL;
     }
 
     it("should leave unknown placeholders empty") {
@@ -33,10 +34,10 @@ spec("turbo prompt helpers") {
     }
 
     it("should render placeholders from a TurboParser JSON object") {
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       json_value_t *task =
-          turbo_json_create_string("inspect code");
-      json_value_t *count = turbo_json_create_int64(2);
+          json_create_string("inspect code");
+      json_value_t *count = json_create_int64(2);
       char *rendered;
 
       check_not_null(input);
@@ -59,29 +60,29 @@ spec("turbo prompt helpers") {
   describe("message creation") {
 
     it("should append role-content messages into an array") {
-      json_value_t *messages = turbo_json_create_array();
+      json_value_t *messages = json_create_array();
       json_value_t *message;
 
       check_not_null(messages);
       check_int_eq(turbo_prompt_messages_append(messages, "user", "Ping"), TURBO_PROMPT_OK);
-      check_size_eq(turbo_json_array_size(messages), 1);
+      check_size_eq(json_array_size(messages), 1);
 
-      message = turbo_json_array_get(messages, 0);
-      check_str_eq(turbo_json_get_string(message, "role"), "user");
-      check_str_eq(turbo_json_get_string(message, "content"), "Ping");
+      message = json_array_get(messages, 0);
+      check_str_eq(json_get_string(message, "role"), "user");
+      check_str_eq(json_get_string(message, "content"), "Ping");
 
-      turbo_free_json(&messages);
+      json_free(messages); messages = NULL;
     }
 
     it("should keep arbitrary content values when building a message") {
-      json_value_t *content = turbo_json_create_string("plain text");
+      json_value_t *content = json_create_string("plain text");
       json_value_t *message = turbo_prompt_message_with_content_create("user", content);
 
       check_not_null(message);
-      check_str_eq(turbo_json_get_string(message, "role"), "user");
-      check_str_eq(turbo_json_get_string(message, "content"), "plain text");
+      check_str_eq(json_get_string(message, "role"), "user");
+      check_str_eq(json_get_string(message, "content"), "plain text");
 
-      turbo_free_json(&message);
+      json_free(message); message = NULL;
     }
 
     it("should append role-content messages into a TurboParser JSON array") {
@@ -93,12 +94,12 @@ spec("turbo prompt helpers") {
                    TURBO_PROMPT_OK);
       check_size_eq(turbo_runtime_json_value_size(messages), 1);
 
-      message = turbo_json_array_get(messages, 0);
+      message = json_array_get(messages, 0);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(message, "role")),
+                       json_object_get(message, "role")),
                    "user");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(message, "content")),
+                       json_object_get(message, "content")),
                    "Ping");
 
       turbo_runtime_json_destroy(messages);
@@ -110,16 +111,16 @@ spec("turbo prompt helpers") {
 
       check_not_null(schema);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(schema, "type")),
+                       json_object_get(schema, "type")),
                    "object");
-      properties = turbo_json_object_get(schema, "properties");
+      properties = json_object_get(schema, "properties");
       check_not_null(properties);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(
-                           turbo_json_object_get(properties, "role"), "type")),
+                       json_object_get(
+                           json_object_get(properties, "role"), "type")),
                    "string");
       check_false(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(schema, "additionalProperties"), 1));
+          json_object_get(schema, "additionalProperties"), 1));
 
       turbo_runtime_json_destroy(schema);
     }
@@ -129,10 +130,10 @@ spec("turbo prompt helpers") {
       const json_value_t *properties;
 
       check_not_null(schema);
-      properties = turbo_json_object_get(schema, "properties");
+      properties = json_object_get(schema, "properties");
       check_not_null(properties);
-      check_not_null(turbo_json_object_get(properties, "id"));
-      check_not_null(turbo_json_object_get(properties, "function"));
+      check_not_null(json_object_get(properties, "id"));
+      check_not_null(json_object_get(properties, "function"));
 
       turbo_runtime_json_destroy(schema);
     }
@@ -142,13 +143,13 @@ spec("turbo prompt helpers") {
       const json_value_t *properties;
 
       check_not_null(schema);
-      properties = turbo_json_object_get(schema, "properties");
+      properties = json_object_get(schema, "properties");
       check_not_null(properties);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(
-                           turbo_json_object_get(properties, "type"), "type")),
+                       json_object_get(
+                           json_object_get(properties, "type"), "type")),
                    "string");
-      check_not_null(turbo_json_object_get(properties, "text"));
+      check_not_null(json_object_get(properties, "text"));
 
       turbo_runtime_json_destroy(schema);
     }
@@ -157,7 +158,7 @@ spec("turbo prompt helpers") {
       json_value_t *message =
           turbo_prompt_message_create_json_value("user", "Ping");
       json_value_t *invalid =
-          turbo_json_create_object();
+          json_create_object();
 
       check_not_null(message);
       check_not_null(invalid);
@@ -170,7 +171,7 @@ spec("turbo prompt helpers") {
     }
 
     it("should validate assistant messages with tool calls") {
-      json_value_t *tool_calls = turbo_json_create_array();
+      json_value_t *tool_calls = json_create_array();
       json_value_t *tool_call =
           turbo_prompt_chat_tool_call_create_json_value("call_1", "function", "sum", "{\"a\":1}");
       json_value_t *message;
@@ -197,7 +198,7 @@ spec("turbo prompt helpers") {
     }
 
     it("should validate messages with rich content parts") {
-      json_value_t *parts = turbo_json_create_array();
+      json_value_t *parts = json_create_array();
       json_value_t *text_part =
           turbo_prompt_content_text_part_create_json_value("Ping");
       json_value_t *tool_result =
@@ -222,11 +223,11 @@ spec("turbo prompt helpers") {
       json_value_t *message =
           turbo_prompt_message_create_json_value("assistant", "");
       json_value_t *tool_calls =
-          turbo_json_create_array();
+          json_create_array();
       json_value_t *tool_call =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *function =
-          turbo_json_create_object();
+          json_create_object();
 
       check_not_null(message);
       check_not_null(tool_calls);
@@ -234,11 +235,11 @@ spec("turbo prompt helpers") {
       check_not_null(function);
       check_int_eq(
           turbo_runtime_json_object_set(tool_call, "id",
-                                             turbo_json_create_string("call_1")),
+                                             json_create_string("call_1")),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(
           turbo_runtime_json_object_set(tool_call, "type",
-                                             turbo_json_create_string("function")),
+                                             json_create_string("function")),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(tool_call, "function", function),
                    TURBO_RUNTIME_JSON_OK);
@@ -256,7 +257,7 @@ spec("turbo prompt helpers") {
     it("should convert canonical messages into openai chat json") {
       json_value_t *messages = turbo_prompt_messages_create_json_value();
       json_value_t *assistant = NULL;
-      json_value_t *tool_calls = turbo_json_create_array();
+      json_value_t *tool_calls = json_create_array();
       json_value_t *tool_call =
           turbo_prompt_chat_tool_call_create_json_value("call_1", "function", "sum", "{\"a\":1}");
       json_value_t *json_messages;
@@ -276,14 +277,14 @@ spec("turbo prompt helpers") {
 
       json_messages = turbo_prompt_messages_to_openai_chat_json(messages);
       check_not_null(json_messages);
-      check_size_eq(turbo_json_array_size(json_messages), 2);
-      check_str_eq(turbo_json_get_string(turbo_json_array_get(json_messages, 0), "role"), "user");
-      check_ptr_eq(turbo_json_object_get(turbo_json_array_get(json_messages, 1), "tool_calls") != NULL
+      check_size_eq(json_array_size(json_messages), 2);
+      check_str_eq(json_get_string(json_array_get(json_messages, 0), "role"), "user");
+      check_ptr_eq(json_object_get(json_array_get(json_messages, 1), "tool_calls") != NULL
                        ? (void *)1
                        : NULL,
                    (void *)1);
 
-      turbo_free_json(&json_messages);
+      json_free(json_messages); json_messages = NULL;
       turbo_runtime_json_destroy(messages);
     }
 
@@ -298,19 +299,19 @@ spec("turbo prompt helpers") {
 
       json_messages = turbo_prompt_messages_to_openai_responses_json(messages);
       check_not_null(json_messages);
-      check_size_eq(turbo_json_array_size(json_messages), 1);
-      check_str_eq(turbo_json_get_string(turbo_json_array_get(json_messages, 0), "role"), "user");
-      check_str_eq(turbo_json_get_string(turbo_json_array_get(json_messages, 0), "content"),
+      check_size_eq(json_array_size(json_messages), 1);
+      check_str_eq(json_get_string(json_array_get(json_messages, 0), "role"), "user");
+      check_str_eq(json_get_string(json_array_get(json_messages, 0), "content"),
                    "Ping");
 
-      turbo_free_json(&json_messages);
+      json_free(json_messages); json_messages = NULL;
       turbo_runtime_json_destroy(messages);
     }
 
     it("should convert canonical messages into anthropic json") {
       json_value_t *messages = turbo_prompt_messages_create_json_value();
       json_value_t *assistant = NULL;
-      json_value_t *tool_calls = turbo_json_create_array();
+      json_value_t *tool_calls = json_create_array();
       json_value_t *tool_call =
           turbo_prompt_chat_tool_call_create_json_value("call_1", "function", "sum", "{\"a\":1}");
       json_value_t *tool_message = NULL;
@@ -341,14 +342,14 @@ spec("turbo prompt helpers") {
           TURBO_PROMPT_OK);
       check_not_null(json_messages);
       check_str_eq(system_text, "Rules");
-      check_size_eq(turbo_json_array_size(json_messages), 2);
-      check_str_eq(turbo_json_get_string(turbo_json_array_get(json_messages, 0), "role"),
+      check_size_eq(json_array_size(json_messages), 2);
+      check_str_eq(json_get_string(json_array_get(json_messages, 0), "role"),
                    "assistant");
-      check_str_eq(turbo_json_get_string(turbo_json_array_get(json_messages, 1), "role"),
+      check_str_eq(json_get_string(json_array_get(json_messages, 1), "role"),
                    "user");
 
       free(system_text);
-      turbo_free_json(&json_messages);
+      json_free(json_messages); json_messages = NULL;
       turbo_runtime_json_destroy(messages);
     }
   }

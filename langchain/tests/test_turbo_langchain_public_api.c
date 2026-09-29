@@ -249,8 +249,6 @@ spec("turbo langchain public api") {
     void *agent_runtime_remote_dispatch = (void *)turbo_agent_runtime_remote_dispatch_jsonrpc;
     void *agent_runtime_remote_dispatch_text =
         (void *)turbo_agent_runtime_remote_dispatch_jsonrpc_text;
-    void *agent_runtime_remote_handle_http =
-        (void *)turbo_agent_runtime_remote_handle_http_jsonrpc;
     void *agent_runtime_remote_client_create =
         (void *)turbo_agent_runtime_remote_client_create;
     void *agent_runtime_remote_client_destroy =
@@ -1446,7 +1444,6 @@ spec("turbo langchain public api") {
     check_not_null(agent_runtime_remote_destroy);
     check_not_null(agent_runtime_remote_dispatch);
     check_not_null(agent_runtime_remote_dispatch_text);
-    check_not_null(agent_runtime_remote_handle_http);
     check_not_null(agent_runtime_remote_client_create);
     check_not_null(agent_runtime_remote_client_destroy);
     check_not_null(agent_runtime_remote_client_call);

@@ -107,7 +107,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 
@@ -119,7 +119,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 
@@ -130,7 +130,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 
@@ -141,7 +141,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 
@@ -152,7 +152,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_responses_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 
@@ -214,7 +214,7 @@ spec("turbo agent sse api") {
         "data: {\"type\":\"message_stop\"}\n\n";
     char *response_json = NULL;
 
-    check_int_ne(
+    check_not_equal(
         turbo_agent_anthropic_messages_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
@@ -226,7 +226,7 @@ spec("turbo agent sse api") {
         "data: {\"type\":\"message_stop\"}\n\n";
     char *response_json = NULL;
 
-    check_int_ne(
+    check_not_equal(
         turbo_agent_anthropic_messages_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
@@ -238,7 +238,7 @@ spec("turbo agent sse api") {
         "data: {\"type\":\"message_stop\"}\n\n";
     char *response_json = NULL;
 
-    check_int_ne(
+    check_not_equal(
         turbo_agent_anthropic_messages_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
@@ -250,7 +250,7 @@ spec("turbo agent sse api") {
         "data: {\"type\":\"message_stop\"}\n\n";
     char *response_json = NULL;
 
-    check_int_ne(
+    check_not_equal(
         turbo_agent_anthropic_messages_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
@@ -262,7 +262,7 @@ spec("turbo agent sse api") {
         "data: {\"type\":\"message_stop\"}\n\n";
     char *response_json = NULL;
 
-    check_int_ne(
+    check_not_equal(
         turbo_agent_anthropic_messages_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
@@ -301,7 +301,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_chat_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_chat_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 
@@ -311,7 +311,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_chat_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_chat_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 
@@ -321,7 +321,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_chat_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_chat_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 
@@ -331,7 +331,7 @@ spec("turbo agent sse api") {
         "data: [DONE]\n\n";
     char *response_json = NULL;
 
-    check_int_ne(turbo_agent_chat_sse_to_json(sse, strlen(sse), &response_json), 0);
+    check_not_equal(turbo_agent_chat_sse_to_json(sse, strlen(sse), &response_json), 0);
     check_true((response_json) == (NULL));
   }
 }

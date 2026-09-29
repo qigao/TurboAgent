@@ -406,16 +406,94 @@ static void turbo_praktor_control_from_context(
   control->timeout_ms = deadline > now ? deadline - now : 1u;
 }
 
+static int turbo_praktor_context_has_observation(
+    const turbo_tool_execution_context_t *context) {
+  return context &&
+         context->abi_version >= TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION &&
+         context->struct_size >= sizeof(*context);
+}
+
+#if TURBO_PRAKTOR_HAS_EXECUTION_EVENTS
+static const char *turbo_praktor_event_name(praktor_event_type type) {
+  switch (type) {
+    case PRAKTOR_EVENT_WORKFLOW_STARTED:
+      return "praktor.workflow.started";
+    case PRAKTOR_EVENT_TASK_STARTED:
+      return "praktor.task.started";
+    case PRAKTOR_EVENT_TASK_PROGRESS:
+      return "praktor.task.progress";
+    case PRAKTOR_EVENT_TASK_COMPLETED:
+      return "praktor.task.completed";
+    case PRAKTOR_EVENT_TASK_FAILED:
+      return "praktor.task.failed";
+    case PRAKTOR_EVENT_WORKFLOW_COMPLETED:
+      return "praktor.workflow.completed";
+    default:
+      return "praktor.event";
+  }
+}
+
+static void PRAKTOR_CALL turbo_praktor_event_bridge(
+    const praktor_execution_event *event, void *user_data) {
+  const turbo_tool_execution_context_t *context =
+      (const turbo_tool_execution_context_t *)user_data;
+  json_value_t *payload = NULL;
+  json_value_t *trace = NULL;
+  char *payload_text = NULL;
+  int status = 0;
+  if (!event || !turbo_praktor_context_has_observation(context) ||
+      !context->event_sink) {
+    return;
+  }
+
+  payload = json_create_object();
+  trace = json_create_object();
+  if (!payload || !trace) goto cleanup;
+
+  json_object_set_number(payload, "sequence", (double)event->sequence);
+  if (event->task_name) json_object_set_string(payload, "task_name", event->task_name);
+  if (event->status) json_object_set_string(payload, "status", event->status);
+  if (event->message) json_object_set_string(payload, "message", event->message);
+  if (event->thread_id) json_object_set_string(payload, "thread_id", event->thread_id);
+  if (event->run_id) json_object_set_string(payload, "run_id", event->run_id);
+  if (event->turn_id) json_object_set_string(payload, "turn_id", event->turn_id);
+  if (event->tool_call_id) {
+    json_object_set_string(payload, "tool_call_id", event->tool_call_id);
+  }
+
+  payload_text = json_serialize(payload, NULL);
+  if (!payload_text) goto cleanup;
+
+  if (event->type == PRAKTOR_EVENT_TASK_FAILED ||
+      (event->type == PRAKTOR_EVENT_WORKFLOW_COMPLETED &&
+       event->status && strcmp(event->status, "success") != 0)) {
+    status = -1;
+  }
+  json_object_set_string(trace, "kind", "trace");
+  json_object_set_string(trace, "name", turbo_praktor_event_name(event->type));
+  json_object_set_string(trace, "detail", event->status ? event->status : "");
+  json_object_set_string(trace, "payload", payload_text);
+  json_object_set_number(trace, "status", (double)status);
+
+  context->event_sink(trace, context->event_sink_user_data);
+
+cleanup:
+  if (payload_text) json_serialize_free(payload_text);
+  turbo_runtime_json_destroy(payload);
+  turbo_runtime_json_destroy(trace);
+}
+#endif
+
 static turbo_tool_status_t turbo_praktor_execute_text(
     turbo_praktor_binding_t *binding, const char *input_json, size_t input_size,
     const turbo_tool_execution_context_t *context, char **out_output) {
-  praktor_execute_request request = PRAKTOR_EXECUTE_REQUEST_INIT;
   praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
   praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
   praktor_error error = PRAKTOR_ERROR_INIT;
   praktor_result status;
   turbo_tool_status_t tool_status;
   json_value_t *parsed = NULL;
+  const json_value_t *projection = NULL;
   char *serialized = NULL;
   size_t serialized_size = 0;
 
@@ -426,16 +504,47 @@ static turbo_tool_status_t turbo_praktor_execute_text(
 
   tool_status = turbo_praktor_context_status(context);
   if (tool_status != TURBO_TOOL_OK) return tool_status;
+  if (context) turbo_praktor_control_from_context(context, &control);
 
-  request.workflow_path = binding->workflow_path;
-  request.input_json = input_json;
-  request.input_json_size = input_size;
-  if (context) {
-    turbo_praktor_control_from_context(context, &control);
-    status = (praktor_result)binding->api->execute_workflow_controlled(
-        &request, &control, &output, &error);
-  } else {
-    status = (praktor_result)binding->api->execute_workflow(&request, &output, &error);
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  if (binding->plan && binding->api->execute_workflow_plan) {
+    praktor_plan_execute_request request = PRAKTOR_PLAN_EXECUTE_REQUEST_INIT;
+    request.plan = binding->plan;
+    request.input_json = input_json;
+    request.input_json_size = input_size;
+#if TURBO_PRAKTOR_HAS_EXECUTION_EVENTS
+    if (context &&
+        (binding->api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_EVENTS) != 0 &&
+        binding->api->execute_workflow_plan_observed) {
+      praktor_execution_observer observer = PRAKTOR_EXECUTION_OBSERVER_INIT;
+      observer.on_event = turbo_praktor_event_bridge;
+      observer.user_data = (void *)context;
+      observer.thread_id = context->thread_id;
+      observer.run_id = context->run_id;
+      observer.turn_id = context->turn_id;
+      observer.tool_call_id = context->tool_call_id;
+      status = (praktor_result)binding->api->execute_workflow_plan_observed(
+          &request, &control, &observer, &output, &error);
+    } else
+#endif
+    {
+      status = (praktor_result)binding->api->execute_workflow_plan(
+          &request, context ? &control : NULL, &output, &error);
+    }
+  } else
+#endif
+  {
+    praktor_execute_request request = PRAKTOR_EXECUTE_REQUEST_INIT;
+    request.workflow_path = binding->workflow_path;
+    request.input_json = input_json;
+    request.input_json_size = input_size;
+    if (context) {
+      status = (praktor_result)binding->api->execute_workflow_controlled(
+          &request, &control, &output, &error);
+    } else {
+      status = (praktor_result)binding->api->execute_workflow(
+          &request, &output, &error);
+    }
   }
 
   if (status == PRAKTOR_RESULT_CANCELLED) {
@@ -447,18 +556,37 @@ static turbo_tool_status_t turbo_praktor_execute_text(
     goto cleanup;
   }
   if (output.size > binding->max_result_bytes) {
-    tool_status = TURBO_TOOL_ERROR;
+    tool_status = TURBO_TOOL_OUTPUT_LIMIT;
     goto cleanup;
   }
 
   if (status == PRAKTOR_RESULT_SUCCESS ||
       status == PRAKTOR_RESULT_EXECUTION_FAILED) {
     parsed = output.data && output.size ? json_parse(output.data, output.size) : NULL;
-    if (!parsed || json_type(parsed) != JSON_OBJECT ||
-        turbo_praktor_copy_text(output.data, output.size, out_output) != 0) {
+    if (!parsed || json_type(parsed) != JSON_OBJECT) {
       tool_status = TURBO_TOOL_ERROR;
       goto cleanup;
     }
+
+    if (turbo_praktor_context_has_observation(context) &&
+        context->detail_sink) {
+      context->detail_sink(parsed, context->detail_sink_user_data);
+    }
+
+    projection = json_object_get(parsed, "agent_output");
+    if (projection && json_type(projection) == JSON_OBJECT) {
+      serialized = json_serialize(projection, &serialized_size);
+      if (!serialized || serialized_size > binding->max_result_bytes ||
+          turbo_praktor_copy_text(serialized, serialized_size, out_output) != 0) {
+        tool_status = TURBO_TOOL_ERROR;
+        goto cleanup;
+      }
+    } else if (turbo_praktor_copy_text(
+                   output.data, output.size, out_output) != 0) {
+      tool_status = TURBO_TOOL_ERROR;
+      goto cleanup;
+    }
+
     tool_status = TURBO_TOOL_OK;
     goto cleanup;
   }

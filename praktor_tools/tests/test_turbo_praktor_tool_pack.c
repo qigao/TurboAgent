@@ -98,7 +98,7 @@ spec("Praktor workflow tool pack") {
 
     check_not_null(workspace);
     check_not_null(arguments);
-    check_int_eq(praktor_test_write_named_workflow(
+    check_equal(praktor_test_write_named_workflow(
                      workspace, "cancel.yml", workflow_path, sizeof(workflow_path)),
                  0);
     turbo_praktor_tool_pack_config_init(&pack_config);
@@ -108,18 +108,18 @@ spec("Praktor workflow tool pack") {
     workflow_config.tool_name = "praktor_cancel";
     workflow_config.description = "Cancellation propagation test.";
     workflow_config.workflow_path = workflow_path;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
 
-    check_int_eq(turbo_cancel_source_create(NULL, &source), 0);
-    check_int_eq(turbo_cancel_source_token(source, &token), 0);
-    check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), 0);
+    check_equal(turbo_cancel_source_create(NULL, &source), 0);
+    check_equal(turbo_cancel_source_token(source, &token), 0);
+    check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), 0);
     context.struct_size = sizeof(context);
     context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
     context.cancel_token = token;
     context.turn_id = "turn-cancel";
     context.tool_call_id = "call-cancel";
 
-    check_int_eq(turbo_tool_registry_execute_json_value_with_context(
+    check_equal(turbo_tool_registry_execute_json_value_with_context(
                      turbo_praktor_tool_pack_registry(pack), "praktor_cancel",
                      arguments, &context, &result),
                  TURBO_TOOL_CANCELLED);
@@ -148,7 +148,7 @@ spec("Praktor workflow tool pack") {
 
     check_not_null(workspace);
     check_not_null(arguments);
-    check_int_eq(praktor_test_write_named_workflow(
+    check_equal(praktor_test_write_named_workflow(
                      workspace, "deadline.yml", workflow_path, sizeof(workflow_path)),
                  0);
     turbo_praktor_tool_pack_config_init(&pack_config);
@@ -158,19 +158,19 @@ spec("Praktor workflow tool pack") {
     workflow_config.tool_name = "praktor_deadline";
     workflow_config.description = "Deadline propagation test.";
     workflow_config.workflow_path = workflow_path;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
 
     cancel_config.struct_size = sizeof(cancel_config);
     cancel_config.abi_version = TURBO_RUNTIME_CONTROL_ABI_VERSION;
     cancel_config.deadline_mono_ms = 1u;
-    check_int_eq(turbo_cancel_source_create(&cancel_config, &source), 0);
-    check_int_eq(turbo_cancel_source_token(source, &token), 0);
+    check_equal(turbo_cancel_source_create(&cancel_config, &source), 0);
+    check_equal(turbo_cancel_source_token(source, &token), 0);
     context.struct_size = sizeof(context);
     context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
     context.cancel_token = token;
     context.deadline_mono_ms = 1u;
 
-    check_int_eq(turbo_tool_registry_execute_json_value_with_context(
+    check_equal(turbo_tool_registry_execute_json_value_with_context(
                      turbo_praktor_tool_pack_registry(pack), "praktor_deadline",
                      arguments, &context, &result),
                  TURBO_TOOL_DEADLINE_EXCEEDED);
@@ -195,7 +195,7 @@ spec("Praktor workflow tool pack") {
     size_t capability_count = 0;
 
     check_not_null(workspace);
-    check_int_eq(praktor_test_write_workflow(workspace, workflow_path, sizeof(workflow_path)), 0);
+    check_equal(praktor_test_write_workflow(workspace, workflow_path, sizeof(workflow_path)), 0);
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
@@ -208,23 +208,23 @@ spec("Praktor workflow tool pack") {
         "{\"type\":\"object\",\"properties\":{\"payload\":{\"type\":\"object\"}},"
         "\"required\":[\"payload\"],\"additionalProperties\":false}";
     workflow_config.strict = 1;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
-    check_size_eq(turbo_praktor_tool_pack_workflow_count(pack), 1);
-    check_int_eq(turbo_tool_registry_get_execution_policy(
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_praktor_tool_pack_workflow_count(pack), 1);
+    check_equal(turbo_tool_registry_get_execution_policy(
                      turbo_praktor_tool_pack_registry(pack), "praktor_inspect", &policy),
                  TURBO_TOOL_OK);
-    check_int_eq(policy.mode, TURBO_TOOL_EXECUTION_EXCLUSIVE);
-    check_int_eq(policy.idempotency, TURBO_TOOL_IDEMPOTENCY_NONE);
-    check_int_eq(turbo_tool_registry_get_required_capabilities(
+    check_equal(policy.mode, TURBO_TOOL_EXECUTION_EXCLUSIVE);
+    check_equal(policy.idempotency, TURBO_TOOL_IDEMPOTENCY_NONE);
+    check_equal(turbo_tool_registry_get_required_capabilities(
                      turbo_praktor_tool_pack_registry(pack), "praktor_inspect",
                      &capabilities, &capability_count),
                  TURBO_TOOL_OK);
-    check_size_eq(capability_count, 5);
-    check_str_eq(capabilities[0], "runtime_tools");
-    check_str_eq(capabilities[1], "network");
-    check_str_eq(capabilities[2], "shell");
-    check_str_eq(capabilities[3], "patch");
-    check_str_eq(capabilities[4], "outside_workspace");
+    check_equal(capability_count, 5);
+    check_equal(capabilities[0], "runtime_tools");
+    check_equal(capabilities[1], "network");
+    check_equal(capabilities[2], "shell");
+    check_equal(capabilities[3], "patch");
+    check_equal(capabilities[4], "outside_workspace");
 
     turbo_praktor_tool_pack_destroy(pack);
 
@@ -233,17 +233,17 @@ spec("Praktor workflow tool pack") {
     workflow_config.required_capabilities = NULL;
     workflow_config.required_capability_count = 0;
     workflow_config.tool_name = "praktor_zero_caps";
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_registry_get_required_capabilities(
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_required_capabilities(
                      turbo_praktor_tool_pack_registry(pack), "praktor_zero_caps",
                      &capabilities, &capability_count),
                  TURBO_TOOL_OK);
-    check_size_eq(capability_count, 5);
-    check_str_eq(capabilities[0], "runtime_tools");
-    check_str_eq(capabilities[1], "network");
-    check_str_eq(capabilities[2], "shell");
-    check_str_eq(capabilities[3], "patch");
-    check_str_eq(capabilities[4], "outside_workspace");
+    check_equal(capability_count, 5);
+    check_equal(capabilities[0], "runtime_tools");
+    check_equal(capabilities[1], "network");
+    check_equal(capabilities[2], "shell");
+    check_equal(capabilities[3], "patch");
+    check_equal(capabilities[4], "outside_workspace");
 
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
@@ -265,7 +265,7 @@ spec("Praktor workflow tool pack") {
     json_value_t *string_result = NULL;
 
     check_not_null(workspace);
-    check_int_eq(praktor_test_write_workflow(workspace, workflow_path, sizeof(workflow_path)), 0);
+    check_equal(praktor_test_write_workflow(workspace, workflow_path, sizeof(workflow_path)), 0);
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
@@ -273,21 +273,21 @@ spec("Praktor workflow tool pack") {
     workflow_config.tool_name = "praktor_inspect";
     workflow_config.description = "Run inspect.";
     workflow_config.workflow_path = workflow_path;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
     arguments = json_parse("{\"payload\":{\"name\":\"demo\",\"count\":7}}",
                            strlen("{\"payload\":{\"name\":\"demo\",\"count\":7}}"));
     check_not_null(arguments);
-    check_int_eq(turbo_tool_registry_execute_json_value(
+    check_equal(turbo_tool_registry_execute_json_value(
                      turbo_praktor_tool_pack_registry(pack), "praktor_inspect",
                      arguments, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(json_get_string(result, "workflow_status"), "success");
+    check_equal(json_get_string(result, "workflow_status"), "success");
     tasks = json_object_get(result, "tasks");
     inspect = json_object_get(tasks, "inspect");
     outputs = json_object_get(inspect, "outputs");
-    check_int_eq((int)json_get_double(outputs, "count", -1.0), 7);
+    check_equal((int)json_get_double(outputs, "count", -1.0), 7);
 
-    check_int_eq(turbo_tool_registry_execute(
+    check_equal(turbo_tool_registry_execute(
                      turbo_praktor_tool_pack_registry(pack), "praktor_inspect",
                      "{\"payload\":{\"name\":\"demo\",\"count\":7}}",
                      &string_output),
@@ -295,7 +295,7 @@ spec("Praktor workflow tool pack") {
     check_not_null(string_output);
     string_result = json_parse(string_output, strlen(string_output));
     check_not_null(string_result);
-    check_str_eq(json_get_string(string_result, "workflow_status"), "success");
+    check_equal(json_get_string(string_result, "workflow_status"), "success");
 
     json_free(arguments);
     json_free(result);
@@ -316,7 +316,7 @@ spec("Praktor workflow tool pack") {
     json_value_t *result = NULL;
 
     check_not_null(workspace);
-    check_int_eq(praktor_test_write_failing_workflow(
+    check_equal(praktor_test_write_failing_workflow(
                      workspace, workflow_path, sizeof(workflow_path)),
                  0);
     turbo_praktor_tool_pack_config_init(&pack_config);
@@ -326,12 +326,12 @@ spec("Praktor workflow tool pack") {
     workflow_config.tool_name = "praktor_failure";
     workflow_config.description = "Run a workflow that fails by design.";
     workflow_config.workflow_path = workflow_path;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_registry_execute_json_value(
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_execute_json_value(
                      turbo_praktor_tool_pack_registry(pack), "praktor_failure",
                      arguments, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(json_get_string(result, "workflow_status"), "failed");
+    check_equal(json_get_string(result, "workflow_status"), "failed");
     check_not_null(json_get_string(result, "error"));
 
     turbo_runtime_json_destroy(arguments);
@@ -351,7 +351,7 @@ spec("Praktor workflow tool pack") {
     json_value_t *result = NULL;
 
     check_not_null(workspace);
-    check_int_eq(praktor_test_write_workflow(workspace, workflow_path, sizeof(workflow_path)), 0);
+    check_equal(praktor_test_write_workflow(workspace, workflow_path, sizeof(workflow_path)), 0);
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack_config.max_result_bytes = 1;
     pack = turbo_praktor_tool_pack_create(&pack_config);
@@ -360,11 +360,11 @@ spec("Praktor workflow tool pack") {
     workflow_config.tool_name = "praktor_bounded";
     workflow_config.description = "Exercise the result bound.";
     workflow_config.workflow_path = workflow_path;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
     arguments = json_parse("{\"payload\":{\"name\":\"demo\",\"count\":7}}",
                            strlen("{\"payload\":{\"name\":\"demo\",\"count\":7}}"));
     check_not_null(arguments);
-    check_int_eq(turbo_tool_registry_execute_json_value(
+    check_equal(turbo_tool_registry_execute_json_value(
                      turbo_praktor_tool_pack_registry(pack), "praktor_bounded",
                      arguments, &result),
                  TURBO_TOOL_ERROR);
@@ -385,10 +385,10 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_t *pack;
 
     check_not_null(workspace);
-    check_int_eq(praktor_test_write_named_workflow(
+    check_equal(praktor_test_write_named_workflow(
                      workspace, "one.yml", first_path, sizeof(first_path)),
                  0);
-    check_int_eq(praktor_test_write_named_workflow(
+    check_equal(praktor_test_write_named_workflow(
                      workspace, "two.yml", second_path, sizeof(second_path)),
                  0);
     turbo_praktor_tool_pack_config_init(&pack_config);
@@ -400,23 +400,23 @@ spec("Praktor workflow tool pack") {
     workflow_config.tool_name = "praktor_one";
     workflow_config.description = "One.";
     workflow_config.workflow_path = "relative.yml";
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
                  TURBO_TOOL_INVALID_ARGUMENT);
 
     {
       char missing_path[SALTS_FS_MAX_PATH] = {0};
-      check_int_eq(salts_fs_path_join(missing_path, sizeof(missing_path), workspace, "missing.yml"),
+      check_equal(salts_fs_path_join(missing_path, sizeof(missing_path), workspace, "missing.yml"),
                    0);
       workflow_config.workflow_path = missing_path;
-      check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+      check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
                    TURBO_TOOL_INVALID_ARGUMENT);
     }
 
     workflow_config.workflow_path = first_path;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
     workflow_config.tool_name = "praktor_two";
     workflow_config.workflow_path = second_path;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
                  TURBO_TOOL_BACKPRESSURE);
 
     turbo_praktor_tool_pack_destroy(pack);
@@ -426,8 +426,8 @@ spec("Praktor workflow tool pack") {
     check_not_null(pack);
     workflow_config.tool_name = "praktor_one";
     workflow_config.workflow_path = first_path;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
                  TURBO_TOOL_DUPLICATE);
     turbo_praktor_tool_pack_destroy(pack);
     salts_fs_unlink(first_path);
@@ -447,7 +447,7 @@ spec("Praktor workflow tool pack") {
     size_t capability_count = 0;
 
     check_not_null(workspace);
-    check_int_eq(praktor_test_write_named_workflow(
+    check_equal(praktor_test_write_named_workflow(
                      workspace, "net.yml", workflow_path, sizeof(workflow_path)),
                  0);
     turbo_praktor_tool_pack_config_init(&pack_config);
@@ -459,14 +459,14 @@ spec("Praktor workflow tool pack") {
     workflow_config.workflow_path = workflow_path;
     workflow_config.required_capabilities = reviewed_capabilities;
     workflow_config.required_capability_count = 1;
-    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_registry_get_required_capabilities(
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_required_capabilities(
                      turbo_praktor_tool_pack_registry(pack), "praktor_network",
                      &capabilities, &capability_count),
                  TURBO_TOOL_OK);
-    check_size_eq(capability_count, 2);
-    check_str_eq(capabilities[0], "runtime_tools");
-    check_str_eq(capabilities[1], "network");
+    check_equal(capability_count, 2);
+    check_equal(capabilities[0], "runtime_tools");
+    check_equal(capabilities[1], "network");
 
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);

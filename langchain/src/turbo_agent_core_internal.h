@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_CORE_INTERNAL_H
 #define TURBO_AGENT_CORE_INTERNAL_H
 
+#include <stddef.h>
+
 #include "turbo_agent.h"
 #include "turbo_agent_policy.h"
 

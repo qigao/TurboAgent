@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_langchain.h"
 
 #include <stdlib.h>
@@ -41,10 +42,10 @@ spec("turbo langchain facade") {
     check_not_null(chain);
     check_not_null(log);
     check_not_null(state);
-    input = (json_value_t *)turbo_json_object_get(state, "input");
+    input = (json_value_t *)json_object_get(state, "input");
     check_not_null(input);
     check_int_eq(turbo_runtime_json_object_set(
-                     input, "task", turbo_json_create_string("ship")),
+                     input, "task", json_create_string("ship")),
                  TURBO_RUNTIME_JSON_OK);
     check_int_eq(turbo_langchain_chain_add_prompt(chain, "prompt", "user", "Please {{task}}."),
                  TURBO_CHAIN_OK);
@@ -54,7 +55,7 @@ spec("turbo langchain facade") {
     check_int_eq(turbo_langchain_runnable_log(runnable, state, log, &out_state), 0);
     check_not_null(out_state);
     check_size_eq(turbo_runtime_json_value_size(
-                      turbo_json_object_get(out_state, "messages")),
+                      json_object_get(out_state, "messages")),
                   1);
     check_size_eq(turbo_runtime_json_value_size(turbo_event_log_events_json_value(log)), 2);
 
@@ -89,15 +90,15 @@ spec("turbo langchain facade") {
     check_int_eq(turbo_langchain_agent_memory_query(
                      agent, "project", "context", "notes", "remember", &records),
                  0);
-    check_size_eq(turbo_json_array_size(records), 1);
+    check_size_eq(json_array_size(records), 1);
 
     check_int_eq(turbo_langchain_agent_invoke_text(agent, "hello", NULL, &text, &summary), 0);
     check_str_eq(text, "facade ok");
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
+    check_str_eq(json_get_string(summary, "status"), "completed");
 
     free(text);
-    turbo_free_json(&records);
-    turbo_free_json(&summary);
+    json_free(records); records = NULL;
+    json_free(summary); summary = NULL;
     turbo_langchain_agent_destroy(agent);
   }
 }

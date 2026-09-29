@@ -34,14 +34,14 @@ typedef enum turbo_mcp_header_value_type_e {
 
 typedef struct turbo_mcp_header_binding_s {
   tstr name;
-  vec_t path;
+  vec_t path = {0};
   turbo_mcp_header_value_type_t type;
 } turbo_mcp_header_binding_t;
 
 typedef struct turbo_mcp_tool_binding_s {
   turbo_mcp_tool_pack_t *pack;
   tstr remote_name;
-  vec_t headers;
+  vec_t headers = {0};
 } turbo_mcp_tool_binding_t;
 
 struct turbo_mcp_tool_pack_s {

@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_TRANSPORT_INTERNAL_H
 #define TURBO_AGENT_TRANSPORT_INTERNAL_H
 
+#include <stddef.h>
+
 #include "turbo_agent_core_internal.h"
 
 #include <http_client/http.h>

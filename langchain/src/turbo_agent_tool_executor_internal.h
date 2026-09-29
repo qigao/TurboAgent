@@ -6,6 +6,7 @@
 #include "turbo_agent_policy.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_tool_executor.h"
+#include "turbo_event.h"
 #include "turbo_runtime_control.h"
 #include "turbo_tool_registry.h"
 
@@ -18,6 +19,7 @@ typedef struct turbo_agent_tool_execution_s {
   turbo_tool_execution_policy_t policy;
   turbo_tool_status_t status;
   char *output;
+  json_value_t *detail;
   int replayed;
   int approval_granted;
   int arguments_owned;
@@ -31,6 +33,7 @@ CXX_C_API void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *ex
 CXX_C_API int turbo_agent_tool_executor_execute(
     turbo_agent_tool_executor_t *executor, turbo_agent_runtime_t *runtime,
     const turbo_cancel_token_t *cancel_token, const char *thread_id, const char *run_id,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
     const turbo_tool_registry_t *registry, const turbo_agent_policy_t *policy,
     turbo_agent_tool_execution_t *calls, size_t call_count);
 

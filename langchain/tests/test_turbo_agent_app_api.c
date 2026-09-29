@@ -550,7 +550,7 @@ static int app_parent_tool_transport(const char *request_json, char **out_respon
 static char *create_app_temp_root(void) {
   int needed;
   char *path;
-  unsigned long long tick = (unsigned long long)turbo_hrtime();
+  unsigned long long tick = (unsigned long long)salts_hrtime();
 
 #ifdef _WIN32
   char temp_dir[MAX_PATH];

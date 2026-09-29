@@ -538,7 +538,7 @@ create_override_from_result(const json_value_t *result_state, int approved) {
 static char *create_runtime_temp_root(void) {
   int needed;
   char *path;
-  unsigned long long tick = (unsigned long long)turbo_hrtime();
+  unsigned long long tick = (unsigned long long)salts_hrtime();
 
 #ifdef _WIN32
   char temp_dir[MAX_PATH];

@@ -1,6 +1,8 @@
 #ifndef TURBO_CODING_TOOLS_H
 #define TURBO_CODING_TOOLS_H
 
+#include <stddef.h>
+
 #include <turbo_agent_api.h>
 
 #include "turbo_tool_registry.h"

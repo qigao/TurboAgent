@@ -105,7 +105,8 @@ spec("turbo action tool") {
 
     serialized = json_serialize(result, NULL);
     check_not_null(serialized);
-    check_int_eq(turbo_parse_json((const uint8_t *)serialized, strlen(serialized), &parsed), 0);
+    parsed = json_parse(serialized, strlen(serialized));
+    check_not_null(parsed);
     check_not_null(parsed);
     check_false(json_get_bool(parsed, "ok", true));
     check_str_eq(json_get_string(parsed, "summary"), "quote: \"bad\"\npath");
@@ -171,7 +172,8 @@ spec("turbo action tool") {
     check_int_eq(turbo_tool_registry_execute(tool_registry, "echo", "{\"message\":\"hi\"}", &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output), &result), 0);
+    result = json_parse(output, strlen(output));
+    check_not_null(result);
     check_true(json_get_bool(result, "ok", false));
     check_str_eq(json_get_string(result, "echo"), "hi");
 
@@ -208,7 +210,8 @@ spec("turbo action tool") {
     check_int_eq(turbo_tool_registry_execute(tool_registry, "echo", "{\"message\":\"hi\"}", &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output), &result), 0);
+    result = json_parse(output, strlen(output));
+    check_not_null(result);
     check_true(json_get_bool(result, "ok", false));
     check_str_eq(json_get_string(result, "echo"), "hi");
 

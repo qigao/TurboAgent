@@ -824,7 +824,8 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
   }
 
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
-  if ((pack->api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
+  if (config->abi_version >= TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+      (pack->api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
       pack->api->compile_workflow && pack->api->describe_workflow_plan &&
       pack->api->execute_workflow_plan && pack->api->release_workflow_plan) {
     status = turbo_praktor_compile_plan(

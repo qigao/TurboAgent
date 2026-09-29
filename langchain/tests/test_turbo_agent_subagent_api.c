@@ -4,6 +4,7 @@
 #include "turbo_retriever.h"
 #include "turbo_agent_subagent.h"
 #include <json_parser.h>
+#include <platform.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -348,7 +349,7 @@ spec("turbo agent subagent api") {
     json_value_t *result = NULL;
 
     snprintf(db_path, sizeof(db_path), "subagent_knowledge_%llx.sqlite3",
-             (unsigned long long)turbo_hrtime());
+             (unsigned long long)salts_hrtime());
     store = turbo_agent_knowledge_store_sqlite_open(db_path);
     check_not_null(runtime);
     check_not_null(store);

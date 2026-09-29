@@ -1941,10 +1941,10 @@ CXX_C_API int turbo_agent_runtime_remote_dispatch_jsonrpc_text(
   }
   *out_response_json_text = NULL;
 
-  if (!request_json_text ||
-      turbo_parse_json((const uint8_t *)request_json_text, strlen(request_json_text), &request_json) !=
-          0 ||
-      !request_json) {
+  if (request_json_text) {
+    request_json = json_parse(request_json_text, strlen(request_json_text));
+  }
+  if (!request_json_text || !request_json) {
     json_free(request_json); request_json = NULL;
     return turbo_agent_runtime_remote_build_error_response_text(
         NULL, TURBO_AGENT_RUNTIME_REMOTE_RPC_INVALID_REQUEST, "Invalid request",

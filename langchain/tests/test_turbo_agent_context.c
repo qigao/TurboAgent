@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 
 #include "turbo_agent_context.h"
 #include "turbo_agent_session.h"
@@ -55,9 +56,9 @@ static int context_estimate_json(const json_value_t *value, uint64_t *out_tokens
 
   (void)user_data;
   if (!value || !out_tokens) return -1;
-  serialized = turbo_json_serialize(value, &length);
+  serialized = json_serialize(value, &length);
   if (!serialized) return -1;
-  turbo_json_serialize_free(serialized);
+  json_serialize_free(serialized);
   *out_tokens = (uint64_t)length;
   return 0;
 }
@@ -74,25 +75,25 @@ static int context_summarize(const json_value_t *source, uint64_t max_summary_to
   (void)max_summary_tokens;
   if (!source || !out_summary || !strategy) return -1;
   *out_summary = NULL;
-  events = turbo_json_object_get(source, "events");
-  if (!events || turbo_json_type(events) != TURBO_JSON_ARRAY ||
-      turbo_json_array_size(events) == 0) {
+  events = json_object_get(source, "events");
+  if (!events || json_type(events) != JSON_ARRAY ||
+      json_array_size(events) == 0) {
     return -1;
   }
   strategy->summarize_calls++;
-  strategy->source_event_count = turbo_json_array_size(events);
-  first = turbo_json_array_get(events, 0);
-  last = turbo_json_array_get(events, strategy->source_event_count - 1);
-  kind = turbo_json_get_string(first, "kind");
+  strategy->source_event_count = json_array_size(events);
+  first = json_array_get(events, 0);
+  last = json_array_get(events, strategy->source_event_count - 1);
+  kind = json_get_string(first, "kind");
   snprintf(strategy->first_kind, sizeof(strategy->first_kind), "%s", kind ? kind : "");
-  kind = turbo_json_get_string(last, "kind");
+  kind = json_get_string(last, "kind");
   snprintf(strategy->last_kind, sizeof(strategy->last_kind), "%s", kind ? kind : "");
 
-  summary = turbo_json_create_object();
+  summary = json_create_object();
   if (!summary) return -1;
-  turbo_json_object_set_number(summary, "schema_version", 1.0);
-  turbo_json_object_set_string(summary, "goal", "summary-old-history");
-  turbo_json_object_set_number(summary, "source_event_count", (double)strategy->source_event_count);
+  json_object_set_number(summary, "schema_version", 1.0);
+  json_object_set_string(summary, "goal", "summary-old-history");
+  json_object_set_number(summary, "source_event_count", (double)strategy->source_event_count);
   *out_summary = summary;
   return 0;
 }
@@ -165,7 +166,7 @@ static turbo_agent_session_t *context_create_session(const char *thread_id,
 
 static json_value_t *context_state_with_model_events(void) {
   json_value_t *state = turbo_agent_state_create();
-  json_value_t *tool_calls = turbo_json_create_array();
+  json_value_t *tool_calls = json_create_array();
   json_value_t *event;
 
   check_not_null(state);
@@ -184,9 +185,9 @@ static json_value_t *context_state_with_model_events(void) {
 
 static json_value_t *context_state_with_tool_pair(void) {
   json_value_t *state = turbo_agent_state_create();
-  json_value_t *tool_calls = turbo_json_create_array();
-  json_value_t *recent_tool_calls = turbo_json_create_array();
-  json_value_t *tool_call = turbo_json_create_object();
+  json_value_t *tool_calls = json_create_array();
+  json_value_t *recent_tool_calls = json_create_array();
+  json_value_t *tool_call = json_create_object();
   json_value_t *event;
   json_value_t *outputs;
   json_value_t *output;
@@ -197,22 +198,22 @@ static json_value_t *context_state_with_tool_pair(void) {
   check_not_null(tool_call);
   if (!state || !tool_calls || !recent_tool_calls || !tool_call) return state;
   check_int_eq(turbo_agent_state_add_user_message(state, "current question"), 0);
-  turbo_json_object_set_string(tool_call, "call_id", "call-old");
-  turbo_json_object_set_string(tool_call, "name", "read_file");
-  turbo_json_object_set_string(tool_call, "arguments", "{\"path\":\"old.txt\"}");
-  turbo_json_array_add(tool_calls, tool_call);
+  json_object_set_string(tool_call, "call_id", "call-old");
+  json_object_set_string(tool_call, "name", "read_file");
+  json_object_set_string(tool_call, "arguments", "{\"path\":\"old.txt\"}");
+  json_array_add(tool_calls, tool_call);
   event = turbo_event_model_create_json_value("resp-tool", "", tool_calls);
   check_not_null(event);
   check_int_eq(turbo_agent_append_event(state, event), 0);
 
   event = turbo_agent_event_create("tool_results");
-  outputs = turbo_json_create_array();
+  outputs = json_create_array();
   output = turbo_agent_tool_result_output_item_create("call-old", "old tool output");
   check_not_null(event);
   check_not_null(outputs);
   check_not_null(output);
-  turbo_json_array_add(outputs, output);
-  turbo_json_object_add(event, "outputs", outputs);
+  json_array_add(outputs, output);
+  json_object_add(event, "outputs", outputs);
   check_int_eq(turbo_agent_append_event(state, event), 0);
 
   event = turbo_event_model_create_json_value("resp-recent", "recent answer", recent_tool_calls);
@@ -272,8 +273,8 @@ spec("turbo agent context") {
     check_not_null(strstr(transport.last_request, "recent answer"));
     check_size_eq(context_text_count(transport.last_request, "Be concise."), 1);
     check_int_eq(turbo_agent_session_context_status(session, &status), SALTS_OK);
-    check_str_eq(turbo_json_get_string(status, "status"), "committed");
-    check_size_eq((size_t)turbo_json_get_double(status, "source_event_end", 0), 1);
+    check_str_eq(json_get_string(status, "status"), "committed");
+    check_size_eq((size_t)json_get_double(status, "source_event_end", 0), 1);
     check_size_eq(turbo_agent_state_event_count(state), 2);
 
     free(transport.last_request);

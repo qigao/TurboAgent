@@ -295,10 +295,9 @@ static int session_invoke_preset_json_impl(
   if (rc != 0) {
     return rc;
   }
-  rc = turbo_parse_json((const uint8_t *)text, strlen(text), &parsed);
+  parsed = json_parse(text, strlen(text));
   free(text);
-  if (rc != 0 || !parsed) {
-    json_free(parsed); parsed = NULL;
+  if (!parsed) {
     return -1;
   }
   *out_json = parsed;

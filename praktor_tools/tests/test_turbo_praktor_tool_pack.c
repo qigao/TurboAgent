@@ -2,6 +2,7 @@
 #include "turbo_praktor_tool_pack.h"
 #include "turbo_runtime_control.h"
 
+#include <praktor.h>
 #include <salts_fs.h>
 #include <json_parser.h>
 
@@ -83,6 +84,58 @@ static void praktor_test_cleanup(const char *workspace, const char *workflow_pat
   if (workspace) salts_fs_rmdir(workspace);
 }
 
+static void praktor_test_legacy_workflow_config_init(
+    turbo_praktor_workflow_config_t *config) {
+  turbo_praktor_workflow_config_init(config);
+  config->require_harness_safe = 0;
+}
+
+#if defined(PRAKTOR_CAPABILITY_WORKFLOW_PLAN)
+static int praktor_test_write_harness_safe_workflow(
+    const char *workspace, char *out_path, size_t out_size) {
+  static const char yaml[] =
+      "input_policy: strict\n"
+      "inputs:\n"
+      "  payload:\n"
+      "    type: object\n"
+      "    required: true\n"
+      "outputs:\n"
+      "  count:\n"
+      "    type: integer\n"
+      "    required: true\n"
+      "    value: \"{{ tasks.inspect.outputs.count }}\"\n"
+      "tasks:\n"
+      "  - name: inspect\n"
+      "    script: |\n"
+      "      ctx.output(\"count\", ctx.get(\"payload.count\"));\n";
+  salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (salts_fs_path_join(out_path, out_size, workspace, "harness-safe.yml") != 0) return -1;
+  return salts_fs_write_file(out_path, &buffer);
+}
+
+typedef struct praktor_test_observation_s {
+  int event_count;
+  int detail_count;
+  int detail_has_tasks;
+} praktor_test_observation_t;
+
+static void praktor_test_event_sink(const json_value_t *event, void *user_data) {
+  praktor_test_observation_t *capture = (praktor_test_observation_t *)user_data;
+  if (!capture || !event) return;
+  if (json_get_string(event, "kind") &&
+      strcmp(json_get_string(event, "kind"), "trace") == 0) {
+    ++capture->event_count;
+  }
+}
+
+static void praktor_test_detail_sink(const json_value_t *detail, void *user_data) {
+  praktor_test_observation_t *capture = (praktor_test_observation_t *)user_data;
+  if (!capture || !detail) return;
+  ++capture->detail_count;
+  capture->detail_has_tasks = json_object_get(detail, "tasks") != NULL;
+}
+#endif
+
 spec("Praktor workflow tool pack") {
   it("propagates generic cancellation into Praktor controlled execution") {
     char *workspace = praktor_test_workspace();
@@ -104,7 +157,7 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
-    turbo_praktor_workflow_config_init(&workflow_config);
+    praktor_test_legacy_workflow_config_init(&workflow_config);
     workflow_config.tool_name = "praktor_cancel";
     workflow_config.description = "Cancellation propagation test.";
     workflow_config.workflow_path = workflow_path;
@@ -154,7 +207,7 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
-    turbo_praktor_workflow_config_init(&workflow_config);
+    praktor_test_legacy_workflow_config_init(&workflow_config);
     workflow_config.tool_name = "praktor_deadline";
     workflow_config.description = "Deadline propagation test.";
     workflow_config.workflow_path = workflow_path;
@@ -200,7 +253,7 @@ spec("Praktor workflow tool pack") {
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
 
-    turbo_praktor_workflow_config_init(&workflow_config);
+    praktor_test_legacy_workflow_config_init(&workflow_config);
     workflow_config.tool_name = "praktor_inspect";
     workflow_config.description = "Run the reviewed inspect workflow.";
     workflow_config.workflow_path = workflow_path;
@@ -269,7 +322,7 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
-    turbo_praktor_workflow_config_init(&workflow_config);
+    praktor_test_legacy_workflow_config_init(&workflow_config);
     workflow_config.tool_name = "praktor_inspect";
     workflow_config.description = "Run inspect.";
     workflow_config.workflow_path = workflow_path;
@@ -322,7 +375,7 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
-    turbo_praktor_workflow_config_init(&workflow_config);
+    praktor_test_legacy_workflow_config_init(&workflow_config);
     workflow_config.tool_name = "praktor_failure";
     workflow_config.description = "Run a workflow that fails by design.";
     workflow_config.workflow_path = workflow_path;
@@ -356,7 +409,7 @@ spec("Praktor workflow tool pack") {
     pack_config.max_result_bytes = 1;
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
-    turbo_praktor_workflow_config_init(&workflow_config);
+    praktor_test_legacy_workflow_config_init(&workflow_config);
     workflow_config.tool_name = "praktor_bounded";
     workflow_config.description = "Exercise the result bound.";
     workflow_config.workflow_path = workflow_path;
@@ -396,7 +449,7 @@ spec("Praktor workflow tool pack") {
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
 
-    turbo_praktor_workflow_config_init(&workflow_config);
+    praktor_test_legacy_workflow_config_init(&workflow_config);
     workflow_config.tool_name = "praktor_one";
     workflow_config.description = "One.";
     workflow_config.workflow_path = "relative.yml";
@@ -453,7 +506,7 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
-    turbo_praktor_workflow_config_init(&workflow_config);
+    praktor_test_legacy_workflow_config_init(&workflow_config);
     workflow_config.tool_name = "praktor_network";
     workflow_config.description = "Reviewed network-only workflow.";
     workflow_config.workflow_path = workflow_path;
@@ -464,12 +517,195 @@ spec("Praktor workflow tool pack") {
                      turbo_praktor_tool_pack_registry(pack), "praktor_network",
                      &capabilities, &capability_count),
                  TURBO_TOOL_OK);
+#if defined(PRAKTOR_CAPABILITY_WORKFLOW_PLAN)
     check_equal(capability_count, 2);
     check_equal(capabilities[0], "runtime_tools");
     check_equal(capabilities[1], "network");
+#else
+    check_equal(capability_count, 5);
+    check_equal(capabilities[0], "runtime_tools");
+    check_equal(capabilities[1], "network");
+    check_equal(capabilities[2], "shell");
+    check_equal(capabilities[3], "patch");
+    check_equal(capabilities[4], "outside_workspace");
+#endif
 
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
     free(workspace);
   }
+
+  it("accepts workflow config v1 prefix callers") {
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack;
+
+    check_not_null(workspace);
+    check_equal(praktor_test_write_named_workflow(
+                     workspace, "v1.yml", workflow_path, sizeof(workflow_path)),
+                 0);
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+
+    memset(&workflow_config, 0, sizeof(workflow_config));
+    workflow_config.struct_size = TURBO_PRAKTOR_WORKFLOW_CONFIG_V1_SIZE;
+    workflow_config.abi_version = TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V1;
+    workflow_config.tool_name = "praktor_v1";
+    workflow_config.description = "v1 config compatibility.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.execution_policy.mode = TURBO_TOOL_EXECUTION_EXCLUSIVE;
+    workflow_config.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+
+    turbo_praktor_tool_pack_destroy(pack);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
+#if defined(PRAKTOR_CAPABILITY_WORKFLOW_PLAN)
+  it("uses WorkflowPlan contracts for harness-native registration and execution") {
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack;
+    turbo_tool_definition_t definition = {0};
+    const char *const *capabilities = NULL;
+    size_t capability_count = 0;
+    json_value_t *schema = NULL;
+    json_value_t *arguments = NULL;
+    json_value_t *result = NULL;
+    turbo_tool_execution_context_t context = {0};
+    praktor_test_observation_t observation = {0};
+
+    check_not_null(workspace);
+    check_equal(praktor_test_write_harness_safe_workflow(
+                     workspace, workflow_path, sizeof(workflow_path)),
+                 0);
+
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    turbo_praktor_workflow_config_init(&workflow_config);
+    workflow_config.tool_name = "praktor_harness_safe";
+    workflow_config.description = "Harness-safe plan-backed workflow.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.strict = 1;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+
+    check_equal(turbo_tool_registry_get_definition(
+                     turbo_praktor_tool_pack_registry(pack), 0, &definition),
+                 TURBO_TOOL_OK);
+    schema = json_parse(definition.parameters_json, strlen(definition.parameters_json));
+    check_not_null(schema);
+    check_equal(json_get_string(schema, "type"), "object");
+    check_false(json_get_bool(schema, "additionalProperties", true));
+    check_not_null(json_object_get(json_object_get(schema, "properties"), "payload"));
+
+    check_equal(turbo_tool_registry_get_required_capabilities(
+                     turbo_praktor_tool_pack_registry(pack), "praktor_harness_safe",
+                     &capabilities, &capability_count),
+                 TURBO_TOOL_OK);
+    check_equal(capability_count, 1);
+    check_equal(capabilities[0], "runtime_tools");
+
+    arguments = json_parse("{\"payload\":{\"count\":7}}",
+                           strlen("{\"payload\":{\"count\":7}}"));
+    check_not_null(arguments);
+    context.struct_size = sizeof(context);
+    context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    context.thread_id = "thread-plan";
+    context.run_id = "run-plan";
+    context.turn_id = "turn-plan";
+    context.tool_call_id = "call-plan";
+    context.event_sink = praktor_test_event_sink;
+    context.event_sink_user_data = &observation;
+    context.detail_sink = praktor_test_detail_sink;
+    context.detail_sink_user_data = &observation;
+
+    check_equal(turbo_tool_registry_execute_json_value_with_context(
+                     turbo_praktor_tool_pack_registry(pack), "praktor_harness_safe",
+                     arguments, &context, &result),
+                 TURBO_TOOL_OK);
+    check_not_null(result);
+    check_equal(json_get_string(result, "workflow_status"), "success");
+    check_null(json_object_get(result, "tasks"));
+    check_equal((int)json_get_double(json_object_get(result, "outputs"), "count", -1.0), 7);
+    check_equal(observation.detail_count, 1);
+    check_true(observation.detail_has_tasks);
+#if defined(PRAKTOR_CAPABILITY_EXECUTION_EVENTS)
+    check_true(observation.event_count >= 4);
+#endif
+
+    turbo_runtime_json_destroy(result);
+    result = NULL;
+
+    /* The bound plan must detect reviewed bytes changing after registration. */
+    {
+      static const char changed[] =
+          "input_policy: strict\n"
+          "inputs:\n"
+          "  payload:\n"
+          "    type: object\n"
+          "    required: true\n"
+          "outputs:\n"
+          "  count:\n"
+          "    type: integer\n"
+          "    required: true\n"
+          "    value: \"{{ tasks.inspect.outputs.count }}\"\n"
+          "tasks:\n"
+          "  - name: inspect\n"
+          "    script: |\n"
+          "      ctx.output(\"count\", 99);\n";
+      salts_fs_buf_t buffer =
+          salts_fs_buf_init((void *)changed, sizeof(changed) - 1);
+      check_equal(salts_fs_write_file(workflow_path, &buffer), 0);
+    }
+
+    check_equal(turbo_tool_registry_execute_json_value_with_context(
+                     turbo_praktor_tool_pack_registry(pack), "praktor_harness_safe",
+                     arguments, &context, &result),
+                 TURBO_TOOL_OK);
+    check_not_null(result);
+    check_equal(json_get_string(result, "workflow_status"), "error");
+    check_equal(json_get_string(result, "error_phase"), "plan");
+
+    turbo_runtime_json_destroy(schema);
+    turbo_runtime_json_destroy(arguments);
+    turbo_runtime_json_destroy(result);
+    turbo_praktor_tool_pack_destroy(pack);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
+  it("requires harness-safe qualification by default for config v2") {
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack;
+
+    check_not_null(workspace);
+    check_equal(praktor_test_write_named_workflow(
+                     workspace, "unsafe.yml", workflow_path, sizeof(workflow_path)),
+                 0);
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    turbo_praktor_workflow_config_init(&workflow_config);
+    workflow_config.tool_name = "praktor_unsafe_default";
+    workflow_config.description = "Missing strict contract and output.";
+    workflow_config.workflow_path = workflow_path;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+
+    turbo_praktor_tool_pack_destroy(pack);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+#endif
+
 }

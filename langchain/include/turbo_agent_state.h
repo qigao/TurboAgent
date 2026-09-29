@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_STATE_H
 #define TURBO_AGENT_STATE_H
 
+#include <stddef.h>
+
 #include <turbo_agent_api.h>
 
 #include <json_parser.h>

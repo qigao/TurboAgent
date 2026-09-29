@@ -1,0 +1,92 @@
+{
+  "start_request": {
+    "id": "req-start",
+    "method": "runtime.start",
+    "params": {
+      "graph_name": "remote-skeleton",
+      "thread_id": "remote-thread-1",
+      "options": {
+        "interrupt_before_nodes": ["end"]
+      }
+    }
+  },
+  "start_response": {
+    "id": "req-start",
+    "summary": {
+      "thread_id": "remote-thread-1",
+      "status": "interrupted"
+    },
+    "state": {
+      "visited_start": true,
+      "visited_end": false
+    }
+  },
+  "get_thread_state_request": {
+    "id": "req-thread-state",
+    "method": "runtime.getThreadState",
+    "params": {
+      "thread_id": "remote-thread-1"
+    }
+  },
+  "get_thread_state_response": {
+    "id": "req-thread-state",
+    "state": {
+      "visited_start": true
+    }
+  },
+  "update_thread_state_request": {
+    "id": "req-thread-update",
+    "method": "runtime.updateThreadState",
+    "params": {
+      "thread_id": "remote-thread-1",
+      "state_patch": {
+        "patched": true
+      }
+    }
+  },
+  "update_thread_state_response": {
+    "id": "req-thread-update",
+    "state": {
+      "patched": true,
+      "visited_start": true
+    }
+  },
+  "apply_thread_state_patch_request": {
+    "id": "req-thread-patch",
+    "method": "runtime.applyThreadStatePatch",
+    "params": {
+      "thread_id": "remote-thread-1",
+      "state_patch": {
+        "patched_via_alias": true
+      }
+    }
+  },
+  "apply_thread_state_patch_response": {
+    "id": "req-thread-patch",
+    "state": {
+      "patched_via_alias": true,
+      "visited_start": true
+    }
+  },
+  "apply_command_request": {
+    "id": "req-apply",
+    "method": "runtime.applyCommand",
+    "params": {
+      "checkpoint_id_required": true,
+      "command": {
+        "kind": "append_user_message",
+        "text": "hello from remote"
+      }
+    }
+  },
+  "apply_command_response": {
+    "id": "req-apply",
+    "state": {
+      "input_count": 1,
+      "last_message": {
+        "role": "user",
+        "content": "hello from remote"
+      }
+    }
+  }
+}

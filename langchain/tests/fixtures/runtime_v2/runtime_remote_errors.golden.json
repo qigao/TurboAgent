@@ -1,0 +1,22 @@
+{
+  "invalid_request_response": {
+    "id": "req-invalid-request",
+    "error_code": -32600,
+    "error_message": "Invalid request"
+  },
+  "invalid_params_response": {
+    "id": "req-invalid",
+    "error_code": -32602,
+    "error_message": "Invalid params"
+  },
+  "method_not_found_response": {
+    "id": "req-unknown",
+    "error_code": -32601,
+    "error_message": "Method not found"
+  },
+  "internal_error_response": {
+    "id": "req-internal",
+    "error_code": -32603,
+    "error_message": "Internal error"
+  }
+}

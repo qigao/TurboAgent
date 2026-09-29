@@ -1,0 +1,81 @@
+{
+  "thread_id": "thr_123",
+  "current_run_id": "run_456",
+  "latest_run_id": "run_456",
+  "pending_run_id": null,
+  "current_checkpoint_id": null,
+  "current_checkpoint_summary": null,
+  "current_branch": {
+    "run_id": "run_456",
+    "parent_run_id": "run_123",
+    "source_checkpoint_id": "ckpt_123",
+    "branch_root_checkpoint_id": "ckpt_123",
+    "checkpoint_id": null,
+    "checkpoint_summary": null,
+    "source_checkpoint_summary": {
+      "id": "ckpt_123",
+      "run_id": "run_123",
+      "parent_checkpoint_id": null,
+      "status": "interrupted",
+      "created_at": "2026-04-16T12:00:00Z",
+      "next_node": "review",
+      "seq": 1,
+      "steps": 1
+    }
+  },
+  "branches": [
+    {
+      "run_id": "run_123",
+      "parent_run_id": null,
+      "source_checkpoint_id": null,
+      "checkpoint_id": "ckpt_123",
+      "checkpoint_summary": {
+        "id": "ckpt_123",
+        "run_id": "run_123",
+        "parent_checkpoint_id": null,
+        "status": "interrupted",
+        "created_at": "2026-04-16T12:00:00Z",
+        "next_node": "review",
+        "seq": 1,
+        "steps": 1
+      },
+      "source_checkpoint_summary": null,
+      "branch_root_checkpoint_id": "ckpt_123"
+    },
+    {
+      "run_id": "run_456",
+      "parent_run_id": "run_123",
+      "source_checkpoint_id": "ckpt_123",
+      "checkpoint_id": null,
+      "checkpoint_summary": null,
+      "source_checkpoint_summary": {
+        "id": "ckpt_123",
+        "run_id": "run_123",
+        "parent_checkpoint_id": null,
+        "status": "interrupted",
+        "created_at": "2026-04-16T12:00:00Z",
+        "next_node": "review",
+        "seq": 1,
+        "steps": 1
+      },
+      "branch_root_checkpoint_id": "ckpt_123"
+    }
+  ],
+  "edges": [
+    {
+      "kind": "fork",
+      "source_checkpoint_id": "ckpt_123",
+      "target_run_id": "run_456",
+      "source_checkpoint_summary": {
+        "id": "ckpt_123",
+        "run_id": "run_123",
+        "parent_checkpoint_id": null,
+        "status": "interrupted",
+        "created_at": "2026-04-16T12:00:00Z",
+        "next_node": "review",
+        "seq": 1,
+        "steps": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,336 @@
+{
+  "supervisor_inspect": {
+    "supervisor": {
+      "active_agent": "planner",
+      "target_agent": "executor",
+      "handoff_reason": "delegate execution",
+      "inbox_count": 0,
+      "handoff_count": 1
+    },
+    "inbox": [],
+    "handoff_history": [
+      {
+        "source_agent": "planner",
+        "target_agent": "executor",
+        "reason": "delegate execution"
+      }
+    ],
+    "control_snapshot": {
+      "supervisor": {
+        "active_agent": "planner",
+        "target_agent": "executor",
+        "handoff_reason": "delegate execution",
+        "inbox_count": 0,
+        "handoff_count": 1
+      }
+    },
+    "workflow_snapshot": {
+      "supervisor": {
+        "active_agent": "planner",
+        "target_agent": "executor",
+        "handoff_reason": "delegate execution",
+        "inbox_count": 0,
+        "handoff_count": 1
+      }
+    }
+  },
+  "orchestration_inspect": {
+    "supervisor_inspect": {
+      "supervisor": {
+        "active_agent": "planner",
+        "target_agent": "executor",
+        "handoff_reason": "delegate execution",
+        "inbox_count": 0,
+        "handoff_count": 1
+      },
+      "inbox": [],
+      "handoff_history": [
+        {
+          "source_agent": "planner",
+          "target_agent": "executor",
+          "reason": "delegate execution"
+        }
+      ],
+      "control_snapshot": {
+        "supervisor": {
+          "active_agent": "planner",
+          "target_agent": "executor",
+          "handoff_reason": "delegate execution",
+          "inbox_count": 0,
+          "handoff_count": 1
+        }
+      },
+      "workflow_snapshot": {
+        "supervisor": {
+          "active_agent": "planner",
+          "target_agent": "executor",
+          "handoff_reason": "delegate execution",
+          "inbox_count": 0,
+          "handoff_count": 1
+        }
+      }
+    },
+    "thread_timeline": {
+      "thread": {
+        "id": "thr_123"
+      },
+      "resolved_current_run": {
+        "id": "run_123"
+      },
+      "resolved_current_checkpoint_id": "ckpt_123",
+      "resolved_current_checkpoint": {
+        "id": "ckpt_123",
+        "run_id": "run_123",
+        "parent_checkpoint_id": null,
+        "seq": 1,
+        "status": "interrupted",
+        "created_at": "2026-04-16T12:00:00Z",
+        "next_node": "review",
+        "steps": 1
+      },
+      "latest_run": {
+        "id": "run_123"
+      },
+      "pending_run": {
+        "id": "run_123"
+      },
+      "runs": [
+        {
+          "id": "run_123"
+        }
+      ],
+      "current_run_checkpoints": [
+        {
+          "id": "ckpt_123"
+        }
+      ],
+      "history_events": [
+        {
+          "type": "node_start"
+        }
+      ]
+    },
+    "thread_lineage": {
+      "thread_id": "thr_123",
+      "latest_run_id": "run_123",
+      "pending_run_id": "run_123",
+      "root_checkpoint_id": "ckpt_123",
+      "branches": [
+        {
+          "parent_run_id": null,
+          "forked_from_checkpoint_id": null,
+          "parent_checkpoint_id": null,
+          "branch_root_checkpoint_id": "ckpt_123"
+        }
+      ]
+    },
+    "branch_tree": {
+      "thread_id": "thr_123",
+      "current_run_id": "run_123",
+      "latest_run_id": "run_123",
+      "pending_run_id": "run_123",
+      "current_checkpoint_id": "ckpt_123",
+      "current_checkpoint_summary": {
+        "id": "ckpt_123",
+        "run_id": "run_123",
+        "parent_checkpoint_id": null,
+        "status": "interrupted",
+        "created_at": "2026-04-16T12:00:00Z",
+        "next_node": "review",
+        "seq": 1,
+        "steps": 1
+      },
+      "current_branch": {
+        "run_id": "run_123",
+        "parent_run_id": null,
+        "source_checkpoint_id": null,
+        "branch_root_checkpoint_id": "ckpt_123",
+        "checkpoint_id": "ckpt_123",
+        "checkpoint_summary": {
+          "id": "ckpt_123",
+          "run_id": "run_123",
+          "parent_checkpoint_id": null,
+          "status": "interrupted",
+          "created_at": "2026-04-16T12:00:00Z",
+          "next_node": "review",
+          "seq": 1,
+          "steps": 1
+        },
+        "source_checkpoint_summary": null
+      },
+      "branches": [
+        {
+          "run_id": "run_123",
+          "parent_run_id": null,
+          "source_checkpoint_id": null,
+          "branch_root_checkpoint_id": "ckpt_123",
+          "checkpoint_id": "ckpt_123",
+          "checkpoint_summary": {
+            "id": "ckpt_123",
+            "run_id": "run_123",
+            "parent_checkpoint_id": null,
+            "status": "interrupted",
+            "created_at": "2026-04-16T12:00:00Z",
+            "next_node": "review",
+            "seq": 1,
+            "steps": 1
+          },
+          "source_checkpoint_summary": null
+        }
+      ],
+      "edges": []
+    },
+    "child_runs": []
+  },
+  "child_orchestration_inspect": {
+    "parent_agent_run_id": "run_parent",
+    "parent_tool_call_id": "call_parent",
+    "parent_tool_name": "delegate",
+    "parent_graph_run_id": "run_parent",
+    "call_frame_id": "call_parent",
+    "child_inspect": {
+      "run": {
+        "id": "run_123"
+      },
+      "checkpoints": [
+        {
+          "id": "ckpt_123"
+        }
+      ],
+      "latest_checkpoint": {
+        "id": "ckpt_123"
+      },
+      "checkpoint_context": {
+        "checkpoint_summary": {
+          "id": "ckpt_123",
+          "run_id": "run_123",
+          "parent_checkpoint_id": null,
+          "seq": 1,
+          "status": "interrupted",
+          "created_at": "2026-04-16T12:00:00Z",
+          "next_node": "review",
+          "steps": 1
+        },
+        "state": {
+          "visited_start": true,
+          "review": {
+            "approved": false
+          }
+        },
+        "run": {
+          "id": "run_123"
+        },
+        "thread": {
+          "id": "thr_123"
+        },
+        "history_events": [
+          {
+            "type": "node_start"
+          }
+        ]
+      },
+      "history_events": [
+        {
+          "type": "node_start"
+        }
+      ],
+      "trace_events": [],
+      "thread_timeline": {
+        "thread": {
+          "id": "thr_123"
+        },
+        "resolved_current_run": {
+          "id": "run_123"
+        },
+        "resolved_current_checkpoint_id": "ckpt_123",
+        "resolved_current_checkpoint": {
+          "id": "ckpt_123",
+          "run_id": "run_123",
+          "parent_checkpoint_id": null,
+          "seq": 1,
+          "status": "interrupted",
+          "created_at": "2026-04-16T12:00:00Z",
+          "next_node": "review",
+          "steps": 1
+        },
+        "latest_run": {
+          "id": "run_123"
+        },
+        "pending_run": {
+          "id": "run_123"
+        },
+        "runs": [
+          {
+            "id": "run_123"
+          }
+        ],
+        "current_run_checkpoints": [
+          {
+            "id": "ckpt_123"
+          }
+        ],
+        "history_events": [
+          {
+            "type": "node_start"
+          }
+        ]
+      },
+      "branch_tree": {
+        "thread_id": "thr_123",
+        "current_run_id": "run_123",
+        "latest_run_id": "run_123",
+        "pending_run_id": "run_123",
+        "current_checkpoint_id": "ckpt_123",
+        "current_checkpoint_summary": {
+          "id": "ckpt_123",
+          "run_id": "run_123",
+          "parent_checkpoint_id": null,
+          "status": "interrupted",
+          "created_at": "2026-04-16T12:00:00Z",
+          "next_node": "review",
+          "seq": 1,
+          "steps": 1
+        },
+        "current_branch": {
+          "run_id": "run_123",
+          "parent_run_id": null,
+          "source_checkpoint_id": null,
+          "branch_root_checkpoint_id": "ckpt_123",
+          "checkpoint_id": "ckpt_123",
+          "checkpoint_summary": {
+            "id": "ckpt_123",
+            "run_id": "run_123",
+            "parent_checkpoint_id": null,
+            "status": "interrupted",
+            "created_at": "2026-04-16T12:00:00Z",
+            "next_node": "review",
+            "seq": 1,
+            "steps": 1
+          },
+          "source_checkpoint_summary": null
+        },
+        "branches": [
+          {
+            "run_id": "run_123",
+            "parent_run_id": null,
+            "source_checkpoint_id": null,
+            "branch_root_checkpoint_id": "ckpt_123",
+            "checkpoint_id": "ckpt_123",
+            "checkpoint_summary": {
+              "id": "ckpt_123",
+              "run_id": "run_123",
+              "parent_checkpoint_id": null,
+              "status": "interrupted",
+              "created_at": "2026-04-16T12:00:00Z",
+              "next_node": "review",
+              "seq": 1,
+              "steps": 1
+            },
+            "source_checkpoint_summary": null
+          }
+        ],
+        "edges": []
+      }
+    }
+  }
+}

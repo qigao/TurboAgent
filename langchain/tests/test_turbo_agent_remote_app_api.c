@@ -1,0 +1,1318 @@
+#include "tinytest.h"
+
+#include <http_server/http.h>
+#include "turbo_agent_graph.h"
+#include "turbo_agent_memory_store.h"
+#include "turbo_agent_remote_app.h"
+#include "turbo_agent_runtime.h"
+#include "turbo_agent_runtime_remote.h"
+#include "turbo_agent_runtime_remote_chttp.h"
+#include "turbo_agent_state.h"
+#include "turbo_agent_test_support.h"
+#include <json_parser.h>
+
+#include <stdio.h>
+#include <string.h>
+
+#define remote_app_observer_capture_t turbo_agent_test_observer_capture_t
+#define remote_app_capture_observer_event turbo_agent_test_capture_observer_event
+#define remote_app_check_memory_record_fixture turbo_agent_test_check_memory_record_fixture
+#define remote_app_check_memory_record_array_fixture turbo_agent_test_check_memory_record_array_fixture
+#define remote_app_check_supervisor_inspect turbo_agent_test_check_supervisor_inspect
+#define remote_app_check_thread_lineage_json_value turbo_agent_test_check_thread_lineage_json_value
+
+typedef struct {
+  const char *key;
+  int value;
+} remote_app_bool_write_t;
+
+typedef struct {
+  const char *name;
+  turbo_graph_t *graph;
+} remote_app_graph_registry_t;
+
+typedef struct {
+  chttp_server server;
+  int server_initialized;
+  int server_started;
+  turbo_graph_t *graph;
+  turbo_agent_runtime_store_t store;
+  turbo_agent_runtime_t *runtime;
+  turbo_agent_runtime_remote_t *remote;
+  turbo_agent_remote_app_t *app;
+  int accessors_ok;
+  int inspect_thread_ok;
+  int inspect_latest_run_ok;
+  int inspect_pending_run_ok;
+  int thread_state_ok;
+  int context_ok;
+  int observability_ok;
+  int timeline_ok;
+  int thread_history_ok;
+  int thread_history_replay_ok;
+  int thread_observer_ok;
+  int thread_trace_ok;
+  int branch_tree_ok;
+  int lineage_ok;
+  int supervisor_inbox_ok;
+  int supervisor_history_ok;
+  int supervisor_inspect_ok;
+  int requested_handoff_event_ok;
+  int committed_handoff_event_ok;
+  int child_runs_ok;
+  int child_inspect_ok;
+  int orchestration_inspect_ok;
+  int resume_ok;
+  int fork_ok;
+  int high_level_helpers_ok;
+} remote_app_test_state_t;
+
+
+enum {
+  REMOTE_APP_TEST_CONNECTIONS = 4,
+  REMOTE_APP_TEST_COMMANDS = 32,
+  REMOTE_APP_TEST_SEND_BYTES = 64 * 1024,
+  REMOTE_APP_TEST_BUFFER_BYTES = 1024 * 1024,
+  REMOTE_APP_TEST_TIMEOUT_MS = 5000
+};
+
+static chttp_server_config remote_app_test_server_config(void) {
+  chttp_server_config config = {0};
+  config.host = "127.0.0.1";
+  config.port = 0u;
+  config.backlog = REMOTE_APP_TEST_CONNECTIONS;
+#if defined(_WIN32)
+  config.network.backend = NATIVE_IO_BACKEND_IOCP;
+#elif defined(__linux__)
+  config.network.backend = NATIVE_IO_BACKEND_EPOLL;
+#else
+  config.network.backend = NATIVE_IO_BACKEND_KQUEUE;
+#endif
+  config.network.connection_capacity = REMOTE_APP_TEST_CONNECTIONS;
+  config.network.command_capacity = REMOTE_APP_TEST_COMMANDS;
+  config.network.request_capacity = REMOTE_APP_TEST_COMMANDS;
+  config.network.completion_batch_capacity = REMOTE_APP_TEST_CONNECTIONS;
+  config.network.event_capacity = REMOTE_APP_TEST_COMMANDS;
+  config.network.max_send_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.network.receive_buffer_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.network.connect_timeout_ms = REMOTE_APP_TEST_TIMEOUT_MS;
+  config.network.read_timeout_ms = REMOTE_APP_TEST_TIMEOUT_MS;
+  config.network.write_timeout_ms = REMOTE_APP_TEST_TIMEOUT_MS;
+  config.route_capacity = 4u;
+  config.middleware_capacity = 1u;
+  config.max_route_middleware_count = 1u;
+  config.max_route_param_count = 1u;
+  config.max_route_param_bytes = 256u;
+  config.max_target_bytes = 256u;
+  config.max_header_count = 32u;
+  config.max_header_bytes = 8192u;
+  config.max_request_body_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.max_response_header_count = 32u;
+  config.max_response_header_bytes = 8192u;
+  config.max_response_body_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.max_buffered_response_body_bytes = REMOTE_APP_TEST_SEND_BYTES;
+  config.buffer_capacity_bytes = REMOTE_APP_TEST_BUFFER_BYTES;
+  config.poll_slice_ms = 1u;
+  return config;
+}
+
+static int remote_app_test_server_start(chttp_server *server, int *initialized,
+                                        int *started,
+                                        turbo_agent_runtime_remote_t *remote,
+                                        char *endpoint_url, size_t endpoint_capacity) {
+  chttp_server_config config;
+  uint16_t port = 0u;
+  int status;
+  int written;
+
+  if (!server || !initialized || !started || !remote || !endpoint_url ||
+      endpoint_capacity == 0u) {
+    return -1;
+  }
+
+  config = remote_app_test_server_config();
+  status = chttp_server_init(server, &config);
+  if (status != SALTS_OK) return -1;
+  *initialized = 1;
+
+  status = turbo_agent_runtime_remote_chttp_mount(
+      remote, server, "/v1/runtime/jsonrpc");
+  if (status != SALTS_OK) return -1;
+  status = chttp_server_start(server);
+  if (status != SALTS_OK) return -1;
+  *started = 1;
+  status = chttp_server_port(server, &port);
+  if (status != SALTS_OK || port == 0u) return -1;
+
+  written = snprintf(endpoint_url, endpoint_capacity,
+                     "http://127.0.0.1:%u/v1/runtime/jsonrpc",
+                     (unsigned int)port);
+  return written > 0 && (size_t)written < endpoint_capacity ? 0 : -1;
+}
+
+static void remote_app_test_server_cleanup(chttp_server *server, int *initialized,
+                                           int *started) {
+  if (!server || !initialized || !started) return;
+  if (*started) {
+    (void)chttp_server_stop(server, REMOTE_APP_TEST_TIMEOUT_MS);
+    *started = 0;
+  }
+  if (*initialized) {
+    (void)chttp_server_destroy(server);
+    *initialized = 0;
+  }
+}
+
+static void remote_app_test_state_cleanup(remote_app_test_state_t *state) {
+  if (!state) return;
+  if (state->app) {
+    turbo_agent_remote_app_destroy(state->app);
+    state->app = NULL;
+  }
+  remote_app_test_server_cleanup(&state->server, &state->server_initialized,
+                                 &state->server_started);
+  if (state->remote) {
+    turbo_agent_runtime_remote_destroy(state->remote);
+    state->remote = NULL;
+  }
+  if (state->runtime) {
+    turbo_agent_runtime_destroy(state->runtime);
+    state->runtime = NULL;
+  }
+  state->graph = NULL;
+}
+
+static int remote_app_configure_session_client(
+    turbo_agent_remote_session_config_t *session_config, const char *endpoint_url) {
+  if (!session_config || !endpoint_url || !endpoint_url[0]) return -1;
+  session_config->client_config.url = endpoint_url;
+  session_config->client_config.http_client = NULL;
+  return 0;
+}
+
+static int remote_app_write_bool_json_value_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+  remote_app_bool_write_t *write = (remote_app_bool_write_t *)user_data;
+  json_value_t *value;
+
+  value = json_create_bool(write->value);
+  if (!value) {
+    return -1;
+  }
+  return turbo_runtime_json_object_set(ctx->json_value_state, write->key, value) ==
+                 TURBO_RUNTIME_JSON_OK
+             ? 0
+             : -1;
+}
+
+static int remote_app_complete_json_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+  const char *final_output = (const char *)user_data;
+
+  if (!ctx || !ctx->state || !final_output) {
+    return -1;
+  }
+  json_object_set_bool(ctx->state, "visited_end", true);
+  return turbo_agent_state_set_final_answer(ctx->state, final_output);
+}
+
+static turbo_graph_t *remote_app_graph_resolver(const char *graph_name, void *user_data) {
+  remote_app_graph_registry_t *registry = (remote_app_graph_registry_t *)user_data;
+
+  if (!registry || !graph_name || !registry->name || !registry->graph) {
+    return NULL;
+  }
+  return strcmp(graph_name, registry->name) == 0 ? registry->graph : NULL;
+}
+
+static turbo_graph_t *create_remote_app_graph(void) {
+  turbo_graph_t *graph = turbo_graph_create("remote-app-test");
+  static remote_app_bool_write_t start = {"visited_start", 1};
+  static const char *final_output = "{\"ok\":true,\"source\":\"remote-app\"}";
+
+  check_not_null(graph);
+  check_int_eq(
+      turbo_graph_add_json_value_node(graph, "start", remote_app_write_bool_json_value_node, &start),
+      TURBO_GRAPH_EXEC_OK);
+  check_int_eq(turbo_graph_add_node(graph, "end", remote_app_complete_json_node, (void *)final_output),
+               TURBO_GRAPH_EXEC_OK);
+  check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
+               TURBO_GRAPH_EXEC_OK);
+  check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+  return graph;
+}
+
+static json_value_t *create_remote_app_state_json_value(void) {
+  json_value_t *state = turbo_agent_state_create_json_value();
+
+  check_not_null(state);
+  return state;
+}
+
+static json_value_t *create_remote_app_supervisor_state_json_value(void) {
+  json_value_t *state = turbo_agent_state_create();
+  json_value_t *bound;
+
+  check_not_null(state);
+  check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
+  check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
+  check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
+  check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
+  return bound;
+}
+
+static json_value_t *create_remote_app_committed_supervisor_state_json_value(void) {
+  json_value_t *state = turbo_agent_state_create();
+  json_value_t *bound;
+
+  check_not_null(state);
+  check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
+  check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
+  check_int_eq(turbo_agent_state_commit_handoff(state), 0);
+  check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
+  check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
+  return bound;
+}
+
+static json_value_t *remote_app_make_memory_record_variant(const json_value_t *record_fixture,
+                                                           const char *key, const char *text) {
+  json_value_t *record_json;
+  char record_id[128];
+  const char *record_namespace;
+
+  check_not_null(record_fixture);
+  check_not_null(key);
+  check_not_null(text);
+  record_namespace = json_get_string(record_fixture, "namespace");
+  check_not_null(record_namespace);
+  record_json = json_clone(record_fixture);
+  check_not_null(record_json);
+  check_true(snprintf(record_id, sizeof(record_id), "%s::%s", record_namespace, key) > 0);
+  json_object_set_string(record_json, "id", record_id);
+  json_object_set_string(record_json, "key", key);
+  json_object_set_string(record_json, "text", text);
+  return record_json;
+}
+
+static int remote_app_check_latest_handoff_event(const json_value_t *inspect_json,
+                                                 const char *phase,
+                                                 const char *from_agent,
+                                                 const char *target_agent,
+                                                 const char *reason,
+                                                 const char *active_agent) {
+  const json_value_t *handoff_event;
+  const char *actual_kind;
+  const char *actual_phase;
+  const char *actual_from_agent;
+  const char *actual_target_agent;
+  const char *actual_reason;
+  const char *actual_active_agent;
+
+  if (!inspect_json || json_type(inspect_json) != JSON_OBJECT) {
+    return 0;
+  }
+  handoff_event = json_object_get(inspect_json, "latest_handoff_event");
+  if (!handoff_event || json_type(handoff_event) != JSON_OBJECT) {
+    return 0;
+  }
+  actual_kind = json_get_string(handoff_event, "kind");
+  if (!actual_kind || strcmp(actual_kind, "handoff") != 0) {
+    return 0;
+  }
+  actual_phase = turbo_agent_state_handoff_event_phase(handoff_event);
+  actual_from_agent = turbo_agent_state_handoff_event_from_agent(handoff_event);
+  actual_target_agent = turbo_agent_state_handoff_event_target_agent(handoff_event);
+  actual_reason = turbo_agent_state_handoff_event_reason(handoff_event);
+  actual_active_agent = turbo_agent_state_handoff_event_active_agent(handoff_event);
+  return actual_phase && actual_from_agent && actual_target_agent && actual_reason &&
+         actual_active_agent && strcmp(actual_phase, phase) == 0 &&
+         strcmp(actual_from_agent, from_agent) == 0 &&
+         strcmp(actual_target_agent, target_agent) == 0 &&
+         strcmp(actual_reason, reason) == 0 &&
+         strcmp(actual_active_agent, active_agent) == 0;
+}
+
+static int remote_app_check_orchestration_latest_handoff_event(
+    const json_value_t *inspect_json, const char *phase, const char *from_agent,
+    const char *target_agent, const char *reason, const char *active_agent) {
+  const json_value_t *supervisor_inspect;
+
+  if (!inspect_json || json_type(inspect_json) != JSON_OBJECT) {
+    return 0;
+  }
+  supervisor_inspect = json_object_get(inspect_json, "supervisor_inspect");
+  return remote_app_check_latest_handoff_event(supervisor_inspect, phase, from_agent,
+                                               target_agent, reason, active_agent);
+}
+
+static json_value_t *create_remote_app_command_json_value(const char *text) {
+  json_value_t *command = json_create_object();
+
+  check_not_null(command);
+  check_int_eq(
+      turbo_runtime_json_object_set(
+          command, "kind", json_create_string("append_user_message")),
+      TURBO_RUNTIME_JSON_OK);
+  check_int_eq(
+      turbo_runtime_json_object_set(command, "text",
+                                         json_create_string(text)),
+      TURBO_RUNTIME_JSON_OK);
+  return command;
+}
+
+static json_value_t *create_remote_app_messages_json_value(const char *text) {
+  json_value_t *messages = json_create_array();
+  json_value_t *system_message = json_create_object();
+  json_value_t *user_message = json_create_object();
+
+  check_not_null(messages);
+  check_not_null(system_message);
+  check_not_null(user_message);
+  check_int_eq(turbo_runtime_json_object_set(
+                   system_message, "role", json_create_string("system")),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(
+      turbo_runtime_json_object_set(system_message, "content",
+                                         json_create_string("Be terse.")),
+      TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_object_set(
+                   user_message, "role", json_create_string("user")),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_object_set(
+                   user_message, "content", json_create_string(text)),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_array_append(messages, system_message),
+               TURBO_RUNTIME_JSON_OK);
+  check_int_eq(turbo_runtime_json_array_append(messages, user_message),
+               TURBO_RUNTIME_JSON_OK);
+  return messages;
+}
+
+static void remote_app_count_event_sink(const json_value_t *event,
+                                        void *user_data) {
+  int *count = (int *)user_data;
+
+  if (!event || !count) {
+    return;
+  }
+  *count += 1;
+}
+
+static void remote_app_test_coro(void *arg) {
+  remote_app_test_state_t *state = (remote_app_test_state_t *)arg;
+  remote_app_graph_registry_t registry = {0};
+  turbo_agent_runtime_remote_config_t remote_config = {0};
+  turbo_agent_remote_session_config_t session_config = {0};
+  turbo_agent_remote_app_config_t app_config = {0};
+  json_value_t *input_state = NULL;
+  json_value_t *thread_state = NULL;
+  json_value_t *timeline = NULL;
+  json_value_t *history_events = NULL;
+  json_value_t *trace_events = NULL;
+  json_value_t *result_state = NULL;
+  json_value_t *command = NULL;
+  json_value_t *summary_json = NULL;
+  json_value_t *thread_json = NULL;
+  json_value_t *latest_run_json = NULL;
+  json_value_t *pending_run_json = NULL;
+  json_value_t *context_json = NULL;
+  json_value_t *index_json = NULL;
+  json_value_t *branch_tree_json = NULL;
+  json_value_t *lineage_json = NULL;
+  json_value_t *inbox_json = NULL;
+  json_value_t *history_json = NULL;
+  json_value_t *supervisor_inspect_json = NULL;
+  json_value_t *child_runs_json = NULL;
+  json_value_t *orchestration_inspect_json = NULL;
+  json_value_t *output_item = NULL;
+  json_value_t *child_run_json = NULL;
+  json_value_t *child_checkpoint_json = NULL;
+  json_value_t *child_checkpoint_context_json = NULL;
+  json_value_t *child_branch_tree_json = NULL;
+  json_value_t *child_checkpoints_json = NULL;
+  json_value_t *child_inspect_json = NULL;
+  json_value_t *child_orchestration_inspect_json = NULL;
+  json_value_t *child_multi_agent_inspect_json = NULL;
+  json_value_t *fork_summary_json = NULL;
+  json_value_t *resume_summary_json = NULL;
+  turbo_graph_run_options_t interrupt_options = {0};
+  remote_app_observer_capture_t observer_capture = {0};
+  turbo_agent_observer_json_value_sink_t observer_sink = {0};
+  char endpoint_url[256];
+  const char *app_thread_id = NULL;
+  const char *app_run_id = NULL;
+  const char *run_id = NULL;
+  const char *checkpoint_id = NULL;
+  const char *fork_run_id;
+  const char *resume_status;
+  const char *fork_status;
+  const json_value_t *history_entry;
+  const json_value_t *visited_end_value;
+  json_value_t *child_timeline = NULL;
+  json_value_t *child_history_events = NULL;
+  json_value_t *child_trace_events = NULL;
+  int replayed_event_count = 0;
+  static const char *interrupt_before_end[] = {"end"};
+
+  state->store = turbo_agent_runtime_store_memory_create();
+  state->runtime = turbo_agent_runtime_create(&state->store);
+  state->graph = create_remote_app_graph();
+  if (!state->runtime || !state->graph) {
+    return;
+  }
+
+  registry.name = "remote-app";
+  registry.graph = state->graph;
+  remote_config.runtime = state->runtime;
+  remote_config.graph_resolver = remote_app_graph_resolver;
+  remote_config.graph_resolver_user_data = &registry;
+  state->remote = turbo_agent_runtime_remote_create(&remote_config);
+  if (!state->remote) {
+    return;
+  }
+
+  if (remote_app_test_server_start(&state->server, &state->server_initialized,
+                                   &state->server_started, state->remote,
+                                   endpoint_url, sizeof(endpoint_url)) != 0) {
+    return;
+  }
+
+  if (remote_app_configure_session_client(&session_config, endpoint_url) != 0) {
+    return;
+  }
+  app_config.session_config = &session_config;
+  app_config.graph_name = "remote-app";
+  state->app = turbo_agent_remote_app_create(&app_config);
+  if (!state->app) {
+    return;
+  }
+
+  interrupt_options.interrupt_before_nodes = interrupt_before_end;
+  interrupt_options.interrupt_before_count = 1;
+
+  input_state = create_remote_app_supervisor_state_json_value();
+  if (turbo_agent_remote_app_start_json_value_graph(state->app, input_state, &interrupt_options,
+                                              &summary_json, &result_state) == 0 &&
+      summary_json && result_state) {
+    run_id = json_get_string(summary_json, "run_id");
+    checkpoint_id = json_get_string(summary_json, "checkpoint_id");
+    if (turbo_agent_remote_app_session(state->app) &&
+        strcmp(turbo_agent_remote_app_graph_name(state->app), "remote-app") == 0 &&
+        turbo_agent_remote_app_thread_id(state->app) &&
+        run_id && checkpoint_id &&
+        strcmp(run_id, turbo_agent_remote_app_last_run_id(state->app)) == 0 &&
+        strcmp(checkpoint_id, turbo_agent_remote_app_last_checkpoint_id(state->app)) == 0) {
+      state->accessors_ok = 1;
+    }
+  }
+  turbo_runtime_json_destroy(input_state);
+  input_state = NULL;
+  turbo_runtime_json_destroy(result_state);
+  result_state = NULL;
+
+  app_thread_id = turbo_agent_remote_app_thread_id(state->app);
+  app_run_id = turbo_agent_remote_app_last_run_id(state->app);
+  if (state->accessors_ok &&
+      turbo_agent_remote_app_get_thread(state->app, &thread_json) == 0 && thread_json &&
+      json_get_string(thread_json, "id") && app_thread_id &&
+      strcmp(json_get_string(thread_json, "id"), app_thread_id) == 0) {
+    state->inspect_thread_ok = 1;
+  }
+  if (state->inspect_thread_ok &&
+      turbo_agent_remote_app_get_latest_run(state->app, &latest_run_json) == 0 &&
+      latest_run_json && json_get_string(latest_run_json, "id") &&
+      json_get_string(latest_run_json, "thread_id") && app_run_id && app_thread_id &&
+      strcmp(json_get_string(latest_run_json, "id"), app_run_id) == 0 &&
+      strcmp(json_get_string(latest_run_json, "thread_id"), app_thread_id) == 0) {
+    state->inspect_latest_run_ok = 1;
+  }
+  if (state->inspect_latest_run_ok &&
+      turbo_agent_remote_app_get_pending_run(state->app, &pending_run_json) == 0 &&
+      pending_run_json && json_get_string(pending_run_json, "id") &&
+      json_get_string(pending_run_json, "status") && app_run_id &&
+      strcmp(json_get_string(pending_run_json, "id"), app_run_id) == 0 &&
+      strcmp(json_get_string(pending_run_json, "status"), "interrupted") == 0) {
+    state->inspect_pending_run_ok = 1;
+  }
+  if (state->accessors_ok &&
+      turbo_agent_remote_app_get_thread_state_json_value(state->app, &thread_state) == 0 &&
+      thread_state &&
+      json_type(thread_state) == JSON_OBJECT &&
+      ((visited_end_value = json_object_get(thread_state, "visited_end")) == NULL ||
+       !turbo_runtime_json_value_as_bool(visited_end_value, 0))) {
+    state->thread_state_ok = 1;
+  }
+  if (state->thread_state_ok &&
+      turbo_agent_remote_app_get_checkpoint_context(state->app, NULL, &context_json) == 0 &&
+      context_json) {
+    state->context_ok = 1;
+  }
+  if (state->context_ok &&
+      turbo_agent_remote_app_get_observability_index(state->app, &index_json) == 0 &&
+      index_json) {
+    state->observability_ok = 1;
+  }
+  if (state->observability_ok &&
+      turbo_agent_remote_app_get_thread_timeline_json_value(state->app, &timeline) == 0 &&
+      timeline &&
+      json_type(timeline) == JSON_OBJECT) {
+    state->timeline_ok = 1;
+  }
+  if (state->timeline_ok &&
+      turbo_agent_remote_app_load_thread_history_events_json_value(state->app, &history_events) == 0 &&
+      history_events &&
+      json_type(history_events) == JSON_ARRAY &&
+      json_array_get(history_events, 0) != NULL) {
+    state->thread_history_ok = 1;
+  }
+  if (state->thread_history_ok &&
+      turbo_agent_remote_app_replay_thread_history_json_value(state->app, remote_app_count_event_sink,
+                                                        &replayed_event_count) == 0 &&
+      replayed_event_count >= 1) {
+    state->thread_history_replay_ok = 1;
+  }
+  observer_sink.callback = remote_app_capture_observer_event;
+  observer_sink.user_data = &observer_capture;
+  if (state->thread_history_replay_ok &&
+      turbo_agent_remote_app_observe_thread_history_json_value(state->app, &observer_sink) == 0 &&
+      observer_capture.count >= 1 && observer_capture.interrupted_count >= 1) {
+    state->thread_observer_ok = 1;
+  }
+  if (state->thread_observer_ok &&
+      turbo_agent_remote_app_get_thread_trace_events_json_value(state->app, &trace_events) == 0 &&
+      trace_events &&
+      json_type(trace_events) == JSON_ARRAY) {
+    state->thread_trace_ok = 1;
+  }
+  if (state->thread_trace_ok &&
+      turbo_agent_remote_app_get_branch_tree(state->app, &branch_tree_json) == 0 &&
+      branch_tree_json &&
+      json_object_get(branch_tree_json, "current_checkpoint_summary")) {
+    state->branch_tree_ok = 1;
+  }
+  if (state->branch_tree_ok &&
+      turbo_agent_remote_app_list_thread_lineage(state->app, &lineage_json) == 0 &&
+      lineage_json) {
+    remote_app_check_thread_lineage_json_value(lineage_json, app_thread_id, run_id, run_id, checkpoint_id);
+    state->lineage_ok = 1;
+  }
+  if (state->lineage_ok &&
+      turbo_agent_remote_app_get_supervisor_inbox(state->app, &inbox_json) == 0 &&
+      inbox_json && json_type(inbox_json) == JSON_ARRAY &&
+      json_array_size(inbox_json) == 0) {
+    state->supervisor_inbox_ok = 1;
+  }
+  history_entry = NULL;
+  if (state->supervisor_inbox_ok &&
+      turbo_agent_remote_app_get_supervisor_handoff_history(state->app, &history_json) == 0 &&
+      history_json && json_type(history_json) == JSON_ARRAY &&
+      json_array_size(history_json) == 1 &&
+      (history_entry = json_array_get(history_json, 0)) != NULL &&
+      strcmp(json_get_string(history_entry, "from_agent"), "planner") == 0 &&
+      strcmp(json_get_string(history_entry, "target_agent"), "executor") == 0 &&
+      strcmp(json_get_string(history_entry, "reason"), "delegate execution") == 0) {
+    state->supervisor_history_ok = 1;
+  }
+  if (state->supervisor_history_ok &&
+      turbo_agent_remote_app_get_supervisor_inspect(state->app, &supervisor_inspect_json) == 0 &&
+      supervisor_inspect_json) {
+    remote_app_check_supervisor_inspect(supervisor_inspect_json, "planner", "executor",
+                                        "delegate execution", 0, 1);
+    state->supervisor_inspect_ok = 1;
+    state->requested_handoff_event_ok = remote_app_check_latest_handoff_event(
+        supervisor_inspect_json, "requested", "planner", "executor", "delegate execution",
+        "planner");
+  }
+  if (state->supervisor_inspect_ok &&
+      turbo_agent_remote_app_list_child_runs(state->app, NULL, &child_runs_json) == 0 &&
+      child_runs_json && json_type(child_runs_json) == JSON_ARRAY &&
+      json_array_size(child_runs_json) == 0) {
+    state->child_runs_ok = 1;
+  }
+  if (state->child_runs_ok &&
+      turbo_agent_remote_app_get_orchestration_inspect(state->app,
+                                                       &orchestration_inspect_json) == 0 &&
+      orchestration_inspect_json) {
+    turbo_agent_test_check_orchestration_inspect(orchestration_inspect_json, app_thread_id, run_id,
+                                                 checkpoint_id, 0, "planner", "executor",
+                                                 "delegate execution");
+    state->orchestration_inspect_ok = remote_app_check_orchestration_latest_handoff_event(
+        orchestration_inspect_json, "requested", "planner", "executor", "delegate execution",
+        "planner");
+  }
+  output_item = json_create_object();
+  check_not_null(output_item);
+  json_object_set_string(output_item, "child_run_id",
+                               turbo_agent_remote_app_last_run_id(state->app));
+  json_object_set_string(output_item, "child_checkpoint_id",
+                               turbo_agent_remote_app_last_checkpoint_id(state->app));
+  json_object_set_string(output_item, "child_thread_id",
+                               turbo_agent_remote_app_thread_id(state->app));
+  json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
+  json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
+  json_object_set_string(output_item, "parent_tool_name", "delegate");
+  json_object_set_string(output_item, "parent_graph_run_id", "run_parent");
+  json_object_set_string(output_item, "call_frame_id", "call_parent");
+
+  check_int_eq(turbo_agent_remote_app_get_child_run(state->app, output_item, &child_run_json),
+               0);
+  check_int_eq(turbo_agent_remote_app_get_child_checkpoint(state->app, output_item,
+                                                           &child_checkpoint_json),
+               0);
+  check_int_eq(turbo_agent_remote_app_get_child_checkpoint_context(
+                   state->app, output_item, &child_checkpoint_context_json),
+               0);
+  check_int_eq(turbo_agent_remote_app_get_child_thread_timeline_json_value(state->app, output_item,
+                                                                     &child_timeline),
+               0);
+  check_int_eq(turbo_agent_remote_app_get_child_branch_tree(state->app, output_item,
+                                                            &child_branch_tree_json),
+               0);
+  check_int_eq(turbo_agent_remote_app_list_child_checkpoints(state->app, output_item,
+                                                             &child_checkpoints_json),
+               0);
+  check_int_eq(turbo_agent_remote_app_load_child_history_events_json_value(state->app, output_item,
+                                                                     &child_history_events),
+               0);
+  check_int_eq(turbo_agent_remote_app_get_child_trace_events_json_value(state->app, output_item,
+                                                                  &child_trace_events),
+               0);
+  check_int_eq(turbo_agent_remote_app_get_child_inspect(state->app, output_item,
+                                                        &child_inspect_json),
+               0);
+  check_int_eq(turbo_agent_remote_app_get_child_orchestration_inspect(
+                   state->app, output_item, &child_orchestration_inspect_json),
+               0);
+  check_int_eq(turbo_agent_remote_app_get_child_multi_agent_inspect(
+                   state->app, output_item, &child_multi_agent_inspect_json),
+               0);
+  check_str_eq(json_get_string(child_run_json, "id"),
+               turbo_agent_remote_app_last_run_id(state->app));
+  check_str_eq(json_get_string(child_checkpoint_json, "id"),
+               turbo_agent_remote_app_last_checkpoint_id(state->app));
+  check_size_eq(json_array_size(child_checkpoints_json), 1);
+  check_str_eq(json_get_string(json_array_get(child_checkpoints_json, 0), "id"),
+               turbo_agent_remote_app_last_checkpoint_id(state->app));
+  turbo_agent_test_check_checkpoint_context(
+      child_checkpoint_context_json, turbo_agent_remote_app_thread_id(state->app),
+      turbo_agent_remote_app_last_run_id(state->app),
+      turbo_agent_remote_app_last_checkpoint_id(state->app), NULL, 1);
+  turbo_agent_test_check_thread_timeline_json_value(
+      child_timeline, turbo_agent_remote_app_thread_id(state->app),
+      turbo_agent_remote_app_last_run_id(state->app),
+      turbo_agent_remote_app_last_checkpoint_id(state->app), 1, 1, 1, 1);
+  turbo_agent_test_check_branch_tree(
+      child_branch_tree_json, turbo_agent_remote_app_thread_id(state->app),
+      turbo_agent_remote_app_last_run_id(state->app), turbo_agent_remote_app_last_run_id(state->app),
+      turbo_agent_remote_app_last_run_id(state->app),
+      turbo_agent_remote_app_last_checkpoint_id(state->app), 1, 0);
+  check_not_null(child_history_events);
+  check_true(json_type(child_history_events) ==
+             JSON_ARRAY);
+  check_true(json_array_get(child_history_events, 0) != NULL);
+  check_not_null(child_trace_events);
+  check_true(json_type(child_trace_events) ==
+             JSON_ARRAY);
+  turbo_agent_test_check_child_inspect(child_inspect_json, turbo_agent_remote_app_thread_id(state->app),
+                                       turbo_agent_remote_app_last_run_id(state->app),
+                                       turbo_agent_remote_app_last_checkpoint_id(state->app), 1);
+  turbo_agent_test_check_child_orchestration_inspect(
+      child_orchestration_inspect_json, "run_parent", "call_parent", "delegate",
+      turbo_agent_remote_app_thread_id(state->app), turbo_agent_remote_app_last_run_id(state->app),
+      turbo_agent_remote_app_last_checkpoint_id(state->app), 1);
+  turbo_agent_test_check_child_multi_agent_inspect(
+      child_multi_agent_inspect_json, turbo_agent_remote_app_thread_id(state->app),
+      turbo_agent_remote_app_last_run_id(state->app),
+      turbo_agent_remote_app_last_checkpoint_id(state->app), "run_parent", "call_parent",
+      "delegate");
+  state->child_inspect_ok = 1;
+  turbo_runtime_json_destroy(thread_state);
+  thread_state = NULL;
+  turbo_runtime_json_destroy(timeline);
+  timeline = NULL;
+  turbo_runtime_json_destroy(history_events);
+  history_events = NULL;
+  turbo_runtime_json_destroy(trace_events);
+  trace_events = NULL;
+  json_free(thread_json); thread_json = NULL;
+  json_free(latest_run_json); latest_run_json = NULL;
+  json_free(pending_run_json); pending_run_json = NULL;
+  json_free(context_json); context_json = NULL;
+  json_free(index_json); index_json = NULL;
+  json_free(branch_tree_json); branch_tree_json = NULL;
+  json_free(lineage_json); lineage_json = NULL;
+  json_free(inbox_json); inbox_json = NULL;
+  json_free(history_json); history_json = NULL;
+  json_free(supervisor_inspect_json); supervisor_inspect_json = NULL;
+  json_free(child_runs_json); child_runs_json = NULL;
+  json_free(orchestration_inspect_json); orchestration_inspect_json = NULL;
+  json_free(child_inspect_json); child_inspect_json = NULL;
+  json_free(child_orchestration_inspect_json); child_orchestration_inspect_json = NULL;
+  json_free(child_multi_agent_inspect_json); child_multi_agent_inspect_json = NULL;
+  json_free(child_branch_tree_json); child_branch_tree_json = NULL;
+  json_free(child_checkpoints_json); child_checkpoints_json = NULL;
+  json_free(child_checkpoint_json); child_checkpoint_json = NULL;
+  json_free(child_checkpoint_context_json); child_checkpoint_context_json = NULL;
+  json_free(child_run_json); child_run_json = NULL;
+  json_free(output_item); output_item = NULL;
+  turbo_runtime_json_destroy(child_timeline);
+  turbo_runtime_json_destroy(child_history_events);
+  turbo_runtime_json_destroy(child_trace_events);
+  json_free(summary_json); summary_json = NULL;
+
+  command = create_remote_app_command_json_value("resume from remote app");
+  if (state->branch_tree_ok &&
+      turbo_agent_remote_app_resume_thread_command_json_value(state->app, command, NULL,
+                                                        &resume_summary_json, &result_state) == 0 &&
+      resume_summary_json && result_state &&
+      json_type(result_state) == JSON_OBJECT &&
+      (resume_status = json_get_string(resume_summary_json, "status")) &&
+      strcmp(resume_status, "completed") == 0 &&
+      turbo_runtime_json_value_as_bool(
+          json_object_get(result_state, "visited_end"), 0)) {
+    state->resume_ok = 1;
+  }
+  turbo_runtime_json_destroy(command);
+  command = NULL;
+  turbo_runtime_json_destroy(result_state);
+  result_state = NULL;
+  json_free(resume_summary_json); resume_summary_json = NULL;
+
+  input_state = create_remote_app_state_json_value();
+  if (turbo_agent_remote_app_start_json_value_graph(state->app, input_state, &interrupt_options,
+                                              &summary_json, &result_state) == 0 &&
+      summary_json && result_state) {
+    fork_run_id = json_get_string(summary_json, "run_id");
+    command = create_remote_app_command_json_value("fork from remote app");
+    if (fork_run_id &&
+        turbo_agent_remote_app_fork_thread_command_json_value(state->app, command, NULL,
+                                                        &fork_summary_json, &thread_state) == 0 &&
+        fork_summary_json && thread_state &&
+        json_type(thread_state) == JSON_OBJECT &&
+        (fork_status = json_get_string(fork_summary_json, "status")) &&
+        strcmp(fork_status, "completed") == 0 &&
+        strcmp(json_get_string(fork_summary_json, "run_id"), fork_run_id) != 0 &&
+        turbo_runtime_json_value_as_bool(
+            json_object_get(thread_state, "visited_end"), 0)) {
+      state->fork_ok = 1;
+    }
+  }
+
+  turbo_runtime_json_destroy(command);
+  turbo_runtime_json_destroy(input_state);
+  turbo_runtime_json_destroy(result_state);
+  turbo_runtime_json_destroy(thread_state);
+  command = NULL;
+  input_state = NULL;
+  result_state = NULL;
+  thread_state = NULL;
+  json_free(summary_json); summary_json = NULL;
+  json_free(fork_summary_json); fork_summary_json = NULL;
+
+  remote_app_test_state_cleanup(state);
+}
+
+typedef struct {
+  chttp_server server;
+  int server_initialized;
+  int server_started;
+  turbo_agent_runtime_store_t runtime_store;
+  turbo_agent_memory_store_t memory_store;
+  turbo_agent_runtime_t *runtime;
+  turbo_agent_runtime_remote_t *remote;
+  turbo_agent_remote_app_t *app;
+  int memory_helpers_ok;
+} remote_app_memory_test_state_t;
+
+static void remote_app_memory_test_state_cleanup(remote_app_memory_test_state_t *state) {
+  if (!state) return;
+  if (state->app) {
+    turbo_agent_remote_app_destroy(state->app);
+    state->app = NULL;
+  }
+  remote_app_test_server_cleanup(&state->server, &state->server_initialized,
+                                 &state->server_started);
+  if (state->remote) {
+    turbo_agent_runtime_remote_destroy(state->remote);
+    state->remote = NULL;
+  }
+  turbo_agent_memory_store_destroy(&state->memory_store);
+  if (state->runtime) {
+    turbo_agent_runtime_destroy(state->runtime);
+    state->runtime = NULL;
+  }
+}
+
+static void remote_app_memory_test_coro(void *arg) {
+  remote_app_memory_test_state_t *state = (remote_app_memory_test_state_t *)arg;
+  turbo_agent_runtime_remote_config_t remote_config = {0};
+  turbo_agent_remote_session_config_t session_config = {0};
+  turbo_agent_remote_app_config_t app_config = {0};
+  turbo_agent_memory_query_options_t options = {0};
+  json_value_t *record = NULL;
+  json_value_t *record_variant = NULL;
+  json_value_t *invalid_record = NULL;
+  json_value_t *loaded_record = NULL;
+  json_value_t *deleted_record = NULL;
+  json_value_t *listed_records = NULL;
+  json_value_t *listed_records_after_delete = NULL;
+  json_value_t *queried_records = NULL;
+  json_value_t *queried_records_ex = NULL;
+  int record_valid = 0;
+  int invalid_record_valid = 1;
+  char endpoint_url[256];
+
+  state->runtime_store = turbo_agent_runtime_store_memory_create();
+  state->memory_store = turbo_agent_memory_store_memory_create();
+  state->runtime = turbo_agent_runtime_create(&state->runtime_store);
+  if (!state->runtime) {
+    return;
+  }
+
+  remote_config.runtime = state->runtime;
+  remote_config.memory_store = &state->memory_store;
+  state->remote = turbo_agent_runtime_remote_create(&remote_config);
+  if (!state->remote) {
+    return;
+  }
+
+  if (remote_app_test_server_start(&state->server, &state->server_initialized,
+                                   &state->server_started, state->remote,
+                                   endpoint_url, sizeof(endpoint_url)) != 0) {
+    return;
+  }
+
+  if (remote_app_configure_session_client(&session_config, endpoint_url) != 0) {
+    return;
+  }
+  app_config.session_config = &session_config;
+  app_config.graph_name = "remote-memory";
+  state->app = turbo_agent_remote_app_create(&app_config);
+  if (!state->app) {
+    return;
+  }
+
+  record = turbo_agent_test_load_fixture_json("memory_context_record.golden.json");
+  if (!record) {
+    return;
+  }
+
+  invalid_record = json_create_object();
+  if (!invalid_record) {
+    return;
+  }
+  json_object_set_string(invalid_record, "id", "project/demo::broken");
+  json_object_set_string(invalid_record, "namespace", "project/demo");
+  json_object_set_string(invalid_record, "kind", "context");
+  json_object_set_string(invalid_record, "key", "broken");
+  json_object_set_string(invalid_record, "text", "missing value json");
+  json_object_set_null(invalid_record, "metadata");
+  json_object_set_null(invalid_record, "created_at");
+
+  if (turbo_agent_remote_app_memory_validate_record(state->app, record, &record_valid) == 0 &&
+      record_valid &&
+      turbo_agent_remote_app_memory_validate_record(state->app, invalid_record,
+                                                    &invalid_record_valid) == 0 &&
+      !invalid_record_valid &&
+      turbo_agent_remote_app_memory_put_record(state->app, record) == 0 &&
+      turbo_agent_remote_app_memory_get_record(state->app, "project/demo", "context",
+                                               &loaded_record) == 0 &&
+      loaded_record && turbo_agent_remote_app_memory_list_records(state->app, "project",
+                                                                  &listed_records) == 0 &&
+      listed_records && json_array_size(listed_records) == 1 &&
+      turbo_agent_remote_app_memory_query_records(state->app, "project", "context", "con",
+                                                  "remember", &queried_records) == 0 &&
+      queried_records && json_array_size(queried_records) == 1) {
+    record_variant =
+        remote_app_make_memory_record_variant(record, "zeta", "remember this too");
+    if (record_variant) {
+      json_object_set_string(record_variant, "created_at", "2026-02-15T12:00:00Z");
+    }
+    if (record_variant &&
+        turbo_agent_remote_app_memory_put_record(state->app, record_variant) == 0) {
+      options.namespace_prefix = "project";
+      options.kind = "context";
+      options.key_prefix = "con";
+      options.text_substring = "remember";
+      if (turbo_agent_remote_app_memory_query_records_ex(state->app, &options,
+                                                         &queried_records_ex) == 0 &&
+          queried_records_ex && json_array_size(queried_records_ex) == 1) {
+        remote_app_check_memory_record_fixture(loaded_record,
+                                               "memory_context_record.golden.json", NULL);
+        remote_app_check_memory_record_array_fixture(listed_records,
+                                                     "memory_query_results.golden.json",
+                                                     "context_query");
+        remote_app_check_memory_record_array_fixture(queried_records,
+                                                     "memory_query_results.golden.json",
+                                                     "context_query");
+        remote_app_check_memory_record_array_fixture(queried_records_ex,
+                                                     "memory_query_results.golden.json",
+                                                     "context_query");
+        json_free(queried_records_ex); queried_records_ex = NULL;
+        queried_records_ex = NULL;
+
+        options.key_prefix = NULL;
+        options.id_prefix = "project/demo::z";
+        options.metadata_scope = "project";
+        options.metadata_path_prefix = "/tmp";
+        options.created_after = "2026-02-01T00:00:00Z";
+        options.created_before = "2026-02-28T23:59:59Z";
+        options.sort_by = "key";
+        options.sort_order = "desc";
+        options.limit = 1;
+        if (turbo_agent_remote_app_memory_query_records_ex(state->app, &options,
+                                                           &queried_records_ex) == 0 &&
+            queried_records_ex && json_array_size(queried_records_ex) == 1 &&
+            strcmp(json_get_string(json_array_get(queried_records_ex, 0), "key"),
+                   "zeta") == 0 &&
+            turbo_agent_remote_app_memory_delete_record(state->app, "project/demo", "zeta") == 0 &&
+            turbo_agent_remote_app_memory_list_records(state->app, "project",
+                                                       &listed_records_after_delete) == 0 &&
+            listed_records_after_delete &&
+            json_array_size(listed_records_after_delete) == 1 &&
+            turbo_agent_remote_app_memory_get_record(state->app, "project/demo", "zeta",
+                                                     &deleted_record) != 0 &&
+            !deleted_record) {
+          state->memory_helpers_ok = 1;
+        }
+      }
+    }
+  }
+
+  json_free(record_variant); record_variant = NULL;
+  json_free(queried_records_ex); queried_records_ex = NULL;
+  json_free(queried_records); queried_records = NULL;
+  json_free(listed_records_after_delete); listed_records_after_delete = NULL;
+  json_free(listed_records); listed_records = NULL;
+  json_free(deleted_record); deleted_record = NULL;
+  json_free(loaded_record); loaded_record = NULL;
+  json_free(invalid_record); invalid_record = NULL;
+  json_free(record); record = NULL;
+
+  remote_app_memory_test_state_cleanup(state);
+}
+
+static void remote_app_committed_handoff_coro(void *arg) {
+  remote_app_test_state_t *state = (remote_app_test_state_t *)arg;
+  remote_app_graph_registry_t registry = {0};
+  turbo_agent_runtime_remote_config_t remote_config = {0};
+  turbo_agent_remote_session_config_t session_config = {0};
+  turbo_agent_remote_app_config_t app_config = {0};
+  json_value_t *input_state = NULL;
+  json_value_t *result_state = NULL;
+  json_value_t *summary_json = NULL;
+  json_value_t *supervisor_inspect_json = NULL;
+  json_value_t *orchestration_inspect_json = NULL;
+  char endpoint_url[256];
+  static const char *interrupt_before_end[] = {"end"};
+
+  state->store = turbo_agent_runtime_store_memory_create();
+  state->runtime = turbo_agent_runtime_create(&state->store);
+  state->graph = create_remote_app_graph();
+  if (!state->runtime || !state->graph) {
+    return;
+  }
+
+  registry.name = "remote-app";
+  registry.graph = state->graph;
+  remote_config.runtime = state->runtime;
+  remote_config.graph_resolver = remote_app_graph_resolver;
+  remote_config.graph_resolver_user_data = &registry;
+  state->remote = turbo_agent_runtime_remote_create(&remote_config);
+  if (!state->remote) {
+    return;
+  }
+
+  if (remote_app_test_server_start(&state->server, &state->server_initialized,
+                                   &state->server_started, state->remote,
+                                   endpoint_url, sizeof(endpoint_url)) != 0) {
+    return;
+  }
+
+  if (remote_app_configure_session_client(&session_config, endpoint_url) != 0) {
+    return;
+  }
+  app_config.session_config = &session_config;
+  app_config.graph_name = "remote-app";
+  state->app = turbo_agent_remote_app_create(&app_config);
+  if (!state->app) {
+    return;
+  }
+
+  {
+    const char *committed_thread_id;
+    const char *committed_run_id;
+    const char *committed_checkpoint_id;
+    turbo_graph_run_options_t interrupt_options = {0};
+
+    interrupt_options.interrupt_before_nodes = interrupt_before_end;
+    interrupt_options.interrupt_before_count = 1;
+
+    input_state = create_remote_app_committed_supervisor_state_json_value();
+    if (turbo_agent_remote_app_start_json_value_graph(state->app, input_state, &interrupt_options,
+                                                &summary_json, &result_state) != 0 ||
+        !summary_json || !result_state) {
+      goto cleanup;
+    }
+
+    committed_thread_id = json_get_string(summary_json, "thread_id");
+    committed_run_id = json_get_string(summary_json, "run_id");
+    committed_checkpoint_id = json_get_string(summary_json, "checkpoint_id");
+    if (!committed_thread_id || !committed_run_id || !committed_checkpoint_id) {
+      goto cleanup;
+    }
+
+    if (turbo_agent_remote_app_get_supervisor_inspect(state->app, &supervisor_inspect_json) != 0 ||
+        !supervisor_inspect_json ||
+        !remote_app_check_latest_handoff_event(supervisor_inspect_json, "committed", "planner",
+                                               "executor", "delegate execution", "executor")) {
+      goto cleanup;
+    }
+
+    if (turbo_agent_remote_app_get_orchestration_inspect(state->app,
+                                                         &orchestration_inspect_json) != 0 ||
+        !orchestration_inspect_json) {
+      goto cleanup;
+    }
+
+    turbo_agent_test_check_orchestration_inspect(orchestration_inspect_json, committed_thread_id,
+                                                 committed_run_id, committed_checkpoint_id, 0,
+                                                 "executor", "", "");
+    state->committed_handoff_event_ok = remote_app_check_orchestration_latest_handoff_event(
+        orchestration_inspect_json, "committed", "planner", "executor", "delegate execution",
+        "executor");
+  }
+
+cleanup:
+  turbo_runtime_json_destroy(input_state);
+  turbo_runtime_json_destroy(result_state);
+  json_free(summary_json); summary_json = NULL;
+  json_free(supervisor_inspect_json); supervisor_inspect_json = NULL;
+  json_free(orchestration_inspect_json); orchestration_inspect_json = NULL;
+
+  remote_app_test_state_cleanup(state);
+}
+
+static void remote_app_high_level_test_coro(void *arg) {
+  remote_app_test_state_t *state = (remote_app_test_state_t *)arg;
+  remote_app_graph_registry_t registry = {0};
+  turbo_agent_runtime_remote_config_t remote_config = {0};
+  turbo_agent_remote_session_config_t session_config = {0};
+  turbo_agent_remote_app_config_t app_config = {0};
+  json_value_t *messages = NULL;
+  json_value_t *result_state = NULL;
+  json_value_t *summary_json = NULL;
+  json_value_t *result_json = NULL;
+  char *result_text = NULL;
+  const char *status;
+  char endpoint_url[256];
+
+  state->store = turbo_agent_runtime_store_memory_create();
+  state->runtime = turbo_agent_runtime_create(&state->store);
+  state->graph = create_remote_app_graph();
+  if (!state->runtime || !state->graph) {
+    return;
+  }
+
+  registry.name = "remote-app";
+  registry.graph = state->graph;
+  remote_config.runtime = state->runtime;
+  remote_config.graph_resolver = remote_app_graph_resolver;
+  remote_config.graph_resolver_user_data = &registry;
+  state->remote = turbo_agent_runtime_remote_create(&remote_config);
+  if (!state->remote) {
+    return;
+  }
+
+  if (remote_app_test_server_start(&state->server, &state->server_initialized,
+                                   &state->server_started, state->remote,
+                                   endpoint_url, sizeof(endpoint_url)) != 0) {
+    return;
+  }
+
+  if (remote_app_configure_session_client(&session_config, endpoint_url) != 0) {
+    return;
+  }
+  app_config.session_config = &session_config;
+  app_config.graph_name = "remote-app";
+  state->app = turbo_agent_remote_app_create(&app_config);
+  if (!state->app) {
+    return;
+  }
+
+  if (turbo_agent_remote_app_start_text(state->app, "hello remote", NULL, &summary_json,
+                                        &result_state) != 0 ||
+      !summary_json || !result_state) {
+    goto cleanup;
+  }
+  status = json_get_string(summary_json, "status");
+  if (!status || strcmp(status, "completed") != 0 ||
+      !turbo_runtime_json_value_as_bool(
+          json_object_get(result_state, "visited_end"), 0)) {
+    goto cleanup;
+  }
+  json_free(summary_json); summary_json = NULL;
+  turbo_runtime_json_destroy(result_state);
+  summary_json = NULL;
+  result_state = NULL;
+
+  messages = create_remote_app_messages_json_value("hello via messages");
+  if (turbo_agent_remote_app_start_messages(state->app, messages, NULL, &summary_json,
+                                            &result_state) != 0 ||
+      !summary_json || !result_state) {
+    goto cleanup;
+  }
+  status = json_get_string(summary_json, "status");
+  if (!status || strcmp(status, "completed") != 0 ||
+      !turbo_runtime_json_value_as_bool(
+          json_object_get(result_state, "visited_end"), 0)) {
+    goto cleanup;
+  }
+  json_free(summary_json); summary_json = NULL;
+  turbo_runtime_json_destroy(result_state);
+  turbo_runtime_json_destroy(messages);
+  summary_json = NULL;
+  result_state = NULL;
+  messages = NULL;
+
+  if (turbo_agent_remote_app_invoke_text(state->app, "hello invoke", NULL, &result_text,
+                                         &summary_json) != 0 ||
+      !result_text || !summary_json) {
+    goto cleanup;
+  }
+  status = json_get_string(summary_json, "status");
+  if (!status || strcmp(status, "completed") != 0 ||
+      strcmp(result_text, "{\"ok\":true,\"source\":\"remote-app\"}") != 0) {
+    goto cleanup;
+  }
+  free(result_text);
+  json_free(summary_json); summary_json = NULL;
+  result_text = NULL;
+  summary_json = NULL;
+
+  messages = create_remote_app_messages_json_value("hello invoke messages");
+  if (turbo_agent_remote_app_invoke_messages_text(state->app, messages, NULL, &result_text,
+                                                  &summary_json) != 0 ||
+      !result_text || !summary_json) {
+    goto cleanup;
+  }
+  status = json_get_string(summary_json, "status");
+  if (!status || strcmp(status, "completed") != 0 ||
+      strcmp(result_text, "{\"ok\":true,\"source\":\"remote-app\"}") != 0) {
+    goto cleanup;
+  }
+  free(result_text);
+  json_free(summary_json); summary_json = NULL;
+  turbo_runtime_json_destroy(messages);
+  result_text = NULL;
+  summary_json = NULL;
+  messages = NULL;
+
+  if (turbo_agent_remote_app_invoke_json(state->app, "hello json", NULL, &result_json,
+                                         &summary_json) != 0 ||
+      !result_json || !summary_json) {
+    goto cleanup;
+  }
+  status = json_get_string(summary_json, "status");
+  if (!status || strcmp(status, "completed") != 0 ||
+      !json_get_bool(result_json, "ok", false) ||
+      strcmp(json_get_string(result_json, "source"), "remote-app") != 0) {
+    goto cleanup;
+  }
+  json_free(result_json); result_json = NULL;
+  json_free(summary_json); summary_json = NULL;
+  result_json = NULL;
+  summary_json = NULL;
+
+  messages = create_remote_app_messages_json_value("hello json messages");
+  if (turbo_agent_remote_app_invoke_messages_json(state->app, messages, NULL, &result_json,
+                                                  &summary_json) != 0 ||
+      !result_json || !summary_json) {
+    goto cleanup;
+  }
+  status = json_get_string(summary_json, "status");
+  if (!status || strcmp(status, "completed") != 0 ||
+      !json_get_bool(result_json, "ok", false) ||
+      strcmp(json_get_string(result_json, "source"), "remote-app") != 0) {
+    goto cleanup;
+  }
+
+  state->high_level_helpers_ok = 1;
+
+cleanup:
+  free(result_text);
+  json_free(result_json); result_json = NULL;
+  json_free(summary_json); summary_json = NULL;
+  turbo_runtime_json_destroy(messages);
+  turbo_runtime_json_destroy(result_state);
+
+  remote_app_test_state_cleanup(state);
+}
+
+spec("turbo agent remote app api") {
+  remote_app_test_state_t state = {0};
+
+  before_each() {
+    memset(&state, 0, sizeof(state));
+  }
+
+  after_each() {
+    remote_app_test_state_cleanup(&state);
+  }
+
+  it("should wrap one configured remote graph through an app facade") {
+    remote_app_test_coro(&state);
+
+    check_true(state.accessors_ok);
+    check_true(state.thread_state_ok);
+    check_true(state.context_ok);
+    check_true(state.observability_ok);
+    check_true(state.timeline_ok);
+    check_true(state.thread_history_ok);
+    check_true(state.thread_history_replay_ok);
+    check_true(state.thread_observer_ok);
+    check_true(state.thread_trace_ok);
+    check_true(state.branch_tree_ok);
+    check_true(state.lineage_ok);
+    check_true(state.supervisor_inbox_ok);
+    check_true(state.supervisor_history_ok);
+    check_true(state.supervisor_inspect_ok);
+    check_true(state.requested_handoff_event_ok);
+    check_true(state.child_runs_ok);
+    check_true(state.child_inspect_ok);
+    check_true(state.orchestration_inspect_ok);
+    check_true(state.resume_ok);
+    check_true(state.fork_ok);
+  }
+
+  it("should expose committed handoff events through the remote app facade") {
+    remote_app_committed_handoff_coro(&state);
+
+    check_true(state.committed_handoff_event_ok);
+  }
+
+  it("should expose inspect helpers through the remote app facade") {
+    remote_app_test_coro(&state);
+
+    check_true(state.inspect_thread_ok);
+    check_true(state.inspect_latest_run_ok);
+    check_true(state.inspect_pending_run_ok);
+  }
+
+  it("should expose high-level helpers through the remote app facade") {
+    remote_app_high_level_test_coro(&state);
+
+    check_true(state.high_level_helpers_ok);
+  }
+
+  it("should expose memory helpers through the remote app facade") {
+    remote_app_memory_test_state_t memory_state = {0};
+
+    remote_app_memory_test_coro(&memory_state);
+
+    check_true(memory_state.memory_helpers_ok);
+    remote_app_memory_test_state_cleanup(&memory_state);
+  }
+}

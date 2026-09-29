@@ -1,0 +1,34 @@
+{
+  "name": "turbo-agent",
+  "version-semver": "1.0.0",
+  "dependencies": [
+    {
+      "name": "stb"
+    },
+    {
+      "name": "boringssl"
+    },
+    {
+      "name": "aklomp-base64",
+      "version>=": "0.5.2"
+    },
+    {
+      "name": "stc",
+      "version>=": "5.0"
+    },
+    {
+      "name": "pkgconf"
+    },
+    {
+      "name": "zstd"
+    },
+    {
+      "name": "sqlite3",
+      "version>=": "3.49.0",
+      "features": [
+        "fts5"
+      ]
+    }
+  ],
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+}

@@ -1,0 +1,314 @@
+#include "turbo_agent_runtime.h"
+
+#include "turbo_agent_runtime_internal.h"
+#include "turbo_agent_runtime_v1_internal.h"
+#include "turbo_agent_state.h"
+#include "turbo_agent_util_internal.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+static int turbo_agent_runtime_merge_state_patch_object_json_value(
+    json_value_t *target_object,
+    const json_value_t *patch_object) {
+  size_t i;
+  size_t count;
+
+  if (!target_object || !patch_object ||
+      json_type(target_object) != JSON_OBJECT ||
+      json_type(patch_object) != JSON_OBJECT) {
+    return -1;
+  }
+
+  count = turbo_runtime_json_value_size(patch_object);
+  for (i = 0; i < count; ++i) {
+    const char *key = json_object_key(patch_object, i);
+    const json_value_t *patch_value;
+    const json_value_t *target_value;
+    json_value_t *copy;
+
+    if (!key) {
+      return -1;
+    }
+    patch_value = json_object_get(patch_object, key);
+    if (!patch_value) {
+      return -1;
+    }
+    target_value = json_object_get(target_object, key);
+    if (target_value &&
+        json_type(patch_value) == JSON_OBJECT &&
+        json_type(target_value) == JSON_OBJECT) {
+      if (turbo_agent_runtime_merge_state_patch_object_json_value(
+              (json_value_t *)target_value, patch_value) != 0) {
+        return -1;
+      }
+      continue;
+    }
+    copy = json_clone(patch_value);
+    if (!copy) {
+      return -1;
+    }
+    if (turbo_runtime_json_object_set(target_object, key, copy) !=
+        TURBO_RUNTIME_JSON_OK) {
+      turbo_runtime_json_destroy(copy);
+      return -1;
+    }
+  }
+  return 0;
+}
+
+static int turbo_agent_runtime_apply_state_patch_to_json_value(
+    const json_value_t *state,
+    const json_value_t *patch,
+    json_value_t **out_state_override) {
+  json_value_t *updated_state = NULL;
+  json_type_t state_kind;
+  json_type_t patch_kind;
+  int rc = -1;
+
+  if (!state || !patch || !out_state_override) {
+    return -1;
+  }
+  *out_state_override = NULL;
+
+  state_kind = json_type(state);
+  patch_kind = json_type(patch);
+  if (state_kind == JSON_OBJECT &&
+      patch_kind == JSON_OBJECT) {
+    updated_state = json_clone(state);
+    if (!updated_state) {
+      return -1;
+    }
+    if (turbo_agent_runtime_merge_state_patch_object_json_value(updated_state, patch) != 0) {
+      goto cleanup;
+    }
+  } else {
+    updated_state = json_clone(patch);
+    if (!updated_state) {
+      goto cleanup;
+    }
+  }
+
+  *out_state_override = updated_state;
+  updated_state = NULL;
+  rc = 0;
+
+cleanup:
+  turbo_runtime_json_destroy(updated_state);
+  return rc;
+}
+
+static const char *turbo_agent_runtime_command_string(const json_value_t *command_json,
+                                                      const char *primary_key) {
+  const char *value;
+
+  if (!command_json) {
+    return NULL;
+  }
+  value = json_get_string(command_json, primary_key);
+  if (value && value[0] != '\0') {
+    return value;
+  }
+  return NULL;
+}
+
+static char *turbo_agent_runtime_command_text_owned(const json_value_t *command_json,
+                                                    const char *primary_key) {
+  const char *text_value;
+  const json_value_t *json_value;
+  char *serialized = NULL;
+  char *owned_value = NULL;
+
+  if (!command_json) {
+    return NULL;
+  }
+  text_value = turbo_agent_runtime_command_string(command_json, primary_key);
+  if (text_value && text_value[0] != '\0') {
+    return turbo_agent_runtime_strdup(text_value);
+  }
+
+  json_value = primary_key ? json_object_get(command_json, primary_key) : NULL;
+  if (!json_value || json_type(json_value) == JSON_NULL) {
+    return NULL;
+  }
+  if (json_type(json_value) == JSON_STRING) {
+    text_value = json_string(json_value);
+    return text_value ? turbo_agent_runtime_strdup(text_value) : NULL;
+  }
+  serialized = json_serialize(json_value, NULL);
+  if (!serialized) {
+    return NULL;
+  }
+  owned_value = turbo_agent_runtime_strdup(serialized);
+  json_serialize_free(serialized);
+  return owned_value;
+}
+
+static int turbo_agent_runtime_apply_command_json(json_value_t *state,
+                                                  const json_value_t *command_json) {
+  const char *kind;
+  const json_value_t *approved_value;
+  int approved;
+  const char *text;
+  char *owned_text = NULL;
+  int rc = -1;
+
+  if (!state || !command_json || json_type(command_json) != JSON_OBJECT) {
+    return -1;
+  }
+  kind = json_get_string(command_json, "kind");
+  if (!kind || kind[0] == '\0') {
+    return -1;
+  }
+
+  if (strcmp(kind, "approve_review") == 0) {
+    approved_value = json_object_get(command_json, "approved");
+    approved = approved_value ? json_get_bool(command_json, "approved", 1) : 1;
+    return turbo_agent_state_set_review_approved(state, approved);
+  }
+  if (strcmp(kind, "reject_review") == 0) {
+    owned_text = turbo_agent_runtime_command_text_owned(command_json, "reason");
+    if (owned_text && owned_text[0] != '\0') {
+      rc = turbo_agent_state_request_review(state, owned_text);
+      free(owned_text);
+      return rc;
+    }
+    free(owned_text);
+    return turbo_agent_state_set_review_approved(state, 0);
+  }
+  if (strcmp(kind, "request_replan") == 0) {
+    text = turbo_agent_runtime_command_string(command_json, "reason");
+    rc = turbo_agent_state_clear_review(state);
+    if (rc != 0) {
+      return rc;
+    }
+    return turbo_agent_state_request_replan(state, text);
+  }
+  if (strcmp(kind, "append_feedback") == 0) {
+    owned_text = turbo_agent_runtime_command_text_owned(command_json, "text");
+    if (!owned_text || owned_text[0] == '\0') {
+      free(owned_text);
+      return -1;
+    }
+    rc = turbo_agent_state_add_user_message(state, owned_text);
+    free(owned_text);
+    return rc;
+  }
+  if (strcmp(kind, "append_user_message") == 0) {
+    owned_text = turbo_agent_runtime_command_text_owned(command_json, "text");
+    if (!owned_text || owned_text[0] == '\0') {
+      free(owned_text);
+      return -1;
+    }
+    rc = turbo_agent_state_add_user_message(state, owned_text);
+    free(owned_text);
+    return rc;
+  }
+  if (strcmp(kind, "override_final_output") == 0) {
+    owned_text = turbo_agent_runtime_command_text_owned(command_json, "text");
+    if (!owned_text || owned_text[0] == '\0') {
+      free(owned_text);
+      owned_text = turbo_agent_runtime_command_text_owned(command_json, "output_json");
+    }
+    if (!owned_text || owned_text[0] == '\0') {
+      free(owned_text);
+      return -1;
+    }
+    rc = turbo_agent_state_set_final_answer(state, owned_text);
+    free(owned_text);
+    return rc;
+  }
+  return -1;
+}
+
+static int turbo_agent_runtime_run_command_json_value(
+    turbo_agent_runtime_t *runtime, turbo_graph_t *graph, const char *checkpoint_id,
+    const json_value_t *command,
+    const turbo_graph_run_options_t *options, json_value_t **out_summary_json,
+    json_value_t **out_state, int fork_run) {
+  json_value_t *state_override = NULL;
+  int rc;
+
+  if (!runtime || !graph || !checkpoint_id || !command || !out_summary_json || !out_state) {
+    return -1;
+  }
+  rc = turbo_agent_runtime_prepare_checkpoint_command_override_json_value(runtime, checkpoint_id, command, &state_override);
+  if (rc != 0) {
+    return rc;
+  }
+  if (fork_run) {
+    rc = turbo_agent_runtime_fork_json_value_graph_stream(runtime, graph, checkpoint_id, state_override,
+                                                    options, NULL, NULL, out_summary_json,
+                                                    out_state);
+  } else {
+    rc = turbo_agent_runtime_resume_json_value_graph_stream(runtime, graph, checkpoint_id, state_override,
+                                                      options, NULL, NULL, out_summary_json,
+                                                      out_state);
+  }
+  turbo_runtime_json_destroy(state_override);
+  return rc;
+}
+
+
+int turbo_agent_runtime_prepare_checkpoint_command_override_json_value(
+    turbo_agent_runtime_t *runtime, const char *checkpoint_id,
+    const json_value_t *command,
+    json_value_t **out_state_override) {
+  json_value_t *state = NULL;
+  json_value_t *state_json = NULL;
+  json_value_t *command_json = NULL;
+  json_value_t *updated_state = NULL;
+  int rc = -1;
+
+  if (!runtime || !checkpoint_id || !command || !out_state_override) {
+    return -1;
+  }
+  *out_state_override = NULL;
+  if (turbo_agent_runtime_get_checkpoint_state_json_value(runtime, checkpoint_id, &state) != 0 || !state) {
+    goto cleanup;
+  }
+  state_json = json_clone(state);
+  command_json = json_clone(command);
+  if (!state_json || !command_json ||
+      turbo_agent_runtime_apply_command_json(state_json, command_json) != 0) {
+    goto cleanup;
+  }
+  updated_state = json_clone(state_json);
+  if (!updated_state) {
+    goto cleanup;
+  }
+  *out_state_override = updated_state;
+  updated_state = NULL;
+  rc = 0;
+
+cleanup:
+  turbo_runtime_json_destroy(updated_state);
+  json_free(command_json); command_json = NULL;
+  json_free(state_json); state_json = NULL;
+  turbo_runtime_json_destroy(state);
+  return rc;
+}
+
+int turbo_agent_runtime_prepare_checkpoint_state_override_json_value(
+    turbo_agent_runtime_t *runtime, const char *checkpoint_id,
+    const json_value_t *state_patch,
+    json_value_t **out_state_override) {
+  json_value_t *state = NULL;
+  int rc;
+
+  if (!runtime || !checkpoint_id || !checkpoint_id[0] || !state_patch || !out_state_override) {
+    return -1;
+  }
+  *out_state_override = NULL;
+  rc = turbo_agent_runtime_get_checkpoint_state_json_value(runtime, checkpoint_id, &state);
+  if (rc != 0 || !state) {
+    turbo_runtime_json_destroy(state);
+    return -1;
+  }
+  rc = turbo_agent_runtime_apply_state_patch_to_json_value(state, state_patch, out_state_override);
+  turbo_runtime_json_destroy(state);
+  return rc;
+}
+
+
+

@@ -1,0 +1,53 @@
+{
+  "request_replan": {
+    "name": "request_replan",
+    "label": "Request Replan",
+    "category": "planning",
+    "input_mode": "optional_text",
+    "resume_mode": "resume_or_fork",
+    "primary_key": "reason",
+    "requires_input": false,
+    "supports_json_value": false,
+    "accepted_keys": ["reason"],
+    "placeholder": "Describe why the current plan should be rebuilt.",
+    "success_state_hint": "Marks the state for replanning before the next execution pass.",
+    "example_payload": {
+      "kind": "request_replan",
+      "reason": "the constraints changed"
+    }
+  },
+  "append_feedback": {
+    "name": "append_feedback",
+    "label": "Append Feedback",
+    "category": "input",
+    "input_mode": "text",
+    "resume_mode": "resume_or_fork",
+    "primary_key": "text",
+    "requires_input": true,
+    "supports_json_value": false,
+    "accepted_keys": ["text"],
+    "placeholder": "Add one short feedback message for the next run.",
+    "success_state_hint": "Appends one user-visible feedback message to the canonical input.",
+    "example_payload": {
+      "kind": "append_feedback",
+      "text": "please add tests"
+    }
+  },
+  "override_final_output": {
+    "name": "override_final_output",
+    "label": "Override Final Output",
+    "category": "output",
+    "input_mode": "text_or_json",
+    "resume_mode": "resume_or_fork",
+    "primary_key": "text",
+    "requires_input": true,
+    "supports_json_value": true,
+    "accepted_keys": ["text", "output_json"],
+    "placeholder": "Replace the final output text or provide structured output_json.",
+    "success_state_hint": "Overrides the current final answer with host-provided content.",
+    "example_payload": {
+      "kind": "override_final_output",
+      "text": "Ship it."
+    }
+  }
+}

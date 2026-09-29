@@ -216,7 +216,7 @@ spec("turbo agent execution") {
                      pool, runtime, graph, input, NULL,
                      &(turbo_agent_runtime_exec_options_t){.thread_id = "async-rejected"}, NULL,
                      &execution),
-                 SALTS_EBUSY);
+                 SALTS_ENOBUFS);
     check_null(execution);
 
     atomic_store_explicit(&gate.open, 1, memory_order_release);

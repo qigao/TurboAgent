@@ -22,7 +22,7 @@ get_filename_component(CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
 
 # Project description
 set(PROJECT_DESCRIPTION "a LLM agent library")
-set(PROJECT_HOMEPAGE_URL "https://github.com/qigao/turbo-agent")
+set(PROJECT_HOMEPAGE_URL "https://github.com/qigao/TurboAgent")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # Language standards - unified approach
@@ -55,9 +55,10 @@ endif()
 if(DEFINED SALTS_UTILS_ROOT AND NOT "${SALTS_UTILS_ROOT}" STREQUAL "")
   set(ENV{SALTS_UTILS_ROOT} "${SALTS_UTILS_ROOT}")
 endif()
-find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT}")
+find_package(Salts 1.8.3 EXACT CONFIG REQUIRED PATHS "${SALTS_ROOT}")
+find_package(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT}")
 if(ENABLE_MCP_TOOLS OR ENABLE_LANGCHAIN)
-  find_package(Chttp CONFIG REQUIRED PATHS "${CHTTP_ROOT}")
+  find_package(Chttp 1.1.4 EXACT CONFIG REQUIRED PATHS "${CHTTP_ROOT}")
 endif()
 if(ENABLE_LLM_SANDBOX)
   find_package(TurboWasm CONFIG REQUIRED PATHS "${TURBOWASM_ROOT}")

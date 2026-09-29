@@ -1,6 +1,6 @@
 {
-  "name": "turboagent",
-  "version-semver": "0.1.0",
+  "name": "turbo-agent",
+  "version-semver": "1.0.0",
   "dependencies": [
     {
       "name": "stb"

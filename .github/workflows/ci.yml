@@ -214,6 +214,26 @@ jobs:
             echo "PRAKTOR_ROOT=$(restore_sdk qigao/praktor 'Praktor.Native.*.nupkg' praktor 'lib/cmake/Praktor/PraktorConfig.cmake')"
           } >> "$GITHUB_ENV"
 
+      # TEMPORARY PR-ONLY QUALIFICATION: replace released Praktor with the
+      # already-green ABI 2.4 SDK artifact from qigao/praktor#52. This step is
+      # removed after the cross-repo adapter path is proven.
+      - name: Override Praktor with ABI 2.4 qualification artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          artifact_id=11046193108
+          dir="$RUNNER_TEMP/praktor-head-artifact"
+          mkdir -p "$dir"
+          gh api -H "Accept: application/vnd.github+json"             "/repos/qigao/praktor/actions/artifacts/$artifact_id/zip" > "$dir/artifact.zip"
+          unzip -q "$dir/artifact.zip" -d "$dir/archive"
+          tar -xzf "$dir/archive/praktor-linux-x64.tar.gz" -C "$dir"
+          test -f "$dir/linux-x64/include/praktor.h"
+          grep -F '#define PRAKTOR_ABI_MINOR 4u' "$dir/linux-x64/include/praktor.h"
+          grep -F 'PRAKTOR_CAPABILITY_WORKFLOW_PLAN' "$dir/linux-x64/include/praktor.h"
+          echo "PRAKTOR_ROOT=$dir/linux-x64" >> "$GITHUB_ENV"
+
       - name: Verify released Praktor package contract
         shell: bash
         run: |

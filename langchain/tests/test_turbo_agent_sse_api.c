@@ -13,7 +13,7 @@ static json_value_t *parse_sse_response_or_fail(int rc, char **response_json) {
   check_int_eq(
       turbo_parse_json((const uint8_t *)*response_json, strlen(*response_json), &parsed), 0);
   check_not_null(parsed);
-  turbo_json_serialize_free(*response_json);
+  json_serialize_free(*response_json);
   *response_json = NULL;
   return parsed;
 }
@@ -48,16 +48,16 @@ spec("turbo agent sse api") {
     const json_value_t *message;
 
     response = parse_chat_sse_or_fail(sse);
-    check_str_eq(turbo_json_get_string(response, "id"), "chat_1");
-    choices = turbo_json_object_get(response, "choices");
+    check_str_eq(json_get_string(response, "id"), "chat_1");
+    choices = json_object_get(response, "choices");
     check_not_null(choices);
-    check_size_eq(turbo_json_array_size(choices), 1);
-    message = turbo_json_object_get(turbo_json_array_get(choices, 0), "message");
+    check_size_eq(json_array_size(choices), 1);
+    message = json_object_get(json_array_get(choices, 0), "message");
     check_not_null(message);
-    check_str_eq(turbo_json_get_string(message, "role"), "assistant");
-    check_str_eq(turbo_json_get_string(message, "content"), "hello");
+    check_str_eq(json_get_string(message, "role"), "assistant");
+    check_str_eq(json_get_string(message, "content"), "hello");
 
-    turbo_free_json(&response);
+    json_free(response); response = NULL;
   }
 
   it("should aggregate responses frames into one response object") {
@@ -70,15 +70,15 @@ spec("turbo agent sse api") {
     const json_value_t *content;
 
     response = parse_responses_sse_or_fail(sse);
-    check_str_eq(turbo_json_get_string(response, "id"), "resp_1");
-    output = turbo_json_object_get(response, "output");
+    check_str_eq(json_get_string(response, "id"), "resp_1");
+    output = json_object_get(response, "output");
     check_not_null(output);
-    check_size_eq(turbo_json_array_size(output), 1);
-    content = turbo_json_object_get(turbo_json_array_get(output, 0), "content");
+    check_size_eq(json_array_size(output), 1);
+    content = json_object_get(json_array_get(output, 0), "content");
     check_not_null(content);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(content, 0), "text"), "yo");
+    check_str_eq(json_get_string(json_array_get(content, 0), "text"), "yo");
 
-    turbo_free_json(&response);
+    json_free(response); response = NULL;
   }
 
   it("should rebuild responses output items when completion omits output") {
@@ -90,15 +90,15 @@ spec("turbo agent sse api") {
     const json_value_t *output;
 
     response = parse_responses_sse_or_fail(sse);
-    check_str_eq(turbo_json_get_string(response, "id"), "resp_rebuilt");
-    output = turbo_json_object_get(response, "output");
+    check_str_eq(json_get_string(response, "id"), "resp_rebuilt");
+    output = json_object_get(response, "output");
     check_not_null(output);
-    check_size_eq(turbo_json_array_size(output), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(output, 0), "type"),
+    check_size_eq(json_array_size(output), 1);
+    check_str_eq(json_get_string(json_array_get(output, 0), "type"),
                  "function_call_output");
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(output, 0), "call_id"), "call_1");
+    check_str_eq(json_get_string(json_array_get(output, 0), "call_id"), "call_1");
 
-    turbo_free_json(&response);
+    json_free(response); response = NULL;
   }
 
   it("should fail responses aggregation without a completed response") {
@@ -167,15 +167,15 @@ spec("turbo agent sse api") {
     const json_value_t *content;
 
     response = parse_anthropic_sse_or_fail(sse);
-    check_str_eq(turbo_json_get_string(response, "id"), "msg_1");
-    check_str_eq(turbo_json_get_string(response, "stop_reason"), "end_turn");
-    content = turbo_json_object_get(response, "content");
+    check_str_eq(json_get_string(response, "id"), "msg_1");
+    check_str_eq(json_get_string(response, "stop_reason"), "end_turn");
+    content = json_object_get(response, "content");
     check_not_null(content);
-    check_size_eq(turbo_json_array_size(content), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(content, 0), "type"), "text");
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(content, 0), "text"), "anth");
+    check_size_eq(json_array_size(content), 1);
+    check_str_eq(json_get_string(json_array_get(content, 0), "type"), "text");
+    check_str_eq(json_get_string(json_array_get(content, 0), "text"), "anth");
 
-    turbo_free_json(&response);
+    json_free(response); response = NULL;
   }
 
   it("should aggregate anthropic partial tool input json into one tool_use block") {
@@ -191,19 +191,19 @@ spec("turbo agent sse api") {
     const json_value_t *input;
 
     response = parse_anthropic_sse_or_fail(sse);
-    content = turbo_json_object_get(response, "content");
+    content = json_object_get(response, "content");
     check_not_null(content);
-    check_size_eq(turbo_json_array_size(content), 1);
-    tool_use = turbo_json_array_get(content, 0);
+    check_size_eq(json_array_size(content), 1);
+    tool_use = json_array_get(content, 0);
     check_not_null(tool_use);
-    check_str_eq(turbo_json_get_string(tool_use, "type"), "tool_use");
-    check_str_eq(turbo_json_get_string(tool_use, "id"), "call_1");
-    input = turbo_json_object_get(tool_use, "input");
+    check_str_eq(json_get_string(tool_use, "type"), "tool_use");
+    check_str_eq(json_get_string(tool_use, "id"), "call_1");
+    input = json_object_get(tool_use, "input");
     check_not_null(input);
-    check_int_eq(turbo_json_get_int(input, "a", 0), 2);
-    check_int_eq(turbo_json_get_int(input, "b", 0), 3);
+    check_int_eq(json_get_int(input, "a", 0), 2);
+    check_int_eq(json_get_int(input, "b", 0), 3);
 
-    turbo_free_json(&response);
+    json_free(response); response = NULL;
   }
 
   it("should fail anthropic aggregation on malformed partial tool input json") {
@@ -279,19 +279,19 @@ spec("turbo agent sse api") {
     const json_value_t *function;
 
     response = parse_chat_sse_or_fail(sse);
-    choices = turbo_json_object_get(response, "choices");
+    choices = json_object_get(response, "choices");
     check_not_null(choices);
-    message = turbo_json_object_get(turbo_json_array_get(choices, 0), "message");
+    message = json_object_get(json_array_get(choices, 0), "message");
     check_not_null(message);
-    tool_calls = turbo_json_object_get(message, "tool_calls");
+    tool_calls = json_object_get(message, "tool_calls");
     check_not_null(tool_calls);
-    check_size_eq(turbo_json_array_size(tool_calls), 1);
-    function = turbo_json_object_get(turbo_json_array_get(tool_calls, 0), "function");
+    check_size_eq(json_array_size(tool_calls), 1);
+    function = json_object_get(json_array_get(tool_calls, 0), "function");
     check_not_null(function);
-    check_str_eq(turbo_json_get_string(function, "name"), "sum");
-    check_str_eq(turbo_json_get_string(function, "arguments"), "{\"a\":2,\"b\":3}");
+    check_str_eq(json_get_string(function, "name"), "sum");
+    check_str_eq(json_get_string(function, "arguments"), "{\"a\":2,\"b\":3}");
 
-    turbo_free_json(&response);
+    json_free(response); response = NULL;
   }
 
   it("should fail chat aggregation on malformed json frame") {

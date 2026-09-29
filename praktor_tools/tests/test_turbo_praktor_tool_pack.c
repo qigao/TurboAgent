@@ -133,6 +133,57 @@ spec("Praktor workflow tool pack") {
     free(workspace);
   }
 
+  it("preserves deadline-exceeded semantics at the Praktor boundary") {
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack;
+    turbo_cancel_source_config_t cancel_config = {0};
+    turbo_cancel_source_t *source = NULL;
+    turbo_cancel_token_t *token = NULL;
+    turbo_tool_execution_context_t context = {0};
+    json_value_t *arguments = json_create_object();
+    json_value_t *result = NULL;
+
+    check_not_null(workspace);
+    check_not_null(arguments);
+    check_int_eq(praktor_test_write_named_workflow(
+                     workspace, "deadline.yml", workflow_path, sizeof(workflow_path)),
+                 0);
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    turbo_praktor_workflow_config_init(&workflow_config);
+    workflow_config.tool_name = "praktor_deadline";
+    workflow_config.description = "Deadline propagation test.";
+    workflow_config.workflow_path = workflow_path;
+    check_int_eq(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config), TURBO_TOOL_OK);
+
+    cancel_config.struct_size = sizeof(cancel_config);
+    cancel_config.abi_version = TURBO_RUNTIME_CONTROL_ABI_VERSION;
+    cancel_config.deadline_mono_ms = 1u;
+    check_int_eq(turbo_cancel_source_create(&cancel_config, &source), 0);
+    check_int_eq(turbo_cancel_source_token(source, &token), 0);
+    context.struct_size = sizeof(context);
+    context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    context.cancel_token = token;
+    context.deadline_mono_ms = 1u;
+
+    check_int_eq(turbo_tool_registry_execute_json_value_with_context(
+                     turbo_praktor_tool_pack_registry(pack), "praktor_deadline",
+                     arguments, &context, &result),
+                 TURBO_TOOL_DEADLINE_EXCEEDED);
+    check_null(result);
+
+    turbo_cancel_token_release(token);
+    turbo_cancel_source_destroy(source);
+    turbo_runtime_json_destroy(arguments);
+    turbo_praktor_tool_pack_destroy(pack);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
   it("registers a reviewed workflow with conservative policy metadata") {
     char *workspace = praktor_test_workspace();
     char workflow_path[SALTS_FS_MAX_PATH] = {0};

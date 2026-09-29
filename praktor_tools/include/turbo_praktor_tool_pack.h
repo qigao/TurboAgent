@@ -102,6 +102,17 @@ turbo_praktor_tool_pack_registry(turbo_praktor_tool_pack_t *pack);
 CXX_C_API size_t
 turbo_praktor_tool_pack_workflow_count(const turbo_praktor_tool_pack_t *pack);
 
+
+/** Return whether the linked Praktor exposes immutable WorkflowPlan contracts. */
+CXX_C_API int
+turbo_praktor_tool_pack_supports_workflow_plan(
+    const turbo_praktor_tool_pack_t *pack);
+
+/** Return whether the linked Praktor exposes lifecycle event callbacks. */
+CXX_C_API int
+turbo_praktor_tool_pack_supports_execution_events(
+    const turbo_praktor_tool_pack_t *pack);
+
 #ifdef __cplusplus
 }
 #endif

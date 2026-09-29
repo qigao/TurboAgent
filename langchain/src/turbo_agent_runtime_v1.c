@@ -7,6 +7,7 @@
 #include "turbo_event_log.h"
 #include "turbo_graph_run_log.h"
 #include <json_parser.h>
+#include <salts/clock.h>
 
 #include <errno.h>
 #include <stdatomic.h>
@@ -1016,7 +1017,7 @@ char *turbo_agent_runtime_make_id(const char *prefix) {
   }
 
   counter = atomic_fetch_add(&turbo_agent_runtime_id_counter, 1);
-  tick = (unsigned long long)turbo_hrtime();
+  tick = (unsigned long long)salts_hrtime();
   needed = snprintf(NULL, 0, "%s_%llx%llx", prefix, tick, counter);
   if (needed < 0) {
     return NULL;

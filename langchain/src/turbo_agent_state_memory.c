@@ -3,7 +3,7 @@
 #include "turbo_agent_hooks_internal.h"
 #include "turbo_agent_state_memory_internal.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +15,7 @@ int turbo_agent_state_set_memory_json_impl(json_value_t *state, const char *key,
   json_value_t *value = NULL;
 
   if (!state || !key || !value_json || key[0] == '\0' ||
-      turbo_json_type(state) != TURBO_JSON_OBJECT) {
+      json_type(state) != JSON_OBJECT) {
     return -1;
   }
 
@@ -24,11 +24,12 @@ int turbo_agent_state_set_memory_json_impl(json_value_t *state, const char *key,
     return -1;
   }
 
-  if (turbo_parse_json((const uint8_t *)value_json, strlen(value_json), &value) != 0) {
+  value = json_parse(value_json, strlen(value_json));
+  if (!value) {
     return -1;
   }
 
-  turbo_json_object_add(memory, key, value);
+  json_object_add(memory, key, value);
   return 0;
 }
 
@@ -37,19 +38,19 @@ const json_value_t *turbo_agent_state_memory_json_impl(const json_value_t *state
   const json_value_t *memory;
   size_t i;
 
-  if (!state || !key || key[0] == '\0' || turbo_json_type(state) != TURBO_JSON_OBJECT) {
+  if (!state || !key || key[0] == '\0' || json_type(state) != JSON_OBJECT) {
     return NULL;
   }
 
   memory = turbo_agent_state_get_object_const(state, "memory");
-  if (!memory || turbo_json_type(memory) != TURBO_JSON_OBJECT) {
+  if (!memory || json_type(memory) != JSON_OBJECT) {
     return NULL;
   }
 
-  for (i = turbo_json_object_size(memory); i > 0; --i) {
-    const char *memory_key = turbo_json_object_key(memory, i - 1);
+  for (i = json_object_size(memory); i > 0; --i) {
+    const char *memory_key = json_object_key(memory, i - 1);
     if (memory_key && strcmp(memory_key, key) == 0) {
-      return turbo_json_object_value(memory, i - 1);
+      return json_object_value(memory, i - 1);
     }
   }
 
@@ -94,7 +95,7 @@ int turbo_agent_state_save_memory_impl(turbo_agent_t *agent, json_value_t *state
     return agent->store.remove ? agent->store.remove(agent->store.user_data, key) : -1;
   }
 
-  serialized = turbo_json_serialize(value, NULL);
+  serialized = json_serialize(value, NULL);
   if (!serialized) {
     return -1;
   }
@@ -103,7 +104,7 @@ int turbo_agent_state_save_memory_impl(turbo_agent_t *agent, json_value_t *state
   if (rc == 0) {
     turbo_agent_emit_trace(agent, state, TURBO_AGENT_TRACE_MEMORY_SAVE, key, NULL, serialized, 0);
   }
-  turbo_json_serialize_free(serialized);
+  json_serialize_free(serialized);
   return rc;
 }
 
@@ -114,7 +115,7 @@ int turbo_agent_state_add_memory_context_layer_impl(json_value_t *state, const c
   json_value_t *layer;
 
   if (!state || !scope || scope[0] == '\0' || !text || text[0] == '\0' ||
-      turbo_json_type(state) != TURBO_JSON_OBJECT) {
+      json_type(state) != JSON_OBJECT) {
     return -1;
   }
 
@@ -123,32 +124,32 @@ int turbo_agent_state_add_memory_context_layer_impl(json_value_t *state, const c
     return -1;
   }
 
-  layers = turbo_json_object_get(memory_context, "layers");
+  layers = json_object_get(memory_context, "layers");
   if (!layers) {
-    layers = turbo_json_create_array();
+    layers = json_create_array();
     if (!layers) {
       return -1;
     }
-    turbo_json_object_add(memory_context, "layers", layers);
+    json_object_add(memory_context, "layers", layers);
   }
-  if (turbo_json_type(layers) != TURBO_JSON_ARRAY) {
+  if (json_type(layers) != JSON_ARRAY) {
     return -1;
   }
 
-  layer = turbo_json_create_object();
+  layer = json_create_object();
   if (!layer) {
     return -1;
   }
 
-  turbo_json_object_set_string(layer, "scope", scope);
-  turbo_json_object_set_string(layer, "path", path && path[0] != '\0' ? path : "");
-  turbo_json_object_set_string(layer, "text", text);
-  turbo_json_array_add(layers, layer);
+  json_object_set_string(layer, "scope", scope);
+  json_object_set_string(layer, "path", path && path[0] != '\0' ? path : "");
+  json_object_set_string(layer, "text", text);
+  json_array_add(layers, layer);
   return 0;
 }
 
 const json_value_t *turbo_agent_state_memory_context_impl(const json_value_t *state) {
-  return state && turbo_json_type(state) == TURBO_JSON_OBJECT
+  return state && json_type(state) == JSON_OBJECT
              ? turbo_agent_state_get_object_const(state, "memory_context")
              : NULL;
 }
@@ -157,28 +158,28 @@ const json_value_t *turbo_agent_state_memory_layers_impl(const json_value_t *sta
   const json_value_t *memory_context = turbo_agent_state_memory_context(state);
   const json_value_t *layers;
 
-  if (!memory_context || turbo_json_type(memory_context) != TURBO_JSON_OBJECT) {
+  if (!memory_context || json_type(memory_context) != JSON_OBJECT) {
     return NULL;
   }
 
-  layers = turbo_json_object_get(memory_context, "layers");
-  return layers && turbo_json_type(layers) == TURBO_JSON_ARRAY ? layers : NULL;
+  layers = json_object_get(memory_context, "layers");
+  return layers && json_type(layers) == JSON_ARRAY ? layers : NULL;
 }
 
 size_t turbo_agent_state_memory_layer_count_impl(const json_value_t *state) {
   const json_value_t *layers = turbo_agent_state_memory_layers(state);
-  return layers ? turbo_json_array_size(layers) : 0;
+  return layers ? json_array_size(layers) : 0;
 }
 
 const json_value_t *turbo_agent_state_memory_layer_at_impl(const json_value_t *state,
                                                            size_t index) {
   const json_value_t *layers = turbo_agent_state_memory_layers(state);
 
-  if (!layers || index >= turbo_json_array_size(layers)) {
+  if (!layers || index >= json_array_size(layers)) {
     return NULL;
   }
 
-  return turbo_json_array_get(layers, index);
+  return json_array_get(layers, index);
 }
 
 char *turbo_agent_state_memory_context_text_impl(const json_value_t *state) {
@@ -190,24 +191,24 @@ char *turbo_agent_state_memory_context_text_impl(const json_value_t *state) {
   size_t offset = 0;
   static const char *prefix = "Persistent memory:\n";
 
-  if (!layers || turbo_json_type(layers) != TURBO_JSON_ARRAY || turbo_json_array_size(layers) == 0) {
+  if (!layers || json_type(layers) != JSON_ARRAY || json_array_size(layers) == 0) {
     return NULL;
   }
 
   total += strlen(prefix);
-  for (i = 0; i < turbo_json_array_size(layers); ++i) {
-    const json_value_t *layer = turbo_json_array_get(layers, i);
+  for (i = 0; i < json_array_size(layers); ++i) {
+    const json_value_t *layer = json_array_get(layers, i);
     const char *scope;
     const char *path;
     const char *text;
 
-    if (!layer || turbo_json_type(layer) != TURBO_JSON_OBJECT) {
+    if (!layer || json_type(layer) != JSON_OBJECT) {
       continue;
     }
 
-    scope = turbo_json_get_string(layer, "scope");
-    path = turbo_json_get_string(layer, "path");
-    text = turbo_json_get_string(layer, "text");
+    scope = json_get_string(layer, "scope");
+    path = json_get_string(layer, "path");
+    text = json_get_string(layer, "text");
     if (!scope || !text || text[0] == '\0') {
       continue;
     }
@@ -231,20 +232,20 @@ char *turbo_agent_state_memory_context_text_impl(const json_value_t *state) {
 
   memcpy(buffer + offset, prefix, strlen(prefix));
   offset += strlen(prefix);
-  for (i = 0; i < turbo_json_array_size(layers); ++i) {
-    const json_value_t *layer = turbo_json_array_get(layers, i);
+  for (i = 0; i < json_array_size(layers); ++i) {
+    const json_value_t *layer = json_array_get(layers, i);
     const char *scope;
     const char *path;
     const char *text;
     int written;
 
-    if (!layer || turbo_json_type(layer) != TURBO_JSON_OBJECT) {
+    if (!layer || json_type(layer) != JSON_OBJECT) {
       continue;
     }
 
-    scope = turbo_json_get_string(layer, "scope");
-    path = turbo_json_get_string(layer, "path");
-    text = turbo_json_get_string(layer, "text");
+    scope = json_get_string(layer, "scope");
+    path = json_get_string(layer, "path");
+    text = json_get_string(layer, "text");
     if (!scope || !text || text[0] == '\0') {
       continue;
     }

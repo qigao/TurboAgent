@@ -19,6 +19,21 @@ function(cmake_config_target target_name)
     endif()
 
     get_target_property(target_type ${target_name} TYPE)
+
+    if(target_type STREQUAL "SHARED_LIBRARY" OR
+       target_type STREQUAL "STATIC_LIBRARY" OR
+       target_type STREQUAL "INTERFACE_LIBRARY")
+        target_include_directories(
+            ${target_name}
+            INTERFACE $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+                      $<INSTALL_INTERFACE:include>)
+        if(NOT target_type STREQUAL "INTERFACE_LIBRARY")
+            target_include_directories(
+                ${target_name}
+                PUBLIC $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+                       $<INSTALL_INTERFACE:include>)
+        endif()
+    endif()
     if(target_type STREQUAL "SHARED_LIBRARY" OR target_type STREQUAL "STATIC_LIBRARY")
         if(NOT ARG_VERSION AND PROJECT_VERSION)
             set(ARG_VERSION ${PROJECT_VERSION})

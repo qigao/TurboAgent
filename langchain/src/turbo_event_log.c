@@ -1,4 +1,5 @@
 #include "turbo_event_log.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 
@@ -79,7 +80,7 @@ turbo_event_log_append_json_value(turbo_event_log_t *log, const json_value_t *ev
     return log->last_status;
   }
 
-  copy = turbo_json_clone(event);
+  copy = json_clone(event);
   if (!copy) {
     log->last_status = TURBO_EVENT_LOG_OUT_OF_MEMORY;
     return log->last_status;
@@ -98,13 +99,13 @@ turbo_event_log_status_t turbo_event_log_append_events_json_value(
   size_t i;
 
   if (!log || !events ||
-      turbo_json_type(events) != TURBO_JSON_ARRAY) {
+      json_type(events) != JSON_ARRAY) {
     return TURBO_EVENT_LOG_INVALID_ARGUMENT;
   }
 
   count = turbo_runtime_json_value_size(events);
   for (i = 0; i < count; ++i) {
-    const json_value_t *event = turbo_json_array_get(events, i);
+    const json_value_t *event = json_array_get(events, i);
 
     if (!event || turbo_event_validate_json_value(event) != 0) {
       log->last_status = TURBO_EVENT_LOG_INVALID_EVENT;
@@ -127,7 +128,7 @@ turbo_event_log_status_t turbo_event_log_append_events_json_value(
   }
 
   for (i = 0; i < count; ++i) {
-    copies[i] = turbo_json_clone(turbo_json_array_get(events, i));
+    copies[i] = json_clone(json_array_get(events, i));
     if (!copies[i]) {
       size_t j;
 
@@ -217,13 +218,13 @@ json_value_t *turbo_event_log_events_json_value(const turbo_event_log_t *log) {
     return NULL;
   }
 
-  events = turbo_json_create_array();
+  events = json_create_array();
   if (!events) {
     return NULL;
   }
 
   for (i = 0; i < log->count; ++i) {
-    copy = turbo_json_clone(log->events[i]);
+    copy = json_clone(log->events[i]);
     if (!copy ||
         turbo_runtime_json_array_append(events, copy) != TURBO_RUNTIME_JSON_OK) {
       turbo_runtime_json_destroy(copy);

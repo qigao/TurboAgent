@@ -1,7 +1,7 @@
 #include "turbo_coding_tools.h"
 
-#include <turbo_fs.h>
-#include <turbo_str_view.h>
+#include <salts_fs.h>
+#include <vstr.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -62,7 +62,7 @@ turbo_coding_binding_create(const turbo_coding_tools_config_t *config) {
 static int turbo_coding_relative_path_valid(const char *path) {
   const char *segment;
   const char *cursor;
-  if (!path || !path[0] || turbo_fs_path_is_absolute(path) || strchr(path, ':')) return 0;
+  if (!path || !path[0] || salts_fs_path_is_absolute(path) || strchr(path, ':')) return 0;
   segment = path;
   for (cursor = path;; ++cursor) {
     if (*cursor == '/' || *cursor == '\\' || *cursor == '\0') {
@@ -79,13 +79,13 @@ static int turbo_coding_relative_path_valid(const char *path) {
 
 static char *turbo_coding_resolve_path(const turbo_coding_binding_t *binding,
                                        const char *relative_path, int require_directory) {
-  turbo_fs_stat_t metadata;
+  salts_fs_stat_t metadata;
   char *resolved;
   char *cursor;
   size_t root_length;
   size_t path_length;
   if (!binding || !turbo_coding_relative_path_valid(relative_path) ||
-      turbo_fs_lstat(binding->workspace_root, &metadata) != 0 || metadata.is_symlink ||
+      salts_fs_lstat(binding->workspace_root, &metadata) != 0 || metadata.is_symlink ||
       !metadata.is_directory)
     return NULL;
   root_length = strlen(binding->workspace_root);
@@ -102,7 +102,7 @@ static char *turbo_coding_resolve_path(const turbo_coding_binding_t *binding,
     if (*cursor != '/' && *cursor != '\\' && *cursor != '\0') continue;
     saved = *cursor;
     *cursor = '\0';
-    if (turbo_fs_lstat(resolved, &metadata) != 0 || metadata.is_symlink) {
+    if (salts_fs_lstat(resolved, &metadata) != 0 || metadata.is_symlink) {
       free(resolved);
       return NULL;
     }
@@ -117,36 +117,36 @@ static char *turbo_coding_resolve_path(const turbo_coding_binding_t *binding,
 }
 
 static json_value_t *turbo_coding_result(int ok, const char *status, const char *summary) {
-  json_value_t *result = turbo_json_create_object();
-  json_value_t *artifacts = turbo_json_create_array();
-  json_value_t *metrics = turbo_json_create_object();
+  json_value_t *result = json_create_object();
+  json_value_t *artifacts = json_create_array();
+  json_value_t *metrics = json_create_object();
   if (!result || !artifacts || !metrics) {
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(artifacts);
     turbo_runtime_json_destroy(metrics);
     return NULL;
   }
-  turbo_json_object_set_bool(result, "ok", ok);
-  turbo_json_object_set_string(result, "status", status);
-  turbo_json_object_set_number(result, "exit_code", ok ? 0 : -1);
-  turbo_json_object_set_string(result, "summary", summary);
-  turbo_json_object_set_string(result, "stdout", "");
-  turbo_json_object_set_string(result, "stderr", "");
-  turbo_json_object_set_bool(result, "truncated", 0);
-  turbo_json_object_set_bool(result, "retryable", 0);
-  turbo_json_object_add(result, "artifacts", artifacts);
-  turbo_json_object_set_number(metrics, "duration_ms", 0);
-  turbo_json_object_set_number(metrics, "output_bytes", 0);
-  turbo_json_object_add(result, "metrics", metrics);
+  json_object_set_bool(result, "ok", ok);
+  json_object_set_string(result, "status", status);
+  json_object_set_number(result, "exit_code", ok ? 0 : -1);
+  json_object_set_string(result, "summary", summary);
+  json_object_set_string(result, "stdout", "");
+  json_object_set_string(result, "stderr", "");
+  json_object_set_bool(result, "truncated", 0);
+  json_object_set_bool(result, "retryable", 0);
+  json_object_add(result, "artifacts", artifacts);
+  json_object_set_number(metrics, "duration_ms", 0);
+  json_object_set_number(metrics, "output_bytes", 0);
+  json_object_add(result, "metrics", metrics);
   return result;
 }
 
 static int turbo_coding_fs_read_json(const json_value_t *arguments, json_value_t **out_result,
                                      void *user_data) {
   turbo_coding_binding_t *binding = (turbo_coding_binding_t *)user_data;
-  const char *path = turbo_json_get_string(arguments, "path");
-  turbo_fs_stat_t metadata;
-  turbo_fs_buf_t buffer = {0};
+  const char *path = json_get_string(arguments, "path");
+  salts_fs_stat_t metadata;
+  salts_fs_buf_t buffer = {0};
   json_value_t *result;
   char *content = NULL;
   char *resolved = turbo_coding_resolve_path(binding, path, 0);
@@ -155,20 +155,20 @@ static int turbo_coding_fs_read_json(const json_value_t *arguments, json_value_t
     *out_result = turbo_coding_result(0, "rejected", "path is outside the workspace policy");
     return *out_result ? 0 : -1;
   }
-  if (turbo_fs_stat(resolved, &metadata) != 0 || metadata.size > binding->max_read_bytes ||
-      metadata.size > binding->max_result_bytes || turbo_fs_read_file(resolved, &buffer) != 0 ||
+  if (salts_fs_stat(resolved, &metadata) != 0 || metadata.size > binding->max_read_bytes ||
+      metadata.size > binding->max_result_bytes || salts_fs_read_file(resolved, &buffer) != 0 ||
       buffer.len > binding->max_read_bytes || buffer.len > binding->max_result_bytes ||
       (buffer.len > 0 && memchr(buffer.base, '\0', buffer.len) != NULL) ||
-      !tstr_v_utf8_valid(tstr_v_from_buf(buffer.base, buffer.len))) {
+      !vstr_utf8_valid(vstr_from_buf(buffer.base, buffer.len))) {
     free(resolved);
-    turbo_fs_buf_free(&buffer);
+    salts_fs_buf_free(&buffer);
     *out_result = turbo_coding_result(0, "failed", "file cannot be read within configured bounds");
     return *out_result ? 0 : -1;
   }
   content = (char *)malloc(buffer.len + 1);
   if (!content) {
     free(resolved);
-    turbo_fs_buf_free(&buffer);
+    salts_fs_buf_free(&buffer);
     return -1;
   }
   memcpy(content, buffer.base, buffer.len);
@@ -177,27 +177,27 @@ static int turbo_coding_fs_read_json(const json_value_t *arguments, json_value_t
   if (!result) {
     free(content);
     free(resolved);
-    turbo_fs_buf_free(&buffer);
+    salts_fs_buf_free(&buffer);
     return -1;
   }
-  turbo_json_object_set_string(result, "path", path);
-  turbo_json_object_set_string(result, "content", content);
-  turbo_json_object_set_number(turbo_json_object_get(result, "metrics"), "output_bytes",
+  json_object_set_string(result, "path", path);
+  json_object_set_string(result, "content", content);
+  json_object_set_number(json_object_get(result, "metrics"), "output_bytes",
                                (double)buffer.len);
   free(resolved);
   free(content);
-  turbo_fs_buf_free(&buffer);
+  salts_fs_buf_free(&buffer);
   *out_result = result;
   return 0;
 }
 
-static const char *turbo_coding_dirent_type(turbo_fs_dirent_type_t type) {
+static const char *turbo_coding_dirent_type(salts_fs_dirent_type_t type) {
   switch (type) {
-  case TURBO_FS_DIRENT_FILE:
+  case SALTS_FS_DIRENT_FILE:
     return "file";
-  case TURBO_FS_DIRENT_DIRECTORY:
+  case SALTS_FS_DIRENT_DIRECTORY:
     return "directory";
-  case TURBO_FS_DIRENT_SYMLINK:
+  case SALTS_FS_DIRENT_SYMLINK:
     return "symlink";
   default:
     return "other";
@@ -207,9 +207,9 @@ static const char *turbo_coding_dirent_type(turbo_fs_dirent_type_t type) {
 static int turbo_coding_fs_list_json(const json_value_t *arguments, json_value_t **out_result,
                                      void *user_data) {
   turbo_coding_binding_t *binding = (turbo_coding_binding_t *)user_data;
-  const char *path = turbo_json_get_string(arguments, "path");
-  turbo_fs_dir_t *directory = NULL;
-  turbo_fs_dirent_t entry;
+  const char *path = json_get_string(arguments, "path");
+  salts_fs_dir_t *directory = NULL;
+  salts_fs_dirent_t entry;
   json_value_t *result = NULL;
   json_value_t *entries = NULL;
   char *resolved = turbo_coding_resolve_path(binding, path, 1);
@@ -217,43 +217,43 @@ static int turbo_coding_fs_list_json(const json_value_t *arguments, json_value_t
   size_t output_bytes = 0;
   int read_status;
   *out_result = NULL;
-  if (!resolved || turbo_fs_opendir(resolved, &directory) != 0) {
+  if (!resolved || salts_fs_opendir(resolved, &directory) != 0) {
     free(resolved);
     *out_result = turbo_coding_result(0, "rejected", "directory is outside the workspace policy");
     return *out_result ? 0 : -1;
   }
   result = turbo_coding_result(1, "completed", "directory listing completed");
-  entries = turbo_json_create_array();
+  entries = json_create_array();
   if (!result || !entries) goto fail;
-  while ((read_status = turbo_fs_readdir(directory, &entry)) > 0) {
+  while ((read_status = salts_fs_readdir(directory, &entry)) > 0) {
     json_value_t *item;
     size_t name_length = strlen(entry.name);
     if (count >= binding->max_list_entries ||
         name_length > binding->max_result_bytes - output_bytes) {
-      turbo_json_object_set_bool(result, "truncated", 1);
+      json_object_set_bool(result, "truncated", 1);
       break;
     }
-    item = turbo_json_create_object();
+    item = json_create_object();
     if (!item) goto fail;
-    turbo_json_object_set_string(item, "name", entry.name);
-    turbo_json_object_set_string(item, "type", turbo_coding_dirent_type(entry.type));
-    turbo_json_array_add(entries, item);
+    json_object_set_string(item, "name", entry.name);
+    json_object_set_string(item, "type", turbo_coding_dirent_type(entry.type));
+    json_array_add(entries, item);
     output_bytes += name_length;
     ++count;
   }
   if (read_status < 0) goto fail;
-  turbo_json_object_add(result, "entries", entries);
+  json_object_add(result, "entries", entries);
   entries = NULL;
-  turbo_json_object_set_number(turbo_json_object_get(result, "metrics"), "output_bytes",
+  json_object_set_number(json_object_get(result, "metrics"), "output_bytes",
                                (double)output_bytes);
-  turbo_fs_closedir(directory);
+  salts_fs_closedir(directory);
   free(resolved);
   *out_result = result;
   return 0;
 fail:
   turbo_runtime_json_destroy(entries);
   turbo_runtime_json_destroy(result);
-  turbo_fs_closedir(directory);
+  salts_fs_closedir(directory);
   free(resolved);
   return -1;
 }
@@ -264,16 +264,16 @@ static int turbo_coding_json_bridge(const char *arguments_json, char **out_outpu
   json_value_t *result = NULL;
   int rc;
   *out_output = NULL;
-  if (!arguments_json ||
-      turbo_parse_json((const uint8_t *)arguments_json, strlen(arguments_json), &arguments) != 0)
-    return -1;
+  if (!arguments_json) return -1;
+  arguments = json_parse(arguments_json, strlen(arguments_json));
+  if (!arguments) return -1;
   rc = handler(arguments, &result, user_data);
   turbo_runtime_json_destroy(arguments);
   if (rc != 0 || !result) {
     turbo_runtime_json_destroy(result);
     return -1;
   }
-  *out_output = turbo_json_serialize(result, NULL);
+  *out_output = json_serialize(result, NULL);
   turbo_runtime_json_destroy(result);
   return *out_output ? 0 : -1;
 }
@@ -301,7 +301,7 @@ turbo_tool_status_t turbo_coding_tools_add_read_only(turbo_tool_registry_t *regi
   turbo_tool_status_t status;
   if (!registry || !config || config->struct_size < sizeof(*config) ||
       config->abi_version != TURBO_CODING_TOOLS_CONFIG_ABI_VERSION || !config->workspace_root ||
-      !turbo_fs_path_is_absolute(config->workspace_root) || config->max_read_bytes == 0 ||
+      !salts_fs_path_is_absolute(config->workspace_root) || config->max_read_bytes == 0 ||
       config->max_list_entries == 0 || config->max_result_bytes == 0)
     return TURBO_TOOL_INVALID_ARGUMENT;
   read_binding = turbo_coding_binding_create(config);

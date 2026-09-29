@@ -3,7 +3,7 @@
 
 #include "tinytest.h"
 #include "turbo_event.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_runtime_json.h"
 
 #include <stdio.h>
@@ -50,19 +50,20 @@ static json_value_t *turbo_agent_test_load_fixture_json(const char *fixture_name
   size_t read_count;
   json_value_t *json = NULL;
 
-  check_int_eq(turbo_agent_test_fixture_path(fixture_name, path, sizeof(path)), 0);
+  check_equal(turbo_agent_test_fixture_path(fixture_name, path, sizeof(path)), 0);
   stream = fopen(path, "rb");
   check_not_null(stream);
-  check_int_eq(fseek(stream, 0, SEEK_END), 0);
+  check_equal(fseek(stream, 0, SEEK_END), 0);
   length = ftell(stream);
   check_true(length >= 0);
-  check_int_eq(fseek(stream, 0, SEEK_SET), 0);
+  check_equal(fseek(stream, 0, SEEK_SET), 0);
   buffer = (char *)malloc((size_t)length + 1);
   check_not_null(buffer);
   read_count = fread(buffer, 1, (size_t)length, stream);
-  check_size_eq(read_count, (size_t)length);
+  check_equal(read_count, (size_t)length);
   buffer[length] = '\0';
-  check_int_eq(turbo_parse_json((const uint8_t *)buffer, (size_t)length, &json), 0);
+  json = json_parse(buffer, (size_t)length);
+    check_not_null(json);
   fclose(stream);
   free(buffer);
   return json;
@@ -74,18 +75,18 @@ static const json_value_t *turbo_agent_test_find_named_fixture_entry(const json_
 
   check_not_null(fixture);
   check_not_null(entry_name);
-  if (turbo_json_type(fixture) == TURBO_JSON_OBJECT) {
-    const json_value_t *direct = turbo_json_object_get(fixture, entry_name);
+  if (json_type(fixture) == JSON_OBJECT) {
+    const json_value_t *direct = json_object_get(fixture, entry_name);
     if (direct) {
       return direct;
     }
   }
-  if (turbo_json_type(fixture) != TURBO_JSON_ARRAY) {
+  if (json_type(fixture) != JSON_ARRAY) {
     return NULL;
   }
-  for (i = 0; i < turbo_json_array_size(fixture); ++i) {
-    const json_value_t *entry = turbo_json_array_get(fixture, i);
-    const char *name = entry ? turbo_json_get_string(entry, "name") : NULL;
+  for (i = 0; i < json_array_size(fixture); ++i) {
+    const json_value_t *entry = json_array_get(fixture, i);
+    const char *name = entry ? json_get_string(entry, "name") : NULL;
 
     if (name && strcmp(name, entry_name) == 0) {
       return entry;
@@ -102,17 +103,17 @@ static const json_value_t *turbo_agent_test_find_command_descriptor(const json_v
 
   check_not_null(summary);
   check_not_null(name);
-  descriptors = turbo_json_object_get(summary, "available_command_descriptors");
+  descriptors = json_object_get(summary, "available_command_descriptors");
   check_not_null(descriptors);
-  count = turbo_json_array_size(descriptors);
+  count = json_array_size(descriptors);
   for (i = 0; i < count; ++i) {
-    const json_value_t *descriptor = turbo_json_array_get(descriptors, i);
+    const json_value_t *descriptor = json_array_get(descriptors, i);
     const char *descriptor_name;
 
     if (!descriptor) {
       continue;
     }
-    descriptor_name = turbo_json_get_string(descriptor, "name");
+    descriptor_name = json_get_string(descriptor, "name");
     if (descriptor_name && strcmp(descriptor_name, name) == 0) {
       return descriptor;
     }
@@ -127,13 +128,13 @@ static void turbo_agent_test_check_string_array_contains_all(const json_value_t 
   size_t j;
 
   check_not_null(array);
-  check_true(turbo_json_type(array) == TURBO_JSON_ARRAY);
+  check_true(json_type(array) == JSON_ARRAY);
   for (i = 0; i < value_count; ++i) {
     int found = 0;
 
-    for (j = 0; j < turbo_json_array_size(array); ++j) {
-      const json_value_t *entry = turbo_json_array_get(array, j);
-      const char *entry_text = entry ? turbo_json_string(entry) : NULL;
+    for (j = 0; j < json_array_size(array); ++j) {
+      const json_value_t *entry = json_array_get(array, j);
+      const char *entry_text = entry ? json_string(entry) : NULL;
 
       if (entry_text && strcmp(entry_text, values[i]) == 0) {
         found = 1;
@@ -151,16 +152,16 @@ static void turbo_agent_test_check_string_array_equals_fixture(const json_value_
 
   check_not_null(actual_array);
   check_not_null(expected_array);
-  check_true(turbo_json_type(actual_array) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_type(expected_array) == TURBO_JSON_ARRAY);
-  expected_count = turbo_json_array_size(expected_array);
-  check_size_eq(turbo_json_array_size(actual_array), expected_count);
+  check_true(json_type(actual_array) == JSON_ARRAY);
+  check_true(json_type(expected_array) == JSON_ARRAY);
+  expected_count = json_array_size(expected_array);
+  check_equal(json_array_size(actual_array), expected_count);
   for (i = 0; i < expected_count; ++i) {
-    const json_value_t *entry = turbo_json_array_get(expected_array, i);
-    const char *entry_text = entry ? turbo_json_string(entry) : NULL;
+    const json_value_t *entry = json_array_get(expected_array, i);
+    const char *entry_text = entry ? json_string(entry) : NULL;
 
     check_not_null(entry_text);
-    check_true(turbo_json_type(entry) == TURBO_JSON_STRING);
+    check_true(json_type(entry) == JSON_STRING);
     turbo_agent_test_check_string_array_contains_all(actual_array, &entry_text, 1);
   }
 }
@@ -187,7 +188,7 @@ static void turbo_agent_test_capture_replayed_history_event(
   capture->count++;
 
   type = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(event, "type"));
+      json_object_get(event, "type"));
   if (type) {
     if (strcmp(type, "node_start") == 0) {
       capture->node_start_count++;
@@ -199,7 +200,7 @@ static void turbo_agent_test_capture_replayed_history_event(
   }
 
   kind = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(event, "kind"));
+      json_object_get(event, "kind"));
   if (kind) {
     if (strcmp(kind, "model") == 0) {
       capture->model_count++;
@@ -233,11 +234,11 @@ static void turbo_agent_test_capture_observer_event(
   capture->count++;
 
   kind = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(event, "kind"));
+      json_object_get(event, "kind"));
   type = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(event, "type"));
-  check_str_eq(kind, "observer");
-  check_not_null(turbo_json_object_get(event, "event"));
+      json_object_get(event, "type"));
+  check_equal(kind, "observer");
+  check_not_null(json_object_get(event, "event"));
 
   if (!type) {
     return;
@@ -279,12 +280,12 @@ static void turbo_agent_test_capture_trace_event(turbo_agent_t *agent_unused,
   check_not_null(capture);
   capture->count++;
   kind = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(event, "kind"));
+      json_object_get(event, "kind"));
   if (kind && strcmp(kind, "trace") == 0) {
     capture->trace_count++;
   }
   name = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(event, "name"));
+      json_object_get(event, "name"));
   if (name) {
     if (strcmp(name, "model_request") == 0) {
       capture->model_request_count++;
@@ -313,17 +314,17 @@ static void turbo_agent_test_check_thread_timeline_json_value(
   check_not_null(timeline);
   check_not_null(thread_id);
   check_not_null(latest_run_id);
-  thread = turbo_json_object_get(timeline, "thread");
-  latest_run = turbo_json_object_get(timeline, "latest_run");
-  pending_run = turbo_json_object_get(timeline, "pending_run");
-  resolved_current_run = turbo_json_object_get(timeline, "resolved_current_run");
+  thread = json_object_get(timeline, "thread");
+  latest_run = json_object_get(timeline, "latest_run");
+  pending_run = json_object_get(timeline, "pending_run");
+  resolved_current_run = json_object_get(timeline, "resolved_current_run");
   resolved_current_checkpoint_id_value =
-      turbo_json_object_get(timeline, "resolved_current_checkpoint_id");
+      json_object_get(timeline, "resolved_current_checkpoint_id");
   resolved_current_checkpoint =
-      turbo_json_object_get(timeline, "resolved_current_checkpoint");
-  runs = turbo_json_object_get(timeline, "runs");
-  current_run_checkpoints = turbo_json_object_get(timeline, "current_run_checkpoints");
-  history_events = turbo_json_object_get(timeline, "history_events");
+      json_object_get(timeline, "resolved_current_checkpoint");
+  runs = json_object_get(timeline, "runs");
+  current_run_checkpoints = json_object_get(timeline, "current_run_checkpoints");
+  history_events = json_object_get(timeline, "history_events");
 
   check_not_null(thread);
   check_not_null(latest_run);
@@ -334,64 +335,64 @@ static void turbo_agent_test_check_thread_timeline_json_value(
   check_not_null(runs);
   check_not_null(current_run_checkpoints);
   check_not_null(history_events);
-  check_true(turbo_json_type(thread) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(latest_run) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(resolved_current_run) ==
-              TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(runs) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_type(current_run_checkpoints) ==
-              TURBO_JSON_ARRAY);
-  check_true(turbo_json_type(history_events) ==
-              TURBO_JSON_ARRAY);
-  check_str_eq(
-      turbo_runtime_json_value_as_string(turbo_json_object_get(thread, "id")),
+  check_true(json_type(thread) == JSON_OBJECT);
+  check_true(json_type(latest_run) == JSON_OBJECT);
+  check_true(json_type(resolved_current_run) ==
+              JSON_OBJECT);
+  check_true(json_type(runs) == JSON_ARRAY);
+  check_true(json_type(current_run_checkpoints) ==
+              JSON_ARRAY);
+  check_true(json_type(history_events) ==
+              JSON_ARRAY);
+  check_equal(
+      turbo_runtime_json_value_as_string(json_object_get(thread, "id")),
       thread_id);
-  check_str_eq(
-      turbo_runtime_json_value_as_string(turbo_json_object_get(latest_run, "id")),
+  check_equal(
+      turbo_runtime_json_value_as_string(json_object_get(latest_run, "id")),
       latest_run_id);
-  check_str_eq(
+  check_equal(
       turbo_runtime_json_value_as_string(
-          turbo_json_object_get(resolved_current_run, "id")),
+          json_object_get(resolved_current_run, "id")),
       latest_run_id);
   if (resolved_current_checkpoint_id) {
-    check_str_eq(turbo_runtime_json_value_as_string(resolved_current_checkpoint_id_value),
+    check_equal(turbo_runtime_json_value_as_string(resolved_current_checkpoint_id_value),
                  resolved_current_checkpoint_id);
-    check_true(turbo_json_type(resolved_current_checkpoint) ==
-               TURBO_JSON_OBJECT);
-    check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(resolved_current_checkpoint, "id")),
+    check_true(json_type(resolved_current_checkpoint) ==
+               JSON_OBJECT);
+    check_equal(turbo_runtime_json_value_as_string(
+                     json_object_get(resolved_current_checkpoint, "id")),
                  resolved_current_checkpoint_id);
-    check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(resolved_current_checkpoint, "run_id")),
+    check_equal(turbo_runtime_json_value_as_string(
+                     json_object_get(resolved_current_checkpoint, "run_id")),
                  latest_run_id);
     resolved_current_checkpoint_json =
-        turbo_json_clone(resolved_current_checkpoint);
+        json_clone(resolved_current_checkpoint);
     check_not_null(resolved_current_checkpoint_json);
     turbo_agent_test_check_checkpoint_summary_shape(resolved_current_checkpoint_json,
                                                     resolved_current_checkpoint_id, latest_run_id,
                                                     NULL);
   } else {
-    check_true(turbo_json_type(resolved_current_checkpoint_id_value) ==
-               TURBO_JSON_NULL);
-    check_true(turbo_json_type(resolved_current_checkpoint) ==
-               TURBO_JSON_NULL);
+    check_true(json_type(resolved_current_checkpoint_id_value) ==
+               JSON_NULL);
+    check_true(json_type(resolved_current_checkpoint) ==
+               JSON_NULL);
   }
-  check_size_eq(turbo_runtime_json_value_size(runs), expected_run_count);
-  check_size_eq(turbo_runtime_json_value_size(current_run_checkpoints),
+  check_equal(turbo_runtime_json_value_size(runs), expected_run_count);
+  check_equal(turbo_runtime_json_value_size(current_run_checkpoints),
                 expected_checkpoint_count);
   check_true(turbo_runtime_json_value_size(history_events) >= minimum_history_event_count);
 
   if (pending_run_expected) {
-    check_true(turbo_json_type(pending_run) ==
-               TURBO_JSON_OBJECT);
-    check_str_eq(
+    check_true(json_type(pending_run) ==
+               JSON_OBJECT);
+    check_equal(
         turbo_runtime_json_value_as_string(
-            turbo_json_object_get(pending_run, "id")),
+            json_object_get(pending_run, "id")),
         latest_run_id);
   } else {
-    check_true(turbo_json_type(pending_run) == TURBO_JSON_NULL);
+    check_true(json_type(pending_run) == JSON_NULL);
   }
-  turbo_free_json(&resolved_current_checkpoint_json);
+  json_free(resolved_current_checkpoint_json); resolved_current_checkpoint_json = NULL;
 }
 
 static void turbo_agent_test_check_lineage_string_field(const json_value_t *object,
@@ -401,12 +402,12 @@ static void turbo_agent_test_check_lineage_string_field(const json_value_t *obje
 
   check_not_null(object);
   check_not_null(field);
-  value = turbo_json_object_get(object, field);
+  value = json_object_get(object, field);
   check_not_null(value);
   if (expected_value) {
-    check_str_eq(turbo_json_get_string(object, field), expected_value);
+    check_equal(json_get_string(object, field), expected_value);
   } else {
-    check_true(turbo_json_type(value) == TURBO_JSON_NULL);
+    check_true(json_type(value) == JSON_NULL);
   }
 }
 
@@ -415,25 +416,25 @@ static const json_value_t *turbo_agent_test_find_lineage_branch(const json_value
   size_t i;
 
   check_not_null(branches);
-  check_true(turbo_json_type(branches) == TURBO_JSON_ARRAY);
-  for (i = 0; i < turbo_json_array_size(branches); ++i) {
-    const json_value_t *branch = turbo_json_array_get(branches, i);
+  check_true(json_type(branches) == JSON_ARRAY);
+  for (i = 0; i < json_array_size(branches); ++i) {
+    const json_value_t *branch = json_array_get(branches, i);
     const json_value_t *branch_parent_run_id;
     const char *actual_parent_run_id;
 
     if (!branch) {
       continue;
     }
-    branch_parent_run_id = turbo_json_object_get(branch, "parent_run_id");
+    branch_parent_run_id = json_object_get(branch, "parent_run_id");
     if (!branch_parent_run_id) {
       continue;
     }
     if (parent_run_id) {
-      actual_parent_run_id = turbo_json_get_string(branch, "parent_run_id");
+      actual_parent_run_id = json_get_string(branch, "parent_run_id");
       if (actual_parent_run_id && strcmp(actual_parent_run_id, parent_run_id) == 0) {
         return branch;
       }
-    } else if (turbo_json_type(branch_parent_run_id) == TURBO_JSON_NULL) {
+    } else if (json_type(branch_parent_run_id) == JSON_NULL) {
       return branch;
     }
   }
@@ -446,7 +447,7 @@ static void turbo_agent_test_check_lineage_branch(const json_value_t *branch,
                                                   const char *parent_checkpoint_id,
                                                   const char *branch_root_checkpoint_id) {
   check_not_null(branch);
-  check_true(turbo_json_type(branch) == TURBO_JSON_OBJECT);
+  check_true(json_type(branch) == JSON_OBJECT);
   turbo_agent_test_check_lineage_string_field(branch, "parent_run_id", parent_run_id);
   turbo_agent_test_check_lineage_string_field(branch, "forked_from_checkpoint_id",
                                               forked_from_checkpoint_id);
@@ -462,9 +463,9 @@ static const char *turbo_agent_test_optional_string_field(const json_value_t *ob
 
   check_not_null(object);
   check_not_null(field);
-  value = turbo_json_object_get(object, field);
+  value = json_object_get(object, field);
   check_not_null(value);
-  return turbo_json_type(value) == TURBO_JSON_NULL ? NULL : turbo_json_get_string(object, field);
+  return json_type(value) == JSON_NULL ? NULL : json_get_string(object, field);
 }
 
 static void turbo_agent_test_check_checkpoint_summary_shape(
@@ -480,48 +481,48 @@ static void turbo_agent_test_check_checkpoint_summary_shape(
 
   check_not_null(summary);
   if (!expected_id) {
-    check_true(turbo_json_type(summary) == TURBO_JSON_NULL);
+    check_true(json_type(summary) == JSON_NULL);
     return;
   }
 
-  check_true(turbo_json_type(summary) == TURBO_JSON_OBJECT);
+  check_true(json_type(summary) == JSON_OBJECT);
   turbo_agent_test_check_lineage_string_field(summary, "id", expected_id);
-  run_id = turbo_json_object_get(summary, "run_id");
+  run_id = json_object_get(summary, "run_id");
   check_not_null(run_id);
   if (expected_run_id) {
     turbo_agent_test_check_lineage_string_field(summary, "run_id", expected_run_id);
   } else {
-    check_true(turbo_json_type(run_id) == TURBO_JSON_STRING ||
-               turbo_json_type(run_id) == TURBO_JSON_NULL);
+    check_true(json_type(run_id) == JSON_STRING ||
+               json_type(run_id) == JSON_NULL);
   }
-  parent_checkpoint_id = turbo_json_object_get(summary, "parent_checkpoint_id");
+  parent_checkpoint_id = json_object_get(summary, "parent_checkpoint_id");
   check_not_null(parent_checkpoint_id);
   if (expected_parent_checkpoint_id) {
     turbo_agent_test_check_lineage_string_field(summary, "parent_checkpoint_id",
                                                 expected_parent_checkpoint_id);
   } else {
-    check_true(turbo_json_type(parent_checkpoint_id) == TURBO_JSON_STRING ||
-               turbo_json_type(parent_checkpoint_id) == TURBO_JSON_NULL);
+    check_true(json_type(parent_checkpoint_id) == JSON_STRING ||
+               json_type(parent_checkpoint_id) == JSON_NULL);
   }
-  seq = turbo_json_object_get(summary, "seq");
-  created_at = turbo_json_object_get(summary, "created_at");
-  status = turbo_json_object_get(summary, "status");
-  next_node = turbo_json_object_get(summary, "next_node");
-  steps = turbo_json_object_get(summary, "steps");
+  seq = json_object_get(summary, "seq");
+  created_at = json_object_get(summary, "created_at");
+  status = json_object_get(summary, "status");
+  next_node = json_object_get(summary, "next_node");
+  steps = json_object_get(summary, "steps");
   check_not_null(seq);
   check_not_null(created_at);
   check_not_null(status);
   check_not_null(next_node);
   check_not_null(steps);
-  check_true(turbo_json_type(seq) == TURBO_JSON_NUMBER || turbo_json_type(seq) == TURBO_JSON_NULL);
-  check_true(turbo_json_type(created_at) == TURBO_JSON_STRING ||
-             turbo_json_type(created_at) == TURBO_JSON_NULL);
-  check_true(turbo_json_type(status) == TURBO_JSON_STRING ||
-             turbo_json_type(status) == TURBO_JSON_NULL);
-  check_true(turbo_json_type(next_node) == TURBO_JSON_STRING ||
-             turbo_json_type(next_node) == TURBO_JSON_NULL);
-  check_true(turbo_json_type(steps) == TURBO_JSON_NUMBER ||
-             turbo_json_type(steps) == TURBO_JSON_NULL);
+  check_true(json_type(seq) == JSON_NUMBER || json_type(seq) == JSON_NULL);
+  check_true(json_type(created_at) == JSON_STRING ||
+             json_type(created_at) == JSON_NULL);
+  check_true(json_type(status) == JSON_STRING ||
+             json_type(status) == JSON_NULL);
+  check_true(json_type(next_node) == JSON_STRING ||
+             json_type(next_node) == JSON_NULL);
+  check_true(json_type(steps) == JSON_NUMBER ||
+             json_type(steps) == JSON_NULL);
 }
 
 static void turbo_agent_test_check_checkpoint_context(
@@ -536,30 +537,30 @@ static void turbo_agent_test_check_checkpoint_context(
   const json_value_t *history_events;
 
   check_not_null(context);
-  check_true(turbo_json_type(context) == TURBO_JSON_OBJECT);
-  thread = turbo_json_object_get(context, "thread");
-  run = turbo_json_object_get(context, "run");
-  checkpoint_summary = turbo_json_object_get(context, "checkpoint_summary");
-  state = turbo_json_object_get(context, "state");
-  ancestor_checkpoints = turbo_json_object_get(context, "ancestor_checkpoints");
-  history_events = turbo_json_object_get(context, "history_events");
+  check_true(json_type(context) == JSON_OBJECT);
+  thread = json_object_get(context, "thread");
+  run = json_object_get(context, "run");
+  checkpoint_summary = json_object_get(context, "checkpoint_summary");
+  state = json_object_get(context, "state");
+  ancestor_checkpoints = json_object_get(context, "ancestor_checkpoints");
+  history_events = json_object_get(context, "history_events");
   check_not_null(thread);
   check_not_null(run);
   check_not_null(checkpoint_summary);
   check_not_null(state);
   check_not_null(history_events);
-  check_true(turbo_json_type(thread) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(run) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(checkpoint_summary) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(state) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(history_events) == TURBO_JSON_ARRAY);
+  check_true(json_type(thread) == JSON_OBJECT);
+  check_true(json_type(run) == JSON_OBJECT);
+  check_true(json_type(checkpoint_summary) == JSON_OBJECT);
+  check_true(json_type(state) == JSON_OBJECT);
+  check_true(json_type(history_events) == JSON_ARRAY);
   turbo_agent_test_check_lineage_string_field(thread, "id", thread_id);
   turbo_agent_test_check_lineage_string_field(run, "id", run_id);
   turbo_agent_test_check_checkpoint_summary_shape(checkpoint_summary, checkpoint_id, run_id,
                                                   parent_checkpoint_id);
-  check_true(turbo_json_object_size(state) > 0);
-  check_true(!ancestor_checkpoints || turbo_json_type(ancestor_checkpoints) == TURBO_JSON_NULL);
-  check_true(turbo_json_array_size(history_events) >= minimum_history_event_count);
+  check_true(json_object_size(state) > 0);
+  check_true(!ancestor_checkpoints || json_type(ancestor_checkpoints) == JSON_NULL);
+  check_true(json_array_size(history_events) >= minimum_history_event_count);
 }
 
 static void turbo_agent_test_check_supervisor_inspect(const json_value_t *inspect,
@@ -575,31 +576,31 @@ static void turbo_agent_test_check_supervisor_inspect(const json_value_t *inspec
   const json_value_t *workflow;
 
   check_not_null(inspect);
-  check_true(turbo_json_type(inspect) == TURBO_JSON_OBJECT);
-  supervisor = turbo_json_object_get(inspect, "supervisor");
-  inbox = turbo_json_object_get(inspect, "inbox");
-  history = turbo_json_object_get(inspect, "handoff_history");
-  control = turbo_json_object_get(inspect, "control_snapshot");
-  workflow = turbo_json_object_get(inspect, "workflow_snapshot");
+  check_true(json_type(inspect) == JSON_OBJECT);
+  supervisor = json_object_get(inspect, "supervisor");
+  inbox = json_object_get(inspect, "inbox");
+  history = json_object_get(inspect, "handoff_history");
+  control = json_object_get(inspect, "control_snapshot");
+  workflow = json_object_get(inspect, "workflow_snapshot");
   check_not_null(supervisor);
   check_not_null(inbox);
   check_not_null(history);
   check_not_null(control);
   check_not_null(workflow);
-  check_true(turbo_json_type(supervisor) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(inbox) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_type(history) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_type(control) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(workflow) == TURBO_JSON_OBJECT);
+  check_true(json_type(supervisor) == JSON_OBJECT);
+  check_true(json_type(inbox) == JSON_ARRAY);
+  check_true(json_type(history) == JSON_ARRAY);
+  check_true(json_type(control) == JSON_OBJECT);
+  check_true(json_type(workflow) == JSON_OBJECT);
   turbo_agent_test_check_lineage_string_field(supervisor, "active_agent", active_agent);
   turbo_agent_test_check_lineage_string_field(supervisor, "target_agent", target_agent);
   turbo_agent_test_check_lineage_string_field(supervisor, "handoff_reason", handoff_reason);
-  check_int_eq(turbo_json_get_int(supervisor, "inbox_count", -1), (int)inbox_count);
-  check_int_eq(turbo_json_get_int(supervisor, "handoff_count", -1), (int)handoff_count);
-  check_size_eq(turbo_json_array_size(inbox), inbox_count);
-  check_size_eq(turbo_json_array_size(history), handoff_count);
-  check_not_null(turbo_json_object_get(control, "supervisor"));
-  check_not_null(turbo_json_object_get(workflow, "supervisor"));
+  check_equal(json_get_int(supervisor, "inbox_count", -1), (int)inbox_count);
+  check_equal(json_get_int(supervisor, "handoff_count", -1), (int)handoff_count);
+  check_equal(json_array_size(inbox), inbox_count);
+  check_equal(json_array_size(history), handoff_count);
+  check_not_null(json_object_get(control, "supervisor"));
+  check_not_null(json_object_get(workflow, "supervisor"));
 }
 
 static void turbo_agent_test_check_thread_lineage_json_value(const json_value_t *lineage,
@@ -610,13 +611,13 @@ static void turbo_agent_test_check_thread_lineage_json_value(const json_value_t 
   const json_value_t *branches;
 
   check_not_null(lineage);
-  check_str_eq(turbo_json_get_string(lineage, "thread_id"), thread_id);
-  check_str_eq(turbo_json_get_string(lineage, "latest_run_id"), latest_run_id);
+  check_equal(json_get_string(lineage, "thread_id"), thread_id);
+  check_equal(json_get_string(lineage, "latest_run_id"), latest_run_id);
   turbo_agent_test_check_lineage_string_field(lineage, "pending_run_id", pending_run_id);
   turbo_agent_test_check_lineage_string_field(lineage, "root_checkpoint_id", root_checkpoint_id);
-  branches = turbo_json_object_get(lineage, "branches");
+  branches = json_object_get(lineage, "branches");
   check_not_null(branches);
-  check_true(turbo_json_type(branches) == TURBO_JSON_ARRAY);
+  check_true(json_type(branches) == JSON_ARRAY);
 }
 
 static const json_value_t *turbo_agent_test_find_branch_tree_branch(const json_value_t *branches,
@@ -624,9 +625,9 @@ static const json_value_t *turbo_agent_test_find_branch_tree_branch(const json_v
   size_t i;
 
   check_not_null(branches);
-  check_true(turbo_json_type(branches) == TURBO_JSON_ARRAY);
-  for (i = 0; i < turbo_json_array_size(branches); ++i) {
-    const json_value_t *branch = turbo_json_array_get(branches, i);
+  check_true(json_type(branches) == JSON_ARRAY);
+  for (i = 0; i < json_array_size(branches); ++i) {
+    const json_value_t *branch = json_array_get(branches, i);
     const json_value_t *current_run_value;
     const char *actual_current_run_id;
     const char *run_field;
@@ -634,18 +635,18 @@ static const json_value_t *turbo_agent_test_find_branch_tree_branch(const json_v
     if (!branch) {
       continue;
     }
-    current_run_value = turbo_json_object_get(branch, "current_run_id");
+    current_run_value = json_object_get(branch, "current_run_id");
     run_field = current_run_value ? "current_run_id" : "run_id";
-    current_run_value = turbo_json_object_get(branch, run_field);
+    current_run_value = json_object_get(branch, run_field);
     if (!current_run_value) {
       continue;
     }
     if (current_run_id) {
-      actual_current_run_id = turbo_json_get_string(branch, run_field);
+      actual_current_run_id = json_get_string(branch, run_field);
       if (actual_current_run_id && strcmp(actual_current_run_id, current_run_id) == 0) {
         return branch;
       }
-    } else if (turbo_json_type(current_run_value) == TURBO_JSON_NULL) {
+    } else if (json_type(current_run_value) == JSON_NULL) {
       return branch;
     }
   }
@@ -658,36 +659,36 @@ static const json_value_t *turbo_agent_test_find_branch_tree_edge(const json_val
   size_t i;
 
   check_not_null(edges);
-  check_true(turbo_json_type(edges) == TURBO_JSON_ARRAY);
-  for (i = 0; i < turbo_json_array_size(edges); ++i) {
-    const json_value_t *edge = turbo_json_array_get(edges, i);
+  check_true(json_type(edges) == JSON_ARRAY);
+  for (i = 0; i < json_array_size(edges); ++i) {
+    const json_value_t *edge = json_array_get(edges, i);
     const json_value_t *source_checkpoint_value;
     const char *actual_source_checkpoint_id;
 
     if (!edge) {
       continue;
     }
-    source_checkpoint_value = turbo_json_object_get(edge, "source_checkpoint_id");
+    source_checkpoint_value = json_object_get(edge, "source_checkpoint_id");
     if (!source_checkpoint_value) {
       continue;
     }
     if (source_checkpoint_id) {
-      actual_source_checkpoint_id = turbo_json_get_string(edge, "source_checkpoint_id");
+      actual_source_checkpoint_id = json_get_string(edge, "source_checkpoint_id");
       if (!actual_source_checkpoint_id ||
           strcmp(actual_source_checkpoint_id, source_checkpoint_id) != 0) {
         continue;
       }
-    } else if (turbo_json_type(source_checkpoint_value) != TURBO_JSON_NULL) {
+    } else if (json_type(source_checkpoint_value) != JSON_NULL) {
       continue;
     }
     if (target_run_id) {
-      const char *actual_target_run_id = turbo_json_get_string(edge, "target_run_id");
+      const char *actual_target_run_id = json_get_string(edge, "target_run_id");
 
       if (actual_target_run_id && strcmp(actual_target_run_id, target_run_id) == 0) {
         return edge;
       }
-    } else if (turbo_json_type(turbo_json_object_get(edge, "target_run_id")) ==
-               TURBO_JSON_NULL) {
+    } else if (json_type(json_object_get(edge, "target_run_id")) ==
+               JSON_NULL) {
       return edge;
     }
   }
@@ -707,18 +708,18 @@ static void turbo_agent_test_check_branch_tree_branch(const json_value_t *branch
   const char *run_field;
 
   check_not_null(branch);
-  check_true(turbo_json_type(branch) == TURBO_JSON_OBJECT);
-  run_field = turbo_json_object_get(branch, "current_run_id") ? "current_run_id" : "run_id";
+  check_true(json_type(branch) == JSON_OBJECT);
+  run_field = json_object_get(branch, "current_run_id") ? "current_run_id" : "run_id";
   turbo_agent_test_check_lineage_string_field(branch, run_field, current_run_id);
   turbo_agent_test_check_lineage_string_field(branch, "parent_run_id", parent_run_id);
   actual_checkpoint_id = turbo_agent_test_optional_string_field(branch, "checkpoint_id");
   actual_source_checkpoint_id = turbo_agent_test_optional_string_field(branch,
                                                                       "source_checkpoint_id");
-  checkpoint_summary = turbo_json_object_get(branch, "checkpoint_summary");
+  checkpoint_summary = json_object_get(branch, "checkpoint_summary");
   check_not_null(checkpoint_summary);
   turbo_agent_test_check_checkpoint_summary_shape(checkpoint_summary, actual_checkpoint_id,
                                                   current_run_id, actual_source_checkpoint_id);
-  source_checkpoint_summary = turbo_json_object_get(branch, "source_checkpoint_summary");
+  source_checkpoint_summary = json_object_get(branch, "source_checkpoint_summary");
   check_not_null(source_checkpoint_summary);
   actual_source_run_id = parent_run_id;
   turbo_agent_test_check_checkpoint_summary_shape(source_checkpoint_summary,
@@ -735,12 +736,12 @@ static void turbo_agent_test_check_branch_tree_edge(const json_value_t *edge,
   const char *actual_source_checkpoint_id;
 
   check_not_null(edge);
-  check_true(turbo_json_type(edge) == TURBO_JSON_OBJECT);
+  check_true(json_type(edge) == JSON_OBJECT);
   turbo_agent_test_check_lineage_string_field(edge, "source_checkpoint_id",
                                               source_checkpoint_id);
   actual_source_checkpoint_id = turbo_agent_test_optional_string_field(edge,
                                                                       "source_checkpoint_id");
-  source_checkpoint_summary = turbo_json_object_get(edge, "source_checkpoint_summary");
+  source_checkpoint_summary = json_object_get(edge, "source_checkpoint_summary");
   check_not_null(source_checkpoint_summary);
   turbo_agent_test_check_checkpoint_summary_shape(source_checkpoint_summary,
                                                   actual_source_checkpoint_id, NULL, NULL);
@@ -762,41 +763,41 @@ static void turbo_agent_test_check_branch_tree(const json_value_t *tree,
   const char *current_branch_source_checkpoint_id = NULL;
 
   check_not_null(tree);
-  check_str_eq(turbo_json_get_string(tree, "thread_id"), thread_id);
-  check_str_eq(turbo_json_get_string(tree, "current_run_id"), current_run_id);
-  check_str_eq(turbo_json_get_string(tree, "latest_run_id"), latest_run_id);
+  check_equal(json_get_string(tree, "thread_id"), thread_id);
+  check_equal(json_get_string(tree, "current_run_id"), current_run_id);
+  check_equal(json_get_string(tree, "latest_run_id"), latest_run_id);
   turbo_agent_test_check_lineage_string_field(tree, "pending_run_id", pending_run_id);
   turbo_agent_test_check_lineage_string_field(tree, "current_checkpoint_id",
                                               current_checkpoint_id);
-  branches = turbo_json_object_get(tree, "branches");
-  edges = turbo_json_object_get(tree, "edges");
-  current_branch = turbo_json_object_get(tree, "current_branch");
-  current_checkpoint_summary = turbo_json_object_get(tree, "current_checkpoint_summary");
+  branches = json_object_get(tree, "branches");
+  edges = json_object_get(tree, "edges");
+  current_branch = json_object_get(tree, "current_branch");
+  current_checkpoint_summary = json_object_get(tree, "current_checkpoint_summary");
   check_not_null(branches);
   check_not_null(edges);
   check_not_null(current_branch);
   check_not_null(current_checkpoint_summary);
-  check_true(turbo_json_type(branches) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_type(edges) == TURBO_JSON_ARRAY);
+  check_true(json_type(branches) == JSON_ARRAY);
+  check_true(json_type(edges) == JSON_ARRAY);
   if (current_run_id) {
-    check_true(turbo_json_type(current_branch) == TURBO_JSON_OBJECT);
+    check_true(json_type(current_branch) == JSON_OBJECT);
     turbo_agent_test_check_branch_tree_branch(
-        current_branch, current_run_id, turbo_json_get_string(current_branch, "parent_run_id"),
-        turbo_json_get_string(current_branch, "source_checkpoint_id"),
-        turbo_json_get_string(current_branch, "branch_root_checkpoint_id"));
+        current_branch, current_run_id, json_get_string(current_branch, "parent_run_id"),
+        json_get_string(current_branch, "source_checkpoint_id"),
+        json_get_string(current_branch, "branch_root_checkpoint_id"));
     turbo_agent_test_check_lineage_string_field(current_branch, "checkpoint_id",
                                                 current_checkpoint_id);
     current_branch_source_checkpoint_id =
-        turbo_json_get_string(current_branch, "source_checkpoint_id");
+        json_get_string(current_branch, "source_checkpoint_id");
   } else {
-    check_true(turbo_json_type(current_branch) == TURBO_JSON_NULL);
+    check_true(json_type(current_branch) == JSON_NULL);
   }
   turbo_agent_test_check_checkpoint_summary_shape(current_checkpoint_summary,
                                                   current_checkpoint_id, current_run_id,
                                                   current_run_id ? current_branch_source_checkpoint_id
                                                                 : NULL);
-  check_true(turbo_json_array_size(branches) >= minimum_branch_count);
-  check_true(turbo_json_array_size(edges) >= minimum_edge_count);
+  check_true(json_array_size(branches) >= minimum_branch_count);
+  check_true(json_array_size(edges) >= minimum_edge_count);
 }
 
 static void turbo_agent_test_check_orchestration_inspect(
@@ -810,18 +811,18 @@ static void turbo_agent_test_check_orchestration_inspect(
   json_value_t *timeline = NULL;
 
   check_not_null(inspect);
-  check_true(turbo_json_type(inspect) == TURBO_JSON_OBJECT);
-  supervisor_inspect = turbo_json_object_get(inspect, "supervisor_inspect");
-  thread_lineage = turbo_json_object_get(inspect, "thread_lineage");
-  branch_tree = turbo_json_object_get(inspect, "branch_tree");
-  child_runs = turbo_json_object_get(inspect, "child_runs");
+  check_true(json_type(inspect) == JSON_OBJECT);
+  supervisor_inspect = json_object_get(inspect, "supervisor_inspect");
+  thread_lineage = json_object_get(inspect, "thread_lineage");
+  branch_tree = json_object_get(inspect, "branch_tree");
+  child_runs = json_object_get(inspect, "child_runs");
   check_not_null(supervisor_inspect);
   check_not_null(thread_lineage);
   check_not_null(branch_tree);
   check_not_null(child_runs);
   turbo_agent_test_check_supervisor_inspect(supervisor_inspect, active_agent, target_agent,
                                             handoff_reason, 0, 1);
-  timeline = turbo_json_clone(turbo_json_object_get(inspect, "thread_timeline"));
+  timeline = json_clone(json_object_get(inspect, "thread_timeline"));
   check_not_null(timeline);
   turbo_agent_test_check_thread_timeline_json_value(timeline, thread_id, run_id, checkpoint_id, 1, 1,
                                               1, 1);
@@ -829,8 +830,8 @@ static void turbo_agent_test_check_orchestration_inspect(
                                              checkpoint_id);
   turbo_agent_test_check_branch_tree(branch_tree, thread_id, run_id, run_id, run_id,
                                      checkpoint_id, 1, 0);
-  check_true(turbo_json_type(child_runs) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_array_size(child_runs) >= minimum_child_run_count);
+  check_true(json_type(child_runs) == JSON_ARRAY);
+  check_true(json_array_size(child_runs) >= minimum_child_run_count);
   turbo_runtime_json_destroy(timeline);
 }
 
@@ -848,14 +849,14 @@ static void turbo_agent_test_check_child_inspect(const json_value_t *inspect,
   json_value_t *timeline = NULL;
 
   check_not_null(inspect);
-  check_true(turbo_json_type(inspect) == TURBO_JSON_OBJECT);
-  run = turbo_json_object_get(inspect, "run");
-  checkpoints = turbo_json_object_get(inspect, "checkpoints");
-  latest_checkpoint = turbo_json_object_get(inspect, "latest_checkpoint");
-  checkpoint_context = turbo_json_object_get(inspect, "checkpoint_context");
-  history_events = turbo_json_object_get(inspect, "history_events");
-  trace_events = turbo_json_object_get(inspect, "trace_events");
-  branch_tree = turbo_json_object_get(inspect, "branch_tree");
+  check_true(json_type(inspect) == JSON_OBJECT);
+  run = json_object_get(inspect, "run");
+  checkpoints = json_object_get(inspect, "checkpoints");
+  latest_checkpoint = json_object_get(inspect, "latest_checkpoint");
+  checkpoint_context = json_object_get(inspect, "checkpoint_context");
+  history_events = json_object_get(inspect, "history_events");
+  trace_events = json_object_get(inspect, "trace_events");
+  branch_tree = json_object_get(inspect, "branch_tree");
   check_not_null(run);
   check_not_null(checkpoints);
   check_not_null(latest_checkpoint);
@@ -864,15 +865,15 @@ static void turbo_agent_test_check_child_inspect(const json_value_t *inspect,
   check_not_null(trace_events);
   check_not_null(branch_tree);
   turbo_agent_test_check_lineage_string_field(run, "id", run_id);
-  check_true(turbo_json_type(checkpoints) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_array_size(checkpoints) >= 1);
+  check_true(json_type(checkpoints) == JSON_ARRAY);
+  check_true(json_array_size(checkpoints) >= 1);
   turbo_agent_test_check_lineage_string_field(latest_checkpoint, "id", checkpoint_id);
   turbo_agent_test_check_checkpoint_context(checkpoint_context, thread_id, run_id, checkpoint_id,
                                             NULL, minimum_history_event_count);
-  check_true(turbo_json_type(history_events) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_array_size(history_events) >= minimum_history_event_count);
-  check_true(turbo_json_type(trace_events) == TURBO_JSON_ARRAY);
-  timeline = turbo_json_clone(turbo_json_object_get(inspect, "thread_timeline"));
+  check_true(json_type(history_events) == JSON_ARRAY);
+  check_true(json_array_size(history_events) >= minimum_history_event_count);
+  check_true(json_type(trace_events) == JSON_ARRAY);
+  timeline = json_clone(json_object_get(inspect, "thread_timeline"));
   check_not_null(timeline);
   turbo_agent_test_check_thread_timeline_json_value(timeline, thread_id, run_id, checkpoint_id, 1, 1,
                                               1, 1);
@@ -889,7 +890,7 @@ static void turbo_agent_test_check_child_orchestration_inspect(
   const json_value_t *child_inspect;
 
   check_not_null(inspect);
-  check_true(turbo_json_type(inspect) == TURBO_JSON_OBJECT);
+  check_true(json_type(inspect) == JSON_OBJECT);
   turbo_agent_test_check_lineage_string_field(inspect, "parent_agent_run_id",
                                               parent_agent_run_id);
   turbo_agent_test_check_lineage_string_field(inspect, "parent_tool_call_id",
@@ -899,7 +900,7 @@ static void turbo_agent_test_check_child_orchestration_inspect(
                                               parent_agent_run_id);
   turbo_agent_test_check_lineage_string_field(inspect, "call_frame_id",
                                               parent_tool_call_id);
-  child_inspect = turbo_json_object_get(inspect, "child_inspect");
+  child_inspect = json_object_get(inspect, "child_inspect");
   check_not_null(child_inspect);
   turbo_agent_test_check_child_inspect(child_inspect, thread_id, run_id, checkpoint_id,
                                        minimum_history_event_count);
@@ -914,10 +915,10 @@ static void turbo_agent_test_check_child_multi_agent_inspect(
   const json_value_t *child_orchestration_inspect;
 
   check_not_null(inspect);
-  check_true(turbo_json_type(inspect) == TURBO_JSON_OBJECT);
-  supervisor_inspect = turbo_json_object_get(inspect, "supervisor_inspect");
-  orchestration_inspect = turbo_json_object_get(inspect, "orchestration_inspect");
-  child_orchestration_inspect = turbo_json_object_get(inspect, "child_orchestration_inspect");
+  check_true(json_type(inspect) == JSON_OBJECT);
+  supervisor_inspect = json_object_get(inspect, "supervisor_inspect");
+  orchestration_inspect = json_object_get(inspect, "orchestration_inspect");
+  child_orchestration_inspect = json_object_get(inspect, "child_orchestration_inspect");
   check_not_null(supervisor_inspect);
   check_not_null(orchestration_inspect);
   check_not_null(child_orchestration_inspect);
@@ -939,32 +940,32 @@ static void turbo_agent_test_check_command_descriptor_example(
   const char *actual_example_text;
 
   check_not_null(descriptor);
-  check_true(turbo_json_type(descriptor) == TURBO_JSON_OBJECT);
+  check_true(json_type(descriptor) == JSON_OBJECT);
   turbo_agent_test_check_lineage_string_field(descriptor, "name", name);
   turbo_agent_test_check_lineage_string_field(descriptor, "placeholder", placeholder);
   turbo_agent_test_check_lineage_string_field(descriptor, "success_state_hint",
                                               success_state_hint);
-  example_payload = turbo_json_object_get(descriptor, "example_payload");
+  example_payload = json_object_get(descriptor, "example_payload");
   check_not_null(example_payload);
   if (example_kind) {
-    check_true(turbo_json_type(example_payload) == TURBO_JSON_OBJECT);
+    check_true(json_type(example_payload) == JSON_OBJECT);
     turbo_agent_test_check_lineage_string_field(example_payload, "kind", example_kind);
     if (example_text) {
-      example_text_value = turbo_json_object_get(example_payload, "text");
+      example_text_value = json_object_get(example_payload, "text");
       if (!example_text_value) {
-        example_text_value = turbo_json_object_get(example_payload, "reason");
+        example_text_value = json_object_get(example_payload, "reason");
       }
       if (!example_text_value) {
-        example_text_value = turbo_json_object_get(example_payload, "message");
+        example_text_value = json_object_get(example_payload, "message");
       }
       check_not_null(example_text_value);
-      actual_example_text = turbo_json_type(example_text_value) == TURBO_JSON_NULL
+      actual_example_text = json_type(example_text_value) == JSON_NULL
                                 ? NULL
-                                : turbo_json_string(example_text_value);
-      check_str_eq(actual_example_text, example_text);
+                                : json_string(example_text_value);
+      check_equal(actual_example_text, example_text);
     }
   } else {
-    check_true(turbo_json_type(example_payload) == TURBO_JSON_NULL);
+    check_true(json_type(example_payload) == JSON_NULL);
   }
 }
 
@@ -985,55 +986,55 @@ static void turbo_agent_test_check_command_descriptor_fixture(const json_value_t
   fixture_root = turbo_agent_test_load_fixture_json(fixture_name);
   fixture = turbo_agent_test_find_named_fixture_entry(fixture_root, fixture_entry_name);
   check_not_null(fixture);
-  check_true(turbo_json_type(fixture) == TURBO_JSON_OBJECT);
+  check_true(json_type(fixture) == JSON_OBJECT);
 
   turbo_agent_test_check_lineage_string_field(descriptor, "name",
-                                              turbo_json_get_string(fixture, "name"));
+                                              json_get_string(fixture, "name"));
   turbo_agent_test_check_lineage_string_field(descriptor, "label",
-                                              turbo_json_get_string(fixture, "label"));
+                                              json_get_string(fixture, "label"));
   turbo_agent_test_check_lineage_string_field(descriptor, "category",
-                                              turbo_json_get_string(fixture, "category"));
+                                              json_get_string(fixture, "category"));
   turbo_agent_test_check_lineage_string_field(descriptor, "input_mode",
-                                              turbo_json_get_string(fixture, "input_mode"));
+                                              json_get_string(fixture, "input_mode"));
   turbo_agent_test_check_lineage_string_field(descriptor, "resume_mode",
-                                              turbo_json_get_string(fixture, "resume_mode"));
+                                              json_get_string(fixture, "resume_mode"));
   turbo_agent_test_check_lineage_string_field(descriptor, "primary_key",
-                                              turbo_json_get_string(fixture, "primary_key"));
-  check_true(turbo_json_get_bool(descriptor, "requires_input", false) ==
-             turbo_json_get_bool(fixture, "requires_input", false));
-  check_true(turbo_json_get_bool(descriptor, "supports_json_value", false) ==
-             turbo_json_get_bool(fixture, "supports_json_value", false));
+                                              json_get_string(fixture, "primary_key"));
+  check_true(json_get_bool(descriptor, "requires_input", false) ==
+             json_get_bool(fixture, "requires_input", false));
+  check_true(json_get_bool(descriptor, "supports_json_value", false) ==
+             json_get_bool(fixture, "supports_json_value", false));
 
-  fixture_example_payload = turbo_json_object_get(fixture, "example_payload");
-  fixture_example_kind = fixture_example_payload ? turbo_json_get_string(fixture_example_payload, "kind")
+  fixture_example_payload = json_object_get(fixture, "example_payload");
+  fixture_example_kind = fixture_example_payload ? json_get_string(fixture_example_payload, "kind")
                                                  : NULL;
   if (fixture_example_payload) {
-    fixture_example_text = turbo_json_get_string(fixture_example_payload, "text");
+    fixture_example_text = json_get_string(fixture_example_payload, "text");
     if (!fixture_example_text) {
-      fixture_example_text = turbo_json_get_string(fixture_example_payload, "reason");
+      fixture_example_text = json_get_string(fixture_example_payload, "reason");
     }
     if (!fixture_example_text) {
-      fixture_example_text = turbo_json_get_string(fixture_example_payload, "message");
+      fixture_example_text = json_get_string(fixture_example_payload, "message");
     }
   }
   turbo_agent_test_check_command_descriptor_example(
-      descriptor, turbo_json_get_string(fixture, "name"),
-      turbo_json_get_string(fixture, "placeholder"),
-      turbo_json_get_string(fixture, "success_state_hint"), fixture_example_kind,
+      descriptor, json_get_string(fixture, "name"),
+      json_get_string(fixture, "placeholder"),
+      json_get_string(fixture, "success_state_hint"), fixture_example_kind,
       fixture_example_text);
 
-  accepted_keys = turbo_json_object_get(fixture, "accepted_keys");
+  accepted_keys = json_object_get(fixture, "accepted_keys");
   if (accepted_keys) {
     turbo_agent_test_check_string_array_equals_fixture(
-        turbo_json_object_get(descriptor, "accepted_keys"), accepted_keys);
+        json_object_get(descriptor, "accepted_keys"), accepted_keys);
   }
-  fallback_keys = turbo_json_object_get(fixture, "fallback_keys");
+  fallback_keys = json_object_get(fixture, "fallback_keys");
   if (fallback_keys) {
     turbo_agent_test_check_string_array_equals_fixture(
-        turbo_json_object_get(descriptor, "fallback_keys"), fallback_keys);
+        json_object_get(descriptor, "fallback_keys"), fallback_keys);
   }
 
-  turbo_free_json(&fixture_root);
+  json_free(fixture_root); fixture_root = NULL;
 }
 
 static void turbo_agent_test_check_memory_record_shape(const json_value_t *record,
@@ -1043,39 +1044,39 @@ static void turbo_agent_test_check_memory_record_shape(const json_value_t *recor
 
   check_not_null(record);
   check_not_null(fixture);
-  check_true(turbo_json_type(record) == TURBO_JSON_OBJECT);
-  check_true(turbo_json_type(fixture) == TURBO_JSON_OBJECT);
+  check_true(json_type(record) == JSON_OBJECT);
+  check_true(json_type(fixture) == JSON_OBJECT);
 
   turbo_agent_test_check_lineage_string_field(record, "id",
-                                              turbo_json_get_string(fixture, "id"));
+                                              json_get_string(fixture, "id"));
   turbo_agent_test_check_lineage_string_field(record, "namespace",
-                                              turbo_json_get_string(fixture, "namespace"));
+                                              json_get_string(fixture, "namespace"));
   turbo_agent_test_check_lineage_string_field(record, "kind",
-                                              turbo_json_get_string(fixture, "kind"));
+                                              json_get_string(fixture, "kind"));
   turbo_agent_test_check_lineage_string_field(record, "key",
-                                              turbo_json_get_string(fixture, "key"));
+                                              json_get_string(fixture, "key"));
   turbo_agent_test_check_lineage_string_field(record, "text",
-                                              turbo_json_get_string(fixture, "text"));
+                                              json_get_string(fixture, "text"));
 
-  check_true(turbo_json_type(turbo_json_object_get(record, "created_at")) ==
-             turbo_json_type(turbo_json_object_get(fixture, "created_at")));
-  if (turbo_json_type(turbo_json_object_get(fixture, "created_at")) != TURBO_JSON_NULL) {
+  check_true(json_type(json_object_get(record, "created_at")) ==
+             json_type(json_object_get(fixture, "created_at")));
+  if (json_type(json_object_get(fixture, "created_at")) != JSON_NULL) {
     turbo_agent_test_check_lineage_string_field(record, "created_at",
-                                                turbo_json_get_string(fixture, "created_at"));
+                                                json_get_string(fixture, "created_at"));
   }
 
-  record_metadata = turbo_json_object_get(record, "metadata");
-  fixture_metadata = turbo_json_object_get(fixture, "metadata");
-  check_true(turbo_json_type(record_metadata) == turbo_json_type(fixture_metadata));
-  if (turbo_json_type(fixture_metadata) == TURBO_JSON_OBJECT) {
+  record_metadata = json_object_get(record, "metadata");
+  fixture_metadata = json_object_get(fixture, "metadata");
+  check_true(json_type(record_metadata) == json_type(fixture_metadata));
+  if (json_type(fixture_metadata) == JSON_OBJECT) {
     turbo_agent_test_check_lineage_string_field(record_metadata, "scope",
-                                                turbo_json_get_string(fixture_metadata, "scope"));
-    if (turbo_json_type(turbo_json_object_get(fixture_metadata, "path")) == TURBO_JSON_NULL) {
-      check_true(turbo_json_type(turbo_json_object_get(record_metadata, "path")) ==
-                 TURBO_JSON_NULL);
+                                                json_get_string(fixture_metadata, "scope"));
+    if (json_type(json_object_get(fixture_metadata, "path")) == JSON_NULL) {
+      check_true(json_type(json_object_get(record_metadata, "path")) ==
+                 JSON_NULL);
     } else {
       turbo_agent_test_check_lineage_string_field(record_metadata, "path",
-                                                  turbo_json_get_string(fixture_metadata, "path"));
+                                                  json_get_string(fixture_metadata, "path"));
     }
   }
 }
@@ -1094,7 +1095,7 @@ static void turbo_agent_test_check_memory_record_fixture(const json_value_t *rec
                                : fixture_root;
   check_not_null(fixture);
   turbo_agent_test_check_memory_record_shape(record, fixture);
-  turbo_free_json(&fixture_root);
+  json_free(fixture_root); fixture_root = NULL;
 }
 
 static void turbo_agent_test_check_memory_record_array_fixture(const json_value_t *records,
@@ -1111,14 +1112,14 @@ static void turbo_agent_test_check_memory_record_array_fixture(const json_value_
                                                                            fixture_entry_name)
                                : fixture_root;
   check_not_null(fixture);
-  check_true(turbo_json_type(records) == TURBO_JSON_ARRAY);
-  check_true(turbo_json_type(fixture) == TURBO_JSON_ARRAY);
-  check_size_eq(turbo_json_array_size(records), turbo_json_array_size(fixture));
-  for (i = 0; i < turbo_json_array_size(fixture); ++i) {
-    turbo_agent_test_check_memory_record_shape(turbo_json_array_get(records, i),
-                                               turbo_json_array_get(fixture, i));
+  check_true(json_type(records) == JSON_ARRAY);
+  check_true(json_type(fixture) == JSON_ARRAY);
+  check_equal(json_array_size(records), json_array_size(fixture));
+  for (i = 0; i < json_array_size(fixture); ++i) {
+    turbo_agent_test_check_memory_record_shape(json_array_get(records, i),
+                                               json_array_get(fixture, i));
   }
-  turbo_free_json(&fixture_root);
+  json_free(fixture_root); fixture_root = NULL;
 }
 
 #endif

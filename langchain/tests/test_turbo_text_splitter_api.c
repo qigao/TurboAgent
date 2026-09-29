@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_text_splitter.h"
 
 #include <string.h>
@@ -11,18 +12,18 @@ spec("turbo text splitter api") {
     const json_value_t *second;
 
     options.chunk_size = 12;
-    check_int_eq(turbo_text_splitter_split_text(
+    check_equal(turbo_text_splitter_split_text(
                      "alpha beta\ngamma delta\nomega", &options, &chunks),
                  0);
-    check_size_eq(turbo_json_array_size(chunks), 3);
-    first = turbo_json_array_get(chunks, 0);
-    second = turbo_json_array_get(chunks, 1);
-    check_str_eq(turbo_json_get_string(first, "text"), "alpha beta\n");
-    check_int_eq(turbo_json_get_int(first, "start", -1), 0);
-    check_int_eq(turbo_json_get_int(first, "end", -1), 11);
-    check_str_eq(turbo_json_get_string(second, "text"), "gamma delta\n");
+    check_equal(json_array_size(chunks), 3);
+    first = json_array_get(chunks, 0);
+    second = json_array_get(chunks, 1);
+    check_equal(json_get_string(first, "text"), "alpha beta\n");
+    check_equal(json_get_int(first, "start", -1), 0);
+    check_equal(json_get_int(first, "end", -1), 11);
+    check_equal(json_get_string(second, "text"), "gamma delta\n");
 
-    turbo_free_json(&chunks);
+    json_free(chunks); chunks = NULL;
   }
 
   it("should support overlapping chunks") {
@@ -33,16 +34,16 @@ spec("turbo text splitter api") {
 
     options.chunk_size = 5;
     options.chunk_overlap = 2;
-    check_int_eq(turbo_text_splitter_split_text("abcdefghij", &options, &chunks),
+    check_equal(turbo_text_splitter_split_text("abcdefghij", &options, &chunks),
                  0);
-    check_size_eq(turbo_json_array_size(chunks), 3);
-    first = turbo_json_array_get(chunks, 0);
-    second = turbo_json_array_get(chunks, 1);
-    check_str_eq(turbo_json_get_string(first, "text"), "abcde");
-    check_str_eq(turbo_json_get_string(second, "text"), "defgh");
-    check_int_eq(turbo_json_get_int(second, "start", -1), 3);
+    check_equal(json_array_size(chunks), 3);
+    first = json_array_get(chunks, 0);
+    second = json_array_get(chunks, 1);
+    check_equal(json_get_string(first, "text"), "abcde");
+    check_equal(json_get_string(second, "text"), "defgh");
+    check_equal(json_get_int(second, "start", -1), 3);
 
-    turbo_free_json(&chunks);
+    json_free(chunks); chunks = NULL;
   }
 
   it("should advance when newline split is shorter than overlap") {
@@ -53,12 +54,12 @@ spec("turbo text splitter api") {
 
     options.chunk_size = 10;
     options.chunk_overlap = 8;
-    check_int_eq(turbo_text_splitter_split_text(text, &options, &chunks), 0);
-    check_true(turbo_json_array_size(chunks) > 1);
-    last = turbo_json_array_get(chunks, turbo_json_array_size(chunks) - 1);
-    check_int_eq(turbo_json_get_int(last, "end", -1), (int)strlen(text));
+    check_equal(turbo_text_splitter_split_text(text, &options, &chunks), 0);
+    check_true(json_array_size(chunks) > 1);
+    last = json_array_get(chunks, json_array_size(chunks) - 1);
+    check_equal(json_get_int(last, "end", -1), (int)strlen(text));
 
-    turbo_free_json(&chunks);
+    json_free(chunks); chunks = NULL;
   }
 
   it("should reject overlap that cannot advance") {
@@ -67,7 +68,7 @@ spec("turbo text splitter api") {
 
     options.chunk_size = 5;
     options.chunk_overlap = 5;
-    check_int_eq(turbo_text_splitter_split_text("abcdefghij", &options, &chunks),
+    check_equal(turbo_text_splitter_split_text("abcdefghij", &options, &chunks),
                  -1);
     check_null(chunks);
   }

@@ -12,13 +12,13 @@ turbo_tool_schema_clone_json_value(const json_value_t *value) {
     return NULL;
   }
 
-  json_value = turbo_json_clone(value);
+  json_value = json_clone(value);
   if (!json_value) {
     return NULL;
   }
 
-  clone = turbo_json_clone(json_value);
-  turbo_free_json(&json_value);
+  clone = json_clone(json_value);
+  json_free(json_value);
   return clone;
 }
 
@@ -30,14 +30,14 @@ static json_value_t *turbo_tool_schema_parse_parameters_json(const char *paramet
     return NULL;
   }
 
-  if (turbo_parse_json((const uint8_t *)parameters_json, strlen(parameters_json), &parameters) !=
-      0) {
+  parameters = json_parse(parameters_json, strlen(parameters_json));
+  if (!parameters) {
     return NULL;
   }
 
-  if (strict && parameters && turbo_json_type(parameters) == TURBO_JSON_OBJECT &&
-      !turbo_json_object_get(parameters, "additionalProperties")) {
-    turbo_json_object_set_bool(parameters, "additionalProperties", false);
+  if (strict && parameters && json_type(parameters) == JSON_OBJECT &&
+      !json_object_get(parameters, "additionalProperties")) {
+    json_object_set_bool(parameters, "additionalProperties", false);
   }
 
   return parameters;
@@ -52,8 +52,8 @@ turbo_tool_schema_parse_parameters_json_value(const char *parameters_json, int s
     return NULL;
   }
 
-  bound = turbo_json_clone(parameters);
-  turbo_free_json(&parameters);
+  bound = json_clone(parameters);
+  json_free(parameters);
   return bound;
 }
 
@@ -63,7 +63,7 @@ static json_value_t *turbo_tool_schema_parse_parameters(const turbo_tool_definit
   }
 
   if (definition->parameters_schema) {
-    return turbo_json_clone(definition->parameters_schema);
+    return json_clone(definition->parameters_schema);
   }
   if (!definition->parameters_json) {
     return NULL;
@@ -147,23 +147,23 @@ json_value_t *turbo_tool_schema_build_openai_chat_tool_definition(
     return NULL;
   }
 
-  tool = turbo_json_create_object();
-  function_object = turbo_json_create_object();
+  tool = json_create_object();
+  function_object = json_create_object();
   if (!tool || !function_object) {
-    turbo_free_json(&function_object);
-    turbo_free_json(&tool);
-    turbo_free_json(&parameters);
+    json_free(function_object);
+    json_free(tool);
+    json_free(parameters);
     return NULL;
   }
 
-  turbo_json_object_set_string(tool, "type", "function");
-  turbo_json_object_set_string(function_object, "name", name);
-  turbo_json_object_set_string(function_object, "description", description);
+  json_object_set_string(tool, "type", "function");
+  json_object_set_string(function_object, "name", name);
+  json_object_set_string(function_object, "description", description);
   if (!compatible_mode) {
-    turbo_json_object_set_bool(function_object, "strict", strict ? true : false);
+    json_object_set_bool(function_object, "strict", strict ? true : false);
   }
-  turbo_json_object_add(function_object, "parameters", parameters);
-  turbo_json_object_add(tool, "function", function_object);
+  json_object_add(function_object, "parameters", parameters);
+  json_object_add(tool, "function", function_object);
   return tool;
 }
 
@@ -174,27 +174,27 @@ static json_value_t *turbo_tool_schema_build_openai_chat_tool_with_parameters(
   json_value_t *function_object;
 
   if (!name || !description || !parameters) {
-    turbo_free_json(&parameters);
+    json_free(parameters);
     return NULL;
   }
 
-  tool = turbo_json_create_object();
-  function_object = turbo_json_create_object();
+  tool = json_create_object();
+  function_object = json_create_object();
   if (!tool || !function_object) {
-    turbo_free_json(&function_object);
-    turbo_free_json(&tool);
-    turbo_free_json(&parameters);
+    json_free(function_object);
+    json_free(tool);
+    json_free(parameters);
     return NULL;
   }
 
-  turbo_json_object_set_string(tool, "type", "function");
-  turbo_json_object_set_string(function_object, "name", name);
-  turbo_json_object_set_string(function_object, "description", description);
+  json_object_set_string(tool, "type", "function");
+  json_object_set_string(function_object, "name", name);
+  json_object_set_string(function_object, "description", description);
   if (!compatible_mode) {
-    turbo_json_object_set_bool(function_object, "strict", strict ? true : false);
+    json_object_set_bool(function_object, "strict", strict ? true : false);
   }
-  turbo_json_object_add(function_object, "parameters", parameters);
-  turbo_json_object_add(tool, "function", function_object);
+  json_object_add(function_object, "parameters", parameters);
+  json_object_add(tool, "function", function_object);
   return tool;
 }
 
@@ -204,7 +204,7 @@ json_value_t *turbo_tool_schema_build_openai_tools(const turbo_tool_registry_t *
   size_t count;
 
   count = turbo_tool_registry_count(registry);
-  tools = turbo_json_create_array();
+  tools = json_create_array();
   if (!tools) {
     return NULL;
   }
@@ -215,29 +215,29 @@ json_value_t *turbo_tool_schema_build_openai_tools(const turbo_tool_registry_t *
     json_value_t *parameters;
 
     if (turbo_tool_registry_get_definition(registry, i, &definition) != TURBO_TOOL_OK) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
     parameters = turbo_tool_schema_parse_parameters(&definition);
     if (!parameters) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
-    tool = turbo_json_create_object();
+    tool = json_create_object();
     if (!tool) {
-      turbo_free_json(&parameters);
-      turbo_free_json(&tools);
+      json_free(parameters);
+      json_free(tools);
       return NULL;
     }
 
-    turbo_json_object_set_string(tool, "type", "function");
-    turbo_json_object_set_string(tool, "name", definition.name);
-    turbo_json_object_set_string(tool, "description", definition.description);
-    turbo_json_object_set_bool(tool, "strict", definition.strict ? true : false);
-    turbo_json_object_add(tool, "parameters", parameters);
-    turbo_json_array_add(tools, tool);
+    json_object_set_string(tool, "type", "function");
+    json_object_set_string(tool, "name", definition.name);
+    json_object_set_string(tool, "description", definition.description);
+    json_object_set_bool(tool, "strict", definition.strict ? true : false);
+    json_object_add(tool, "parameters", parameters);
+    json_array_add(tools, tool);
   }
 
   return tools;
@@ -249,7 +249,7 @@ turbo_tool_schema_build_registry_json_value(const turbo_tool_registry_t *registr
   size_t i;
   size_t count = turbo_tool_registry_count(registry);
 
-  tools = turbo_json_create_array();
+  tools = json_create_array();
   if (!tools) {
     return NULL;
   }
@@ -267,10 +267,10 @@ turbo_tool_schema_build_registry_json_value(const turbo_tool_registry_t *registr
       return NULL;
     }
 
-    tool = turbo_json_create_object();
-    name = turbo_json_create_string(definition.name);
-    description = turbo_json_create_string(definition.description);
-    strict = turbo_json_create_bool(definition.strict ? 1 : 0);
+    tool = json_create_object();
+    name = json_create_string(definition.name);
+    description = json_create_string(definition.description);
+    strict = json_create_bool(definition.strict ? 1 : 0);
     if (definition.parameters_schema) {
       parameters = turbo_tool_schema_clone_json_value(definition.parameters_schema);
     } else {
@@ -346,7 +346,7 @@ json_value_t *turbo_tool_schema_build_openai_compatible_chat_tools(
   size_t count;
 
   count = turbo_tool_registry_count(registry);
-  tools = turbo_json_create_array();
+  tools = json_create_array();
   if (!tools) {
     return NULL;
   }
@@ -358,25 +358,25 @@ json_value_t *turbo_tool_schema_build_openai_compatible_chat_tools(
     json_value_t *parameters;
 
     if (turbo_tool_registry_get_definition(registry, i, &definition) != TURBO_TOOL_OK) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
     compatible_name = turbo_tool_schema_openai_compatible_name(definition.name);
     if (!compatible_name) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
     if (turbo_tool_schema_openai_compatible_name_seen(registry, i, compatible_name)) {
       free(compatible_name);
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
     parameters = turbo_tool_schema_parse_parameters(&definition);
     if (!parameters) {
       free(compatible_name);
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
@@ -384,10 +384,10 @@ json_value_t *turbo_tool_schema_build_openai_compatible_chat_tools(
         compatible_name, definition.description, parameters, definition.strict, 1);
     free(compatible_name);
     if (!tool) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
-    turbo_json_array_add(tools, tool);
+    json_array_add(tools, tool);
   }
 
   return tools;
@@ -398,7 +398,7 @@ json_value_t *turbo_tool_schema_build_openai_chat_tools(const turbo_tool_registr
   size_t i;
   size_t count = turbo_tool_registry_count(registry);
 
-  tools = turbo_json_create_array();
+  tools = json_create_array();
   if (!tools) {
     return NULL;
   }
@@ -409,23 +409,23 @@ json_value_t *turbo_tool_schema_build_openai_chat_tools(const turbo_tool_registr
     json_value_t *parameters;
 
     if (turbo_tool_registry_get_definition(registry, i, &definition) != TURBO_TOOL_OK) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
     parameters = turbo_tool_schema_parse_parameters(&definition);
     if (!parameters) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
     tool = turbo_tool_schema_build_openai_chat_tool_with_parameters(
         definition.name, definition.description, parameters, definition.strict, 0);
     if (!tool) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
-    turbo_json_array_add(tools, tool);
+    json_array_add(tools, tool);
   }
 
   return tools;
@@ -437,7 +437,7 @@ json_value_t *turbo_tool_schema_build_anthropic_tools(const turbo_tool_registry_
   size_t count;
 
   count = turbo_tool_registry_count(registry);
-  tools = turbo_json_create_array();
+  tools = json_create_array();
   if (!tools) {
     return NULL;
   }
@@ -448,27 +448,27 @@ json_value_t *turbo_tool_schema_build_anthropic_tools(const turbo_tool_registry_
     json_value_t *input_schema;
 
     if (turbo_tool_registry_get_definition(registry, i, &definition) != TURBO_TOOL_OK) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
     input_schema = turbo_tool_schema_parse_parameters(&definition);
     if (!input_schema) {
-      turbo_free_json(&tools);
+      json_free(tools);
       return NULL;
     }
 
-    tool = turbo_json_create_object();
+    tool = json_create_object();
     if (!tool) {
-      turbo_free_json(&input_schema);
-      turbo_free_json(&tools);
+      json_free(input_schema);
+      json_free(tools);
       return NULL;
     }
 
-    turbo_json_object_set_string(tool, "name", definition.name);
-    turbo_json_object_set_string(tool, "description", definition.description);
-    turbo_json_object_add(tool, "input_schema", input_schema);
-    turbo_json_array_add(tools, tool);
+    json_object_set_string(tool, "name", definition.name);
+    json_object_set_string(tool, "description", definition.description);
+    json_object_add(tool, "input_schema", input_schema);
+    json_array_add(tools, tool);
   }
 
   return tools;

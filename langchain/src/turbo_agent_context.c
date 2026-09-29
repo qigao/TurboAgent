@@ -7,7 +7,7 @@
 #include "turbo_agent_util_internal.h"
 
 #include <openssl/sha.h>
-#include <turbo_uuid.h>
+#include <salts_uuid.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -51,21 +51,21 @@ static int turbo_agent_context_exact_size(const json_value_t *object, const char
                                           size_t *out_value) {
   double value;
 
-  if (!object || !key || !out_value) return TURBO_EINVAL;
-  value = turbo_json_get_double(object, key, -1.0);
+  if (!object || !key || !out_value) return SALTS_EINVAL;
+  value = json_get_double(object, key, -1.0);
   if (value < 0.0 || value > (double)TURBO_AGENT_CONTEXT_MAX_EXACT_JSON_INTEGER ||
       value != (double)(size_t)value) {
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   *out_value = (size_t)value;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_context_summary_valid(const json_value_t *summary) {
   double version;
 
-  if (!summary || turbo_json_type(summary) != TURBO_JSON_OBJECT) return 0;
-  version = turbo_json_get_double(summary, "schema_version", -1.0);
+  if (!summary || json_type(summary) != JSON_OBJECT) return 0;
+  version = json_get_double(summary, "schema_version", -1.0);
   return version == (double)TURBO_AGENT_CONTEXT_SCHEMA_VERSION;
 }
 
@@ -80,18 +80,18 @@ static void turbo_agent_context_clear_projection(turbo_agent_context_t *context)
 static int turbo_agent_context_apply_projection(turbo_agent_context_t *context) {
   json_value_t *summary;
 
-  if (!context || !context->agent) return TURBO_EINVAL;
+  if (!context || !context->agent) return SALTS_EINVAL;
   if (!context->summary) {
     turbo_agent_context_clear_projection(context);
-    return TURBO_OK;
+    return SALTS_OK;
   }
-  summary = turbo_json_clone(context->summary);
-  if (!summary) return TURBO_ENOMEM;
+  summary = json_clone(context->summary);
+  if (!summary) return SALTS_ENOMEM;
   turbo_runtime_json_destroy(context->agent->context_summary);
   context->agent->context_summary = summary;
   context->agent->context_event_start = context->event_start;
   context->agent->context_projection_active = 1;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_context_load_head(turbo_agent_context_t *context) {
@@ -107,54 +107,54 @@ static int turbo_agent_context_load_head(turbo_agent_context_t *context) {
   size_t event_start;
   size_t compaction_end;
   char *computed_hash = NULL;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
 
   if (turbo_agent_runtime_store_list_json(context->runtime, TURBO_AGENT_CONTEXT_HEADS_COLLECTION,
                                           "thread_id", context->thread_id, &heads) != 0) {
-    return TURBO_EIO;
+    return SALTS_EIO;
   }
-  if (turbo_json_array_size(heads) == 0) goto cleanup;
-  if (turbo_json_array_size(heads) != 1) {
-    rc = TURBO_EPROTO;
+  if (json_array_size(heads) == 0) goto cleanup;
+  if (json_array_size(heads) != 1) {
+    rc = SALTS_EPROTO;
     goto cleanup;
   }
-  head = turbo_json_array_get(heads, 0);
-  compaction_id = turbo_json_get_string(head, "compaction_id");
-  head_hash = turbo_json_get_string(head, "source_hash");
-  thread_id = turbo_json_get_string(head, "thread_id");
+  head = json_array_get(heads, 0);
+  compaction_id = json_get_string(head, "compaction_id");
+  head_hash = json_get_string(head, "source_hash");
+  thread_id = json_get_string(head, "thread_id");
   if (!compaction_id || !head_hash || !thread_id || strcmp(thread_id, context->thread_id) != 0 ||
-      strcmp(turbo_json_get_string(head, "status") ? turbo_json_get_string(head, "status") : "",
+      strcmp(json_get_string(head, "status") ? json_get_string(head, "status") : "",
              "committed") != 0 ||
-      turbo_agent_context_exact_size(head, "source_event_end", &event_start) != TURBO_OK) {
-    rc = TURBO_EPROTO;
+      turbo_agent_context_exact_size(head, "source_event_end", &event_start) != SALTS_OK) {
+    rc = SALTS_EPROTO;
     goto cleanup;
   }
   if (turbo_agent_runtime_store_get_json(context->runtime, TURBO_AGENT_COMPACTIONS_COLLECTION,
                                          compaction_id, &compaction) != 0) {
-    rc = TURBO_EIO;
+    rc = SALTS_EIO;
     goto cleanup;
   }
-  compaction_hash = turbo_json_get_string(compaction, "source_hash");
-  thread_id = turbo_json_get_string(compaction, "thread_id");
-  summary = turbo_json_object_get(compaction, "summary");
-  source = turbo_json_object_get(compaction, "source");
+  compaction_hash = json_get_string(compaction, "source_hash");
+  thread_id = json_get_string(compaction, "thread_id");
+  summary = json_object_get(compaction, "summary");
+  source = json_object_get(compaction, "source");
   computed_hash = source ? turbo_agent_context_source_hash(source) : NULL;
   if (!compaction_hash || strcmp(compaction_hash, head_hash) != 0 || !thread_id ||
       strcmp(thread_id, context->thread_id) != 0 ||
-      strcmp(turbo_json_get_string(compaction, "status")
-                 ? turbo_json_get_string(compaction, "status")
+      strcmp(json_get_string(compaction, "status")
+                 ? json_get_string(compaction, "status")
                  : "",
              "prepared") != 0 ||
-      turbo_agent_context_exact_size(compaction, "source_event_end", &compaction_end) != TURBO_OK ||
+      turbo_agent_context_exact_size(compaction, "source_event_end", &compaction_end) != SALTS_OK ||
       compaction_end != event_start || !computed_hash ||
       strcmp(computed_hash, compaction_hash) != 0 || !turbo_agent_context_summary_valid(summary)) {
-    rc = TURBO_EPROTO;
+    rc = SALTS_EPROTO;
     goto cleanup;
   }
-  context->summary = turbo_json_clone(summary);
-  context->head = turbo_json_clone(head);
+  context->summary = json_clone(summary);
+  context->head = json_clone(head);
   if (!context->summary || !context->head) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   context->event_start = event_start;
@@ -164,7 +164,7 @@ cleanup:
   free(computed_hash);
   turbo_runtime_json_destroy(compaction);
   turbo_runtime_json_destroy(heads);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_runtime_json_destroy(context->summary);
     turbo_runtime_json_destroy(context->head);
     context->summary = NULL;
@@ -184,25 +184,25 @@ int turbo_agent_context_create(turbo_agent_runtime_t *runtime, turbo_agent_t *ag
   if (out_context) *out_context = NULL;
   if (!runtime || !agent || !thread_id || thread_id[0] == '\0' ||
       !turbo_agent_context_policy_valid(policy) || !out_context) {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   context = (turbo_agent_context_t *)calloc(1, sizeof(*context));
-  if (!context) return TURBO_ENOMEM;
+  if (!context) return SALTS_ENOMEM;
   context->runtime = runtime;
   context->agent = agent;
   context->thread_id = turbo_agent_util_strdup(thread_id);
   context->policy = *policy;
   if (!context->thread_id) {
     turbo_agent_context_destroy(context);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   rc = turbo_agent_context_load_head(context);
-  if (rc != TURBO_OK) {
+  if (rc != SALTS_OK) {
     turbo_agent_context_destroy(context);
     return rc;
   }
   *out_context = context;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 void turbo_agent_context_destroy(turbo_agent_context_t *context) {
@@ -220,10 +220,10 @@ static int turbo_agent_context_estimate(turbo_agent_context_t *context, const js
 
   if (!context || !value || !out_tokens ||
       context->policy.estimate_tokens(value, &tokens, context->policy.user_data) != 0) {
-    return TURBO_EIO;
+    return SALTS_EIO;
   }
   *out_tokens = tokens;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_context_estimate_request(turbo_agent_context_t *context, json_value_t *state,
@@ -234,13 +234,13 @@ static int turbo_agent_context_estimate_request(turbo_agent_context_t *context, 
 
   if (turbo_agent_build_turn_request(context->agent, state, &request_json) != 0 || !request_json) {
     free(request_json);
-    return TURBO_EIO;
+    return SALTS_EIO;
   }
-  if (turbo_parse_json((const uint8_t *)request_json, strlen(request_json), &request) != 0 ||
-      !request) {
+  request = json_parse(request_json, strlen(request_json));
+  if (!request) {
     free(request_json);
     turbo_runtime_json_destroy(request);
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   free(request_json);
   rc = turbo_agent_context_estimate(context, request, out_tokens);
@@ -251,8 +251,8 @@ static int turbo_agent_context_estimate_request(turbo_agent_context_t *context, 
 static int turbo_agent_context_boundary_valid(const json_value_t *events, size_t boundary) {
   const json_value_t *previous;
 
-  if (!events || boundary == 0 || boundary > turbo_json_array_size(events)) return 0;
-  previous = turbo_json_array_get(events, boundary - 1);
+  if (!events || boundary == 0 || boundary > json_array_size(events)) return 0;
+  previous = json_array_get(events, boundary - 1);
   if (turbo_agent_event_kind_is(previous, "tool_results")) return 1;
   return turbo_agent_event_kind_is(previous, "model") &&
          turbo_agent_model_event_tool_call_count(previous) == 0;
@@ -281,15 +281,15 @@ static size_t turbo_agent_context_next_boundary(const json_value_t *events, size
 
 static json_value_t *turbo_agent_context_clone_event_range(const json_value_t *events, size_t start,
                                                            size_t end) {
-  json_value_t *range = turbo_json_create_array();
+  json_value_t *range = json_create_array();
   size_t index;
 
-  if (!range || !events || start > end || end > turbo_json_array_size(events)) {
+  if (!range || !events || start > end || end > json_array_size(events)) {
     turbo_runtime_json_destroy(range);
     return NULL;
   }
   for (index = start; index < end; ++index) {
-    json_value_t *clone = turbo_json_clone(turbo_json_array_get(events, index));
+    json_value_t *clone = json_clone(json_array_get(events, index));
     if (!clone || turbo_runtime_json_array_append(range, clone) != TURBO_RUNTIME_JSON_OK) {
       turbo_runtime_json_destroy(clone);
       turbo_runtime_json_destroy(range);
@@ -302,9 +302,9 @@ static json_value_t *turbo_agent_context_clone_event_range(const json_value_t *e
 static json_value_t *turbo_agent_context_build_source(turbo_agent_context_t *context,
                                                       const json_value_t *events, size_t start,
                                                       size_t end) {
-  json_value_t *source = turbo_json_create_object();
+  json_value_t *source = json_create_object();
   json_value_t *previous =
-      context->summary ? turbo_json_clone(context->summary) : turbo_json_create_null();
+      context->summary ? json_clone(context->summary) : json_create_null();
   json_value_t *range = turbo_agent_context_clone_event_range(events, start, end);
 
   if (!source || !previous || !range) {
@@ -331,26 +331,26 @@ static json_value_t *turbo_agent_context_build_source(turbo_agent_context_t *con
 
 static int turbo_agent_context_choose_cut(turbo_agent_context_t *context,
                                           const json_value_t *events, size_t *out_cut) {
-  size_t count = turbo_json_array_size(events);
+  size_t count = json_array_size(events);
   size_t cursor = count;
   size_t cut = count;
   uint64_t retained = 0;
   int retained_segment = 0;
 
-  if (context->event_start >= count) return TURBO_ENOENT;
+  if (context->event_start >= count) return SALTS_ENOENT;
   while (cursor > context->event_start) {
     size_t previous = turbo_agent_context_previous_boundary(events, context->event_start, cursor);
     json_value_t *segment;
     uint64_t segment_tokens;
 
     segment = turbo_agent_context_clone_event_range(events, previous, cursor);
-    if (!segment) return TURBO_ENOMEM;
-    if (turbo_agent_context_estimate(context, segment, &segment_tokens) != TURBO_OK) {
+    if (!segment) return SALTS_ENOMEM;
+    if (turbo_agent_context_estimate(context, segment, &segment_tokens) != SALTS_OK) {
       turbo_runtime_json_destroy(segment);
-      return TURBO_EIO;
+      return SALTS_EIO;
     }
     turbo_runtime_json_destroy(segment);
-    if (segment_tokens > UINT64_MAX - retained) return TURBO_ERANGE;
+    if (segment_tokens > UINT64_MAX - retained) return SALTS_ERANGE;
     if (retained_segment && retained + segment_tokens > context->policy.retain_recent_tokens) {
       break;
     }
@@ -360,9 +360,9 @@ static int turbo_agent_context_choose_cut(turbo_agent_context_t *context,
     cursor = previous;
     if (previous == context->event_start) break;
   }
-  if (cut <= context->event_start) return TURBO_ENOENT;
+  if (cut <= context->event_start) return SALTS_ENOENT;
   *out_cut = cut;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_context_limit_source(turbo_agent_context_t *context,
@@ -383,10 +383,10 @@ static int turbo_agent_context_limit_source(turbo_agent_context_t *context,
 
     if (!source) {
       turbo_runtime_json_destroy(selected_source);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
     rc = turbo_agent_context_estimate(context, source, &source_tokens);
-    if (rc != TURBO_OK) {
+    if (rc != SALTS_OK) {
       turbo_runtime_json_destroy(source);
       turbo_runtime_json_destroy(selected_source);
       return rc;
@@ -402,11 +402,11 @@ static int turbo_agent_context_limit_source(turbo_agent_context_t *context,
     if (candidate == desired_cut) break;
     candidate = turbo_agent_context_next_boundary(events, candidate, desired_cut);
   }
-  if (!selected_source) return TURBO_EMSGSIZE;
+  if (!selected_source) return SALTS_EMSGSIZE;
   *out_cut = selected;
   *out_source = selected_source;
   *out_source_tokens = selected_tokens;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static char *turbo_agent_context_source_hash(const json_value_t *source) {
@@ -417,13 +417,13 @@ static char *turbo_agent_context_source_hash(const json_value_t *source) {
   size_t length = 0;
   size_t index;
 
-  serialized = turbo_json_serialize(source, &length);
+  serialized = json_serialize(source, &length);
   if (!serialized) return NULL;
   if (!SHA256((const unsigned char *)serialized, length, digest)) {
-    turbo_json_serialize_free(serialized);
+    json_serialize_free(serialized);
     return NULL;
   }
-  turbo_json_serialize_free(serialized);
+  json_serialize_free(serialized);
   hash_text = (char *)malloc(SHA256_DIGEST_LENGTH * 2 + 1);
   if (!hash_text) return NULL;
   for (index = 0; index < SHA256_DIGEST_LENGTH; ++index) {
@@ -435,7 +435,7 @@ static char *turbo_agent_context_source_hash(const json_value_t *source) {
 }
 
 static int turbo_agent_context_compact_once(turbo_agent_context_t *context, json_value_t *state) {
-  const json_value_t *events = turbo_json_object_get(state, "events");
+  const json_value_t *events = json_object_get(state, "events");
   json_value_t *source = NULL;
   json_value_t *summary = NULL;
   json_value_t *prepared = NULL;
@@ -445,93 +445,93 @@ static int turbo_agent_context_compact_once(turbo_agent_context_t *context, json
   json_value_t *prepared_summary = NULL;
   json_value_t *prepared_source = NULL;
   char *source_hash = NULL;
-  char compaction_id[TURBO_UUID_STRING_SIZE];
+  char compaction_id[SALTS_UUID_STRING_SIZE];
   char created_at[64];
-  turbo_uuid_t uuid;
+  salts_uuid_t uuid;
   uint64_t source_tokens = 0;
   uint64_t summary_tokens = 0;
   size_t desired_cut;
   size_t cut;
   int rc;
 
-  if (!events || turbo_json_type(events) != TURBO_JSON_ARRAY) return TURBO_EPROTO;
+  if (!events || json_type(events) != JSON_ARRAY) return SALTS_EPROTO;
   rc = turbo_agent_context_choose_cut(context, events, &desired_cut);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   rc =
       turbo_agent_context_limit_source(context, events, desired_cut, &cut, &source, &source_tokens);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   if (context->event_start > TURBO_AGENT_CONTEXT_MAX_EXACT_JSON_INTEGER ||
       cut > TURBO_AGENT_CONTEXT_MAX_EXACT_JSON_INTEGER ||
       source_tokens > TURBO_AGENT_CONTEXT_MAX_EXACT_JSON_INTEGER) {
-    rc = TURBO_ERANGE;
+    rc = SALTS_ERANGE;
     goto cleanup;
   }
   if (context->policy.summarize(source, context->policy.max_summary_tokens, &summary,
                                 context->policy.user_data) != 0 ||
       !turbo_agent_context_summary_valid(summary)) {
-    rc = TURBO_EPROTO;
+    rc = SALTS_EPROTO;
     goto cleanup;
   }
   rc = turbo_agent_context_estimate(context, summary, &summary_tokens);
-  if (rc != TURBO_OK || summary_tokens > context->policy.max_summary_tokens) {
-    rc = rc == TURBO_OK ? TURBO_EMSGSIZE : rc;
+  if (rc != SALTS_OK || summary_tokens > context->policy.max_summary_tokens) {
+    rc = rc == SALTS_OK ? SALTS_EMSGSIZE : rc;
     goto cleanup;
   }
   source_hash = turbo_agent_context_source_hash(source);
-  if (!source_hash || turbo_uuid_v7_generate(&uuid) != TURBO_OK ||
-      turbo_uuid_format(&uuid, compaction_id, sizeof(compaction_id)) != TURBO_OK ||
+  if (!source_hash || salts_uuid_v7_generate(&uuid) != SALTS_OK ||
+      salts_uuid_format(&uuid, compaction_id, sizeof(compaction_id)) != SALTS_OK ||
       turbo_agent_runtime_make_timestamp(created_at, sizeof(created_at)) != 0) {
-    rc = TURBO_EIO;
+    rc = SALTS_EIO;
     goto cleanup;
   }
-  prepared = turbo_json_create_object();
-  head = turbo_json_create_object();
-  context_summary = turbo_json_clone(summary);
-  agent_summary = turbo_json_clone(summary);
-  prepared_summary = turbo_json_clone(summary);
-  prepared_source = turbo_json_clone(source);
+  prepared = json_create_object();
+  head = json_create_object();
+  context_summary = json_clone(summary);
+  agent_summary = json_clone(summary);
+  prepared_summary = json_clone(summary);
+  prepared_source = json_clone(source);
   if (!prepared || !head || !context_summary || !agent_summary || !prepared_summary ||
       !prepared_source) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
-  turbo_json_object_set_number(prepared, "schema_version",
+  json_object_set_number(prepared, "schema_version",
                                (double)TURBO_AGENT_CONTEXT_SCHEMA_VERSION);
-  turbo_json_object_set_string(prepared, "compaction_id", compaction_id);
-  turbo_json_object_set_string(prepared, "thread_id", context->thread_id);
-  turbo_json_object_set_string(prepared, "status", "prepared");
-  turbo_json_object_set_number(prepared, "source_event_start", (double)context->event_start);
-  turbo_json_object_set_number(prepared, "source_event_end", (double)cut);
-  turbo_json_object_set_number(prepared, "source_tokens", (double)source_tokens);
-  turbo_json_object_set_string(prepared, "source_hash", source_hash);
-  turbo_json_object_set_string(prepared, "created_at", created_at);
+  json_object_set_string(prepared, "compaction_id", compaction_id);
+  json_object_set_string(prepared, "thread_id", context->thread_id);
+  json_object_set_string(prepared, "status", "prepared");
+  json_object_set_number(prepared, "source_event_start", (double)context->event_start);
+  json_object_set_number(prepared, "source_event_end", (double)cut);
+  json_object_set_number(prepared, "source_tokens", (double)source_tokens);
+  json_object_set_string(prepared, "source_hash", source_hash);
+  json_object_set_string(prepared, "created_at", created_at);
   if (turbo_runtime_json_object_set(prepared, "summary", prepared_summary) !=
       TURBO_RUNTIME_JSON_OK) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   prepared_summary = NULL;
   if (turbo_runtime_json_object_set(prepared, "source", prepared_source) != TURBO_RUNTIME_JSON_OK) {
-    rc = TURBO_ENOMEM;
+    rc = SALTS_ENOMEM;
     goto cleanup;
   }
   prepared_source = NULL;
 
-  turbo_json_object_set_number(head, "schema_version", (double)TURBO_AGENT_CONTEXT_SCHEMA_VERSION);
-  turbo_json_object_set_string(head, "thread_id", context->thread_id);
-  turbo_json_object_set_string(head, "status", "committed");
-  turbo_json_object_set_string(head, "compaction_id", compaction_id);
-  turbo_json_object_set_string(head, "source_hash", source_hash);
-  turbo_json_object_set_number(head, "source_event_end", (double)cut);
-  turbo_json_object_set_string(head, "committed_at", created_at);
+  json_object_set_number(head, "schema_version", (double)TURBO_AGENT_CONTEXT_SCHEMA_VERSION);
+  json_object_set_string(head, "thread_id", context->thread_id);
+  json_object_set_string(head, "status", "committed");
+  json_object_set_string(head, "compaction_id", compaction_id);
+  json_object_set_string(head, "source_hash", source_hash);
+  json_object_set_number(head, "source_event_end", (double)cut);
+  json_object_set_string(head, "committed_at", created_at);
   if (turbo_agent_runtime_store_put_json(context->runtime, TURBO_AGENT_COMPACTIONS_COLLECTION,
                                          compaction_id, prepared) != 0) {
-    rc = TURBO_EIO;
+    rc = SALTS_EIO;
     goto cleanup;
   }
   if (turbo_agent_runtime_store_put_json(context->runtime, TURBO_AGENT_CONTEXT_HEADS_COLLECTION,
                                          context->thread_id, head) != 0) {
-    rc = TURBO_EIO;
+    rc = SALTS_EIO;
     goto cleanup;
   }
 
@@ -547,7 +547,7 @@ static int turbo_agent_context_compact_once(turbo_agent_context_t *context, json
   agent_summary = NULL;
   context->agent->context_event_start = cut;
   context->agent->context_projection_active = 1;
-  rc = TURBO_OK;
+  rc = SALTS_OK;
 
 cleanup:
   free(source_hash);
@@ -569,23 +569,23 @@ int turbo_agent_context_prepare(turbo_agent_context_t *context, json_value_t *st
   uint32_t compacted = 0;
   int rc;
 
-  if (!context || !state) return TURBO_EINVAL;
+  if (!context || !state) return SALTS_EINVAL;
   if (force_compaction) return turbo_agent_context_compact_once(context, state);
   rc = turbo_agent_context_apply_projection(context);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   input_capacity = context->policy.context_window_tokens - context->policy.reserve_output_tokens;
   rc = turbo_agent_context_estimate_request(context, state, &request_tokens);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   while (request_tokens >= context->policy.compact_trigger_tokens &&
          compacted < context->policy.max_compactions_per_turn) {
     rc = turbo_agent_context_compact_once(context, state);
-    if (rc == TURBO_ENOENT) break;
-    if (rc != TURBO_OK) return rc;
+    if (rc == SALTS_ENOENT) break;
+    if (rc != SALTS_OK) return rc;
     ++compacted;
     rc = turbo_agent_context_estimate_request(context, state, &request_tokens);
-    if (rc != TURBO_OK) return rc;
+    if (rc != SALTS_OK) return rc;
   }
-  return request_tokens <= input_capacity ? TURBO_OK : TURBO_EMSGSIZE;
+  return request_tokens <= input_capacity ? SALTS_OK : SALTS_EMSGSIZE;
 }
 
 int turbo_agent_context_handle_overflow(turbo_agent_context_t *context, json_value_t *state,
@@ -596,16 +596,16 @@ int turbo_agent_context_handle_overflow(turbo_agent_context_t *context, json_val
   if (!context || !state || !context->policy.is_context_overflow) return 0;
   detected = context->policy.is_context_overflow(transport_status, response_json,
                                                  context->policy.user_data);
-  if (detected < 0) return TURBO_EPROTO;
+  if (detected < 0) return SALTS_EPROTO;
   if (detected == 0) return 0;
   rc = turbo_agent_context_compact_once(context, state);
-  return rc == TURBO_OK ? 1 : rc;
+  return rc == SALTS_OK ? 1 : rc;
 }
 
 int turbo_agent_context_status(turbo_agent_context_t *context, json_value_t **out_status) {
-  if (!context || !out_status) return TURBO_EINVAL;
+  if (!context || !out_status) return SALTS_EINVAL;
   *out_status = NULL;
-  if (!context->head) return TURBO_ENOENT;
-  *out_status = turbo_json_clone(context->head);
-  return *out_status ? TURBO_OK : TURBO_ENOMEM;
+  if (!context->head) return SALTS_ENOENT;
+  *out_status = json_clone(context->head);
+  return *out_status ? SALTS_OK : SALTS_ENOMEM;
 }

@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_STATE_FLOW_INTERNAL_H
 #define TURBO_AGENT_STATE_FLOW_INTERNAL_H
 
+#include <stddef.h>
+
 #include "turbo_agent_state.h"
 
 #ifdef __cplusplus

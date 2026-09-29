@@ -1,7 +1,7 @@
 #ifndef TURBO_AGENT_SUBAGENT_H
 #define TURBO_AGENT_SUBAGENT_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_agent_app.h"
 #include "turbo_tool_registry.h"

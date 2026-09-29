@@ -73,13 +73,13 @@ static json_value_t *turbo_tool_registry_clone_json_value(const json_value_t *va
     return NULL;
   }
 
-  json_value = turbo_json_clone(value);
+  json_value = json_clone(value);
   if (!json_value) {
     return NULL;
   }
 
-  clone = turbo_json_clone(json_value);
-  turbo_free_json(&json_value);
+  clone = json_clone(json_value);
+  json_free(json_value);
   return clone;
 }
 
@@ -91,13 +91,13 @@ static char *turbo_tool_registry_serialize_json_value(const json_value_t *value)
     return NULL;
   }
 
-  json_value = turbo_json_clone(value);
+  json_value = json_clone(value);
   if (!json_value) {
     return NULL;
   }
 
-  serialized = turbo_json_serialize(json_value, NULL);
-  turbo_free_json(&json_value);
+  serialized = json_serialize(json_value, NULL);
+  json_free(json_value);
   return serialized;
 }
 
@@ -154,7 +154,7 @@ static void turbo_tool_registry_free_entry(turbo_tool_entry_t *entry) {
   free(entry->name);
   free(entry->description);
   if (entry->parameters_json_serialized) {
-    turbo_json_serialize_free(entry->parameters_json);
+    json_serialize_free(entry->parameters_json);
   } else {
     free(entry->parameters_json);
   }

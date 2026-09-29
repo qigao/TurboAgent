@@ -14,8 +14,8 @@
     do {                                                                                            \
         sds __s = sdsnew((str));                                                                    \
         check_not_null(__s);                                                                        \
-        check_str_eq(__s, (str));                                                                   \
-        check_size_eq(sdslen(__s), strlen((str)));                                                  \
+        check_equal(__s, (str));                                                                   \
+        check_equal(sdslen(__s), strlen((str)));                                                  \
         (dst) = __s;                                                                                \
     } while (0)
 
@@ -28,7 +28,7 @@
         sds __s = sdsnewlen(__buf, __n);                                                            \
         free(__buf);                                                                                \
         check_not_null(__s);                                                                        \
-        check_size_eq(sdslen(__s), __n);                                                            \
+        check_equal(sdslen(__s), __n);                                                            \
         (dst) = __s;                                                                                \
     } while (0)
 
@@ -50,8 +50,8 @@ spec("SDS library tests") {
         it("handles empty strings") {
             sds s = sdsempty();
             check_not_null(s);
-            check_size_eq(sdslen(s), 0);
-            check_str_eq(s, "");
+            check_equal(sdslen(s), 0);
+            check_equal(s, "");
             sdsfree(s);
         }
     }
@@ -61,8 +61,8 @@ spec("SDS library tests") {
             sds s;
             SDS_NEW_LITERAL(s, "Hello");
             s = sdscat(s, " World");
-            check_str_eq(s, "Hello World");
-            check_size_eq(sdslen(s), (size_t)11);
+            check_equal(s, "Hello World");
+            check_equal(sdslen(s), (size_t)11);
             sdsfree(s);
         }
 
@@ -72,7 +72,7 @@ spec("SDS library tests") {
             SDS_NEW_LITERAL(s1, "Part 1");
             SDS_NEW_LITERAL(s2, " & Part 2");
             s1 = sdscatsds(s1, s2);
-            check_str_eq(s1, "Part 1 & Part 2");
+            check_equal(s1, "Part 1 & Part 2");
             sds_free_all(s1, s2, NULL, NULL);
         }
     }
@@ -88,8 +88,8 @@ spec("SDS library tests") {
             SDS_NEW_LITERAL(s3, "abd");
             SDS_NEW_LITERAL(s4, "ab");
 
-            check_int_eq(sdscmp(s1, s2), 0);
-            check_int_eq(sdscmp(s1, s2), strcmp("abc", "abc"));
+            check_equal(sdscmp(s1, s2), 0);
+            check_equal(sdscmp(s1, s2), strcmp("abc", "abc"));
 
             {
                 int res = sdscmp(s1, s3);
@@ -107,22 +107,22 @@ spec("SDS library tests") {
         }
 
         it("case-insensitive comparison") {
-            check_int_eq(sdscasecmp("Hello", "hello"), 0);
-            check_int_eq(sdscasecmp("ABC", "abc"), 0);
-            check_int_eq(sdscasecmp("abc", "ABC"), 0);
+            check_equal(sdscasecmp("Hello", "hello"), 0);
+            check_equal(sdscasecmp("ABC", "abc"), 0);
+            check_equal(sdscasecmp("abc", "ABC"), 0);
             check(sdscasecmp("abc", "abd") < 0);
             check(sdscasecmp("abd", "abc") > 0);
-            check_int_eq(sdscasecmp(NULL, NULL), 0);
+            check_equal(sdscasecmp(NULL, NULL), 0);
             check(sdscasecmp(NULL, "a") < 0);
             check(sdscasecmp("a", NULL) > 0);
         }
 
         it("case-insensitive comparison with length") {
-            check_int_eq(sdsncasecmp("Hello", "hello", 5), 0);
-            check_int_eq(sdsncasecmp("HelloWorld", "HelloPlanet", 5), 0);
+            check_equal(sdsncasecmp("Hello", "hello", 5), 0);
+            check_equal(sdsncasecmp("HelloWorld", "HelloPlanet", 5), 0);
             check(sdsncasecmp("HelloWorld", "HelloPlanet", 6) != 0);
-            check_int_eq(sdsncasecmp("abc", "abd", 0), 0);
-            check_int_eq(sdsncasecmp(NULL, NULL, 5), 0);
+            check_equal(sdsncasecmp("abc", "abd", 0), 0);
+            check_equal(sdsncasecmp(NULL, NULL, 5), 0);
         }
 
         it("starts with prefix") {
@@ -168,8 +168,8 @@ spec("SDS library tests") {
             sds s;
             SDS_NEW_LITERAL(s, "initial");
             s = sdscpy(s, "new content");
-            check_str_eq(s, "new content");
-            check_size_eq(sdslen(s), (size_t)11);
+            check_equal(s, "new content");
+            check_equal(sdslen(s), (size_t)11);
             sdsfree(s);
         }
     }
@@ -179,8 +179,8 @@ spec("SDS library tests") {
             sds s;
             SDS_NEW_LITERAL(s, "  hello  ");
             s = sdstrim(s, " ");
-            check_str_eq(s, "hello");
-            check_size_eq(sdslen(s), (size_t)5);
+            check_equal(s, "hello");
+            check_equal(sdslen(s), (size_t)5);
             sdsfree(s);
         }
     }
@@ -192,7 +192,7 @@ spec("SDS library tests") {
             SDS_NEW_FILLED(s31, 'a', 31);
             SDS_NEW_FILLED(s32, 'b', 32);
 
-            check_int_eq((s31[-1] & SDS_TYPE_MASK), SDS_TYPE_5);
+            check_equal((s31[-1] & SDS_TYPE_MASK), SDS_TYPE_5);
             check((s32[-1] & SDS_TYPE_MASK) != SDS_TYPE_5);
 
             sds_free_all(s31, s32, NULL, NULL);
@@ -201,10 +201,10 @@ spec("SDS library tests") {
         it("allows type5 length increments up to 31") {
             sds s;
             SDS_NEW_FILLED(s, 'c', 30);
-            check_int_eq((s[-1] & SDS_TYPE_MASK), SDS_TYPE_5);
+            check_equal((s[-1] & SDS_TYPE_MASK), SDS_TYPE_5);
             sdsinclen(s, 1);
-            check_size_eq(sdslen(s), (size_t)31);
-            check_int_eq((s[-1] & SDS_TYPE_MASK), SDS_TYPE_5);
+            check_equal(sdslen(s), (size_t)31);
+            check_equal((s[-1] & SDS_TYPE_MASK), SDS_TYPE_5);
             sdsfree(s);
         }
     }

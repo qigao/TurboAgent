@@ -1,7 +1,9 @@
 #ifndef TURBO_EVENT_H
 #define TURBO_EVENT_H
 
-#include <platform.h>
+#include <stdint.h>
+
+#include <turbo_agent_api.h>
 
 #include "turbo_runtime_json.h"
 

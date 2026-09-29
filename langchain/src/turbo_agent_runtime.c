@@ -1,4 +1,5 @@
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
+#include <json_parser.h>
 #include "turbo_agent_state_flow_domain_internal.h"
 #include "turbo_agent_event_internal.h"
 #include "turbo_agent_lifecycle_internal.h"
@@ -54,7 +55,7 @@ CXX_C_API turbo_graph_exec_status_t turbo_agent_clone_json(const json_value_t *v
     return TURBO_GRAPH_EXEC_INVALID_ARGUMENT;
   }
 
-  *out_value = turbo_json_clone(value);
+  *out_value = json_clone(value);
   return *out_value ? TURBO_GRAPH_EXEC_OK : TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
 }
 
@@ -74,10 +75,10 @@ CXX_C_API char *turbo_agent_format_tool_error(const char *name, const char *mess
     return NULL;
   }
 
-  turbo_json_object_set_string(result, "tool", name);
-  turbo_json_object_set_string(result, "stderr", message);
-  buffer = turbo_json_serialize(result, NULL);
-  turbo_free_json(&result);
+  json_object_set_string(result, "tool", name);
+  json_object_set_string(result, "stderr", message);
+  buffer = json_serialize(result, NULL);
+  json_free(result); result = NULL;
   return buffer;
 }
 

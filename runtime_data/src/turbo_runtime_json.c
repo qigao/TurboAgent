@@ -8,7 +8,7 @@
 #define TURBO_RUNTIME_JSON_INT64_UPPER_EXCLUSIVE 9223372036854775808.0
 
 void turbo_runtime_json_destroy(json_value_t *value) {
-  turbo_free_json(&value);
+  json_free(value);
 }
 
 turbo_runtime_json_status_t turbo_runtime_json_object_set(
@@ -16,10 +16,10 @@ turbo_runtime_json_status_t turbo_runtime_json_object_set(
   if (!object || !key || !field_value) {
     return TURBO_RUNTIME_JSON_INVALID_ARGUMENT;
   }
-  if (turbo_json_type(object) != TURBO_JSON_OBJECT) {
+  if (json_type(object) != JSON_OBJECT) {
     return TURBO_RUNTIME_JSON_TYPE_MISMATCH;
   }
-  return turbo_json_object_add_checked(object, key, field_value)
+  return json_object_add_checked(object, key, field_value)
              ? TURBO_RUNTIME_JSON_OK
              : TURBO_RUNTIME_JSON_OUT_OF_MEMORY;
 }
@@ -29,10 +29,10 @@ turbo_runtime_json_status_t turbo_runtime_json_array_append(
   if (!array || !element_value) {
     return TURBO_RUNTIME_JSON_INVALID_ARGUMENT;
   }
-  if (turbo_json_type(array) != TURBO_JSON_ARRAY) {
+  if (json_type(array) != JSON_ARRAY) {
     return TURBO_RUNTIME_JSON_TYPE_MISMATCH;
   }
-  return turbo_json_array_add_checked(array, element_value)
+  return json_array_add_checked(array, element_value)
              ? TURBO_RUNTIME_JSON_OK
              : TURBO_RUNTIME_JSON_OUT_OF_MEMORY;
 }
@@ -41,19 +41,19 @@ size_t turbo_runtime_json_value_size(const json_value_t *value) {
   if (!value) {
     return 0;
   }
-  switch (turbo_json_type(value)) {
-    case TURBO_JSON_OBJECT:
-      return turbo_json_object_size(value);
-    case TURBO_JSON_ARRAY:
-      return turbo_json_array_size(value);
+  switch (json_type(value)) {
+    case JSON_OBJECT:
+      return json_object_size(value);
+    case JSON_ARRAY:
+      return json_array_size(value);
     default:
       return 0;
   }
 }
 
 int turbo_runtime_json_value_as_bool(const json_value_t *value, int default_value) {
-  return value && turbo_json_type(value) == TURBO_JSON_BOOL
-             ? (turbo_json_bool(value) ? 1 : 0)
+  return value && json_type(value) == JSON_BOOL
+             ? (json_bool(value) ? 1 : 0)
              : default_value;
 }
 
@@ -66,10 +66,10 @@ int64_t turbo_runtime_json_value_as_int64(const json_value_t *value,
   intmax_t integer_value;
   double number;
 
-  if (!value || turbo_json_type(value) != TURBO_JSON_NUMBER) {
+  if (!value || json_type(value) != JSON_NUMBER) {
     return default_value;
   }
-  number_text = turbo_json_number_text(value, &number_text_length);
+  number_text = json_number_text(value, &number_text_length);
   if (number_text && number_text_length > 0 &&
       number_text_length < sizeof(integer_text) &&
       !memchr(number_text, '.', number_text_length) &&
@@ -86,7 +86,7 @@ int64_t turbo_runtime_json_value_as_int64(const json_value_t *value,
     return default_value;
   }
 
-  number = turbo_json_number(value);
+  number = json_number(value);
   if (!isfinite(number) || trunc(number) != number ||
       number < -TURBO_RUNTIME_JSON_INT64_UPPER_EXCLUSIVE ||
       number >= TURBO_RUNTIME_JSON_INT64_UPPER_EXCLUSIVE) {
@@ -97,13 +97,13 @@ int64_t turbo_runtime_json_value_as_int64(const json_value_t *value,
 
 double turbo_runtime_json_value_as_double(const json_value_t *value,
                                           double default_value) {
-  return value && turbo_json_type(value) == TURBO_JSON_NUMBER
-             ? turbo_json_number(value)
+  return value && json_type(value) == JSON_NUMBER
+             ? json_number(value)
              : default_value;
 }
 
 const char *turbo_runtime_json_value_as_string(const json_value_t *value) {
-  return value && turbo_json_type(value) == TURBO_JSON_STRING
-             ? turbo_json_string(value)
+  return value && json_type(value) == JSON_STRING
+             ? json_string(value)
              : NULL;
 }

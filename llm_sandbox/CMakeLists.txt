@@ -11,12 +11,13 @@ target_compile_definitions(llm_sandbox PRIVATE SHARED_CXX)
 target_include_directories(
   llm_sandbox PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                      $<INSTALL_INTERFACE:include>)
-target_link_libraries(llm_sandbox PUBLIC TurboAgent::RuntimeTools
-                                         TurboWasm::Runtime)
+target_link_libraries(llm_sandbox
+  PUBLIC TurboAgent::RuntimeTools
+         TurboWasm::Runtime
+  PRIVATE Salts::Core)
 
 cmake_config_target(llm_sandbox FOLDER "LLM Sandbox" EXPORT_NAME LLMSandbox
                     ALIAS TurboAgent::LLMSandbox)
-add_library(TurboNet::LLMSandbox ALIAS llm_sandbox)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 
@@ -92,18 +93,18 @@ if(BUILD_TESTS)
 
     cmake_add_test(
       SOURCES tests/test_turbo_tool_runtime_wasm.c
-      LIBS llm_sandbox TurboUtils::TinyTest
+      LIBS llm_sandbox Salts::TinyTest
       FOLDER "LLM Sandbox/tests")
 
     cmake_add_test(
       SOURCES tests/test_turbo_wasm_tool_pack.c
-      LIBS llm_sandbox TurboUtils::TinyTest
+      LIBS llm_sandbox Salts::TinyTest
       FOLDER "LLM Sandbox/tests")
 
     if(TARGET langchain)
       cmake_add_test(
         SOURCES tests/test_turbo_wasm_tool_pack_workspace.c
-        LIBS llm_sandbox langchain TurboUtils::TinyTest
+        LIBS llm_sandbox langchain Salts::TinyTest
         FOLDER "LLM Sandbox/tests")
     endif()
 

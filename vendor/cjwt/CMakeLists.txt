@@ -38,7 +38,7 @@ target_include_directories(
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/cjwt>)
 
-target_link_libraries(cjwt PUBLIC OpenSSL::SSL OpenSSL::Crypto TurboNet::Parser
+target_link_libraries(cjwt PUBLIC OpenSSL::SSL OpenSSL::Crypto Salts::JsonParser
                                   aklomp::base64)
 
 set_target_properties(cjwt PROPERTIES FOLDER vendor/cjwt)

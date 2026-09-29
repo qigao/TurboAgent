@@ -1,8 +1,10 @@
 #ifndef TURBO_AGENT_HARNESS_TRANSPORT_H
 #define TURBO_AGENT_HARNESS_TRANSPORT_H
 
-#include <platform.h>
-#include <turbo_error.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <turbo_agent_api.h>
 
 #include "turbo_agent_harness_server.h"
 

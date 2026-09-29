@@ -1,9 +1,11 @@
 #ifndef TURBO_ACTION_TOOL_H
 #define TURBO_ACTION_TOOL_H
 
-#include <platform.h>
+#include <stddef.h>
+
+#include <turbo_agent_api.h>
 #include "turbo_tool_registry.h"
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 #ifdef __cplusplus
 extern "C" {

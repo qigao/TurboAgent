@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_VALIDATION_INTERNAL_H
 #define TURBO_AGENT_VALIDATION_INTERNAL_H
 
+#include <stddef.h>
+
 #include "turbo_agent_core_internal.h"
 
 #ifdef __cplusplus

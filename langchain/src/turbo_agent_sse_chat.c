@@ -2,7 +2,7 @@
 #include "turbo_agent_sse_json_internal.h"
 #include "turbo_agent_util_internal.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_prompt.h"
 
 #include <stdlib.h>
@@ -20,49 +20,49 @@ static int turbo_agent_sse_chat_apply_chunk(turbo_agent_sse_chat_stream_state_t 
   const char *finish_reason;
   size_t i;
 
-  if (!state || !chunk || turbo_json_type(chunk) != TURBO_JSON_OBJECT) {
+  if (!state || !chunk || json_type(chunk) != JSON_OBJECT) {
     return -1;
   }
 
-  id = turbo_json_get_string(chunk, "id");
+  id = json_get_string(chunk, "id");
   if (turbo_agent_sse_set_if_nonempty(&state->id, id) != 0) {
     return -1;
   }
 
-  choices = turbo_json_object_get(chunk, "choices");
-  choice = choices && turbo_json_type(choices) == TURBO_JSON_ARRAY &&
-                   turbo_json_array_size(choices) > 0
-               ? turbo_json_array_get(choices, 0)
+  choices = json_object_get(chunk, "choices");
+  choice = choices && json_type(choices) == JSON_ARRAY &&
+                   json_array_size(choices) > 0
+               ? json_array_get(choices, 0)
                : NULL;
-  if (!choice || turbo_json_type(choice) != TURBO_JSON_OBJECT) {
+  if (!choice || json_type(choice) != JSON_OBJECT) {
     return -1;
   }
 
-  delta = turbo_json_object_get(choice, "delta");
-  if (delta && turbo_json_type(delta) == TURBO_JSON_OBJECT) {
-    role = turbo_json_get_string(delta, "role");
+  delta = json_object_get(choice, "delta");
+  if (delta && json_type(delta) == JSON_OBJECT) {
+    role = json_get_string(delta, "role");
     if (turbo_agent_sse_set_if_nonempty(&state->role, role) != 0) {
       return -1;
     }
 
-    content = turbo_json_get_string(delta, "content");
+    content = json_get_string(delta, "content");
     if (content && turbo_agent_sse_append_dynamic_text(&state->content, content) != 0) {
       return -1;
     }
 
-    tool_calls = turbo_json_object_get(delta, "tool_calls");
-    if (tool_calls && turbo_json_type(tool_calls) == TURBO_JSON_ARRAY) {
-      for (i = 0; i < turbo_json_array_size(tool_calls); ++i) {
-        const json_value_t *tool_call_json = turbo_json_array_get(tool_calls, i);
+    tool_calls = json_object_get(delta, "tool_calls");
+    if (tool_calls && json_type(tool_calls) == JSON_ARRAY) {
+      for (i = 0; i < json_array_size(tool_calls); ++i) {
+        const json_value_t *tool_call_json = json_array_get(tool_calls, i);
         turbo_agent_sse_tool_call_t *tool_call;
         const json_value_t *function_json;
         int index;
 
-        if (!tool_call_json || turbo_json_type(tool_call_json) != TURBO_JSON_OBJECT) {
+        if (!tool_call_json || json_type(tool_call_json) != JSON_OBJECT) {
           return -1;
         }
 
-        index = turbo_json_get_int(tool_call_json, "index", (int)i);
+        index = json_get_int(tool_call_json, "index", (int)i);
         if (index < 0) {
           return -1;
         }
@@ -73,24 +73,24 @@ static int turbo_agent_sse_chat_apply_chunk(turbo_agent_sse_chat_stream_state_t 
           return -1;
         }
 
-        function_json = turbo_json_object_get(tool_call_json, "function");
+        function_json = json_object_get(tool_call_json, "function");
         if (turbo_agent_sse_set_if_nonempty(&tool_call->id,
-                                            turbo_json_get_string(tool_call_json, "id")) != 0 ||
+                                            json_get_string(tool_call_json, "id")) != 0 ||
             turbo_agent_sse_set_if_nonempty(
-                &tool_call->type, turbo_json_get_string(tool_call_json, "type")) != 0) {
+                &tool_call->type, json_get_string(tool_call_json, "type")) != 0) {
           return -1;
         }
 
-        if (function_json && turbo_json_type(function_json) == TURBO_JSON_OBJECT) {
+        if (function_json && json_type(function_json) == JSON_OBJECT) {
           if (turbo_agent_sse_set_if_nonempty(&tool_call->name,
-                                              turbo_json_get_string(function_json, "name")) != 0) {
+                                              json_get_string(function_json, "name")) != 0) {
             return -1;
           }
 
           if (turbo_agent_sse_append_dynamic_text(
                   &tool_call->arguments,
-                  turbo_json_get_string(function_json, "arguments")
-                      ? turbo_json_get_string(function_json, "arguments")
+                  json_get_string(function_json, "arguments")
+                      ? json_get_string(function_json, "arguments")
                       : "") != 0) {
             return -1;
           }
@@ -99,7 +99,7 @@ static int turbo_agent_sse_chat_apply_chunk(turbo_agent_sse_chat_stream_state_t 
     }
   }
 
-  finish_reason = turbo_json_get_string(choice, "finish_reason");
+  finish_reason = json_get_string(choice, "finish_reason");
   if (turbo_agent_sse_set_if_nonempty(&state->finish_reason, finish_reason) != 0) {
     return -1;
   }
@@ -125,14 +125,14 @@ static char *turbo_agent_sse_build_chat_response_json(
 
   tool_calls = turbo_agent_sse_build_chat_tool_calls_array(state);
   if (state->tool_call_count > 0 && !tool_calls) {
-    turbo_free_json(&response);
+    json_free(response); response = NULL;
     return NULL;
   }
   if (tool_calls) {
-    turbo_json_object_add(message, "tool_calls", tool_calls);
+    json_object_add(message, "tool_calls", tool_calls);
   }
 
-  turbo_json_object_set_string(choice, "finish_reason",
+  json_object_set_string(choice, "finish_reason",
                                state->finish_reason ? state->finish_reason
                                                     : (state->tool_call_count > 0 ? "tool_calls"
                                                                                   : "stop"));
@@ -181,10 +181,10 @@ int turbo_agent_chat_sse_to_json(const char *sse_data, size_t sse_len,
     if (strcmp(data, "[DONE]") == 0) {
       is_done = 1;
     } else if (data[0] != '\0') {
-      if (turbo_parse_json((const uint8_t *)data, strlen(data), &chunk) != 0 ||
+      if (((chunk = json_parse((const char *)((const uint8_t *)data), (strlen(data)))) ? 0 : -1) != 0 ||
           turbo_agent_sse_chat_apply_chunk(&state, chunk) != 0) {
         tstr_free(data);
-        turbo_free_json(&chunk);
+        json_free(chunk); chunk = NULL;
         free(normalized);
         turbo_agent_sse_free_chat_state(&state);
         return -1;
@@ -193,7 +193,7 @@ int turbo_agent_chat_sse_to_json(const char *sse_data, size_t sse_len,
     }
 
     tstr_free(data);
-    turbo_free_json(&chunk);
+    json_free(chunk); chunk = NULL;
 
     if (is_done) {
       break;

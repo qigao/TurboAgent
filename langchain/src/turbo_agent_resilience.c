@@ -1,10 +1,12 @@
 #include "turbo_agent_resilience_internal.h"
+#include <json_parser.h>
 
 #include "turbo_agent_core_internal.h"
 #include "turbo_agent_runtime_internal.h"
 #include "turbo_agent_util_internal.h"
 
-#include <turbo_thread.h>
+#include <salts/clock.h>
+#include <salts/thread.h>
 
 #include <limits.h>
 #include <stdint.h>
@@ -41,21 +43,21 @@ static int turbo_agent_retry_policy_valid(const turbo_agent_retry_policy_t *poli
 }
 
 int turbo_agent_retry_configure(turbo_agent_t *agent, const turbo_agent_retry_policy_t *policy) {
-  if (!agent || !turbo_agent_retry_policy_valid(policy)) return TURBO_EINVAL;
+  if (!agent || !turbo_agent_retry_policy_valid(policy)) return SALTS_EINVAL;
   agent->retry_policy = *policy;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_transport_v2_set(turbo_agent_t *agent, turbo_agent_transport_v2_fn transport,
                                  void *user_data,
                                  turbo_agent_transport_v2_user_data_free_fn user_data_free) {
-  if (!agent || !transport) return TURBO_EINVAL;
+  if (!agent || !transport) return SALTS_EINVAL;
   if (agent->transport_v2_user_data_free)
     agent->transport_v2_user_data_free(agent->transport_v2_user_data);
   agent->transport_v2 = transport;
   agent->transport_v2_user_data = user_data;
   agent->transport_v2_user_data_free = user_data_free;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static unsigned int turbo_agent_retry_delay(const turbo_agent_retry_policy_t *policy,
@@ -81,12 +83,12 @@ static unsigned int turbo_agent_retry_delay(const turbo_agent_retry_policy_t *po
 
 static int turbo_agent_retry_wait(const turbo_cancel_token_t *token, unsigned int delay_ms) {
   if (!token) {
-    turbo_sleep_ms(delay_ms);
-    return TURBO_OK;
+    salts_sleep_ms(delay_ms);
+    return SALTS_OK;
   }
   if (turbo_cancel_token_wait(token, delay_ms) == TURBO_CANCEL_WAIT_SIGNALED)
     return turbo_cancel_token_check(token);
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int turbo_agent_attempt_append(json_value_t *state, unsigned int attempt,
@@ -95,29 +97,29 @@ static int turbo_agent_attempt_append(json_value_t *state, unsigned int attempt,
                                       uint64_t started_ms, uint64_t finished_ms) {
   json_value_t *attempts;
   json_value_t *record;
-  if (!state) return TURBO_OK;
-  attempts = turbo_json_object_get(state, "provider_attempts");
+  if (!state) return SALTS_OK;
+  attempts = json_object_get(state, "provider_attempts");
   if (!attempts) {
-    attempts = turbo_json_create_array();
-    if (!attempts) return TURBO_ENOMEM;
-    turbo_json_object_add(state, "provider_attempts", attempts);
+    attempts = json_create_array();
+    if (!attempts) return SALTS_ENOMEM;
+    json_object_add(state, "provider_attempts", attempts);
   }
-  if (turbo_json_type(attempts) != TURBO_JSON_ARRAY) return TURBO_EPROTO;
-  record = turbo_json_create_object();
-  if (!record) return TURBO_ENOMEM;
-  turbo_json_object_set_number(record, "schema_version", 1);
-  turbo_json_object_set_number(record, "attempt", attempt);
-  turbo_json_object_set_number(record, "transport_status", response->transport_status);
-  turbo_json_object_set_number(record, "http_status", response->http_status);
-  turbo_json_object_set_bool(record, "retryable", response->retryable);
-  turbo_json_object_set_number(record, "delay_ms", delay_ms);
-  turbo_json_object_set_number(record, "started_mono_ms", (double)started_ms);
-  turbo_json_object_set_number(record, "finished_mono_ms", (double)finished_ms);
-  turbo_json_object_set_string(record, "outcome", outcome);
+  if (json_type(attempts) != JSON_ARRAY) return SALTS_EPROTO;
+  record = json_create_object();
+  if (!record) return SALTS_ENOMEM;
+  json_object_set_number(record, "schema_version", 1);
+  json_object_set_number(record, "attempt", attempt);
+  json_object_set_number(record, "transport_status", response->transport_status);
+  json_object_set_number(record, "http_status", response->http_status);
+  json_object_set_bool(record, "retryable", response->retryable);
+  json_object_set_number(record, "delay_ms", delay_ms);
+  json_object_set_number(record, "started_mono_ms", (double)started_ms);
+  json_object_set_number(record, "finished_mono_ms", (double)finished_ms);
+  json_object_set_string(record, "outcome", outcome);
   if (response->provider_request_id)
-    turbo_json_object_set_string(record, "provider_request_id", response->provider_request_id);
-  turbo_json_array_add(attempts, record);
-  return TURBO_OK;
+    json_object_set_string(record, "provider_request_id", response->provider_request_id);
+  json_array_add(attempts, record);
+  return SALTS_OK;
 }
 
 int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
@@ -125,7 +127,7 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
   turbo_agent_execution_context_t context = {0};
   uint64_t execution_start;
   unsigned int attempt;
-  if (!agent || !request_json || !out_response_json) return TURBO_EINVAL;
+  if (!agent || !request_json || !out_response_json) return SALTS_EINVAL;
   *out_response_json = NULL;
   tstr_free(agent->last_provider_request_id);
   agent->last_provider_request_id = NULL;
@@ -133,30 +135,30 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
     return agent->transport_fn(request_json, out_response_json, agent->transport_user_data);
   }
   turbo_agent_execution_context_get(&context);
-  execution_start = turbo_monotonic_ms();
+  execution_start = salts_monotonic_ms();
   for (attempt = 1; attempt <= agent->retry_policy.max_attempts; ++attempt) {
     turbo_agent_transport_response_t response = {sizeof(turbo_agent_transport_response_t),
                                                  TURBO_AGENT_TRANSPORT_V2_ABI_VERSION};
-    uint64_t started_ms = turbo_monotonic_ms();
+    uint64_t started_ms = salts_monotonic_ms();
     uint64_t finished_ms;
     unsigned int delay_ms = 0;
     int invoke_rc;
-    if (context.cancel_token && turbo_cancel_token_check(context.cancel_token) != TURBO_OK)
+    if (context.cancel_token && turbo_cancel_token_check(context.cancel_token) != SALTS_OK)
       return turbo_cancel_token_check(context.cancel_token);
     invoke_rc = agent->transport_v2(
         request_json, context.cancel_token, agent->retry_policy.request_timeout_ms,
         agent->retry_policy.connect_timeout_ms, &response, agent->transport_v2_user_data);
-    finished_ms = turbo_monotonic_ms();
+    finished_ms = salts_monotonic_ms();
     if (response.struct_size < sizeof(response) ||
         response.abi_version != TURBO_AGENT_TRANSPORT_V2_ABI_VERSION) {
       free(response.body);
-      return TURBO_EPROTO;
+      return SALTS_EPROTO;
     }
     if (invoke_rc == 0 && response.transport_status == 0 && response.body) {
       if (turbo_agent_attempt_append(state, attempt, &response, "succeeded", 0, started_ms,
-                                     finished_ms) != TURBO_OK) {
+                                     finished_ms) != SALTS_OK) {
         free(response.body);
-        return TURBO_EIO;
+        return SALTS_EIO;
       }
       *out_response_json = response.body;
       if (response.provider_request_id) {
@@ -164,17 +166,17 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
         if (!agent->last_provider_request_id) {
           free(*out_response_json);
           *out_response_json = NULL;
-          return TURBO_ENOMEM;
+          return SALTS_ENOMEM;
         }
       }
-      return TURBO_OK;
+      return SALTS_OK;
     }
     if (!response.retryable || attempt == agent->retry_policy.max_attempts) {
       (void)turbo_agent_attempt_append(state, attempt, &response, "failed", 0, started_ms,
                                        finished_ms);
       *out_response_json = response.body;
       return response.transport_status != 0 ? response.transport_status
-                                            : (invoke_rc != 0 ? invoke_rc : TURBO_EIO);
+                                            : (invoke_rc != 0 ? invoke_rc : SALTS_EIO);
     }
     delay_ms = turbo_agent_retry_delay(&agent->retry_policy, attempt, response.retry_after_ms);
     if (finished_ms - execution_start > agent->retry_policy.max_elapsed_ms ||
@@ -182,36 +184,36 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
       (void)turbo_agent_attempt_append(state, attempt, &response, "elapsed_limit", 0, started_ms,
                                        finished_ms);
       *out_response_json = response.body;
-      return TURBO_ETIMEDOUT;
+      return SALTS_ETIMEDOUT;
     }
     if (turbo_agent_attempt_append(state, attempt, &response, "retry_scheduled", delay_ms,
-                                   started_ms, finished_ms) != TURBO_OK) {
+                                   started_ms, finished_ms) != SALTS_OK) {
       free(response.body);
-      return TURBO_EIO;
+      return SALTS_EIO;
     }
     free(response.body);
-    if (turbo_agent_retry_wait(context.cancel_token, delay_ms) != TURBO_OK)
+    if (turbo_agent_retry_wait(context.cancel_token, delay_ms) != SALTS_OK)
       return context.cancel_token ? turbo_cancel_token_check(context.cancel_token)
-                                  : TURBO_ECANCELED;
+                                  : SALTS_ECANCELED;
   }
-  return TURBO_EIO;
+  return SALTS_EIO;
 }
 
 static int turbo_agent_usage_exact_u64(const json_value_t *usage, const char *primary,
                                        const char *alternate, uint64_t *out_value) {
   double value;
-  const json_value_t *field = turbo_json_object_get(usage, primary);
-  if (!field && alternate) field = turbo_json_object_get(usage, alternate);
+  const json_value_t *field = json_object_get(usage, primary);
+  if (!field && alternate) field = json_object_get(usage, alternate);
   if (!field) {
     *out_value = 0;
-    return TURBO_ENOENT;
+    return SALTS_ENOENT;
   }
   value = turbo_runtime_json_value_as_double(field, -1.0);
   if (value < 0 || value > (double)TURBO_AGENT_USAGE_MAX_EXACT_INTEGER ||
       value != (double)(uint64_t)value)
-    return TURBO_ERANGE;
+    return SALTS_ERANGE;
   *out_value = (uint64_t)value;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_usage_record(turbo_agent_t *agent, json_value_t *state,
@@ -227,57 +229,57 @@ int turbo_agent_usage_record(turbo_agent_t *agent, json_value_t *state,
   int input_rc;
   int output_rc;
   int total_rc;
-  if (!agent || !state || !response) return TURBO_EINVAL;
+  if (!agent || !state || !response) return SALTS_EINVAL;
   turbo_agent_execution_context_get(&context);
-  usage = turbo_json_object_get(response, "usage");
-  if (!usage || turbo_json_type(usage) != TURBO_JSON_OBJECT) return TURBO_OK;
+  usage = json_object_get(response, "usage");
+  if (!usage || json_type(usage) != JSON_OBJECT) return SALTS_OK;
   input_rc = turbo_agent_usage_exact_u64(usage, "input_tokens", "prompt_tokens", &input_tokens);
   output_rc =
       turbo_agent_usage_exact_u64(usage, "output_tokens", "completion_tokens", &output_tokens);
   total_rc = turbo_agent_usage_exact_u64(usage, "total_tokens", NULL, &total_tokens);
-  if (input_rc == TURBO_ERANGE || output_rc == TURBO_ERANGE || total_rc == TURBO_ERANGE)
-    return TURBO_ERANGE;
-  if (total_rc == TURBO_ENOENT) {
-    if (UINT64_MAX - input_tokens < output_tokens) return TURBO_ERANGE;
+  if (input_rc == SALTS_ERANGE || output_rc == SALTS_ERANGE || total_rc == SALTS_ERANGE)
+    return SALTS_ERANGE;
+  if (total_rc == SALTS_ENOENT) {
+    if (UINT64_MAX - input_tokens < output_tokens) return SALTS_ERANGE;
     total_tokens = input_tokens + output_tokens;
   }
-  if (total_tokens > TURBO_AGENT_USAGE_MAX_EXACT_INTEGER) return TURBO_ERANGE;
-  records = turbo_json_object_get(state, "usage_records");
+  if (total_tokens > TURBO_AGENT_USAGE_MAX_EXACT_INTEGER) return SALTS_ERANGE;
+  records = json_object_get(state, "usage_records");
   if (!records) {
-    records = turbo_json_create_array();
-    if (!records) return TURBO_ENOMEM;
-    turbo_json_object_add(state, "usage_records", records);
+    records = json_create_array();
+    if (!records) return SALTS_ENOMEM;
+    json_object_add(state, "usage_records", records);
   }
-  if (turbo_json_type(records) != TURBO_JSON_ARRAY) return TURBO_EPROTO;
-  record = turbo_json_create_object();
-  cost = turbo_json_create_object();
+  if (json_type(records) != JSON_ARRAY) return SALTS_EPROTO;
+  record = json_create_object();
+  cost = json_create_object();
   if (!record || !cost) {
     turbo_runtime_json_destroy(record);
     turbo_runtime_json_destroy(cost);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
-  turbo_json_object_set_number(record, "schema_version", 1);
-  if (context.run_id) turbo_json_object_set_string(record, "run_id", context.run_id);
-  else turbo_json_object_set_null(record, "run_id");
-  if (context.thread_id) turbo_json_object_set_string(record, "thread_id", context.thread_id);
-  else turbo_json_object_set_null(record, "thread_id");
-  turbo_json_object_set_null(record, "turn_seq");
-  turbo_json_object_set_string(record, "operation", "model");
-  turbo_json_object_set_string(record, "provider", turbo_agent_provider_name(agent));
-  turbo_json_object_set_string(record, "model", agent->model);
+  json_object_set_number(record, "schema_version", 1);
+  if (context.run_id) json_object_set_string(record, "run_id", context.run_id);
+  else json_object_set_null(record, "run_id");
+  if (context.thread_id) json_object_set_string(record, "thread_id", context.thread_id);
+  else json_object_set_null(record, "thread_id");
+  json_object_set_null(record, "turn_seq");
+  json_object_set_string(record, "operation", "model");
+  json_object_set_string(record, "provider", turbo_agent_provider_name(agent));
+  json_object_set_string(record, "model", agent->model);
   if (agent->last_provider_request_id)
-    turbo_json_object_set_string(record, "provider_request_id", agent->last_provider_request_id);
-  turbo_json_object_set_number(record, "input_tokens", (double)input_tokens);
-  turbo_json_object_set_null(record, "cached_input_tokens");
-  turbo_json_object_set_number(record, "output_tokens", (double)output_tokens);
-  turbo_json_object_set_null(record, "reasoning_tokens");
-  turbo_json_object_set_number(record, "total_tokens", (double)total_tokens);
-  turbo_json_object_set_bool(record, "estimated", 0);
-  turbo_json_object_set_string(cost, "status", "unknown");
-  turbo_json_object_set_string(cost, "currency", "USD");
-  turbo_json_object_set_null(cost, "amount_micros");
-  turbo_json_object_set_null(cost, "price_catalog_version");
-  turbo_json_object_add(record, "cost", cost);
-  turbo_json_array_add(records, record);
-  return TURBO_OK;
+    json_object_set_string(record, "provider_request_id", agent->last_provider_request_id);
+  json_object_set_number(record, "input_tokens", (double)input_tokens);
+  json_object_set_null(record, "cached_input_tokens");
+  json_object_set_number(record, "output_tokens", (double)output_tokens);
+  json_object_set_null(record, "reasoning_tokens");
+  json_object_set_number(record, "total_tokens", (double)total_tokens);
+  json_object_set_bool(record, "estimated", 0);
+  json_object_set_string(cost, "status", "unknown");
+  json_object_set_string(cost, "currency", "USD");
+  json_object_set_null(cost, "amount_micros");
+  json_object_set_null(cost, "price_catalog_version");
+  json_object_add(record, "cost", cost);
+  json_array_add(records, record);
+  return SALTS_OK;
 }

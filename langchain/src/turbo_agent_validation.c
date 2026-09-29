@@ -5,7 +5,7 @@
 #include "turbo_agent_validation_internal.h"
 #include "turbo_agent_util_internal.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_prompt.h"
 
 #include <fmt.h>
@@ -29,29 +29,29 @@ static int turbo_agent_json_schema_type_matches(const json_value_t *value,
     return 1;
   }
   if (strcmp(type_name, "object") == 0) {
-    return turbo_json_type(value) == TURBO_JSON_OBJECT;
+    return json_type(value) == JSON_OBJECT;
   }
   if (strcmp(type_name, "array") == 0) {
-    return turbo_json_type(value) == TURBO_JSON_ARRAY;
+    return json_type(value) == JSON_ARRAY;
   }
   if (strcmp(type_name, "string") == 0) {
-    return turbo_json_type(value) == TURBO_JSON_STRING;
+    return json_type(value) == JSON_STRING;
   }
   if (strcmp(type_name, "number") == 0) {
-    return turbo_json_type(value) == TURBO_JSON_NUMBER;
+    return json_type(value) == JSON_NUMBER;
   }
   if (strcmp(type_name, "integer") == 0) {
     double num;
-    return turbo_json_type(value) == TURBO_JSON_NUMBER &&
-                   ((num = turbo_json_number(value)), num == (double)((long long)num))
+    return json_type(value) == JSON_NUMBER &&
+                   ((num = json_number(value)), num == (double)((long long)num))
                ? 1
                : 0;
   }
   if (strcmp(type_name, "boolean") == 0) {
-    return turbo_json_type(value) == TURBO_JSON_BOOL;
+    return json_type(value) == JSON_BOOL;
   }
   if (strcmp(type_name, "null") == 0) {
-    return turbo_json_type(value) == TURBO_JSON_NULL;
+    return json_type(value) == JSON_NULL;
   }
 
   return 1;
@@ -66,24 +66,24 @@ static int turbo_agent_json_schema_validate_type(const json_value_t *value,
     return 1;
   }
 
-  if (turbo_json_type(type_schema) == TURBO_JSON_STRING) {
-    if (turbo_agent_json_schema_type_matches(value, turbo_json_string(type_schema))) {
+  if (json_type(type_schema) == JSON_STRING) {
+    if (turbo_agent_json_schema_type_matches(value, json_string(type_schema))) {
       return 1;
     }
     if (out_reason) {
-      *out_reason = turbo_agent_schema_reason("type mismatch", turbo_json_string(type_schema));
+      *out_reason = turbo_agent_schema_reason("type mismatch", json_string(type_schema));
     }
     return 0;
   }
 
-  if (turbo_json_type(type_schema) != TURBO_JSON_ARRAY) {
+  if (json_type(type_schema) != JSON_ARRAY) {
     return 1;
   }
 
-  for (i = 0; i < turbo_json_array_size(type_schema); ++i) {
-    const json_value_t *entry = turbo_json_array_get(type_schema, i);
-    if (entry && turbo_json_type(entry) == TURBO_JSON_STRING &&
-        turbo_agent_json_schema_type_matches(value, turbo_json_string(entry))) {
+  for (i = 0; i < json_array_size(type_schema); ++i) {
+    const json_value_t *entry = json_array_get(type_schema, i);
+    if (entry && json_type(entry) == JSON_STRING &&
+        turbo_agent_json_schema_type_matches(value, json_string(entry))) {
       return 1;
     }
   }
@@ -107,26 +107,26 @@ static int turbo_agent_json_schema_validate(const json_value_t *value,
     *out_reason = NULL;
   }
 
-  if (!schema || turbo_json_type(schema) != TURBO_JSON_OBJECT) {
+  if (!schema || json_type(schema) != JSON_OBJECT) {
     return 1;
   }
 
-  type_schema = turbo_json_object_get(schema, "type");
+  type_schema = json_object_get(schema, "type");
   if (!turbo_agent_json_schema_validate_type(value, type_schema, out_reason)) {
     return 0;
   }
 
-  required = turbo_json_object_get(schema, "required");
-  if (required && turbo_json_type(required) == TURBO_JSON_ARRAY &&
-      turbo_json_type(value) == TURBO_JSON_OBJECT) {
-    for (i = 0; i < turbo_json_array_size(required); ++i) {
-      const json_value_t *required_entry = turbo_json_array_get(required, i);
+  required = json_object_get(schema, "required");
+  if (required && json_type(required) == JSON_ARRAY &&
+      json_type(value) == JSON_OBJECT) {
+    for (i = 0; i < json_array_size(required); ++i) {
+      const json_value_t *required_entry = json_array_get(required, i);
       const char *required_name;
-      if (!required_entry || turbo_json_type(required_entry) != TURBO_JSON_STRING) {
+      if (!required_entry || json_type(required_entry) != JSON_STRING) {
         continue;
       }
-      required_name = turbo_json_string(required_entry);
-      if (!turbo_json_object_get(value, required_name)) {
+      required_name = json_string(required_entry);
+      if (!json_object_get(value, required_name)) {
         if (out_reason) {
           *out_reason = turbo_agent_schema_reason("missing required property", required_name);
         }
@@ -135,13 +135,13 @@ static int turbo_agent_json_schema_validate(const json_value_t *value,
     }
   }
 
-  properties = turbo_json_object_get(schema, "properties");
-  if (properties && turbo_json_type(properties) == TURBO_JSON_OBJECT &&
-      turbo_json_type(value) == TURBO_JSON_OBJECT) {
-    for (i = 0; i < turbo_json_object_size(properties); ++i) {
-      const char *key = turbo_json_object_key(properties, i);
-      const json_value_t *property_schema = turbo_json_object_value(properties, i);
-      const json_value_t *property_value = key ? turbo_json_object_get(value, key) : NULL;
+  properties = json_object_get(schema, "properties");
+  if (properties && json_type(properties) == JSON_OBJECT &&
+      json_type(value) == JSON_OBJECT) {
+    for (i = 0; i < json_object_size(properties); ++i) {
+      const char *key = json_object_key(properties, i);
+      const json_value_t *property_schema = json_object_value(properties, i);
+      const json_value_t *property_value = key ? json_object_get(value, key) : NULL;
       char *child_reason = NULL;
 
       if (!key || !property_value) {
@@ -159,12 +159,12 @@ static int turbo_agent_json_schema_validate(const json_value_t *value,
     }
   }
 
-  if (turbo_json_type(value) == TURBO_JSON_OBJECT &&
-      !turbo_json_get_bool(schema, "additionalProperties", true)) {
-    for (i = 0; i < turbo_json_object_size(value); ++i) {
-      const char *key = turbo_json_object_key(value, i);
-      if (key && (!properties || turbo_json_type(properties) != TURBO_JSON_OBJECT ||
-                  !turbo_json_object_get(properties, key))) {
+  if (json_type(value) == JSON_OBJECT &&
+      !json_get_bool(schema, "additionalProperties", true)) {
+    for (i = 0; i < json_object_size(value); ++i) {
+      const char *key = json_object_key(value, i);
+      if (key && (!properties || json_type(properties) != JSON_OBJECT ||
+                  !json_object_get(properties, key))) {
         if (out_reason) {
           *out_reason = turbo_agent_schema_reason("unexpected property", key);
         }
@@ -173,10 +173,10 @@ static int turbo_agent_json_schema_validate(const json_value_t *value,
     }
   }
 
-  items = turbo_json_object_get(schema, "items");
-  if (items && turbo_json_type(value) == TURBO_JSON_ARRAY) {
-    for (i = 0; i < turbo_json_array_size(value); ++i) {
-      const json_value_t *item = turbo_json_array_get(value, i);
+  items = json_object_get(schema, "items");
+  if (items && json_type(value) == JSON_ARRAY) {
+    for (i = 0; i < json_array_size(value); ++i) {
+      const json_value_t *item = json_array_get(value, i);
       char *child_reason = NULL;
       if (!turbo_agent_json_schema_validate(item, items, &child_reason)) {
         if (out_reason) {
@@ -218,9 +218,8 @@ CXX_C_API int turbo_agent_structured_output_valid_for_state(const turbo_agent_t 
     return 0;
   }
 
-  if (turbo_parse_json((const uint8_t *)agent->structured_output_schema_json,
-                       strlen(agent->structured_output_schema_json), &schema) != 0) {
-    turbo_free_json(&parsed);
+  if (((schema = json_parse((const char *)((const uint8_t *)agent->structured_output_schema_json), (strlen(agent->structured_output_schema_json)))) ? 0 : -1) != 0) {
+    json_free(parsed); parsed = NULL;
     if (out_reason) {
       *out_reason = turbo_agent_util_strdup(
           "failed to parse structured output schema");
@@ -229,8 +228,8 @@ CXX_C_API int turbo_agent_structured_output_valid_for_state(const turbo_agent_t 
   }
 
   valid = turbo_agent_json_schema_validate(parsed, schema, out_reason);
-  turbo_free_json(&schema);
-  turbo_free_json(&parsed);
+  json_free(schema); schema = NULL;
+  json_free(parsed); parsed = NULL;
   return valid;
 }
 
@@ -256,7 +255,7 @@ CXX_C_API json_value_t *turbo_agent_build_structured_retry_state(const json_valu
 
   input = turbo_agent_state_get_array(retry_state, "input");
   if (!input) {
-    turbo_free_json(&retry_state);
+    json_free(retry_state); retry_state = NULL;
     return NULL;
   }
 
@@ -268,17 +267,17 @@ CXX_C_API json_value_t *turbo_agent_build_structured_retry_state(const json_valu
                                     (unsigned long)(attempt_index + 1));
   }
   if (!prompt) {
-    turbo_free_json(&retry_state);
+    json_free(retry_state); retry_state = NULL;
     return NULL;
   }
 
   message = turbo_prompt_message_create("user", prompt);
   tstr_free(prompt);
   if (!message) {
-    turbo_free_json(&retry_state);
+    json_free(retry_state); retry_state = NULL;
     return NULL;
   }
 
-  turbo_json_array_add(input, message);
+  json_array_add(input, message);
   return retry_state;
 }

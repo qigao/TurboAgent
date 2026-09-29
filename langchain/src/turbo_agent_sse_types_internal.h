@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_SSE_TYPES_INTERNAL_H
 #define TURBO_AGENT_SSE_TYPES_INTERNAL_H
 
+#include <stddef.h>
+
 #include "turbo_agent_sse.h"
 
 #ifdef __cplusplus

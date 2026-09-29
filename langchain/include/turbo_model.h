@@ -2,7 +2,7 @@
 #define TURBO_MODEL_H
 
 #include <platform.h>
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 #include "turbo_runtime_json.h"
 #include "turbo_tool_registry.h"

@@ -5,6 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void turbo_agent_remote_session_json_free(json_value_t **value) {
+  if (!value || !*value) {
+    return;
+  }
+  json_free(*value);
+  *value = NULL;
+}
+
 static char *turbo_agent_remote_session_strdup_or_null(const char *value) {
   return (char *)turbo_agent_util_strdup(value);
 }
@@ -40,14 +48,14 @@ static int turbo_agent_remote_session_capture_summary(turbo_agent_remote_session
   if (!session || !summary) {
     return -1;
   }
-  thread_id = turbo_json_get_string(summary, "thread_id");
-  run_id = turbo_json_get_string(summary, "run_id");
-  checkpoint_value = turbo_json_object_get(summary, "checkpoint_id");
+  thread_id = json_get_string(summary, "thread_id");
+  run_id = json_get_string(summary, "run_id");
+  checkpoint_value = json_object_get(summary, "checkpoint_id");
   if (!thread_id || !run_id) {
     return -1;
   }
-  if (checkpoint_value && turbo_json_type(checkpoint_value) == TURBO_JSON_STRING) {
-    checkpoint_id = turbo_json_get_string(summary, "checkpoint_id");
+  if (checkpoint_value && json_type(checkpoint_value) == JSON_STRING) {
+    checkpoint_id = json_get_string(summary, "checkpoint_id");
   }
 
   turbo_agent_remote_session_replace_string(&session->thread_id, thread_id);
@@ -97,7 +105,7 @@ static int turbo_agent_remote_session_call_start(
       session->client, graph_name, state, options, thread_id, out_summary_json, out_state,
       &error_json);
   tstr_free(thread_id);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   if (rc != 0) {
     return rc;
   }
@@ -137,7 +145,7 @@ static int turbo_agent_remote_session_call_resume(
         out_summary_json, out_state, &error_json);
   }
   tstr_free(owned_checkpoint_id);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   if (rc != 0) {
     return rc;
   }
@@ -175,7 +183,7 @@ static int turbo_agent_remote_session_call_thread_command(
         &error_json);
   }
   tstr_free(owned_thread_id);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   if (rc != 0) {
     return rc;
   }
@@ -198,18 +206,18 @@ static int turbo_agent_remote_session_get_observability_object(
 
   rc = turbo_agent_remote_session_get_observability_index(session, &index_json);
   if (rc != 0 || !index_json) {
-    turbo_free_json(&index_json);
+    turbo_agent_remote_session_json_free(&index_json);
     return rc;
   }
 
-  field_json = turbo_json_object_get(index_json, field_name);
-  if (!field_json || turbo_json_type(field_json) != TURBO_JSON_OBJECT) {
-    turbo_free_json(&index_json);
+  field_json = json_object_get(index_json, field_name);
+  if (!field_json || json_type(field_json) != JSON_OBJECT) {
+    turbo_agent_remote_session_json_free(&index_json);
     return -1;
   }
 
-  *out_object_json = turbo_json_clone(field_json);
-  turbo_free_json(&index_json);
+  *out_object_json = json_clone(field_json);
+  turbo_agent_remote_session_json_free(&index_json);
   return *out_object_json ? 0 : -1;
 }
 
@@ -230,15 +238,15 @@ static int turbo_agent_remote_session_get_supervisor_array_json_local(
   if (turbo_agent_remote_session_get_thread_state_json_value(session, &state_json_value) != 0 || !state_json_value) {
     goto cleanup;
   }
-  state_json = turbo_json_clone(state_json_value);
+  state_json = json_clone(state_json_value);
   if (!state_json) {
     goto cleanup;
   }
   selected = selector(state_json);
-  if (selected && turbo_json_type(selected) == TURBO_JSON_ARRAY) {
-    array_json = turbo_json_clone(selected);
+  if (selected && json_type(selected) == JSON_ARRAY) {
+    array_json = json_clone(selected);
   } else {
-    array_json = turbo_json_create_array();
+    array_json = json_create_array();
   }
   if (!array_json) {
     goto cleanup;
@@ -248,8 +256,8 @@ static int turbo_agent_remote_session_get_supervisor_array_json_local(
   rc = 0;
 
 cleanup:
-  turbo_free_json(&array_json);
-  turbo_free_json(&state_json);
+  turbo_agent_remote_session_json_free(&array_json);
+  turbo_agent_remote_session_json_free(&state_json);
   turbo_runtime_json_destroy(state_json_value);
   return rc;
 }
@@ -278,7 +286,7 @@ static int turbo_agent_remote_session_build_supervisor_inspect_local(
   if (turbo_agent_remote_session_get_thread_state_json_value(session, &state_json_value) != 0 || !state_json_value) {
     goto cleanup;
   }
-  state_json = turbo_json_clone(state_json_value);
+  state_json = json_clone(state_json_value);
   if (!state_json) {
     goto cleanup;
   }
@@ -287,39 +295,39 @@ static int turbo_agent_remote_session_build_supervisor_inspect_local(
   if (!control_json_value || !workflow_json_value) {
     goto cleanup;
   }
-  control_json = turbo_json_clone(control_json_value);
-  workflow_json = turbo_json_clone(workflow_json_value);
+  control_json = json_clone(control_json_value);
+  workflow_json = json_clone(workflow_json_value);
   if (!control_json || !workflow_json) {
     goto cleanup;
   }
 
   state_inbox = turbo_agent_state_supervisor_inbox(state_json);
   state_history = turbo_agent_state_supervisor_handoff_history(state_json);
-  control_supervisor = turbo_json_object_get(control_json, "supervisor");
+  control_supervisor = json_object_get(control_json, "supervisor");
 
-  inbox_json = state_inbox && turbo_json_type(state_inbox) == TURBO_JSON_ARRAY
-                   ? turbo_json_clone(state_inbox)
-                   : turbo_json_create_array();
-  history_json = state_history && turbo_json_type(state_history) == TURBO_JSON_ARRAY
-                     ? turbo_json_clone(state_history)
-                     : turbo_json_create_array();
-  supervisor_json = control_supervisor && turbo_json_type(control_supervisor) == TURBO_JSON_OBJECT
-                        ? turbo_json_clone(control_supervisor)
-                        : turbo_json_create_object();
-  inspect_json = turbo_json_create_object();
+  inbox_json = state_inbox && json_type(state_inbox) == JSON_ARRAY
+                   ? json_clone(state_inbox)
+                   : json_create_array();
+  history_json = state_history && json_type(state_history) == JSON_ARRAY
+                     ? json_clone(state_history)
+                     : json_create_array();
+  supervisor_json = control_supervisor && json_type(control_supervisor) == JSON_OBJECT
+                        ? json_clone(control_supervisor)
+                        : json_create_object();
+  inspect_json = json_create_object();
   if (!inbox_json || !history_json || !supervisor_json || !inspect_json) {
     goto cleanup;
   }
 
-  turbo_json_object_add(inspect_json, "supervisor", supervisor_json);
+  json_object_add(inspect_json, "supervisor", supervisor_json);
   supervisor_json = NULL;
-  turbo_json_object_add(inspect_json, "inbox", inbox_json);
+  json_object_add(inspect_json, "inbox", inbox_json);
   inbox_json = NULL;
-  turbo_json_object_add(inspect_json, "handoff_history", history_json);
+  json_object_add(inspect_json, "handoff_history", history_json);
   history_json = NULL;
-  turbo_json_object_add(inspect_json, "control_snapshot", control_json);
+  json_object_add(inspect_json, "control_snapshot", control_json);
   control_json = NULL;
-  turbo_json_object_add(inspect_json, "workflow_snapshot", workflow_json);
+  json_object_add(inspect_json, "workflow_snapshot", workflow_json);
   workflow_json = NULL;
 
   *out_inspect_json = inspect_json;
@@ -327,13 +335,13 @@ static int turbo_agent_remote_session_build_supervisor_inspect_local(
   rc = 0;
 
 cleanup:
-  turbo_free_json(&supervisor_json);
-  turbo_free_json(&history_json);
-  turbo_free_json(&inbox_json);
-  turbo_free_json(&inspect_json);
-  turbo_free_json(&workflow_json);
-  turbo_free_json(&control_json);
-  turbo_free_json(&state_json);
+  turbo_agent_remote_session_json_free(&supervisor_json);
+  turbo_agent_remote_session_json_free(&history_json);
+  turbo_agent_remote_session_json_free(&inbox_json);
+  turbo_agent_remote_session_json_free(&inspect_json);
+  turbo_agent_remote_session_json_free(&workflow_json);
+  turbo_agent_remote_session_json_free(&control_json);
+  turbo_agent_remote_session_json_free(&state_json);
   turbo_runtime_json_destroy(workflow_json_value);
   turbo_runtime_json_destroy(control_json_value);
   turbo_runtime_json_destroy(state_json_value);
@@ -361,7 +369,7 @@ static int turbo_agent_remote_session_build_orchestration_inspect_local(
   }
   if (turbo_agent_remote_session_get_thread_timeline_json_value(session, &thread_timeline_json_value) == 0 &&
       thread_timeline_json_value) {
-    thread_timeline_json = turbo_json_clone(thread_timeline_json_value);
+    thread_timeline_json = json_clone(thread_timeline_json_value);
     if (!thread_timeline_json) {
       goto cleanup;
     }
@@ -381,29 +389,29 @@ static int turbo_agent_remote_session_build_orchestration_inspect_local(
       goto cleanup;
     }
   } else {
-    child_runs_json = turbo_json_create_array();
+    child_runs_json = json_create_array();
   }
   if (!child_runs_json) {
     goto cleanup;
   }
 
-  inspect_json = turbo_json_create_object();
+  inspect_json = json_create_object();
   if (!inspect_json) {
     goto cleanup;
   }
-  turbo_json_object_add(inspect_json, "supervisor_inspect", supervisor_inspect_json);
+  json_object_add(inspect_json, "supervisor_inspect", supervisor_inspect_json);
   supervisor_inspect_json = NULL;
   if (thread_timeline_json) {
-    turbo_json_object_add(inspect_json, "thread_timeline", thread_timeline_json);
+    json_object_add(inspect_json, "thread_timeline", thread_timeline_json);
     thread_timeline_json = NULL;
   } else {
-    turbo_json_object_set_null(inspect_json, "thread_timeline");
+    json_object_set_null(inspect_json, "thread_timeline");
   }
-  turbo_json_object_add(inspect_json, "thread_lineage", thread_lineage_json);
+  json_object_add(inspect_json, "thread_lineage", thread_lineage_json);
   thread_lineage_json = NULL;
-  turbo_json_object_add(inspect_json, "branch_tree", branch_tree_json);
+  json_object_add(inspect_json, "branch_tree", branch_tree_json);
   branch_tree_json = NULL;
-  turbo_json_object_add(inspect_json, "child_runs", child_runs_json);
+  json_object_add(inspect_json, "child_runs", child_runs_json);
   child_runs_json = NULL;
 
   *out_inspect_json = inspect_json;
@@ -411,13 +419,13 @@ static int turbo_agent_remote_session_build_orchestration_inspect_local(
   rc = 0;
 
 cleanup:
-  turbo_free_json(&inspect_json);
-  turbo_free_json(&child_runs_json);
-  turbo_free_json(&branch_tree_json);
-  turbo_free_json(&thread_lineage_json);
-  turbo_free_json(&thread_timeline_json);
+  turbo_agent_remote_session_json_free(&inspect_json);
+  turbo_agent_remote_session_json_free(&child_runs_json);
+  turbo_agent_remote_session_json_free(&branch_tree_json);
+  turbo_agent_remote_session_json_free(&thread_lineage_json);
+  turbo_agent_remote_session_json_free(&thread_timeline_json);
   turbo_runtime_json_destroy(thread_timeline_json_value);
-  turbo_free_json(&supervisor_inspect_json);
+  turbo_agent_remote_session_json_free(&supervisor_inspect_json);
   return rc;
 }
 
@@ -427,14 +435,14 @@ static int turbo_agent_remote_session_clone_json_value_field(
   const json_value_t *field_value;
 
   if (!object || !field_name || !field_name[0] || !out_value ||
-      turbo_json_type(object) != TURBO_JSON_OBJECT) {
+      json_type(object) != JSON_OBJECT) {
     return -1;
   }
-  field_value = turbo_json_object_get(object, field_name);
+  field_value = json_object_get(object, field_name);
   if (!field_value) {
     return -1;
   }
-  *out_value = turbo_json_clone(field_value);
+  *out_value = json_clone(field_value);
   return *out_value ? 0 : -1;
 }
 
@@ -448,7 +456,7 @@ static int turbo_agent_remote_session_call_get_run_json(
   }
   rc = turbo_agent_runtime_remote_client_get_run(session->client, run_id, out_run_json,
                                                  &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -464,7 +472,7 @@ static int turbo_agent_remote_session_call_get_checkpoint_json(
   }
   rc = turbo_agent_runtime_remote_client_get_checkpoint(session->client, checkpoint_id,
                                                         out_checkpoint_json, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -479,7 +487,7 @@ static int turbo_agent_remote_session_call_list_checkpoints_json(
   }
   rc = turbo_agent_runtime_remote_client_list_checkpoints(session->client, run_id,
                                                           out_checkpoints_json, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -496,7 +504,7 @@ static int turbo_agent_remote_session_call_load_history_events_json_value(
   rc = turbo_agent_runtime_remote_client_load_history_events_json_value(session->client, run_id,
                                                                   checkpoint_id, out_events,
                                                                   &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -511,7 +519,7 @@ static int turbo_agent_remote_session_call_get_run_trace_events_json_value(
   }
   rc = turbo_agent_runtime_remote_client_get_run_trace_events_json_value(session->client, run_id,
                                                                    out_events, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -527,7 +535,7 @@ static int turbo_agent_remote_session_call_get_checkpoint_trace_events_json_valu
   rc = turbo_agent_runtime_remote_client_get_checkpoint_trace_events_json_value(session->client,
                                                                           checkpoint_id,
                                                                           out_events, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -538,7 +546,7 @@ static int turbo_agent_remote_session_json_value_object_set_string(
   if (!object || !key || !key[0]) {
     return -1;
   }
-  string_value = turbo_json_create_string(value);
+  string_value = json_create_string(value);
   if (!string_value ||
       turbo_runtime_json_object_set(object, key, string_value) != TURBO_RUNTIME_JSON_OK) {
     turbo_runtime_json_destroy(string_value);
@@ -555,7 +563,7 @@ static int turbo_agent_remote_session_json_value_object_set_clone(
   if (!object || !key || !key[0] || !value) {
     return -1;
   }
-  copy = turbo_json_clone(value);
+  copy = json_clone(value);
   if (!copy || turbo_runtime_json_object_set(object, key, copy) != TURBO_RUNTIME_JSON_OK) {
     turbo_runtime_json_destroy(copy);
     return -1;
@@ -598,7 +606,7 @@ static int turbo_agent_remote_session_observer_event_from_json_value(
   }
   *out_observer_event = NULL;
 
-  kind_value = turbo_json_object_get(raw_event, "kind");
+  kind_value = json_object_get(raw_event, "kind");
   kind = turbo_runtime_json_value_as_string(kind_value);
   if (kind && strcmp(kind, "model") == 0) {
     observer_type = "model_delta";
@@ -607,17 +615,17 @@ static int turbo_agent_remote_session_observer_event_from_json_value(
   } else if (kind && strcmp(kind, "trace") == 0) {
     observer_type = turbo_agent_remote_session_observer_type_for_trace_name(
         turbo_runtime_json_value_as_string(
-            turbo_json_object_get(raw_event, "name")));
+            json_object_get(raw_event, "name")));
   } else if (kind && strcmp(kind, "observer") == 0) {
     observer_type = turbo_runtime_json_value_as_string(
-        turbo_json_object_get(raw_event, "type"));
+        json_object_get(raw_event, "type"));
   }
 
   if (!observer_type) {
     return 0;
   }
 
-  observer_event = turbo_json_create_object();
+  observer_event = json_create_object();
   if (!observer_event ||
       turbo_agent_remote_session_json_value_object_set_string(observer_event, "kind", "observer") != 0 ||
       turbo_agent_remote_session_json_value_object_set_string(observer_event, "type", observer_type) != 0 ||
@@ -635,20 +643,20 @@ static int turbo_agent_remote_session_events_json_value_has_terminal_type(
   size_t i;
 
   if (!events_json_value || !terminal_type || terminal_type[0] == '\0' ||
-      turbo_json_type(events_json_value) != TURBO_JSON_ARRAY) {
+      json_type(events_json_value) != JSON_ARRAY) {
     return 0;
   }
   count = turbo_runtime_json_value_size(events_json_value);
   for (i = 0; i < count; ++i) {
     const json_value_t *raw_event =
-        turbo_json_array_get(events_json_value, i);
+        json_array_get(events_json_value, i);
     const char *type;
 
     if (!raw_event) {
       continue;
     }
     type = turbo_runtime_json_value_as_string(
-        turbo_json_object_get(raw_event, "type"));
+        json_object_get(raw_event, "type"));
     if (type && strcmp(type, terminal_type) == 0) {
       return 1;
     }
@@ -663,13 +671,13 @@ static int turbo_agent_remote_session_observe_events_json_value(
   size_t i;
 
   if (!events_json_value || !sink || !sink->callback ||
-      turbo_json_type(events_json_value) != TURBO_JSON_ARRAY) {
+      json_type(events_json_value) != JSON_ARRAY) {
     return -1;
   }
   count = turbo_runtime_json_value_size(events_json_value);
   for (i = 0; i < count; ++i) {
     const json_value_t *raw_event =
-        turbo_json_array_get(events_json_value, i);
+        json_array_get(events_json_value, i);
     json_value_t *observer_event = NULL;
     int rc;
 
@@ -699,15 +707,15 @@ static int turbo_agent_remote_session_observer_terminal_event_from_json(
     return -1;
   }
   *out_observer_event = NULL;
-  status = turbo_json_get_string(record_json, "status");
+  status = json_get_string(record_json, "status");
   if (!status || (strcmp(status, "interrupted") != 0 && strcmp(status, "completed") != 0)) {
     return 0;
   }
-  record_json_value = turbo_json_clone(record_json);
+  record_json_value = json_clone(record_json);
   if (!record_json_value) {
     return -1;
   }
-  observer_event = turbo_json_create_object();
+  observer_event = json_create_object();
   if (!observer_event ||
       turbo_agent_remote_session_json_value_object_set_string(observer_event, "kind", "observer") != 0 ||
       turbo_agent_remote_session_json_value_object_set_string(observer_event, "type", status) != 0 ||
@@ -737,7 +745,7 @@ static int turbo_agent_remote_session_observe_terminal_record_json(
     return rc;
   }
   type = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(observer_event, "type"));
+      json_object_get(observer_event, "type"));
   if (!events_json_value || !type ||
       !turbo_agent_remote_session_events_json_value_has_terminal_type(events_json_value, type)) {
     sink->callback(observer_event, sink->user_data);
@@ -756,14 +764,14 @@ static int turbo_agent_remote_session_extract_result_json(
     return -1;
   }
   *out_json = NULL;
-  json_state = turbo_json_clone(state);
+  json_state = json_clone(state);
   if (!json_state) {
     return -1;
   }
   rc = turbo_agent_state_parse_final_output_json(json_state, &result_json);
-  turbo_free_json(&json_state);
+  turbo_agent_remote_session_json_free(&json_state);
   if (rc != 0 || !result_json) {
-    turbo_free_json(&result_json);
+    turbo_agent_remote_session_json_free(&result_json);
     return -1;
   }
   *out_json = result_json;
@@ -774,7 +782,7 @@ CXX_C_API turbo_agent_remote_session_t *
 turbo_agent_remote_session_create(const turbo_agent_remote_session_config_t *config) {
   turbo_agent_remote_session_t *session;
 
-  if (!config || (!config->client && (!config->client_config.rpc_client &&
+  if (!config || (!config->client && (!config->client_config.http_client &&
                                       (!config->client_config.url ||
                                        !config->client_config.url[0])))) {
     return NULL;
@@ -846,7 +854,7 @@ CXX_C_API int turbo_agent_remote_session_get_startup_diagnostics(
   }
   rc = turbo_agent_runtime_remote_client_get_startup_diagnostics(
       session->client, graph_name, out_diagnostics_json, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -946,13 +954,13 @@ CXX_C_API int turbo_agent_remote_session_invoke_text(
                                              out_summary_json, &out_state);
   if (rc != 0) {
     turbo_runtime_json_destroy(out_state);
-    turbo_free_json(out_summary_json);
+    turbo_agent_remote_session_json_free(out_summary_json);
     return rc;
   }
   text = turbo_agent_session_result_text(out_state);
   turbo_runtime_json_destroy(out_state);
   if (!text) {
-    turbo_free_json(out_summary_json);
+    turbo_agent_remote_session_json_free(out_summary_json);
     return -1;
   }
   *out_text = text;
@@ -976,13 +984,13 @@ CXX_C_API int turbo_agent_remote_session_invoke_messages_text(
                                                  out_summary_json, &out_state);
   if (rc != 0) {
     turbo_runtime_json_destroy(out_state);
-    turbo_free_json(out_summary_json);
+    turbo_agent_remote_session_json_free(out_summary_json);
     return rc;
   }
   text = turbo_agent_session_result_text(out_state);
   turbo_runtime_json_destroy(out_state);
   if (!text) {
-    turbo_free_json(out_summary_json);
+    turbo_agent_remote_session_json_free(out_summary_json);
     return -1;
   }
   *out_text = text;
@@ -1005,14 +1013,14 @@ CXX_C_API int turbo_agent_remote_session_invoke_json(
                                              out_summary_json, &out_state);
   if (rc != 0) {
     turbo_runtime_json_destroy(out_state);
-    turbo_free_json(out_summary_json);
+    turbo_agent_remote_session_json_free(out_summary_json);
     return rc;
   }
   rc = turbo_agent_remote_session_extract_result_json(out_state, out_json);
   turbo_runtime_json_destroy(out_state);
   if (rc != 0 || !*out_json) {
-    turbo_free_json(out_summary_json);
-    turbo_free_json(out_json);
+    turbo_agent_remote_session_json_free(out_summary_json);
+    turbo_agent_remote_session_json_free(out_json);
     return -1;
   }
   return 0;
@@ -1034,14 +1042,14 @@ CXX_C_API int turbo_agent_remote_session_invoke_messages_json(
                                                  out_summary_json, &out_state);
   if (rc != 0) {
     turbo_runtime_json_destroy(out_state);
-    turbo_free_json(out_summary_json);
+    turbo_agent_remote_session_json_free(out_summary_json);
     return rc;
   }
   rc = turbo_agent_remote_session_extract_result_json(out_state, out_json);
   turbo_runtime_json_destroy(out_state);
   if (rc != 0 || !*out_json) {
-    turbo_free_json(out_summary_json);
-    turbo_free_json(out_json);
+    turbo_agent_remote_session_json_free(out_summary_json);
+    turbo_agent_remote_session_json_free(out_json);
     return -1;
   }
   return 0;
@@ -1059,7 +1067,7 @@ CXX_C_API int turbo_agent_remote_session_get_thread_state_json_value(
   }
   rc = turbo_agent_runtime_remote_client_get_thread_state_json_value(session->client, thread_id,
                                                                out_state, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1074,7 +1082,7 @@ CXX_C_API int turbo_agent_remote_session_memory_delete_record(
   }
   rc = turbo_agent_runtime_remote_client_delete_memory_record(session->client, memory_namespace,
                                                               key, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1089,7 +1097,7 @@ CXX_C_API int turbo_agent_remote_session_memory_list_records(
   }
   rc = turbo_agent_runtime_remote_client_list_memory_records(session->client, namespace_prefix,
                                                              out_records_json, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1105,7 +1113,7 @@ CXX_C_API int turbo_agent_remote_session_memory_get_record(
   }
   rc = turbo_agent_runtime_remote_client_get_memory_record(session->client, memory_namespace, key,
                                                            out_record_json, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1120,8 +1128,8 @@ CXX_C_API int turbo_agent_remote_session_memory_put_record(
   }
   rc = turbo_agent_runtime_remote_client_put_memory_record(session->client, record_json,
                                                            &stored_record_json, &error_json);
-  turbo_free_json(&stored_record_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&stored_record_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1135,7 +1143,7 @@ CXX_C_API int turbo_agent_remote_session_memory_validate_record(
   }
   rc = turbo_agent_runtime_remote_client_validate_memory_record(session->client, record_json,
                                                                 out_valid, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1151,7 +1159,7 @@ CXX_C_API int turbo_agent_remote_session_memory_query_records(
   rc = turbo_agent_runtime_remote_client_query_memory_records(
       session->client, namespace_prefix, kind, key_prefix, text_substring, out_records_json,
       &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1167,7 +1175,7 @@ CXX_C_API int turbo_agent_remote_session_memory_query_records_ex(
   rc = turbo_agent_runtime_remote_client_query_memory_records_ex(session->client, options,
                                                                   out_records_json,
                                                                   &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1222,7 +1230,7 @@ CXX_C_API int turbo_agent_remote_session_get_checkpoint_context(
   rc = turbo_agent_runtime_remote_client_get_checkpoint_context(session->client,
                                                                 resolved_checkpoint_id,
                                                                 out_context_json, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1239,7 +1247,7 @@ CXX_C_API int turbo_agent_remote_session_get_observability_index(
   rc = turbo_agent_runtime_remote_client_get_thread_observability_index(session->client, thread_id,
                                                                         out_index_json,
                                                                         &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1255,7 +1263,7 @@ CXX_C_API int turbo_agent_remote_session_get_thread_timeline_json_value(
   }
   rc = turbo_agent_runtime_remote_client_get_thread_timeline_json_value(session->client, thread_id,
                                                                   out_timeline, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1289,11 +1297,11 @@ CXX_C_API int turbo_agent_remote_session_replay_thread_history_json_value(
   }
   if (turbo_agent_remote_session_load_thread_history_events_json_value(session, &events) != 0 ||
       !events ||
-      turbo_json_type(events) != TURBO_JSON_ARRAY) {
+      json_type(events) != JSON_ARRAY) {
     turbo_runtime_json_destroy(events);
     return -1;
   }
-  for (index = 0; (event = turbo_json_array_get(events, index)) != NULL; ++index) {
+  for (index = 0; (event = json_array_get(events, index)) != NULL; ++index) {
     event_sink(event, event_sink_user_data);
   }
   turbo_runtime_json_destroy(events);
@@ -1313,26 +1321,26 @@ CXX_C_API int turbo_agent_remote_session_observe_thread_history_json_value(
   }
   rc = turbo_agent_remote_session_get_observability_index(session, &index_json);
   if (rc != 0 || !index_json) {
-    turbo_free_json(&index_json);
+    turbo_agent_remote_session_json_free(&index_json);
     return -1;
   }
-  events_json = turbo_json_object_get(index_json, "history_events");
-  if (!events_json || turbo_json_type(events_json) != TURBO_JSON_ARRAY) {
-    turbo_free_json(&index_json);
+  events_json = json_object_get(index_json, "history_events");
+  if (!events_json || json_type(events_json) != JSON_ARRAY) {
+    turbo_agent_remote_session_json_free(&index_json);
     return -1;
   }
-  events_json_value = turbo_json_clone(events_json);
+  events_json_value = json_clone(events_json);
   if (!events_json_value) {
-    turbo_free_json(&index_json);
+    turbo_agent_remote_session_json_free(&index_json);
     return -1;
   }
   rc = turbo_agent_remote_session_observe_events_json_value(events_json_value, sink);
   if (rc == 0) {
-    record_json = turbo_json_object_get(index_json, "pending_run");
-    if (!record_json || turbo_json_type(record_json) != TURBO_JSON_OBJECT) {
-      record_json = turbo_json_object_get(index_json, "latest_run");
+    record_json = json_object_get(index_json, "pending_run");
+    if (!record_json || json_type(record_json) != JSON_OBJECT) {
+      record_json = json_object_get(index_json, "latest_run");
     }
-    if (record_json && turbo_json_type(record_json) == TURBO_JSON_OBJECT) {
+    if (record_json && json_type(record_json) == JSON_OBJECT) {
       rc = turbo_agent_remote_session_observe_terminal_record_json(events_json_value, record_json, sink);
       if (rc > 0) {
         rc = 0;
@@ -1340,7 +1348,7 @@ CXX_C_API int turbo_agent_remote_session_observe_thread_history_json_value(
     }
   }
   turbo_runtime_json_destroy(events_json_value);
-  turbo_free_json(&index_json);
+  turbo_agent_remote_session_json_free(&index_json);
   return rc;
 }
 
@@ -1355,16 +1363,16 @@ CXX_C_API int turbo_agent_remote_session_get_thread_trace_events_json_value(
   }
   rc = turbo_agent_remote_session_get_observability_index(session, &index_json);
   if (rc != 0 || !index_json) {
-    turbo_free_json(&index_json);
+    turbo_agent_remote_session_json_free(&index_json);
     return -1;
   }
-  trace_events_json = turbo_json_object_get(index_json, "trace_events");
-  if (!trace_events_json || turbo_json_type(trace_events_json) != TURBO_JSON_ARRAY) {
-    turbo_free_json(&index_json);
+  trace_events_json = json_object_get(index_json, "trace_events");
+  if (!trace_events_json || json_type(trace_events_json) != JSON_ARRAY) {
+    turbo_agent_remote_session_json_free(&index_json);
     return -1;
   }
-  *out_events = turbo_json_clone(trace_events_json);
-  turbo_free_json(&index_json);
+  *out_events = json_clone(trace_events_json);
+  turbo_agent_remote_session_json_free(&index_json);
   return *out_events ? 0 : -1;
 }
 
@@ -1380,7 +1388,7 @@ CXX_C_API int turbo_agent_remote_session_get_branch_tree(
   }
   rc = turbo_agent_runtime_remote_client_get_branch_tree(session->client, thread_id,
                                                          out_branch_tree_json, &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1413,7 +1421,7 @@ CXX_C_API int turbo_agent_remote_session_get_supervisor_inspect(
   }
   rc = turbo_agent_runtime_remote_client_get_supervisor_inspect(session->client, session->thread_id,
                                                                 out_inspect_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1432,7 +1440,7 @@ CXX_C_API int turbo_agent_remote_session_list_child_runs(
   rc = turbo_agent_runtime_remote_client_list_child_runs(session->client,
                                                          resolved_parent_agent_run_id, out_runs_json,
                                                          &error_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1447,7 +1455,7 @@ CXX_C_API int turbo_agent_remote_session_get_orchestration_inspect(
   }
   rc = turbo_agent_runtime_remote_client_get_orchestration_inspect(
       session->client, session->thread_id, out_inspect_json);
-  turbo_free_json(&error_json);
+  turbo_agent_remote_session_json_free(&error_json);
   return rc;
 }
 
@@ -1628,7 +1636,7 @@ CXX_C_API int turbo_agent_remote_session_get_child_inspect(
       !history_events_json_value) {
     goto cleanup;
   }
-  history_events_json = turbo_json_clone(history_events_json_value);
+  history_events_json = json_clone(history_events_json_value);
   if (!history_events_json) {
     goto cleanup;
   }
@@ -1637,76 +1645,76 @@ CXX_C_API int turbo_agent_remote_session_get_child_inspect(
       !trace_events_json_value) {
     goto cleanup;
   }
-  trace_events_json = turbo_json_clone(trace_events_json_value);
+  trace_events_json = json_clone(trace_events_json_value);
   if (!trace_events_json) {
     goto cleanup;
   }
   if (turbo_agent_remote_session_get_child_thread_timeline_json_value(session, output_item,
                                                                 &thread_timeline_json_value) == 0 &&
       thread_timeline_json_value) {
-    thread_timeline_json = turbo_json_clone(thread_timeline_json_value);
+    thread_timeline_json = json_clone(thread_timeline_json_value);
     if (!thread_timeline_json) {
       goto cleanup;
     }
   }
   if (turbo_agent_remote_session_get_child_branch_tree(session, output_item, &branch_tree_json) !=
       0) {
-    turbo_free_json(&branch_tree_json);
+    turbo_agent_remote_session_json_free(&branch_tree_json);
   }
 
-  inspect_json = turbo_json_create_object();
+  inspect_json = json_create_object();
   if (!inspect_json) {
     goto cleanup;
   }
-  turbo_json_object_add(inspect_json, "run", run_json);
+  json_object_add(inspect_json, "run", run_json);
   run_json = NULL;
-  turbo_json_object_add(inspect_json, "checkpoints", checkpoints_json);
+  json_object_add(inspect_json, "checkpoints", checkpoints_json);
   checkpoints_json = NULL;
   if (latest_checkpoint_json) {
-    turbo_json_object_add(inspect_json, "latest_checkpoint", latest_checkpoint_json);
+    json_object_add(inspect_json, "latest_checkpoint", latest_checkpoint_json);
     latest_checkpoint_json = NULL;
   } else {
-    turbo_json_object_set_null(inspect_json, "latest_checkpoint");
+    json_object_set_null(inspect_json, "latest_checkpoint");
   }
   if (checkpoint_context_json) {
-    turbo_json_object_add(inspect_json, "checkpoint_context", checkpoint_context_json);
+    json_object_add(inspect_json, "checkpoint_context", checkpoint_context_json);
     checkpoint_context_json = NULL;
   } else {
-    turbo_json_object_set_null(inspect_json, "checkpoint_context");
+    json_object_set_null(inspect_json, "checkpoint_context");
   }
-  turbo_json_object_add(inspect_json, "history_events", history_events_json);
+  json_object_add(inspect_json, "history_events", history_events_json);
   history_events_json = NULL;
-  turbo_json_object_add(inspect_json, "trace_events", trace_events_json);
+  json_object_add(inspect_json, "trace_events", trace_events_json);
   trace_events_json = NULL;
   if (thread_timeline_json) {
-    turbo_json_object_add(inspect_json, "thread_timeline", thread_timeline_json);
+    json_object_add(inspect_json, "thread_timeline", thread_timeline_json);
     thread_timeline_json = NULL;
   } else {
-    turbo_json_object_set_null(inspect_json, "thread_timeline");
+    json_object_set_null(inspect_json, "thread_timeline");
   }
   if (branch_tree_json) {
-    turbo_json_object_add(inspect_json, "branch_tree", branch_tree_json);
+    json_object_add(inspect_json, "branch_tree", branch_tree_json);
     branch_tree_json = NULL;
   } else {
-    turbo_json_object_set_null(inspect_json, "branch_tree");
+    json_object_set_null(inspect_json, "branch_tree");
   }
 
   *out_inspect_json = inspect_json;
   inspect_json = NULL;
 
 cleanup:
-  turbo_free_json(&inspect_json);
-  turbo_free_json(&branch_tree_json);
-  turbo_free_json(&thread_timeline_json);
+  turbo_agent_remote_session_json_free(&inspect_json);
+  turbo_agent_remote_session_json_free(&branch_tree_json);
+  turbo_agent_remote_session_json_free(&thread_timeline_json);
   turbo_runtime_json_destroy(thread_timeline_json_value);
-  turbo_free_json(&trace_events_json);
+  turbo_agent_remote_session_json_free(&trace_events_json);
   turbo_runtime_json_destroy(trace_events_json_value);
-  turbo_free_json(&history_events_json);
+  turbo_agent_remote_session_json_free(&history_events_json);
   turbo_runtime_json_destroy(history_events_json_value);
-  turbo_free_json(&checkpoint_context_json);
-  turbo_free_json(&latest_checkpoint_json);
-  turbo_free_json(&checkpoints_json);
-  turbo_free_json(&run_json);
+  turbo_agent_remote_session_json_free(&checkpoint_context_json);
+  turbo_agent_remote_session_json_free(&latest_checkpoint_json);
+  turbo_agent_remote_session_json_free(&checkpoints_json);
+  turbo_agent_remote_session_json_free(&run_json);
   return *out_inspect_json ? 0 : -1;
 }
 
@@ -1731,7 +1739,7 @@ CXX_C_API int turbo_agent_remote_session_get_child_orchestration_inspect(
     goto cleanup;
   }
 
-  inspect_json = turbo_json_create_object();
+  inspect_json = json_create_object();
   if (!inspect_json) {
     goto cleanup;
   }
@@ -1743,31 +1751,31 @@ CXX_C_API int turbo_agent_remote_session_get_child_orchestration_inspect(
   call_frame_id = turbo_agent_state_tool_result_call_frame_id(output_item);
 
   if (parent_agent_run_id && parent_agent_run_id[0] != '\0') {
-    turbo_json_object_set_string(inspect_json, "parent_agent_run_id", parent_agent_run_id);
+    json_object_set_string(inspect_json, "parent_agent_run_id", parent_agent_run_id);
   } else {
-    turbo_json_object_set_null(inspect_json, "parent_agent_run_id");
+    json_object_set_null(inspect_json, "parent_agent_run_id");
   }
   if (parent_tool_call_id && parent_tool_call_id[0] != '\0') {
-    turbo_json_object_set_string(inspect_json, "parent_tool_call_id", parent_tool_call_id);
+    json_object_set_string(inspect_json, "parent_tool_call_id", parent_tool_call_id);
   } else {
-    turbo_json_object_set_null(inspect_json, "parent_tool_call_id");
+    json_object_set_null(inspect_json, "parent_tool_call_id");
   }
   if (parent_tool_name && parent_tool_name[0] != '\0') {
-    turbo_json_object_set_string(inspect_json, "parent_tool_name", parent_tool_name);
+    json_object_set_string(inspect_json, "parent_tool_name", parent_tool_name);
   } else {
-    turbo_json_object_set_null(inspect_json, "parent_tool_name");
+    json_object_set_null(inspect_json, "parent_tool_name");
   }
   if (parent_graph_run_id && parent_graph_run_id[0] != '\0') {
-    turbo_json_object_set_string(inspect_json, "parent_graph_run_id", parent_graph_run_id);
+    json_object_set_string(inspect_json, "parent_graph_run_id", parent_graph_run_id);
   } else {
-    turbo_json_object_set_null(inspect_json, "parent_graph_run_id");
+    json_object_set_null(inspect_json, "parent_graph_run_id");
   }
   if (call_frame_id && call_frame_id[0] != '\0') {
-    turbo_json_object_set_string(inspect_json, "call_frame_id", call_frame_id);
+    json_object_set_string(inspect_json, "call_frame_id", call_frame_id);
   } else {
-    turbo_json_object_set_null(inspect_json, "call_frame_id");
+    json_object_set_null(inspect_json, "call_frame_id");
   }
-  turbo_json_object_add(inspect_json, "child_inspect", child_inspect_json);
+  json_object_add(inspect_json, "child_inspect", child_inspect_json);
   child_inspect_json = NULL;
 
   *out_inspect_json = inspect_json;
@@ -1775,8 +1783,8 @@ CXX_C_API int turbo_agent_remote_session_get_child_orchestration_inspect(
   return 0;
 
 cleanup:
-  turbo_free_json(&inspect_json);
-  turbo_free_json(&child_inspect_json);
+  turbo_agent_remote_session_json_free(&inspect_json);
+  turbo_agent_remote_session_json_free(&child_inspect_json);
   return -1;
 }
 

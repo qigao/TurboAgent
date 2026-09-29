@@ -1,4 +1,5 @@
 #include "turbo_agent_core_internal.h"
+#include <json_parser.h>
 #include "turbo_agent_util_internal.h"
 
 #include <stdlib.h>
@@ -126,7 +127,7 @@ static int turbo_agent_runnable_pipe_invoke(const json_value_t *input, json_valu
   }
 
   rc = turbo_agent_runnable_invoke(pipe->second, middle, out_output);
-  turbo_free_json(&middle);
+  json_free(middle); middle = NULL;
   return rc;
 }
 

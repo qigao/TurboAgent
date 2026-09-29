@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent_knowledge_store.h"
 
 #include <stdio.h>
@@ -55,7 +56,7 @@ static char *knowledge_test_temp_dir(void) {
 #else
   snprintf(path, sizeof(path), "/tmp/turbonet_knowledge_%lu", (unsigned long)getpid());
 #endif
-  check_int_eq(TEST_MKDIR(path), 0);
+  check_equal(TEST_MKDIR(path), 0);
   return knowledge_test_strdup(path);
 }
 
@@ -80,41 +81,41 @@ static char *knowledge_test_json_path(const char *path) {
 static void knowledge_test_write_file(const char *path, const char *text) {
   FILE *file = fopen(path, "wb");
   check_not_null(file);
-  check_size_eq(fwrite(text, 1, strlen(text), file), strlen(text));
-  check_int_eq(fclose(file), 0);
+  check_equal(fwrite(text, 1, strlen(text), file), strlen(text));
+  check_equal(fclose(file), 0);
 }
 
 static void knowledge_test_write_binary_file(const char *path) {
   static const unsigned char bytes[] = {'a', '\0', 'b'};
   FILE *file = fopen(path, "wb");
   check_not_null(file);
-  check_size_eq(fwrite(bytes, 1, sizeof(bytes), file), sizeof(bytes));
-  check_int_eq(fclose(file), 0);
+  check_equal(fwrite(bytes, 1, sizeof(bytes), file), sizeof(bytes));
+  check_equal(fclose(file), 0);
 }
 
 static void knowledge_test_json_value_set_string(json_value_t *object,
                                            const char *key, const char *value) {
   json_value_t *field =
-      turbo_json_create_string(value);
+      json_create_string(value);
   check_not_null(field);
-  check_int_eq(turbo_runtime_json_object_set(object, key, field),
+  check_equal(turbo_runtime_json_object_set(object, key, field),
                TURBO_RUNTIME_JSON_OK);
 }
 
 static void knowledge_test_json_value_set_int64(json_value_t *object,
                                           const char *key, int64_t value) {
   json_value_t *field =
-      turbo_json_create_int64(value);
+      json_create_int64(value);
   check_not_null(field);
-  check_int_eq(turbo_runtime_json_object_set(object, key, field),
+  check_equal(turbo_runtime_json_object_set(object, key, field),
                TURBO_RUNTIME_JSON_OK);
 }
 
 static const json_value_t *knowledge_test_first_result(const json_value_t *results) {
   check_not_null(results);
-  check_int_eq((int)turbo_json_type(results), TURBO_JSON_ARRAY);
-  check_true(turbo_json_array_size(results) > 0);
-  return turbo_json_array_get(results, 0);
+  check_equal((int)json_type(results), JSON_ARRAY);
+  check_true(json_array_size(results) > 0);
+  return json_array_get(results, 0);
 }
 
 static const json_value_t *knowledge_test_find_kind_stat(const json_value_t *kinds,
@@ -122,10 +123,10 @@ static const json_value_t *knowledge_test_find_kind_stat(const json_value_t *kin
   size_t i;
 
   check_not_null(kinds);
-  check_int_eq((int)turbo_json_type(kinds), TURBO_JSON_ARRAY);
-  for (i = 0; i < turbo_json_array_size(kinds); ++i) {
-    const json_value_t *item = turbo_json_array_get(kinds, i);
-    if (item && strcmp(turbo_json_get_string(item, "kind"), kind) == 0) {
+  check_equal((int)json_type(kinds), JSON_ARRAY);
+  for (i = 0; i < json_array_size(kinds); ++i) {
+    const json_value_t *item = json_array_get(kinds, i);
+    if (item && strcmp(json_get_string(item, "kind"), kind) == 0) {
       return item;
     }
   }
@@ -153,84 +154,84 @@ spec("turbo agent knowledge store") {
     document.kind = "note";
     document.title = "Planning note";
 
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &document,
                      "planner uses graph state and retrieval context", 256),
                  0);
-    check_int_eq(turbo_agent_knowledge_store_query(store, "retrieval context", 5,
+    check_equal(turbo_agent_knowledge_store_query(store, "retrieval context", 5,
                                                    &results),
                  0);
     first = knowledge_test_first_result(results);
-    check_str_eq(turbo_json_get_string(first, "document_id"), "doc-1");
-    check_str_eq(turbo_json_get_string(first, "uri"), "memory://doc-1");
-    check_not_null(strstr(turbo_json_get_string(first, "text"), "retrieval"));
-    turbo_free_json(&results);
+    check_equal(json_get_string(first, "document_id"), "doc-1");
+    check_equal(json_get_string(first, "uri"), "memory://doc-1");
+    check_not_null(strstr(json_get_string(first, "text"), "retrieval"));
+    json_free(results); results = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_query(
+    check_equal(turbo_agent_knowledge_store_query(
                      store, "please use local docs for retrieval context", 5,
                      &results),
                  0);
     first = knowledge_test_first_result(results);
-    check_str_eq(turbo_json_get_string(first, "document_id"), "doc-1");
-    check_not_null(strstr(turbo_json_get_string(first, "text"), "retrieval"));
-    turbo_free_json(&results);
+    check_equal(json_get_string(first, "document_id"), "doc-1");
+    check_not_null(strstr(json_get_string(first, "text"), "retrieval"));
+    json_free(results); results = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_stats(store, &stats), 0);
-    check_not_null(turbo_json_object_get(stats, "fts5_enabled"));
-    check_int_eq(turbo_json_get_int(stats, "document_count", 0), 1);
-    check_int_eq(turbo_json_get_int(stats, "chunk_count", 0), 1);
-    kinds = turbo_json_object_get(stats, "kinds");
+    check_equal(turbo_agent_knowledge_store_stats(store, &stats), 0);
+    check_not_null(json_object_get(stats, "fts5_enabled"));
+    check_equal(json_get_int(stats, "document_count", 0), 1);
+    check_equal(json_get_int(stats, "chunk_count", 0), 1);
+    kinds = json_object_get(stats, "kinds");
     check_not_null(kinds);
-    check_size_eq(turbo_json_array_size(kinds), 1);
-    first = turbo_json_array_get(kinds, 0);
-    check_str_eq(turbo_json_get_string(first, "kind"), "note");
-    check_int_eq(turbo_json_get_int(first, "document_count", 0), 1);
-    check_int_eq(turbo_json_get_int(first, "chunk_count", 0), 1);
-    turbo_free_json(&stats);
+    check_equal(json_array_size(kinds), 1);
+    first = json_array_get(kinds, 0);
+    check_equal(json_get_string(first, "kind"), "note");
+    check_equal(json_get_int(first, "document_count", 0), 1);
+    check_equal(json_get_int(first, "chunk_count", 0), 1);
+    json_free(stats); stats = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &document, "executor writes final answer", 256),
                  0);
-    check_int_eq(turbo_agent_knowledge_store_query(store, "retrieval context", 5,
+    check_equal(turbo_agent_knowledge_store_query(store, "retrieval context", 5,
                                                    &results),
                  0);
-    check_size_eq(turbo_json_array_size(results), 0);
-    turbo_free_json(&results);
+    check_equal(json_array_size(results), 0);
+    json_free(results); results = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_query(store, "final answer", 5,
+    check_equal(turbo_agent_knowledge_store_query(store, "final answer", 5,
                                                    &results),
                  0);
     first = knowledge_test_first_result(results);
-    check_str_eq(turbo_json_get_string(first, "kind"), "note");
-    turbo_free_json(&results);
+    check_equal(json_get_string(first, "kind"), "note");
+    json_free(results); results = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_list_documents(
+    check_equal(turbo_agent_knowledge_store_list_documents(
                      store, "note", "memory://", 10, &documents),
                  0);
     first = knowledge_test_first_result(documents);
-    check_str_eq(turbo_json_get_string(first, "id"), "doc-1");
-    check_str_eq(turbo_json_get_string(first, "uri"), "memory://doc-1");
-    check_str_eq(turbo_json_get_string(first, "kind"), "note");
-    check_int_eq(turbo_json_get_int(first, "chunk_count", 0), 1);
-    turbo_free_json(&documents);
+    check_equal(json_get_string(first, "id"), "doc-1");
+    check_equal(json_get_string(first, "uri"), "memory://doc-1");
+    check_equal(json_get_string(first, "kind"), "note");
+    check_equal(json_get_int(first, "chunk_count", 0), 1);
+    json_free(documents); documents = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_get_document(store, "doc-1",
+    check_equal(turbo_agent_knowledge_store_get_document(store, "doc-1",
                                                           &loaded_document),
                  0);
-    check_str_eq(turbo_json_get_string(loaded_document, "id"), "doc-1");
-    chunks = turbo_json_object_get(loaded_document, "chunks");
+    check_equal(json_get_string(loaded_document, "id"), "doc-1");
+    chunks = json_object_get(loaded_document, "chunks");
     check_not_null(chunks);
-    check_size_eq(turbo_json_array_size(chunks), 1);
-    first = turbo_json_array_get(chunks, 0);
-    check_not_null(strstr(turbo_json_get_string(first, "text"), "final answer"));
-    turbo_free_json(&loaded_document);
+    check_equal(json_array_size(chunks), 1);
+    first = json_array_get(chunks, 0);
+    check_not_null(strstr(json_get_string(first, "text"), "final answer"));
+    json_free(loaded_document); loaded_document = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_delete_document(store, "doc-1"), 0);
-    check_int_eq(turbo_agent_knowledge_store_query(store, "final answer", 5,
+    check_equal(turbo_agent_knowledge_store_delete_document(store, "doc-1"), 0);
+    check_equal(turbo_agent_knowledge_store_query(store, "final answer", 5,
                                                    &results),
                  0);
-    check_size_eq(turbo_json_array_size(results), 0);
-    turbo_free_json(&results);
+    check_equal(json_array_size(results), 0);
+    json_free(results); results = NULL;
 
     turbo_agent_knowledge_store_close(store);
     remove(db_path);
@@ -259,29 +260,29 @@ spec("turbo agent knowledge store") {
     project.kind = "project";
     project.title = "Project";
 
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &note, "shared planner context from notes", 128),
                  0);
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &project, "shared planner context from project docs", 128),
                  0);
 
-    check_int_eq(turbo_agent_knowledge_store_query_ex(
+    check_equal(turbo_agent_knowledge_store_query_ex(
                      store, "planner context", "project", "project://docs/", 5,
                      &results),
                  0);
-    check_size_eq(turbo_json_array_size(results), 1);
+    check_equal(json_array_size(results), 1);
     first = knowledge_test_first_result(results);
-    check_str_eq(turbo_json_get_string(first, "document_id"), "project-1");
-    check_str_eq(turbo_json_get_string(first, "kind"), "project");
-    turbo_free_json(&results);
+    check_equal(json_get_string(first, "document_id"), "project-1");
+    check_equal(json_get_string(first, "kind"), "project");
+    json_free(results); results = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_query_ex(
+    check_equal(turbo_agent_knowledge_store_query_ex(
                      store, "planner context", "project", "memory://", 5,
                      &results),
                  0);
-    check_size_eq(turbo_json_array_size(results), 0);
-    turbo_free_json(&results);
+    check_equal(json_array_size(results), 0);
+    json_free(results); results = NULL;
 
     turbo_agent_knowledge_store_close(store);
     remove(db_path);
@@ -295,19 +296,19 @@ spec("turbo agent knowledge store") {
     const json_value_t *nodes;
     const json_value_t *edges;
 
-    check_int_eq(turbo_agent_knowledge_store_tool_graph(&graph), 0);
-    nodes = turbo_json_object_get(graph, "nodes");
-    edges = turbo_json_object_get(graph, "edges");
+    check_equal(turbo_agent_knowledge_store_tool_graph(&graph), 0);
+    nodes = json_object_get(graph, "nodes");
+    edges = json_object_get(graph, "edges");
     check_not_null(nodes);
     check_not_null(edges);
-    check_true(turbo_json_array_size(nodes) >= 9);
-    check_true(turbo_json_array_size(edges) >= 7);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(nodes, 0), "name"),
+    check_true(json_array_size(nodes) >= 9);
+    check_true(json_array_size(edges) >= 7);
+    check_equal(json_get_string(json_array_get(nodes, 0), "name"),
                  "agent.knowledge.stats");
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(edges, 0), "from"),
+    check_equal(json_get_string(json_array_get(edges, 0), "from"),
                  "agent.knowledge.stats");
 
-    turbo_free_json(&graph);
+    json_free(graph); graph = NULL;
   }
 
   it("should index text files and reject binary files") {
@@ -324,12 +325,12 @@ spec("turbo agent knowledge store") {
     knowledge_test_write_file(text_path, "local rag stores citations in sqlite fts5\n");
     knowledge_test_write_binary_file(binary_path);
 
-    check_int_eq(turbo_agent_knowledge_store_index_file(store, text_path, "file", 64), 0);
-    check_int_eq(turbo_agent_knowledge_store_index_file(store, binary_path, "file", 64), -1);
-    check_int_eq(turbo_agent_knowledge_store_query(store, "sqlite fts5", 3, &results), 0);
+    check_equal(turbo_agent_knowledge_store_index_file(store, text_path, "file", 64), 0);
+    check_equal(turbo_agent_knowledge_store_index_file(store, binary_path, "file", 64), -1);
+    check_equal(turbo_agent_knowledge_store_query(store, "sqlite fts5", 3, &results), 0);
     first = knowledge_test_first_result(results);
-    check_str_eq(turbo_json_get_string(first, "uri"), text_path);
-    turbo_free_json(&results);
+    check_equal(json_get_string(first, "uri"), text_path);
+    json_free(results); results = NULL;
 
     turbo_agent_knowledge_store_close(store);
     remove(binary_path);
@@ -362,9 +363,9 @@ spec("turbo agent knowledge store") {
     const json_value_t *first;
 
     check_not_null(store);
-    check_int_eq(TEST_MKDIR(docs_dir), 0);
-    check_int_eq(TEST_MKDIR(nested_dir), 0);
-    check_int_eq(TEST_MKDIR(build_dir), 0);
+    check_equal(TEST_MKDIR(docs_dir), 0);
+    check_equal(TEST_MKDIR(nested_dir), 0);
+    check_equal(TEST_MKDIR(build_dir), 0);
     knowledge_test_write_file(root_path, "directory rag root document\n");
     knowledge_test_write_file(nested_path, "nested graph planner document\n");
     knowledge_test_write_binary_file(binary_path);
@@ -379,31 +380,31 @@ spec("turbo agent knowledge store") {
     options.recursive = 1;
     options.max_file_bytes = 80;
     options.include_extensions = ".txt,.md";
-    check_int_eq(turbo_agent_knowledge_store_index_directory_ex(
+    check_equal(turbo_agent_knowledge_store_index_directory_ex(
                      store, docs_dir, &options, &summary),
                  0);
     check_not_null(summary);
-    check_int_eq(turbo_json_get_int(summary, "visited", -1), 5);
-    check_int_eq(turbo_json_get_int(summary, "indexed", -1), 2);
-    check_int_eq(turbo_json_get_int(summary, "skipped", -1), 3);
-    check_int_eq(turbo_json_get_int(summary, "skipped_by_extension", -1), 1);
-    check_int_eq(turbo_json_get_int(summary, "skipped_too_large", -1), 1);
-    check_int_eq(turbo_json_get_int(summary, "skipped_index_error", -1), 1);
-    check_int_eq(turbo_json_get_int(summary, "failed", -1), 0);
-    turbo_free_json(&summary);
+    check_equal(json_get_int(summary, "visited", -1), 5);
+    check_equal(json_get_int(summary, "indexed", -1), 2);
+    check_equal(json_get_int(summary, "skipped", -1), 3);
+    check_equal(json_get_int(summary, "skipped_by_extension", -1), 1);
+    check_equal(json_get_int(summary, "skipped_too_large", -1), 1);
+    check_equal(json_get_int(summary, "skipped_index_error", -1), 1);
+    check_equal(json_get_int(summary, "failed", -1), 0);
+    json_free(summary); summary = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_query(store, "nested graph planner", 3,
+    check_equal(turbo_agent_knowledge_store_query(store, "nested graph planner", 3,
                                                    &results),
                  0);
     first = knowledge_test_first_result(results);
-    check_str_eq(turbo_json_get_string(first, "uri"), nested_path);
-    turbo_free_json(&results);
+    check_equal(json_get_string(first, "uri"), nested_path);
+    json_free(results); results = NULL;
 
-    check_int_eq(turbo_agent_knowledge_store_query(store, "ignored build artifact", 3,
+    check_equal(turbo_agent_knowledge_store_query(store, "ignored build artifact", 3,
                                                    &results),
                  0);
-    check_size_eq(turbo_json_array_size(results), 0);
-    turbo_free_json(&results);
+    check_equal(json_array_size(results), 0);
+    json_free(results); results = NULL;
 
     turbo_agent_knowledge_store_close(store);
     remove(ignored_path);
@@ -447,7 +448,7 @@ spec("turbo agent knowledge store") {
     json_value_t *output_json = NULL;
     json_value_t *post_delete_results = NULL;
     json_value_t *search_args =
-        turbo_json_create_object();
+        json_create_object();
     json_value_t *search_result = NULL;
     const json_value_t *results_value;
     const json_value_t *context_value;
@@ -456,24 +457,24 @@ spec("turbo agent knowledge store") {
     check_not_null(registry);
     check_not_null(search_args);
     knowledge_test_write_file(text_path, "planner graph retrieves local context\n");
-    check_int_eq(TEST_MKDIR(tool_docs_dir), 0);
+    check_equal(TEST_MKDIR(tool_docs_dir), 0);
     knowledge_test_write_file(tool_docs_path, "directory tool indexes graph notes\n");
 
-    check_int_eq(turbo_agent_knowledge_store_add_tools(registry, store), 0);
-    check_size_eq(turbo_tool_registry_count(registry), 10);
+    check_equal(turbo_agent_knowledge_store_add_tools(registry, store), 0);
+    check_equal(turbo_tool_registry_count(registry), 10);
 
     snprintf(arguments_json, sizeof(arguments_json),
              "{\"path\":\"%s\",\"kind\":\"note\",\"chunk_target_bytes\":128}",
              json_text_path);
-    check_int_eq(turbo_tool_registry_execute(registry, "agent.knowledge.index_file",
+    check_equal(turbo_tool_registry_execute(registry, "agent.knowledge.index_file",
                                              arguments_json, &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output), &output_json),
-                 0);
-    check_true(turbo_json_get_bool(output_json, "ok", false));
-    check_str_eq(turbo_json_get_string(output_json, "uri"), json_text_path);
-    turbo_free_json(&output_json);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
+    check_true(json_get_bool(output_json, "ok", false));
+    check_equal(json_get_string(output_json, "uri"), json_text_path);
+    json_free(output_json); output_json = NULL;
     free(output);
     output = NULL;
 
@@ -481,23 +482,22 @@ spec("turbo agent knowledge store") {
              "{\"root_dir\":\"%s\",\"kind\":\"note\",\"recursive\":true,"
              "\"max_files\":5,\"chunk_target_bytes\":128}",
              json_tool_docs_dir);
-    check_int_eq(turbo_tool_registry_execute(
+    check_equal(turbo_tool_registry_execute(
                      registry, "agent.knowledge.index_directory",
                      arguments_json, &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
-    check_true(turbo_json_get_bool(output_json, "ok", false));
-    check_int_eq(turbo_json_get_int(turbo_json_object_get(output_json, "stats"),
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
+    check_true(json_get_bool(output_json, "ok", false));
+    check_equal(json_get_int(json_object_get(output_json, "stats"),
                                     "indexed", -1),
                  1);
-    turbo_free_json(&output_json);
+    json_free(output_json); output_json = NULL;
     free(output);
     output = NULL;
 
-    check_int_eq(turbo_tool_registry_execute(
+    check_equal(turbo_tool_registry_execute(
                      registry, "agent.knowledge.upsert_text",
                      "{\"id\":\"memory://tool-memory\",\"kind\":\"memo\","
                      "\"title\":\"Tool memory\","
@@ -506,90 +506,85 @@ spec("turbo agent knowledge store") {
                      &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
-    check_true(turbo_json_get_bool(output_json, "ok", false));
-    check_str_eq(turbo_json_get_string(output_json, "document_id"),
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
+    check_true(json_get_bool(output_json, "ok", false));
+    check_equal(json_get_string(output_json, "document_id"),
                  "memory://tool-memory");
-    check_str_eq(turbo_json_get_string(output_json, "kind"), "memo");
-    turbo_free_json(&output_json);
+    check_equal(json_get_string(output_json, "kind"), "memo");
+    json_free(output_json); output_json = NULL;
     free(output);
     output = NULL;
 
-    check_int_eq(turbo_tool_registry_execute(registry, "agent.knowledge.stats",
+    check_equal(turbo_tool_registry_execute(registry, "agent.knowledge.stats",
                                              "{}", &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
-    check_true(turbo_json_get_bool(output_json, "ok", false));
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
+    check_true(json_get_bool(output_json, "ok", false));
     {
-      const json_value_t *stats_json = turbo_json_object_get(output_json, "stats");
+      const json_value_t *stats_json = json_object_get(output_json, "stats");
       const json_value_t *kind_stats;
 
-      check_true(turbo_json_get_int(stats_json, "document_count", 0) >= 3);
-      check_true(turbo_json_get_int(stats_json, "chunk_count", 0) >= 3);
+      check_true(json_get_int(stats_json, "document_count", 0) >= 3);
+      check_true(json_get_int(stats_json, "chunk_count", 0) >= 3);
       kind_stats = knowledge_test_find_kind_stat(
-          turbo_json_object_get(stats_json, "kinds"), "memo");
+          json_object_get(stats_json, "kinds"), "memo");
       check_not_null(kind_stats);
-      check_int_eq(turbo_json_get_int(kind_stats, "document_count", 0), 1);
+      check_equal(json_get_int(kind_stats, "document_count", 0), 1);
       kind_stats = knowledge_test_find_kind_stat(
-          turbo_json_object_get(stats_json, "kinds"), "note");
+          json_object_get(stats_json, "kinds"), "note");
       check_not_null(kind_stats);
-      check_true(turbo_json_get_int(kind_stats, "document_count", 0) >= 2);
+      check_true(json_get_int(kind_stats, "document_count", 0) >= 2);
     }
-    turbo_free_json(&output_json);
+    json_free(output_json); output_json = NULL;
     free(output);
     output = NULL;
 
-    check_int_eq(turbo_tool_registry_execute(registry, "agent.knowledge.tool_graph",
+    check_equal(turbo_tool_registry_execute(registry, "agent.knowledge.tool_graph",
                                              "{}", &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
-    check_true(turbo_json_get_bool(output_json, "ok", false));
-    check_true(turbo_json_array_size(turbo_json_object_get(
-                   turbo_json_object_get(output_json, "graph"), "edges")) >= 7);
-    turbo_free_json(&output_json);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
+    check_true(json_get_bool(output_json, "ok", false));
+    check_true(json_array_size(json_object_get(
+                   json_object_get(output_json, "graph"), "edges")) >= 7);
+    json_free(output_json); output_json = NULL;
     free(output);
     output = NULL;
 
-    check_int_eq(turbo_tool_registry_execute(registry, "agent.knowledge.list_documents",
+    check_equal(turbo_tool_registry_execute(registry, "agent.knowledge.list_documents",
                                              "{\"kind\":\"note\",\"limit\":10}",
                                              &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
-    check_true(turbo_json_get_bool(output_json, "ok", false));
-    check_int_eq((int)turbo_json_array_size(
-                     turbo_json_object_get(output_json, "documents")),
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
+    check_true(json_get_bool(output_json, "ok", false));
+    check_equal((int)json_array_size(
+                     json_object_get(output_json, "documents")),
                  2);
-    turbo_free_json(&output_json);
+    json_free(output_json); output_json = NULL;
     free(output);
     output = NULL;
 
     snprintf(arguments_json, sizeof(arguments_json),
              "{\"document_id\":\"%s\"}", json_text_path);
-    check_int_eq(turbo_tool_registry_execute(registry, "agent.knowledge.get_document",
+    check_equal(turbo_tool_registry_execute(registry, "agent.knowledge.get_document",
                                              arguments_json, &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
-    check_true(turbo_json_get_bool(output_json, "ok", false));
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(output_json, "document"),
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
+    check_true(json_get_bool(output_json, "ok", false));
+    check_equal(json_get_string(json_object_get(output_json, "document"),
                                        "id"),
                  json_text_path);
-    check_true(turbo_json_array_size(turbo_json_object_get(
-                   turbo_json_object_get(output_json, "document"), "chunks")) > 0);
-    turbo_free_json(&output_json);
+    check_true(json_array_size(json_object_get(
+                   json_object_get(output_json, "document"), "chunks")) > 0);
+    json_free(output_json); output_json = NULL;
     free(output);
     output = NULL;
 
@@ -597,53 +592,52 @@ spec("turbo agent knowledge store") {
     knowledge_test_json_value_set_string(search_args, "kind", "note");
     knowledge_test_json_value_set_string(search_args, "uri_prefix", json_dir);
     knowledge_test_json_value_set_int64(search_args, "limit", 3);
-    check_int_eq(turbo_tool_registry_execute_json_value(registry, "agent.knowledge.search",
+    check_equal(turbo_tool_registry_execute_json_value(registry, "agent.knowledge.search",
                                                   search_args, &search_result),
                  TURBO_TOOL_OK);
     check_not_null(search_result);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(search_result, "ok"), 0));
-    results_value = turbo_json_object_get(search_result, "results");
+        json_object_get(search_result, "ok"), 0));
+    results_value = json_object_get(search_result, "results");
     check_not_null(results_value);
-    check_int_eq((int)turbo_json_type(results_value),
-                 TURBO_JSON_ARRAY);
+    check_equal((int)json_type(results_value),
+                 JSON_ARRAY);
     check_true(turbo_runtime_json_value_size(results_value) > 0);
 
     turbo_runtime_json_destroy(search_result);
     search_result = NULL;
-    check_int_eq(turbo_tool_registry_execute_json_value(
+    check_equal(turbo_tool_registry_execute_json_value(
                      registry, "agent.knowledge.build_context", search_args,
                      &search_result),
                  TURBO_TOOL_OK);
     check_not_null(search_result);
-    context_value = turbo_json_object_get(search_result, "context");
+    context_value = json_object_get(search_result, "context");
     check_not_null(context_value);
-    check_int_eq((int)turbo_json_type(context_value),
-                 TURBO_JSON_OBJECT);
+    check_equal((int)json_type(context_value),
+                 JSON_OBJECT);
     check_true(turbo_runtime_json_value_as_string(
-                   turbo_json_object_get(context_value, "context_text")) != NULL);
+                   json_object_get(context_value, "context_text")) != NULL);
 
     turbo_runtime_json_destroy(search_result);
     search_result = NULL;
     snprintf(arguments_json, sizeof(arguments_json),
              "{\"document_id\":\"%s\"}", json_text_path);
-    check_int_eq(turbo_tool_registry_execute(registry, "agent.knowledge.delete_document",
+    check_equal(turbo_tool_registry_execute(registry, "agent.knowledge.delete_document",
                                              arguments_json, &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output),
-                                  &output_json),
-                 0);
-    check_true(turbo_json_get_bool(output_json, "ok", false));
-    check_str_eq(turbo_json_get_string(output_json, "document_id"), json_text_path);
-    turbo_free_json(&output_json);
+    output_json = json_parse(output, strlen(output));
+    check_not_null(output_json);
+    check_true(json_get_bool(output_json, "ok", false));
+    check_equal(json_get_string(output_json, "document_id"), json_text_path);
+    json_free(output_json); output_json = NULL;
     free(output);
     output = NULL;
-    check_int_eq(turbo_agent_knowledge_store_query(store, "local context", 3,
+    check_equal(turbo_agent_knowledge_store_query(store, "local context", 3,
                                                    &post_delete_results),
                  0);
-    check_size_eq(turbo_json_array_size(post_delete_results), 0);
-    turbo_free_json(&post_delete_results);
+    check_equal(json_array_size(post_delete_results), 0);
+    json_free(post_delete_results); post_delete_results = NULL;
     turbo_runtime_json_destroy(search_args);
     turbo_tool_registry_destroy(registry);
     turbo_agent_knowledge_store_close(store);
@@ -679,10 +673,10 @@ spec("turbo agent knowledge store") {
     const turbo_action_tool_definition_t *get_definition;
     const turbo_action_tool_definition_t *upsert_definition;
     const turbo_action_tool_definition_t *delete_definition;
-    json_value_t *upsert_args = turbo_json_create_object();
-    json_value_t *index_args = turbo_json_create_object();
-    json_value_t *search_args = turbo_json_create_object();
-    json_value_t *get_args = turbo_json_create_object();
+    json_value_t *upsert_args = json_create_object();
+    json_value_t *index_args = json_create_object();
+    json_value_t *search_args = json_create_object();
+    json_value_t *get_args = json_create_object();
     json_value_t *result = NULL;
     const json_value_t *results;
     const json_value_t *document;
@@ -695,9 +689,9 @@ spec("turbo agent knowledge store") {
     check_not_null(get_args);
     knowledge_test_write_file(text_path, "action registry indexes local graph context\n");
 
-    check_int_eq(turbo_agent_knowledge_store_add_action_tools(action_registry, store),
+    check_equal(turbo_agent_knowledge_store_add_action_tools(action_registry, store),
                  0);
-    check_size_eq(turbo_action_tool_registry_count(action_registry), 10);
+    check_equal(turbo_action_tool_registry_count(action_registry), 10);
     index_definition =
         turbo_action_tool_registry_find(action_registry, "agent.knowledge.index_file");
     search_definition =
@@ -725,100 +719,100 @@ spec("turbo agent knowledge store") {
     check_not_null(get_definition);
     check_not_null(upsert_definition);
     check_not_null(delete_definition);
-    check_int_eq(index_definition->kind, TURBO_ACTION_MUTATE);
-    check_int_eq(search_definition->kind, TURBO_ACTION_OBSERVE);
-    check_int_eq(build_context_definition->kind, TURBO_ACTION_OBSERVE);
-    check_int_eq(stats_definition->kind, TURBO_ACTION_OBSERVE);
-    check_int_eq(tool_graph_definition->kind, TURBO_ACTION_OBSERVE);
-    check_int_eq(list_definition->kind, TURBO_ACTION_OBSERVE);
-    check_int_eq(get_definition->kind, TURBO_ACTION_OBSERVE);
-    check_int_eq(upsert_definition->kind, TURBO_ACTION_MUTATE);
-    check_int_eq(delete_definition->kind, TURBO_ACTION_MUTATE);
+    check_equal(index_definition->kind, TURBO_ACTION_MUTATE);
+    check_equal(search_definition->kind, TURBO_ACTION_OBSERVE);
+    check_equal(build_context_definition->kind, TURBO_ACTION_OBSERVE);
+    check_equal(stats_definition->kind, TURBO_ACTION_OBSERVE);
+    check_equal(tool_graph_definition->kind, TURBO_ACTION_OBSERVE);
+    check_equal(list_definition->kind, TURBO_ACTION_OBSERVE);
+    check_equal(get_definition->kind, TURBO_ACTION_OBSERVE);
+    check_equal(upsert_definition->kind, TURBO_ACTION_MUTATE);
+    check_equal(delete_definition->kind, TURBO_ACTION_MUTATE);
 
-    turbo_json_object_set_string(upsert_args, "id", "memory://action-memory");
-    turbo_json_object_set_string(upsert_args, "kind", "memo");
-    turbo_json_object_set_string(upsert_args, "text",
+    json_object_set_string(upsert_args, "id", "memory://action-memory");
+    json_object_set_string(upsert_args, "kind", "memo");
+    json_object_set_string(upsert_args, "text",
                                  "action registry remembers planner memory");
-    turbo_json_object_set_number(upsert_args, "chunk_target_bytes", 128);
-    check_int_eq(turbo_action_tool_registry_execute(
+    json_object_set_number(upsert_args, "chunk_target_bytes", 128);
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.knowledge.upsert_text", upsert_args,
                      &result),
                  TURBO_ACTION_TOOL_OK);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    check_str_eq(turbo_json_get_string(result, "document_id"),
+    check_true(json_get_bool(result, "ok", false));
+    check_equal(json_get_string(result, "document_id"),
                  "memory://action-memory");
-    check_str_eq(turbo_json_get_string(result, "kind"), "memo");
-    turbo_free_json(&result);
+    check_equal(json_get_string(result, "kind"), "memo");
+    json_free(result); result = NULL;
 
-    check_int_eq(turbo_action_tool_registry_execute(
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.knowledge.stats", NULL, &result),
                  TURBO_ACTION_TOOL_OK);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    check_true(turbo_json_get_int(turbo_json_object_get(result, "stats"),
+    check_true(json_get_bool(result, "ok", false));
+    check_true(json_get_int(json_object_get(result, "stats"),
                                   "document_count", 0) >= 1);
-    check_true(turbo_json_get_int(turbo_json_object_get(result, "stats"),
+    check_true(json_get_int(json_object_get(result, "stats"),
                                   "chunk_count", 0) >= 1);
-    turbo_free_json(&result);
+    json_free(result); result = NULL;
 
-    check_int_eq(turbo_action_tool_registry_execute(
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.knowledge.tool_graph", NULL, &result),
                  TURBO_ACTION_TOOL_OK);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    check_true(turbo_json_array_size(turbo_json_object_get(
-                   turbo_json_object_get(result, "graph"), "nodes")) >= 9);
-    turbo_free_json(&result);
+    check_true(json_get_bool(result, "ok", false));
+    check_true(json_array_size(json_object_get(
+                   json_object_get(result, "graph"), "nodes")) >= 9);
+    json_free(result); result = NULL;
 
-    turbo_json_object_set_string(index_args, "path", text_path);
-    turbo_json_object_set_string(index_args, "kind", "note");
-    turbo_json_object_set_number(index_args, "chunk_target_bytes", 128);
-    check_int_eq(turbo_action_tool_registry_execute(
+    json_object_set_string(index_args, "path", text_path);
+    json_object_set_string(index_args, "kind", "note");
+    json_object_set_number(index_args, "chunk_target_bytes", 128);
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.knowledge.index_file", index_args,
                      &result),
                  TURBO_ACTION_TOOL_OK);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    check_str_eq(turbo_json_get_string(result, "uri"), text_path);
-    turbo_free_json(&result);
+    check_true(json_get_bool(result, "ok", false));
+    check_equal(json_get_string(result, "uri"), text_path);
+    json_free(result); result = NULL;
 
-    turbo_json_object_set_string(search_args, "query", "local graph context");
-    turbo_json_object_set_string(search_args, "kind", "note");
-    turbo_json_object_set_string(search_args, "uri_prefix", dir);
-    turbo_json_object_set_number(search_args, "limit", 3);
-    check_int_eq(turbo_action_tool_registry_execute(
+    json_object_set_string(search_args, "query", "local graph context");
+    json_object_set_string(search_args, "kind", "note");
+    json_object_set_string(search_args, "uri_prefix", dir);
+    json_object_set_number(search_args, "limit", 3);
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.knowledge.search", search_args,
                      &result),
                  TURBO_ACTION_TOOL_OK);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    results = turbo_json_object_get(result, "results");
+    check_true(json_get_bool(result, "ok", false));
+    results = json_object_get(result, "results");
     check_not_null(results);
-    check_true(turbo_json_array_size(results) > 0);
+    check_true(json_array_size(results) > 0);
 
-    turbo_free_json(&result);
-    check_int_eq(turbo_action_tool_registry_execute(
+    json_free(result); result = NULL;
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.knowledge.build_context", search_args,
                      &result),
                  TURBO_ACTION_TOOL_OK);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    check_not_null(strstr(turbo_json_get_string(
-                              turbo_json_object_get(result, "context"), "context_text"),
+    check_true(json_get_bool(result, "ok", false));
+    check_not_null(strstr(json_get_string(
+                              json_object_get(result, "context"), "context_text"),
                           "local graph context"));
 
-    turbo_free_json(&result);
-    turbo_json_object_set_string(get_args, "document_id", text_path);
-    check_int_eq(turbo_action_tool_registry_execute(
+    json_free(result); result = NULL;
+    json_object_set_string(get_args, "document_id", text_path);
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.knowledge.get_document", get_args,
                      &result),
                  TURBO_ACTION_TOOL_OK);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    document = turbo_json_object_get(result, "document");
+    check_true(json_get_bool(result, "ok", false));
+    document = json_object_get(result, "document");
     check_not_null(document);
-    check_str_eq(turbo_json_get_string(document, "id"), text_path);
-    check_true(turbo_json_array_size(turbo_json_object_get(document, "chunks")) > 0);
+    check_equal(json_get_string(document, "id"), text_path);
+    check_true(json_array_size(json_object_get(document, "chunks")) > 0);
 
-    turbo_free_json(&result);
-    turbo_free_json(&get_args);
-    turbo_free_json(&search_args);
-    turbo_free_json(&index_args);
-    turbo_free_json(&upsert_args);
+    json_free(result); result = NULL;
+    json_free(get_args); get_args = NULL;
+    json_free(search_args); search_args = NULL;
+    json_free(index_args); index_args = NULL;
+    json_free(upsert_args); upsert_args = NULL;
     turbo_action_tool_registry_destroy(action_registry);
     turbo_agent_knowledge_store_close(store);
     remove(text_path);
@@ -845,18 +839,18 @@ spec("turbo agent knowledge store") {
     document.kind = "note";
     document.title = "Context note";
 
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &document,
                      "planner should read local sqlite fts5 retrieval context", 256),
                  0);
-    check_int_eq(turbo_agent_knowledge_store_load_context(store, state,
+    check_equal(turbo_agent_knowledge_store_load_context(store, state,
                                                           "sqlite fts5 retrieval", 2),
                  0);
-    check_size_eq(turbo_agent_state_memory_layer_count(state), 1);
-    check_str_eq(turbo_json_get_string(turbo_agent_state_memory_layer_at(state, 0),
+    check_equal(turbo_agent_state_memory_layer_count(state), 1);
+    check_equal(json_get_string(turbo_agent_state_memory_layer_at(state, 0),
                                        "scope"),
                  "knowledge");
-    check_str_eq(turbo_json_get_string(turbo_agent_state_memory_layer_at(state, 0),
+    check_equal(json_get_string(turbo_agent_state_memory_layer_at(state, 0),
                                        "path"),
                  "memory://doc-context");
     memory_text = turbo_agent_state_memory_context_text(state);
@@ -864,7 +858,7 @@ spec("turbo agent knowledge store") {
     check_not_null(strstr(memory_text, "sqlite fts5 retrieval"));
 
     free(memory_text);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_knowledge_store_close(store);
     remove(db_path);
     free(db_path);
@@ -895,19 +889,19 @@ spec("turbo agent knowledge store") {
     project.kind = "project";
     project.title = "Project context";
 
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &note, "shared filtered context from notes", 128),
                  0);
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &project, "shared filtered context from project docs", 128),
                  0);
 
-    check_int_eq(turbo_agent_knowledge_store_load_context_ex(
+    check_equal(turbo_agent_knowledge_store_load_context_ex(
                      store, state, "filtered context", "project",
                      "project://docs/", 5),
                  0);
-    check_size_eq(turbo_agent_state_memory_layer_count(state), 1);
-    check_str_eq(turbo_json_get_string(turbo_agent_state_memory_layer_at(state, 0),
+    check_equal(turbo_agent_state_memory_layer_count(state), 1);
+    check_equal(json_get_string(turbo_agent_state_memory_layer_at(state, 0),
                                        "path"),
                  "project://docs/ctx-project");
     memory_text = turbo_agent_state_memory_context_text(state);
@@ -915,22 +909,22 @@ spec("turbo agent knowledge store") {
     check_not_null(strstr(memory_text, "project docs"));
     check_null(strstr(memory_text, "from notes"));
 
-    check_int_eq(turbo_agent_knowledge_store_build_context(
+    check_equal(turbo_agent_knowledge_store_build_context(
                      store, "filtered context", "project", "project://docs/", 5,
                      &context),
                  0);
-    check_int_eq(turbo_json_get_int(context, "layer_count", 0), 1);
-    check_not_null(strstr(turbo_json_get_string(context, "context_text"),
+    check_equal(json_get_int(context, "layer_count", 0), 1);
+    check_not_null(strstr(json_get_string(context, "context_text"),
                           "project docs"));
-    check_null(strstr(turbo_json_get_string(context, "context_text"), "from notes"));
-    check_size_eq(turbo_json_array_size(turbo_json_object_get(context, "evidence")), 1);
-    first = turbo_json_array_get(turbo_json_object_get(context, "evidence"), 0);
-    check_str_eq(turbo_json_get_string(first, "document_id"), "ctx-project");
-    check_str_eq(turbo_json_get_string(first, "uri"), "project://docs/ctx-project");
+    check_null(strstr(json_get_string(context, "context_text"), "from notes"));
+    check_equal(json_array_size(json_object_get(context, "evidence")), 1);
+    first = json_array_get(json_object_get(context, "evidence"), 0);
+    check_equal(json_get_string(first, "document_id"), "ctx-project");
+    check_equal(json_get_string(first, "uri"), "project://docs/ctx-project");
 
-    turbo_free_json(&context);
+    json_free(context); context = NULL;
     free(memory_text);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_knowledge_store_close(store);
     remove(db_path);
     free(db_path);
@@ -955,23 +949,23 @@ spec("turbo agent knowledge store") {
     document.kind = "note";
     document.title = "Node note";
 
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &document,
                      "agent graph can hydrate planner context from local docs", 256),
                  0);
-    check_int_eq(turbo_agent_state_add_user_message(
+    check_equal(turbo_agent_state_add_user_message(
                      state, "hydrate planner context from local docs"),
                  0);
     config.store = store;
     config.limit = 3;
     ctx.state = state;
-    check_int_eq(turbo_agent_knowledge_context_node(&ctx, &config), 0);
-    check_size_eq(turbo_agent_state_memory_layer_count(state), 1);
-    check_str_eq(turbo_json_get_string(turbo_agent_state_memory_layer_at(state, 0),
+    check_equal(turbo_agent_knowledge_context_node(&ctx, &config), 0);
+    check_equal(turbo_agent_state_memory_layer_count(state), 1);
+    check_equal(json_get_string(turbo_agent_state_memory_layer_at(state, 0),
                                        "path"),
                  "memory://doc-node");
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_knowledge_store_close(store);
     remove(db_path);
     free(db_path);
@@ -1001,13 +995,13 @@ spec("turbo agent knowledge store") {
     project.kind = "project";
     project.title = "Node project";
 
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &note, "graph filtered planner context from notes", 128),
                  0);
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &project, "graph filtered planner context from project docs", 128),
                  0);
-    check_int_eq(turbo_agent_state_add_user_message(
+    check_equal(turbo_agent_state_add_user_message(
                      state, "filtered planner context"),
                  0);
     config.store = store;
@@ -1016,13 +1010,13 @@ spec("turbo agent knowledge store") {
     config.limit = 3;
     ctx.state = state;
 
-    check_int_eq(turbo_agent_knowledge_context_node(&ctx, &config), 0);
-    check_size_eq(turbo_agent_state_memory_layer_count(state), 1);
-    check_str_eq(turbo_json_get_string(turbo_agent_state_memory_layer_at(state, 0),
+    check_equal(turbo_agent_knowledge_context_node(&ctx, &config), 0);
+    check_equal(turbo_agent_state_memory_layer_count(state), 1);
+    check_equal(json_get_string(turbo_agent_state_memory_layer_at(state, 0),
                                        "path"),
                  "project://docs/node-project");
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_knowledge_store_close(store);
     remove(db_path);
     free(db_path);
@@ -1048,15 +1042,15 @@ spec("turbo agent knowledge store") {
     config.kind = "note";
     config.limit = 3;
 
-    check_int_eq(turbo_agent_install_knowledge_engineering_loop(
+    check_equal(turbo_agent_install_knowledge_engineering_loop(
                      graph, &config, planner, executor, "knowledge", "planner",
                      "plan_commit", "plan_step", "review", "executor", "tools",
                      "detect_failure", "replan_route", "replan_prepare",
                      "plan_advance", "end", 1),
                  TURBO_GRAPH_EXEC_OK);
-    check_str_eq(turbo_graph_get_entry(graph), "knowledge");
-    check_size_eq(turbo_graph_node_count(graph), 13);
-    check_size_eq(turbo_graph_edge_count(graph), 17);
+    check_equal(turbo_graph_get_entry(graph), "knowledge");
+    check_equal(turbo_graph_node_count(graph), 13);
+    check_equal(turbo_graph_edge_count(graph), 17);
     check_not_null(turbo_graph_topology_id(graph));
 
     turbo_agent_destroy(executor);

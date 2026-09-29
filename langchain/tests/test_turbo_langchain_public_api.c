@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_langchain.h"
 
 spec("turbo langchain public api") {
@@ -7,7 +8,7 @@ spec("turbo langchain public api") {
     turbo_graph_t *graph = turbo_graph_create("public-api");
     turbo_chain_t *chain = turbo_chain_create("public-api");
     json_value_t *runtime_value =
-        turbo_json_create_object();
+        json_create_object();
     json_value_t *chain_state = turbo_chain_state_create_json_value();
     void *chain_run_json_value_stream = (void *)turbo_chain_run_json_value_stream;
     void *graph_run_json_value_stream = (void *)turbo_graph_run_json_value_stream;
@@ -248,8 +249,6 @@ spec("turbo langchain public api") {
     void *agent_runtime_remote_dispatch = (void *)turbo_agent_runtime_remote_dispatch_jsonrpc;
     void *agent_runtime_remote_dispatch_text =
         (void *)turbo_agent_runtime_remote_dispatch_jsonrpc_text;
-    void *agent_runtime_remote_handle_http =
-        (void *)turbo_agent_runtime_remote_handle_http_jsonrpc;
     void *agent_runtime_remote_client_create =
         (void *)turbo_agent_runtime_remote_client_create;
     void *agent_runtime_remote_client_destroy =
@@ -509,12 +508,8 @@ spec("turbo langchain public api") {
         (void *)turbo_agent_remote_app_resume_thread_command_json_value;
     void *agent_remote_app_fork_thread_command =
         (void *)turbo_agent_remote_app_fork_thread_command_json_value;
-    void *agent_runtime_remote_iris_create =
-        (void *)turbo_agent_runtime_remote_iris_create;
-    void *agent_runtime_remote_iris_destroy =
-        (void *)turbo_agent_runtime_remote_iris_destroy;
-    void *agent_runtime_remote_iris_mount =
-        (void *)turbo_agent_runtime_remote_iris_mount;
+    void *agent_runtime_remote_chttp_mount =
+        (void *)turbo_agent_runtime_remote_chttp_mount;
 #if 0
     void *agent_runtime_store_memory = (void *)turbo_agent_runtime_store_memory_create;
     void *agent_runtime_store_file = (void *)turbo_agent_runtime_store_file_create;
@@ -1449,7 +1444,6 @@ spec("turbo langchain public api") {
     check_not_null(agent_runtime_remote_destroy);
     check_not_null(agent_runtime_remote_dispatch);
     check_not_null(agent_runtime_remote_dispatch_text);
-    check_not_null(agent_runtime_remote_handle_http);
     check_not_null(agent_runtime_remote_client_create);
     check_not_null(agent_runtime_remote_client_destroy);
     check_not_null(agent_runtime_remote_client_call);
@@ -1594,9 +1588,7 @@ spec("turbo langchain public api") {
     check_not_null(agent_remote_app_get_child_multi_agent_inspect);
     check_not_null(agent_remote_app_resume_thread_command);
     check_not_null(agent_remote_app_fork_thread_command);
-    check_not_null(agent_runtime_remote_iris_create);
-    check_not_null(agent_runtime_remote_iris_destroy);
-    check_not_null(agent_runtime_remote_iris_mount);
+    check_not_null(agent_runtime_remote_chttp_mount);
 #if 0
     check_not_null(agent_runtime_store_memory);
     check_not_null(agent_runtime_store_file);
@@ -2118,8 +2110,8 @@ spec("turbo langchain public api") {
     turbo_graph_checkpoint_destroy(checkpoint);
     turbo_runtime_json_destroy(chain_state);
     turbo_runtime_json_destroy(runtime_value);
-    turbo_free_json(&agent_state);
-    turbo_free_json(&messages);
+    json_free(agent_state); agent_state = NULL;
+    json_free(messages); messages = NULL;
     turbo_action_tool_registry_destroy(action_registry);
     turbo_tool_runtime_destroy(tool_runtime);
     turbo_tool_registry_destroy(tool_registry);

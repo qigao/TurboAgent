@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_document_loader.h"
 
 #include <stdio.h>
@@ -40,7 +41,7 @@ static char *document_loader_test_temp_dir(void) {
   snprintf(path, sizeof(path), "/tmp/turbonet_doc_loader_%lu",
            (unsigned long)getpid());
 #endif
-  check_int_eq(TEST_MKDIR(path), 0);
+  check_equal(TEST_MKDIR(path), 0);
   return document_loader_test_strdup(path);
 }
 
@@ -56,8 +57,8 @@ static void document_loader_test_write_file(const char *path,
   FILE *file = fopen(path, "wb");
 
   check_not_null(file);
-  check_size_eq(fwrite(text, 1, strlen(text), file), strlen(text));
-  check_int_eq(fclose(file), 0);
+  check_equal(fwrite(text, 1, strlen(text), file), strlen(text));
+  check_equal(fclose(file), 0);
 }
 
 static void document_loader_test_write_binary_file(const char *path) {
@@ -65,8 +66,8 @@ static void document_loader_test_write_binary_file(const char *path) {
   FILE *file = fopen(path, "wb");
 
   check_not_null(file);
-  check_size_eq(fwrite(bytes, 1, sizeof(bytes), file), sizeof(bytes));
-  check_int_eq(fclose(file), 0);
+  check_equal(fwrite(bytes, 1, sizeof(bytes), file), sizeof(bytes));
+  check_equal(fclose(file), 0);
 }
 
 spec("turbo document loader api") {
@@ -76,18 +77,18 @@ spec("turbo document loader api") {
     json_value_t *document = NULL;
 
     document_loader_test_write_file(path, "loader reads local docs\n");
-    check_int_eq(turbo_document_loader_load_text_file(path, "note", &document),
+    check_equal(turbo_document_loader_load_text_file(path, "note", &document),
                  0);
-    check_str_eq(turbo_json_get_string(document, "id"), path);
-    check_str_eq(turbo_json_get_string(document, "uri"), path);
-    check_str_eq(turbo_json_get_string(document, "kind"), "note");
-    check_str_eq(turbo_json_get_string(document, "text"),
+    check_equal(json_get_string(document, "id"), path);
+    check_equal(json_get_string(document, "uri"), path);
+    check_equal(json_get_string(document, "kind"), "note");
+    check_equal(json_get_string(document, "text"),
                  "loader reads local docs\n");
-    check_not_null(turbo_json_get_string(document, "content_hash"));
-    check_int_eq(turbo_json_get_int(document, "size", -1),
+    check_not_null(json_get_string(document, "content_hash"));
+    check_equal(json_get_int(document, "size", -1),
                  (int)strlen("loader reads local docs\n"));
 
-    turbo_free_json(&document);
+    json_free(document); document = NULL;
     remove(path);
     free(path);
     TEST_RMDIR(dir);
@@ -100,7 +101,7 @@ spec("turbo document loader api") {
     json_value_t *document = NULL;
 
     document_loader_test_write_binary_file(path);
-    check_int_eq(turbo_document_loader_load_text_file(path, "file", &document),
+    check_equal(turbo_document_loader_load_text_file(path, "file", &document),
                  -1);
     check_null(document);
 

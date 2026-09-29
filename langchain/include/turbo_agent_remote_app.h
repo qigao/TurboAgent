@@ -1,7 +1,7 @@
 #ifndef TURBO_AGENT_REMOTE_APP_H
 #define TURBO_AGENT_REMOTE_APP_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_agent_remote_session.h"
 

@@ -1,9 +1,12 @@
 #ifndef TURBO_AGENT_HARNESS_H
 #define TURBO_AGENT_HARNESS_H
 
-#include <platform.h>
-#include <turbo_error.h>
-#include <turbo_thread.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <turbo_agent_api.h>
+#include <salts/thread.h>
+#include <salts/thread_pool.h>
 
 #include "turbo_agent_app.h"
 #include "turbo_agent_execution.h"
@@ -28,7 +31,7 @@ typedef struct turbo_agent_harness_config_s {
   size_t struct_size;
   uint32_t abi_version;
   const turbo_agent_app_config_t *app_config;
-  turbo_threadpool_t *executor;
+  salts_threadpool_t *executor;
 } turbo_agent_harness_config_t;
 
 /**

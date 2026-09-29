@@ -1,7 +1,7 @@
 #include "turbo_tool_runtime_wasm.h"
 
 #include "turbo_runtime_json.h"
-#include "turbo_str.h"
+#include <tstr.h>
 #include "turbo_tool_schema.h"
 
 #include <stdint.h>

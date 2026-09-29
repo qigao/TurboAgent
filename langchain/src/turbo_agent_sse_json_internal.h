@@ -2,7 +2,7 @@
 #define TURBO_AGENT_SSE_JSON_INTERNAL_H
 
 #include "turbo_agent_sse_types_internal.h"
-#include <turbo_parser.h>
+#include <json_parser.h>
 
 #ifdef __cplusplus
 extern "C" {

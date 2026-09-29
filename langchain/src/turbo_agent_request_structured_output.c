@@ -1,6 +1,6 @@
 #include "turbo_agent_request_structured_output_internal.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <string.h>
 
@@ -26,56 +26,56 @@ CXX_C_API int turbo_agent_request_add_structured_output(const turbo_agent_t *age
     return 0;
   }
 
-  if (turbo_parse_json((const uint8_t *)agent->structured_output_schema_json,
-                       strlen(agent->structured_output_schema_json), &schema) != 0 ||
-      !schema || turbo_json_type(schema) != TURBO_JSON_OBJECT) {
-    turbo_free_json(&schema);
+  schema = json_parse(agent->structured_output_schema_json,
+                      strlen(agent->structured_output_schema_json));
+  if (!schema || json_type(schema) != JSON_OBJECT) {
+    json_free(schema); schema = NULL;
     return -1;
   }
 
   if (chat_mode) {
-    response_format = turbo_json_create_object();
-    json_schema = turbo_json_create_object();
+    response_format = json_create_object();
+    json_schema = json_create_object();
     if (!response_format || !json_schema) {
-      turbo_free_json(&schema);
-      turbo_free_json(&response_format);
-      turbo_free_json(&json_schema);
+      json_free(schema); schema = NULL;
+      json_free(response_format); response_format = NULL;
+      json_free(json_schema); json_schema = NULL;
       return -1;
     }
 
-    turbo_json_object_set_string(response_format, "type", "json_schema");
-    turbo_json_object_set_string(json_schema, "name",
+    json_object_set_string(response_format, "type", "json_schema");
+    json_object_set_string(json_schema, "name",
                                  (agent->structured_output_name &&
                                   agent->structured_output_name[0] != '\0')
                                      ? agent->structured_output_name
                                      : "structured_output");
-    turbo_json_object_add(json_schema, "schema", schema);
-    turbo_json_object_set_bool(json_schema, "strict",
+    json_object_add(json_schema, "schema", schema);
+    json_object_set_bool(json_schema, "strict",
                                agent->structured_output_strict ? true : false);
-    turbo_json_object_add(response_format, "json_schema", json_schema);
-    turbo_json_object_add(request, compatible_mode ? "response_format" : "response_format",
+    json_object_add(response_format, "json_schema", json_schema);
+    json_object_add(request, compatible_mode ? "response_format" : "response_format",
                           response_format);
     return 0;
   }
 
-  text = turbo_json_create_object();
-  format = turbo_json_create_object();
+  text = json_create_object();
+  format = json_create_object();
   if (!text || !format) {
-    turbo_free_json(&schema);
-    turbo_free_json(&text);
-    turbo_free_json(&format);
+    json_free(schema); schema = NULL;
+    json_free(text); text = NULL;
+    json_free(format); format = NULL;
     return -1;
   }
 
-  turbo_json_object_set_string(format, "type", "json_schema");
-  turbo_json_object_set_string(format, "name",
+  json_object_set_string(format, "type", "json_schema");
+  json_object_set_string(format, "name",
                                (agent->structured_output_name &&
                                 agent->structured_output_name[0] != '\0')
                                    ? agent->structured_output_name
                                    : "structured_output");
-  turbo_json_object_add(format, "schema", schema);
-  turbo_json_object_set_bool(format, "strict", agent->structured_output_strict ? true : false);
-  turbo_json_object_add(text, "format", format);
-  turbo_json_object_add(request, "text", text);
+  json_object_add(format, "schema", schema);
+  json_object_set_bool(format, "strict", agent->structured_output_strict ? true : false);
+  json_object_add(text, "format", format);
+  json_object_add(request, "text", text);
   return 0;
 }

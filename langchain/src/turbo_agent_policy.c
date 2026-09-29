@@ -1,4 +1,5 @@
 #include "turbo_agent_policy.h"
+#include <json_parser.h>
 
 #include "turbo_tool_registry.h"
 
@@ -143,23 +144,23 @@ static char *turbo_policy_normalize_path(const char *path) {
 }
 
 static const char *turbo_policy_get_path_arg(const json_value_t *args) {
-  if (!args || turbo_json_type(args) != TURBO_JSON_OBJECT) {
+  if (!args || json_type(args) != JSON_OBJECT) {
     return NULL;
   }
 
-  if (turbo_json_get_string(args, "path")) {
-    return turbo_json_get_string(args, "path");
+  if (json_get_string(args, "path")) {
+    return json_get_string(args, "path");
   }
 
-  if (turbo_json_get_string(args, "workdir")) {
-    return turbo_json_get_string(args, "workdir");
+  if (json_get_string(args, "workdir")) {
+    return json_get_string(args, "workdir");
   }
 
-  if (turbo_json_get_string(args, "root_dir")) {
-    return turbo_json_get_string(args, "root_dir");
+  if (json_get_string(args, "root_dir")) {
+    return json_get_string(args, "root_dir");
   }
 
-  return turbo_json_get_string(args, "cwd");
+  return json_get_string(args, "cwd");
 }
 
 turbo_agent_policy_t turbo_agent_policy_default(void) {
@@ -460,8 +461,8 @@ turbo_agent_policy_check_action(const turbo_agent_policy_t *policy,
     return TURBO_AGENT_POLICY_DENY;
   }
 
-  command = args && turbo_json_type(args) == TURBO_JSON_OBJECT
-                ? turbo_json_get_string(args, "command")
+  command = args && json_type(args) == JSON_OBJECT
+                ? json_get_string(args, "command")
                 : NULL;
   if (command && turbo_agent_policy_is_dangerous_command(command)) {
     if (out_reason) {

@@ -1,4 +1,5 @@
 #include "turbo_text_splitter.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -52,7 +53,7 @@ int turbo_text_splitter_split_text(
     return -1;
   }
 
-  chunks = turbo_json_create_array();
+  chunks = json_create_array();
   if (!chunks) {
     return -1;
   }
@@ -61,7 +62,7 @@ int turbo_text_splitter_split_text(
     size_t remaining = text_len - offset;
     size_t chunk_len = turbo_text_splitter_next_chunk_len(
         text + offset, remaining, effective_options.chunk_size);
-    json_value_t *chunk = turbo_json_create_object();
+    json_value_t *chunk = json_create_object();
     char *chunk_text = NULL;
 
     if (chunk_len <= effective_options.chunk_overlap &&
@@ -69,21 +70,21 @@ int turbo_text_splitter_split_text(
       chunk_len = effective_options.chunk_overlap + 1;
     }
     if (chunk_len == 0 || !chunk) {
-      turbo_free_json(&chunk);
-      turbo_free_json(&chunks);
+      json_free(chunk); chunk = NULL;
+      json_free(chunks); chunks = NULL;
       return -1;
     }
     chunk_text = turbo_text_splitter_copy_chunk(text + offset, chunk_len);
     if (!chunk_text) {
-      turbo_free_json(&chunk);
-      turbo_free_json(&chunks);
+      json_free(chunk); chunk = NULL;
+      json_free(chunks); chunks = NULL;
       return -1;
     }
-    turbo_json_object_set_string(chunk, "text", chunk_text);
-    turbo_json_object_set_number(chunk, "start", (double)offset);
-    turbo_json_object_set_number(chunk, "end", (double)(offset + chunk_len));
+    json_object_set_string(chunk, "text", chunk_text);
+    json_object_set_number(chunk, "start", (double)offset);
+    json_object_set_number(chunk, "end", (double)(offset + chunk_len));
     free(chunk_text);
-    turbo_json_array_add(chunks, chunk);
+    json_array_add(chunks, chunk);
 
     if (offset + chunk_len >= text_len) {
       break;

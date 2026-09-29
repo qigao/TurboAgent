@@ -18,12 +18,12 @@ CXX_C_API const json_value_t *turbo_agent_request_responses_input_source(
   last_event = turbo_agent_state_last_event(state);
   last_model_event = turbo_agent_state_last_event_of_kind(state, "model");
 
-  if (last_event && turbo_json_type(last_event) == TURBO_JSON_OBJECT) {
-    input_source = turbo_json_object_get(last_event, "outputs");
-    if (input_source && turbo_json_type(input_source) == TURBO_JSON_ARRAY) {
+  if (last_event && json_type(last_event) == JSON_OBJECT) {
+    input_source = json_object_get(last_event, "outputs");
+    if (input_source && json_type(input_source) == JSON_ARRAY) {
       const char *response_id = turbo_agent_model_event_response_id(last_model_event);
       if (response_id) {
-        turbo_json_object_set_string(request, "previous_response_id", response_id);
+        json_object_set_string(request, "previous_response_id", response_id);
       } else {
         input_source = NULL;
       }
@@ -48,7 +48,7 @@ turbo_agent_request_build_responses_input_messages(const json_value_t *input_sou
     return NULL;
   }
 
-  messages_json_value = turbo_json_clone(input_source);
+  messages_json_value = json_clone(input_source);
   if (!messages_json_value) {
     return NULL;
   }
@@ -70,8 +70,8 @@ CXX_C_API json_value_t *turbo_agent_request_build_chat_messages(const turbo_agen
     return NULL;
   }
 
-  messages_json_value = turbo_json_clone(canonical_messages);
-  turbo_free_json(&canonical_messages);
+  messages_json_value = json_clone(canonical_messages);
+  json_free(canonical_messages); canonical_messages = NULL;
   if (!messages_json_value) {
     return NULL;
   }
@@ -103,8 +103,8 @@ CXX_C_API int turbo_agent_request_build_anthropic_wire_messages(const turbo_agen
     return -1;
   }
 
-  messages_json_value = turbo_json_clone(canonical_messages);
-  turbo_free_json(&canonical_messages);
+  messages_json_value = json_clone(canonical_messages);
+  json_free(canonical_messages); canonical_messages = NULL;
   if (!messages_json_value) {
     return -1;
   }

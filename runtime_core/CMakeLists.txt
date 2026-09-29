@@ -11,11 +11,10 @@ target_compile_definitions(runtime_core PRIVATE SHARED_CXX)
 target_include_directories(
   runtime_core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                       $<INSTALL_INTERFACE:include>)
-target_link_libraries(runtime_core PUBLIC TurboUtils::Core)
+target_link_libraries(runtime_core PUBLIC Salts::Core)
 
 cmake_config_target(runtime_core FOLDER "Runtime Core" EXPORT_NAME RuntimeCore
                     ALIAS TurboAgent::RuntimeCore)
-add_library(TurboNet::RuntimeCore ALIAS runtime_core)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 
@@ -26,7 +25,7 @@ if(BUILD_TESTS)
     ${TEST_SOURCES}
     LIBS
     runtime_core
-    TurboUtils::TinyTest
+    Salts::TinyTest
     INCLUDES
     include
     FOLDER

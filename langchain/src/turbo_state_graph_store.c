@@ -2,7 +2,7 @@
 
 #include "turbo_state_graph_store.h"
 
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include "turbo_state_graph.h"
 
 #include <errno.h>
@@ -56,8 +56,9 @@ static int turbo_state_graph_store_parse_json(const char *json_text, json_value_
   if (!json_text || !out_json) {
     return -1;
   }
-  if (turbo_parse_json((const uint8_t *)json_text, strlen(json_text), &json) != 0 || !json) {
-    turbo_free_json(&json);
+  json = json_parse(json_text, strlen(json_text));
+  if (!json) {
+    json_free(json); json = NULL;
     return -1;
   }
   *out_json = json;
@@ -69,13 +70,13 @@ static int turbo_state_graph_store_count_runs_by_status(const json_value_t *runs
   size_t i;
   int count = 0;
 
-  if (!runs || turbo_json_type(runs) != TURBO_JSON_ARRAY || !status_text) {
+  if (!runs || json_type(runs) != JSON_ARRAY || !status_text) {
     return 0;
   }
-  for (i = 0; i < turbo_json_array_size(runs); ++i) {
-    const json_value_t *run = turbo_json_array_get(runs, i);
-    if (run && turbo_json_type(run) == TURBO_JSON_OBJECT) {
-      const char *status = turbo_json_get_string(run, "status");
+  for (i = 0; i < json_array_size(runs); ++i) {
+    const json_value_t *run = json_array_get(runs, i);
+    if (run && json_type(run) == JSON_OBJECT) {
+      const char *status = json_get_string(run, "status");
       if (status && strcmp(status, status_text) == 0) {
         count += 1;
       }
@@ -90,8 +91,8 @@ static int turbo_state_graph_store_descriptor_set_nullable_string(json_value_t *
   if (!object || !key) {
     return -1;
   }
-  turbo_json_object_add(object, key,
-                        value ? turbo_json_create_string(value) : turbo_json_create_null());
+  json_object_add(object, key,
+                        value ? json_create_string(value) : json_create_null());
   return 0;
 }
 
@@ -111,70 +112,70 @@ static int turbo_state_graph_store_make_snapshot_descriptor(const char *snapshot
   const char *entry_node = NULL;
 
   if (!snapshot_id || !snapshot || !out_descriptor ||
-      turbo_json_type(snapshot) != TURBO_JSON_OBJECT) {
+      json_type(snapshot) != JSON_OBJECT) {
     return -1;
   }
-  topology = turbo_json_object_get(snapshot, "topology");
-  runtime = turbo_json_object_get(snapshot, "runtime");
-  if (!topology || !runtime || turbo_json_type(topology) != TURBO_JSON_OBJECT ||
-      turbo_json_type(runtime) != TURBO_JSON_OBJECT) {
+  topology = json_object_get(snapshot, "topology");
+  runtime = json_object_get(snapshot, "runtime");
+  if (!topology || !runtime || json_type(topology) != JSON_OBJECT ||
+      json_type(runtime) != JSON_OBJECT) {
     return -1;
   }
 
-  channels = turbo_json_object_get(topology, "channels");
-  nodes = turbo_json_object_get(topology, "nodes");
-  edges = turbo_json_object_get(topology, "edges");
-  threads = turbo_json_object_get(runtime, "threads");
-  runs = turbo_json_object_get(runtime, "runs");
-  history = turbo_json_object_get(runtime, "history");
+  channels = json_object_get(topology, "channels");
+  nodes = json_object_get(topology, "nodes");
+  edges = json_object_get(topology, "edges");
+  threads = json_object_get(runtime, "threads");
+  runs = json_object_get(runtime, "runs");
+  history = json_object_get(runtime, "history");
   if (!channels || !nodes || !edges || !threads || !runs || !history ||
-      turbo_json_type(channels) != TURBO_JSON_ARRAY ||
-      turbo_json_type(nodes) != TURBO_JSON_ARRAY ||
-      turbo_json_type(edges) != TURBO_JSON_ARRAY ||
-      turbo_json_type(threads) != TURBO_JSON_ARRAY ||
-      turbo_json_type(runs) != TURBO_JSON_ARRAY ||
-      turbo_json_type(history) != TURBO_JSON_ARRAY) {
+      json_type(channels) != JSON_ARRAY ||
+      json_type(nodes) != JSON_ARRAY ||
+      json_type(edges) != JSON_ARRAY ||
+      json_type(threads) != JSON_ARRAY ||
+      json_type(runs) != JSON_ARRAY ||
+      json_type(history) != JSON_ARRAY) {
     return -1;
   }
 
-  descriptor = turbo_json_create_object();
+  descriptor = json_create_object();
   if (!descriptor) {
     return -1;
   }
-  graph_name = turbo_json_get_string(topology, "graph_name");
-  entry_node = turbo_json_get_string(topology, "entry_node");
-  turbo_json_object_set_string(descriptor, "snapshot_id", snapshot_id);
-  turbo_json_object_set_number(
+  graph_name = json_get_string(topology, "graph_name");
+  entry_node = json_get_string(topology, "entry_node");
+  json_object_set_string(descriptor, "snapshot_id", snapshot_id);
+  json_object_set_number(
       descriptor, "snapshot_version",
-      turbo_json_get_double(snapshot, "snapshot_version", 0));
+      json_get_double(snapshot, "snapshot_version", 0));
   turbo_state_graph_store_descriptor_set_nullable_string(descriptor, "graph_name", graph_name);
   turbo_state_graph_store_descriptor_set_nullable_string(descriptor, "entry_node", entry_node);
-  turbo_json_object_set_number(descriptor, "channel_count",
-                               (double)turbo_json_array_size(channels));
-  turbo_json_object_set_number(descriptor, "node_count",
-                               (double)turbo_json_array_size(nodes));
-  turbo_json_object_set_number(descriptor, "edge_count",
-                               (double)turbo_json_array_size(edges));
-  turbo_json_object_set_number(descriptor, "thread_count",
-                               (double)turbo_json_array_size(threads));
-  turbo_json_object_set_number(descriptor, "run_count",
-                               (double)turbo_json_array_size(runs));
-  turbo_json_object_set_number(descriptor, "history_count",
-                               (double)turbo_json_array_size(history));
-  turbo_json_object_set_number(descriptor, "checkpoint_count",
-                               (double)turbo_json_array_size(history));
-  turbo_json_object_set_number(descriptor, "next_thread_id",
-                               turbo_json_get_double(runtime, "next_thread_id", 0));
-  turbo_json_object_set_number(descriptor, "next_run_id",
-                               turbo_json_get_double(runtime, "next_run_id", 0));
-  turbo_json_object_set_number(descriptor, "next_history_id",
-                               turbo_json_get_double(runtime, "next_history_id", 0));
-  turbo_json_object_set_number(descriptor, "next_checkpoint_id",
-                               turbo_json_get_double(runtime, "next_checkpoint_id", 0));
-  turbo_json_object_set_number(
+  json_object_set_number(descriptor, "channel_count",
+                               (double)json_array_size(channels));
+  json_object_set_number(descriptor, "node_count",
+                               (double)json_array_size(nodes));
+  json_object_set_number(descriptor, "edge_count",
+                               (double)json_array_size(edges));
+  json_object_set_number(descriptor, "thread_count",
+                               (double)json_array_size(threads));
+  json_object_set_number(descriptor, "run_count",
+                               (double)json_array_size(runs));
+  json_object_set_number(descriptor, "history_count",
+                               (double)json_array_size(history));
+  json_object_set_number(descriptor, "checkpoint_count",
+                               (double)json_array_size(history));
+  json_object_set_number(descriptor, "next_thread_id",
+                               json_get_double(runtime, "next_thread_id", 0));
+  json_object_set_number(descriptor, "next_run_id",
+                               json_get_double(runtime, "next_run_id", 0));
+  json_object_set_number(descriptor, "next_history_id",
+                               json_get_double(runtime, "next_history_id", 0));
+  json_object_set_number(descriptor, "next_checkpoint_id",
+                               json_get_double(runtime, "next_checkpoint_id", 0));
+  json_object_set_number(
       descriptor, "interrupted_run_count",
       (double)turbo_state_graph_store_count_runs_by_status(runs, "interrupted"));
-  turbo_json_object_set_number(
+  json_object_set_number(
       descriptor, "completed_run_count",
       (double)turbo_state_graph_store_count_runs_by_status(runs, "completed"));
 
@@ -186,13 +187,13 @@ static int turbo_state_graph_store_snapshot_array_has_string_field(
     const json_value_t *array, const char *field, const char *expected) {
   size_t i;
 
-  if (!expected || !array || turbo_json_type(array) != TURBO_JSON_ARRAY) {
+  if (!expected || !array || json_type(array) != JSON_ARRAY) {
     return 0;
   }
-  for (i = 0; i < turbo_json_array_size(array); ++i) {
-    const json_value_t *entry = turbo_json_array_get(array, i);
-    const char *value = entry && turbo_json_type(entry) == TURBO_JSON_OBJECT
-                            ? turbo_json_get_string(entry, field)
+  for (i = 0; i < json_array_size(array); ++i) {
+    const json_value_t *entry = json_array_get(array, i);
+    const char *value = entry && json_type(entry) == JSON_OBJECT
+                            ? json_get_string(entry, field)
                             : NULL;
     if (value && strcmp(value, expected) == 0) {
       return 1;
@@ -217,25 +218,25 @@ static int turbo_state_graph_store_snapshot_matches_options(
     return 1;
   }
 
-  topology = turbo_json_object_get(snapshot, "topology");
-  runtime = turbo_json_object_get(snapshot, "runtime");
-  if (!topology || !runtime || turbo_json_type(topology) != TURBO_JSON_OBJECT ||
-      turbo_json_type(runtime) != TURBO_JSON_OBJECT) {
+  topology = json_object_get(snapshot, "topology");
+  runtime = json_object_get(snapshot, "runtime");
+  if (!topology || !runtime || json_type(topology) != JSON_OBJECT ||
+      json_type(runtime) != JSON_OBJECT) {
     return 0;
   }
 
   if (options->graph_name) {
-    const char *graph_name = turbo_json_get_string(topology, "graph_name");
+    const char *graph_name = json_get_string(topology, "graph_name");
     if (!graph_name || strcmp(graph_name, options->graph_name) != 0) {
       return 0;
     }
   }
 
-  threads = turbo_json_object_get(runtime, "threads");
-  runs = turbo_json_object_get(runtime, "runs");
-  history = turbo_json_object_get(runtime, "history");
-  if (!threads || !runs || !history || turbo_json_type(threads) != TURBO_JSON_ARRAY ||
-      turbo_json_type(runs) != TURBO_JSON_ARRAY || turbo_json_type(history) != TURBO_JSON_ARRAY) {
+  threads = json_object_get(runtime, "threads");
+  runs = json_object_get(runtime, "runs");
+  history = json_object_get(runtime, "history");
+  if (!threads || !runs || !history || json_type(threads) != JSON_ARRAY ||
+      json_type(runs) != JSON_ARRAY || json_type(history) != JSON_ARRAY) {
     return 0;
   }
 
@@ -260,10 +261,10 @@ static int turbo_state_graph_store_snapshot_matches_options(
     return 0;
   }
   if (options->run_status) {
-    for (i = 0; i < turbo_json_array_size(runs); ++i) {
-      const json_value_t *run = turbo_json_array_get(runs, i);
-      const char *status = run && turbo_json_type(run) == TURBO_JSON_OBJECT
-                               ? turbo_json_get_string(run, "status")
+    for (i = 0; i < json_array_size(runs); ++i) {
+      const json_value_t *run = json_array_get(runs, i);
+      const char *status = run && json_type(run) == JSON_OBJECT
+                               ? json_get_string(run, "status")
                                : NULL;
       if (status && strcmp(status, options->run_status) == 0) {
         return 1;
@@ -293,32 +294,32 @@ static int turbo_state_graph_store_descriptor_is_newer(const json_value_t *candi
     return 1;
   }
 
-  candidate_history = turbo_json_get_double(candidate, "next_history_id", 0);
-  current_history = turbo_json_get_double(current_best, "next_history_id", 0);
+  candidate_history = json_get_double(candidate, "next_history_id", 0);
+  current_history = json_get_double(current_best, "next_history_id", 0);
   if (candidate_history != current_history) {
     return candidate_history > current_history;
   }
 
-  candidate_checkpoint = turbo_json_get_double(candidate, "next_checkpoint_id", 0);
-  current_checkpoint = turbo_json_get_double(current_best, "next_checkpoint_id", 0);
+  candidate_checkpoint = json_get_double(candidate, "next_checkpoint_id", 0);
+  current_checkpoint = json_get_double(current_best, "next_checkpoint_id", 0);
   if (candidate_checkpoint != current_checkpoint) {
     return candidate_checkpoint > current_checkpoint;
   }
 
-  candidate_run = turbo_json_get_double(candidate, "next_run_id", 0);
-  current_run = turbo_json_get_double(current_best, "next_run_id", 0);
+  candidate_run = json_get_double(candidate, "next_run_id", 0);
+  current_run = json_get_double(current_best, "next_run_id", 0);
   if (candidate_run != current_run) {
     return candidate_run > current_run;
   }
 
-  candidate_thread = turbo_json_get_double(candidate, "next_thread_id", 0);
-  current_thread = turbo_json_get_double(current_best, "next_thread_id", 0);
+  candidate_thread = json_get_double(candidate, "next_thread_id", 0);
+  current_thread = json_get_double(current_best, "next_thread_id", 0);
   if (candidate_thread != current_thread) {
     return candidate_thread > current_thread;
   }
 
-  return strcmp(turbo_json_get_string(candidate, "snapshot_id"),
-                turbo_json_get_string(current_best, "snapshot_id")) > 0;
+  return strcmp(json_get_string(candidate, "snapshot_id"),
+                json_get_string(current_best, "snapshot_id")) > 0;
 }
 
 static int turbo_state_graph_store_ensure_dir(const char *path) {
@@ -623,15 +624,15 @@ static int turbo_state_graph_store_memory_list(void *user_data, char **out_snaps
     return -1;
   }
   *out_snapshot_ids_json = NULL;
-  array = turbo_json_create_array();
+  array = json_create_array();
   if (!array) {
     return -1;
   }
   for (record = backend->head; record; record = record->next) {
-    turbo_json_array_add(array, turbo_json_create_string(record->snapshot_id));
+    json_array_add(array, json_create_string(record->snapshot_id));
   }
-  serialized = turbo_json_serialize(array, NULL);
-  turbo_free_json(&array);
+  serialized = json_serialize(array, NULL);
+  json_free(array); array = NULL;
   if (!serialized) {
     return -1;
   }
@@ -735,7 +736,7 @@ static int turbo_state_graph_store_file_list_append(const char *file_name, json_
   encoded_id[len - 5] = '\0';
   snapshot_id = turbo_state_graph_store_hex_decode(encoded_id);
   if (snapshot_id) {
-    turbo_json_array_add(array, turbo_json_create_string(snapshot_id));
+    json_array_add(array, json_create_string(snapshot_id));
     rc = 0;
   }
   free(snapshot_id);
@@ -756,10 +757,10 @@ static int turbo_state_graph_store_file_list(void *user_data, char **out_snapsho
   }
   *out_snapshot_ids_json = NULL;
   snapshots_dir = turbo_state_graph_store_file_snapshot_dir(backend->root_dir);
-  array = turbo_json_create_array();
+  array = json_create_array();
   if (!snapshots_dir || !array) {
     free(snapshots_dir);
-    turbo_free_json(&array);
+    json_free(array); array = NULL;
     return -1;
   }
 
@@ -771,7 +772,7 @@ static int turbo_state_graph_store_file_list(void *user_data, char **out_snapsho
 
     if (!pattern) {
       free(snapshots_dir);
-      turbo_free_json(&array);
+      json_free(array); array = NULL;
       return -1;
     }
     handle = FindFirstFileA(pattern, &find_data);
@@ -796,7 +797,7 @@ static int turbo_state_graph_store_file_list(void *user_data, char **out_snapsho
 
     if (!dir) {
       free(snapshots_dir);
-      turbo_free_json(&array);
+      json_free(array); array = NULL;
       return -1;
     }
     while ((entry = readdir(dir)) != NULL) {
@@ -811,11 +812,11 @@ static int turbo_state_graph_store_file_list(void *user_data, char **out_snapsho
 
   free(snapshots_dir);
   if (rc != 0) {
-    turbo_free_json(&array);
+    json_free(array); array = NULL;
     return -1;
   }
-  serialized = turbo_json_serialize(array, NULL);
-  turbo_free_json(&array);
+  serialized = json_serialize(array, NULL);
+  json_free(array); array = NULL;
   if (!serialized) {
     return -1;
   }
@@ -919,13 +920,13 @@ CXX_C_API int turbo_state_graph_store_list(const turbo_state_graph_store_t *stor
   *out_snapshot_ids_json = NULL;
   rc = store->list(store->user_data, &serialized);
   if (rc != 0 || !serialized) {
-    turbo_json_serialize_free(serialized);
+    json_serialize_free(serialized);
     return -1;
   }
   rc = turbo_state_graph_store_parse_json(serialized, &json);
-  turbo_json_serialize_free(serialized);
+  json_serialize_free(serialized);
   if (rc != 0) {
-    turbo_free_json(&json);
+    json_free(json); json = NULL;
     return -1;
   }
   *out_snapshot_ids_json = json;
@@ -951,13 +952,13 @@ CXX_C_API int turbo_state_graph_store_get_snapshot_descriptor(
   rc = turbo_state_graph_store_parse_json(snapshot_json, &snapshot);
   free(snapshot_json);
   if (rc != 0) {
-    turbo_free_json(&snapshot);
+    json_free(snapshot); snapshot = NULL;
     return -1;
   }
   rc = turbo_state_graph_store_make_snapshot_descriptor(snapshot_id, snapshot, &descriptor);
-  turbo_free_json(&snapshot);
+  json_free(snapshot); snapshot = NULL;
   if (rc != 0) {
-    turbo_free_json(&descriptor);
+    json_free(descriptor); descriptor = NULL;
     return -1;
   }
   *out_descriptor_json = descriptor;
@@ -977,26 +978,26 @@ CXX_C_API int turbo_state_graph_store_list_snapshot_descriptors(
   if (turbo_state_graph_store_list(store, &snapshot_ids) != 0) {
     return -1;
   }
-  descriptors = turbo_json_create_array();
+  descriptors = json_create_array();
   if (!descriptors) {
-    turbo_free_json(&snapshot_ids);
+    json_free(snapshot_ids); snapshot_ids = NULL;
     return -1;
   }
-  for (i = 0; i < turbo_json_array_size(snapshot_ids); ++i) {
-    const json_value_t *entry = turbo_json_array_get(snapshot_ids, i);
+  for (i = 0; i < json_array_size(snapshot_ids); ++i) {
+    const json_value_t *entry = json_array_get(snapshot_ids, i);
     json_value_t *descriptor = NULL;
-    const char *snapshot_id = entry && turbo_json_type(entry) == TURBO_JSON_STRING
-                                  ? turbo_json_string(entry)
+    const char *snapshot_id = entry && json_type(entry) == JSON_STRING
+                                  ? json_string(entry)
                                   : NULL;
     if (!snapshot_id ||
         turbo_state_graph_store_get_snapshot_descriptor(store, snapshot_id, &descriptor) != 0) {
-      turbo_free_json(&descriptors);
-      turbo_free_json(&snapshot_ids);
+      json_free(descriptors); descriptors = NULL;
+      json_free(snapshot_ids); snapshot_ids = NULL;
       return -1;
     }
-    turbo_json_array_add(descriptors, descriptor);
+    json_array_add(descriptors, descriptor);
   }
-  turbo_free_json(&snapshot_ids);
+  json_free(snapshot_ids); snapshot_ids = NULL;
   *out_descriptors_json = descriptors;
   return 0;
 }
@@ -1017,24 +1018,24 @@ CXX_C_API int turbo_state_graph_store_list_snapshot_descriptors_filtered(
   if (turbo_state_graph_store_list(store, &snapshot_ids) != 0) {
     return -1;
   }
-  descriptors = turbo_json_create_array();
+  descriptors = json_create_array();
   if (!descriptors) {
-    turbo_free_json(&snapshot_ids);
+    json_free(snapshot_ids); snapshot_ids = NULL;
     return -1;
   }
 
-  for (i = 0; i < turbo_json_array_size(snapshot_ids); ++i) {
-    const json_value_t *entry = turbo_json_array_get(snapshot_ids, i);
-    const char *snapshot_id = entry && turbo_json_type(entry) == TURBO_JSON_STRING
-                                  ? turbo_json_string(entry)
+  for (i = 0; i < json_array_size(snapshot_ids); ++i) {
+    const json_value_t *entry = json_array_get(snapshot_ids, i);
+    const char *snapshot_id = entry && json_type(entry) == JSON_STRING
+                                  ? json_string(entry)
                                   : NULL;
     char *snapshot_json = NULL;
     json_value_t *snapshot = NULL;
     json_value_t *descriptor = NULL;
 
     if (!snapshot_id) {
-      turbo_free_json(&descriptors);
-      turbo_free_json(&snapshot_ids);
+      json_free(descriptors); descriptors = NULL;
+      json_free(snapshot_ids); snapshot_ids = NULL;
       return -1;
     }
     if (options && options->limit > 0 && emitted >= options->limit) {
@@ -1042,36 +1043,36 @@ CXX_C_API int turbo_state_graph_store_list_snapshot_descriptors_filtered(
     }
     if (store->load(store->user_data, snapshot_id, &snapshot_json) != 0 || !snapshot_json) {
       free(snapshot_json);
-      turbo_free_json(&descriptors);
-      turbo_free_json(&snapshot_ids);
+      json_free(descriptors); descriptors = NULL;
+      json_free(snapshot_ids); snapshot_ids = NULL;
       return -1;
     }
     if (turbo_state_graph_store_parse_json(snapshot_json, &snapshot) != 0) {
       free(snapshot_json);
-      turbo_free_json(&snapshot);
-      turbo_free_json(&descriptors);
-      turbo_free_json(&snapshot_ids);
+      json_free(snapshot); snapshot = NULL;
+      json_free(descriptors); descriptors = NULL;
+      json_free(snapshot_ids); snapshot_ids = NULL;
       return -1;
     }
     free(snapshot_json);
     if (!turbo_state_graph_store_snapshot_matches_options(snapshot, options)) {
-      turbo_free_json(&snapshot);
+      json_free(snapshot); snapshot = NULL;
       continue;
     }
     if (turbo_state_graph_store_make_snapshot_descriptor(snapshot_id, snapshot, &descriptor) !=
         0) {
-      turbo_free_json(&descriptor);
-      turbo_free_json(&snapshot);
-      turbo_free_json(&descriptors);
-      turbo_free_json(&snapshot_ids);
+      json_free(descriptor); descriptor = NULL;
+      json_free(snapshot); snapshot = NULL;
+      json_free(descriptors); descriptors = NULL;
+      json_free(snapshot_ids); snapshot_ids = NULL;
       return -1;
     }
-    turbo_json_array_add(descriptors, descriptor);
-    turbo_free_json(&snapshot);
+    json_array_add(descriptors, descriptor);
+    json_free(snapshot); snapshot = NULL;
     emitted += 1;
   }
 
-  turbo_free_json(&snapshot_ids);
+  json_free(snapshot_ids); snapshot_ids = NULL;
   *out_descriptors_json = descriptors;
   return 0;
 }
@@ -1093,20 +1094,20 @@ CXX_C_API int turbo_state_graph_store_get_latest_snapshot_descriptor(
     return -1;
   }
 
-  for (i = 0; i < turbo_json_array_size(descriptors); ++i) {
-    const json_value_t *entry = turbo_json_array_get(descriptors, i);
-    if (entry && turbo_json_type(entry) == TURBO_JSON_OBJECT &&
+  for (i = 0; i < json_array_size(descriptors); ++i) {
+    const json_value_t *entry = json_array_get(descriptors, i);
+    if (entry && json_type(entry) == JSON_OBJECT &&
         turbo_state_graph_store_descriptor_is_newer(entry, best)) {
-      turbo_free_json(&best);
-      best = turbo_json_clone(entry);
+      json_free(best); best = NULL;
+      best = json_clone(entry);
       if (!best) {
-        turbo_free_json(&descriptors);
+        json_free(descriptors); descriptors = NULL;
         return -1;
       }
     }
   }
 
-  turbo_free_json(&descriptors);
+  json_free(descriptors); descriptors = NULL;
   if (!best) {
     return -1;
   }
@@ -1180,13 +1181,13 @@ CXX_C_API int turbo_state_graph_store_get_latest_snapshot_id(
   if (turbo_state_graph_store_get_latest_snapshot_descriptor(store, options, &descriptor) != 0) {
     return -1;
   }
-  snapshot_id = turbo_json_get_string(descriptor, "snapshot_id");
+  snapshot_id = json_get_string(descriptor, "snapshot_id");
   if (!snapshot_id || snapshot_id[0] == '\0') {
-    turbo_free_json(&descriptor);
+    json_free(descriptor); descriptor = NULL;
     return -1;
   }
   owned_snapshot_id = turbo_state_graph_store_strdup(snapshot_id);
-  turbo_free_json(&descriptor);
+  json_free(descriptor); descriptor = NULL;
   if (!owned_snapshot_id) {
     return -1;
   }
@@ -1255,13 +1256,13 @@ CXX_C_API turbo_state_graph_status_t turbo_state_graph_store_load_latest_snapsho
   if (turbo_state_graph_store_get_latest_snapshot_descriptor(store, options, &descriptor) != 0) {
     return TURBO_STATE_GRAPH_ERROR;
   }
-  snapshot_id = turbo_json_get_string(descriptor, "snapshot_id");
+  snapshot_id = json_get_string(descriptor, "snapshot_id");
   if (!snapshot_id) {
-    turbo_free_json(&descriptor);
+    json_free(descriptor); descriptor = NULL;
     return TURBO_STATE_GRAPH_ERROR;
   }
   status = turbo_state_graph_store_load_snapshot(store, snapshot_id, graph);
-  turbo_free_json(&descriptor);
+  json_free(descriptor); descriptor = NULL;
   return status;
 }
 
@@ -1331,7 +1332,7 @@ CXX_C_API turbo_state_graph_status_t turbo_state_graph_store_save_snapshot(
   if (store->save(store->user_data, snapshot_id, snapshot_json) != 0) {
     status = TURBO_STATE_GRAPH_ERROR;
   }
-  turbo_json_serialize_free(snapshot_json);
+  json_serialize_free(snapshot_json);
   return status;
 }
 

@@ -16,7 +16,7 @@ set(TEST_FILES
 foreach(test_file ${TEST_FILES})
     get_filename_component(test_name ${test_file} NAME_WE)
     add_executable(${test_name} ${test_file})
-    target_link_libraries(${test_name} PRIVATE cjwt TurboNet::TinyTest TurboNet::Parser aklomp::base64 OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(${test_name} PRIVATE cjwt Salts::TinyTest Salts::JsonParser aklomp::base64 OpenSSL::SSL OpenSSL::Crypto)
     target_include_directories(${test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
     target_compile_definitions(${test_name} PRIVATE TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     

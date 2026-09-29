@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "tinytest.h"
-#include <turbo_parser.h>
+#include <json_parser.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -743,11 +743,11 @@ static void claims_eq(__bdd_config_type__ *__bdd_config__, const expected_claim_
     }
 
     check(act != NULL);
-    text = turbo_json_serialize_pretty(act, NULL);
+    text = json_serialize_pretty(act, NULL);
     printf("got: %s\n", text);
-    turbo_json_serialize_free(text);
+    json_serialize_free(text);
 
-    const char *got = turbo_json_get_string(act, exp->key);
+    const char *got = json_get_string(act, exp->key);
     check(got != NULL);
     if (got) {
         check(0 == strcmp(exp->value, got));

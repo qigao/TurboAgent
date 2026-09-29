@@ -1,6 +1,10 @@
 #ifndef TURBO_AGENT_APP_H
 #define TURBO_AGENT_APP_H
 
+#include <stddef.h>
+
+#include <turbo_agent_api.h>
+
 #include "turbo_agent_session.h"
 
 #ifdef __cplusplus

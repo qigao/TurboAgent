@@ -1,7 +1,7 @@
 #ifndef TURBO_AGENT_EXTENSIONS_H
 #define TURBO_AGENT_EXTENSIONS_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_event.h"
 #include "turbo_tool.h"

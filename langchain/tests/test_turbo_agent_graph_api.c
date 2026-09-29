@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_action_tool.h"
 #include "turbo_agent_extensions.h"
 #include "turbo_agent_graph.h"
@@ -65,7 +66,7 @@ static char *graph_test_temp_dir(void) {
 #else
   snprintf(path, sizeof(path), "/tmp/turbonet_graph_%lu", (unsigned long)getpid());
 #endif
-  check_int_eq(GRAPH_TEST_MKDIR(path), 0);
+  check_equal(GRAPH_TEST_MKDIR(path), 0);
   return graph_test_strdup(path);
 }
 
@@ -106,29 +107,29 @@ spec("turbo agent graph api") {
 
     state = turbo_agent_state_create();
     check_not_null(state);
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    model_event = turbo_json_create_object();
-    tool_calls = turbo_json_create_array();
-    tool_call = turbo_json_create_object();
+    model_event = json_create_object();
+    tool_calls = json_create_array();
+    tool_call = json_create_object();
     check_not_null(model_event);
     check_not_null(tool_calls);
     check_not_null(tool_call);
 
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "output_text", "");
-    turbo_json_object_set_string(tool_call, "call_id", "call_1");
-    turbo_json_array_add(tool_calls, tool_call);
-    turbo_json_object_add(model_event, "tool_calls", tool_calls);
-    turbo_json_array_add(events, model_event);
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "output_text", "");
+    json_object_set_string(tool_call, "call_id", "call_1");
+    json_array_add(tool_calls, tool_call);
+    json_object_add(model_event, "tool_calls", tool_calls);
+    json_array_add(events, model_event);
 
     ctx.state = state;
-    check_int_ne(turbo_agent_tool_node(&ctx, agent), 0);
-    check_str_eq(turbo_agent_state_model_error_phase(state), "tool");
-    check_str_eq(turbo_agent_state_model_error_detail(state), "malformed pending tool call record");
+    check_not_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(turbo_agent_state_model_error_phase(state), "tool");
+    check_equal(turbo_agent_state_model_error_detail(state), "malformed pending tool call record");
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -160,7 +161,7 @@ spec("turbo agent graph api") {
     const char *output_text;
 
     check_not_null(action_registry);
-    check_int_eq(turbo_action_tool_registry_add(action_registry, &definition),
+    check_equal(turbo_action_tool_registry_add(action_registry, &definition),
                  TURBO_ACTION_TOOL_OK);
     tool_registry = turbo_action_tool_registry_build_tool_registry_bridge(action_registry);
     check_not_null(tool_registry);
@@ -172,60 +173,60 @@ spec("turbo agent graph api") {
     config.tool_registry = tool_registry;
     agent = turbo_agent_create(&config);
     check_not_null(agent);
-    check_int_eq(turbo_agent_add_action_policy_guardrail(agent, action_registry,
+    check_equal(turbo_agent_add_action_policy_guardrail(agent, action_registry,
                                                          &policy),
                  0);
-    check_int_eq(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent),
+    check_equal(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent),
                  TURBO_GRAPH_EXEC_OK);
 
     state = turbo_agent_state_create();
     check_not_null(state);
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
-    model_event = turbo_json_create_object();
-    tool_calls = turbo_json_create_array();
-    tool_call = turbo_json_create_object();
+    model_event = json_create_object();
+    tool_calls = json_create_array();
+    tool_call = json_create_object();
     check_not_null(model_event);
     check_not_null(tool_calls);
     check_not_null(tool_call);
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "output_text", "");
-    turbo_json_object_set_string(tool_call, "call_id", "call_1");
-    turbo_json_object_set_string(tool_call, "name", "run_command");
-    turbo_json_object_set_string(tool_call, "arguments",
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "output_text", "");
+    json_object_set_string(tool_call, "call_id", "call_1");
+    json_object_set_string(tool_call, "name", "run_command");
+    json_object_set_string(tool_call, "arguments",
                                  "{\"command\":\"git reset --hard HEAD\"}");
-    turbo_json_array_add(tool_calls, tool_call);
-    turbo_json_object_add(model_event, "tool_calls", tool_calls);
-    turbo_json_array_add(events, model_event);
+    json_array_add(tool_calls, tool_call);
+    json_object_add(model_event, "tool_calls", tool_calls);
+    json_array_add(events, model_event);
 
     ctx.graph = graph;
     ctx.state = state;
     ctx.current_node = "tools";
-    check_int_eq(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
     check_true(ctx.stop != 0);
-    check_str_eq(ctx.next_node, "tools");
+    check_equal(ctx.next_node, "tools");
     check_true(turbo_agent_state_review_required(state));
     check_false(turbo_agent_state_review_approved(state));
     check_not_null(strstr(turbo_agent_state_review_note(state), "tool_approval"));
     check_not_null(strstr(turbo_agent_state_review_note(state), "call_1"));
     check_not_null(strstr(turbo_agent_state_review_note(state), "run_command"));
     check_null(turbo_agent_state_guardrail_rejection_reason(state));
-    check_size_eq(turbo_json_array_size(events), 1);
+    check_equal(json_array_size(events), 1);
 
-    check_int_eq(turbo_agent_state_set_review_approved(state, 1), 0);
+    check_equal(turbo_agent_state_set_review_approved(state, 1), 0);
     ctx.stop = 0;
-    check_int_eq(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
     check_false(ctx.stop != 0);
-    last_event = turbo_json_array_get(events, turbo_json_array_size(events) - 1);
-    check_str_eq(turbo_json_get_string(last_event, "kind"), "tool_results");
-    outputs = turbo_json_object_get(last_event, "outputs");
-    check_size_eq(turbo_json_array_size(outputs), 1);
-    output_item = turbo_json_array_get(outputs, 0);
-    output_text = turbo_json_get_string(output_item, "output");
+    last_event = json_array_get(events, json_array_size(events) - 1);
+    check_equal(json_get_string(last_event, "kind"), "tool_results");
+    outputs = json_object_get(last_event, "outputs");
+    check_equal(json_array_size(outputs), 1);
+    output_item = json_array_get(outputs, 0);
+    output_text = json_get_string(output_item, "output");
     check_not_null(output_text);
     check_not_null(strstr(output_text, "approved"));
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_graph_destroy(graph);
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(tool_registry);
@@ -258,7 +259,7 @@ spec("turbo agent graph api") {
     char *owned_first_note;
 
     check_not_null(action_registry);
-    check_int_eq(turbo_action_tool_registry_add(action_registry, &definition),
+    check_equal(turbo_action_tool_registry_add(action_registry, &definition),
                  TURBO_ACTION_TOOL_OK);
     tool_registry = turbo_action_tool_registry_build_tool_registry_bridge(action_registry);
     check_not_null(tool_registry);
@@ -270,56 +271,56 @@ spec("turbo agent graph api") {
     config.tool_registry = tool_registry;
     agent = turbo_agent_create(&config);
     check_not_null(agent);
-    check_int_eq(turbo_agent_add_action_policy_guardrail(agent, action_registry,
+    check_equal(turbo_agent_add_action_policy_guardrail(agent, action_registry,
                                                          &policy),
                  0);
-    check_int_eq(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent),
+    check_equal(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent),
                  TURBO_GRAPH_EXEC_OK);
 
     state = turbo_agent_state_create();
     check_not_null(state);
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
-    model_event = turbo_json_create_object();
-    tool_calls = turbo_json_create_array();
-    tool_call = turbo_json_create_object();
+    model_event = json_create_object();
+    tool_calls = json_create_array();
+    tool_call = json_create_object();
     check_not_null(model_event);
     check_not_null(tool_calls);
     check_not_null(tool_call);
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "output_text", "");
-    turbo_json_object_set_string(tool_call, "call_id", "call_1");
-    turbo_json_object_set_string(tool_call, "name", "run_command");
-    turbo_json_object_set_string(tool_call, "arguments",
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "output_text", "");
+    json_object_set_string(tool_call, "call_id", "call_1");
+    json_object_set_string(tool_call, "name", "run_command");
+    json_object_set_string(tool_call, "arguments",
                                  "{\"command\":\"git reset --hard HEAD\"}");
-    turbo_json_array_add(tool_calls, tool_call);
-    turbo_json_object_add(model_event, "tool_calls", tool_calls);
-    turbo_json_array_add(events, model_event);
+    json_array_add(tool_calls, tool_call);
+    json_object_add(model_event, "tool_calls", tool_calls);
+    json_array_add(events, model_event);
 
     ctx.graph = graph;
     ctx.state = state;
     ctx.current_node = "tools";
-    check_int_eq(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
     first_note = turbo_agent_state_review_note(state);
     check_not_null(first_note);
     owned_first_note = (char *)malloc(strlen(first_note) + 1);
     check_not_null(owned_first_note);
     memcpy(owned_first_note, first_note, strlen(first_note) + 1);
-    check_int_eq(turbo_agent_state_set_review_approved(state, 1), 0);
+    check_equal(turbo_agent_state_set_review_approved(state, 1), 0);
 
-    turbo_json_object_set_string(tool_call, "call_id", "call_2");
+    json_object_set_string(tool_call, "call_id", "call_2");
     ctx.stop = 0;
     ctx.next_node = NULL;
-    check_int_eq(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
     check_true(ctx.stop != 0);
     check_true(turbo_agent_state_review_required(state));
     check_false(turbo_agent_state_review_approved(state));
     check_not_null(strstr(turbo_agent_state_review_note(state), "call_2"));
     check_true(strcmp(turbo_agent_state_review_note(state), owned_first_note) != 0);
-    check_size_eq(turbo_json_array_size(events), 1);
+    check_equal(json_array_size(events), 1);
 
     free(owned_first_note);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_graph_destroy(graph);
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(tool_registry);
@@ -351,7 +352,7 @@ spec("turbo agent graph api") {
 
     check_not_null(store);
     check_not_null(action_registry);
-    check_int_eq(turbo_agent_knowledge_store_add_action_tools(action_registry, store),
+    check_equal(turbo_agent_knowledge_store_add_action_tools(action_registry, store),
                  0);
     tool_registry = turbo_action_tool_registry_build_tool_registry_bridge(action_registry);
     check_not_null(tool_registry);
@@ -364,49 +365,49 @@ spec("turbo agent graph api") {
     agent = turbo_agent_create(&config);
     check_not_null(agent);
     policy.workspace_root = "C:\\workspace";
-    check_int_eq(turbo_agent_add_action_policy_guardrail(agent, action_registry,
+    check_equal(turbo_agent_add_action_policy_guardrail(agent, action_registry,
                                                          &policy),
                  0);
-    check_int_eq(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent),
+    check_equal(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent),
                  TURBO_GRAPH_EXEC_OK);
 
     state = turbo_agent_state_create();
     check_not_null(state);
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
-    model_event = turbo_json_create_object();
-    tool_calls = turbo_json_create_array();
-    tool_call = turbo_json_create_object();
+    model_event = json_create_object();
+    tool_calls = json_create_array();
+    tool_call = json_create_object();
     check_not_null(model_event);
     check_not_null(tool_calls);
     check_not_null(tool_call);
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "output_text", "");
-    turbo_json_object_set_string(tool_call, "call_id", "call_knowledge");
-    turbo_json_object_set_string(tool_call, "name", "agent.knowledge.index_directory");
-    turbo_json_object_set_string(tool_call, "arguments",
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "output_text", "");
+    json_object_set_string(tool_call, "call_id", "call_knowledge");
+    json_object_set_string(tool_call, "name", "agent.knowledge.index_directory");
+    json_object_set_string(tool_call, "arguments",
                                  "{\"root_dir\":\"D:/outside/docs\"}");
-    turbo_json_array_add(tool_calls, tool_call);
-    turbo_json_object_add(model_event, "tool_calls", tool_calls);
-    turbo_json_array_add(events, model_event);
+    json_array_add(tool_calls, tool_call);
+    json_object_add(model_event, "tool_calls", tool_calls);
+    json_array_add(events, model_event);
 
     ctx.graph = graph;
     ctx.state = state;
     ctx.current_node = "tools";
-    check_int_eq(turbo_agent_tool_node(&ctx, agent), 0);
-    check_str_eq(turbo_agent_state_guardrail_rejection_phase(state), "before_tool");
-    check_str_eq(turbo_agent_state_guardrail_rejection_reason(state),
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(turbo_agent_state_guardrail_rejection_phase(state), "before_tool");
+    check_equal(turbo_agent_state_guardrail_rejection_reason(state),
                  "path_outside_workspace");
-    last_event = turbo_json_array_get(events, turbo_json_array_size(events) - 1);
-    check_str_eq(turbo_json_get_string(last_event, "kind"), "tool_results");
-    outputs = turbo_json_object_get(last_event, "outputs");
-    check_size_eq(turbo_json_array_size(outputs), 1);
-    output_item = turbo_json_array_get(outputs, 0);
-    output_text = turbo_json_get_string(output_item, "output");
+    last_event = json_array_get(events, json_array_size(events) - 1);
+    check_equal(json_get_string(last_event, "kind"), "tool_results");
+    outputs = json_object_get(last_event, "outputs");
+    check_equal(json_array_size(outputs), 1);
+    output_item = json_array_get(outputs, 0);
+    output_text = json_get_string(output_item, "output");
     check_not_null(output_text);
     check_not_null(strstr(output_text, "path_outside_workspace"));
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_graph_destroy(graph);
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(tool_registry);
@@ -428,34 +429,34 @@ spec("turbo agent graph api") {
     turbo_graph_exec_ctx_t ctx = {0};
 
     check_not_null(state);
-    executor_versions = turbo_json_create_array();
-    executor_events = turbo_json_create_array();
-    tool_results = turbo_json_create_object();
-    outputs = turbo_json_create_array();
-    output_item = turbo_json_create_object();
+    executor_versions = json_create_array();
+    executor_events = json_create_array();
+    tool_results = json_create_object();
+    outputs = json_create_array();
+    output_item = json_create_object();
     check_not_null(executor_versions);
     check_not_null(executor_events);
     check_not_null(tool_results);
     check_not_null(outputs);
     check_not_null(output_item);
 
-    turbo_json_object_set_string(tool_results, "kind", "tool_results");
-    turbo_json_object_set_string(output_item, "call_id", "call_1");
-    turbo_json_object_set_string(output_item, "output", "not-json");
-    turbo_json_array_add(outputs, output_item);
-    turbo_json_object_add(tool_results, "outputs", outputs);
-    turbo_json_array_add(executor_events, tool_results);
-    turbo_json_array_add(executor_versions, executor_events);
-    turbo_json_object_add(state, "executor_event_versions", executor_versions);
+    json_object_set_string(tool_results, "kind", "tool_results");
+    json_object_set_string(output_item, "call_id", "call_1");
+    json_object_set_string(output_item, "output", "not-json");
+    json_array_add(outputs, output_item);
+    json_object_add(tool_results, "outputs", outputs);
+    json_array_add(executor_events, tool_results);
+    json_array_add(executor_versions, executor_events);
+    json_object_add(state, "executor_event_versions", executor_versions);
 
     ctx.state = state;
-    check_int_eq(turbo_agent_detect_failed_step_node(&ctx, NULL), 0);
+    check_equal(turbo_agent_detect_failed_step_node(&ctx, NULL), 0);
     check_true(turbo_agent_state_replan_requested(state));
-    check_str_eq(turbo_agent_state_failure_kind(state), "tool_result");
-    check_str_eq(turbo_agent_state_failure_reason(state), "tool output was not valid JSON");
-    check_str_eq(turbo_agent_state_replan_reason(state), "tool output was not valid JSON");
+    check_equal(turbo_agent_state_failure_kind(state), "tool_result");
+    check_equal(turbo_agent_state_failure_reason(state), "tool output was not valid JSON");
+    check_equal(turbo_agent_state_replan_reason(state), "tool output was not valid JSON");
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
   }
 
   it("should stop review node when review is required and not approved") {
@@ -469,14 +470,14 @@ spec("turbo agent graph api") {
     agent = turbo_agent_create(&config);
     check_not_null(agent);
     check_not_null(state);
-    check_int_eq(turbo_agent_state_request_review(state, "needs human check"), 0);
-    check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
+    check_equal(turbo_agent_state_request_review(state, "needs human check"), 0);
+    check_equal(turbo_agent_state_set_review_approved(state, 0), 0);
 
     ctx.state = state;
-    check_int_eq(turbo_agent_review_node(&ctx, agent), 0);
+    check_equal(turbo_agent_review_node(&ctx, agent), 0);
     check_true(ctx.stop != 0);
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -487,17 +488,17 @@ spec("turbo agent graph api") {
 
     check_not_null(state);
     check_not_null(graph);
-    check_int_eq(turbo_graph_add_node(graph, "replan", dummy_graph_node, NULL),
+    check_equal(turbo_graph_add_node(graph, "replan", dummy_graph_node, NULL),
                  TURBO_GRAPH_EXEC_OK);
-    check_int_eq(turbo_agent_state_request_replan(state, "bad output"), 0);
+    check_equal(turbo_agent_state_request_replan(state, "bad output"), 0);
 
     ctx.graph = graph;
     ctx.state = state;
-    check_int_eq(turbo_agent_replan_route_node(&ctx, "replan"), 0);
-    check_str_eq(ctx.next_node, "replan");
+    check_equal(turbo_agent_replan_route_node(&ctx, "replan"), 0);
+    check_equal(ctx.next_node, "replan");
 
     turbo_graph_destroy(graph);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
   }
 
   it("should mark executor text failures and request replan when failure markers are present") {
@@ -508,27 +509,27 @@ spec("turbo agent graph api") {
     turbo_graph_exec_ctx_t ctx = {0};
 
     check_not_null(state);
-    executor_versions = turbo_json_create_array();
-    executor_events = turbo_json_create_array();
-    model_event = turbo_json_create_object();
+    executor_versions = json_create_array();
+    executor_events = json_create_array();
+    model_event = json_create_object();
     check_not_null(executor_versions);
     check_not_null(executor_events);
     check_not_null(model_event);
 
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "output_text", "FAILED: executor could not finish");
-    turbo_json_array_add(executor_events, model_event);
-    turbo_json_array_add(executor_versions, executor_events);
-    turbo_json_object_add(state, "executor_event_versions", executor_versions);
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "output_text", "FAILED: executor could not finish");
+    json_array_add(executor_events, model_event);
+    json_array_add(executor_versions, executor_events);
+    json_object_add(state, "executor_event_versions", executor_versions);
 
     ctx.state = state;
-    check_int_eq(turbo_agent_detect_failed_step_node(&ctx, NULL), 0);
+    check_equal(turbo_agent_detect_failed_step_node(&ctx, NULL), 0);
     check_true(turbo_agent_state_replan_requested(state));
-    check_str_eq(turbo_agent_state_failure_kind(state), "executor_text");
-    check_str_eq(turbo_agent_state_failure_reason(state), "FAILED: executor could not finish");
-    check_str_eq(turbo_agent_state_replan_reason(state), "FAILED: executor could not finish");
+    check_equal(turbo_agent_state_failure_kind(state), "executor_text");
+    check_equal(turbo_agent_state_failure_reason(state), "FAILED: executor could not finish");
+    check_equal(turbo_agent_state_replan_reason(state), "FAILED: executor could not finish");
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
   }
 
   it("should report pending tool calls only when the latest model event carries tool calls") {
@@ -540,28 +541,28 @@ spec("turbo agent graph api") {
     turbo_graph_exec_ctx_t ctx = {0};
 
     check_not_null(state);
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    model_event = turbo_json_create_object();
-    tool_calls = turbo_json_create_array();
-    tool_call = turbo_json_create_object();
+    model_event = json_create_object();
+    tool_calls = json_create_array();
+    tool_call = json_create_object();
     check_not_null(model_event);
     check_not_null(tool_calls);
     check_not_null(tool_call);
 
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(tool_call, "call_id", "call_1");
-    turbo_json_object_set_string(tool_call, "name", "sum");
-    turbo_json_object_set_string(tool_call, "arguments", "{\"a\":2}");
-    turbo_json_array_add(tool_calls, tool_call);
-    turbo_json_object_add(model_event, "tool_calls", tool_calls);
-    turbo_json_array_add(events, model_event);
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(tool_call, "call_id", "call_1");
+    json_object_set_string(tool_call, "name", "sum");
+    json_object_set_string(tool_call, "arguments", "{\"a\":2}");
+    json_array_add(tool_calls, tool_call);
+    json_object_add(model_event, "tool_calls", tool_calls);
+    json_array_add(events, model_event);
 
     ctx.state = state;
     check_true(turbo_agent_has_pending_tool_calls(&ctx, NULL));
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
   }
 
   it("should report review approval through the public predicate") {
@@ -569,13 +570,13 @@ spec("turbo agent graph api") {
     turbo_graph_exec_ctx_t ctx = {0};
 
     check_not_null(state);
-    check_int_eq(turbo_agent_state_request_review(state, "ok"), 0);
-    check_int_eq(turbo_agent_state_set_review_approved(state, 1), 0);
+    check_equal(turbo_agent_state_request_review(state, "ok"), 0);
+    check_equal(turbo_agent_state_set_review_approved(state, 1), 0);
 
     ctx.state = state;
     check_true(turbo_agent_review_approved_predicate(&ctx, NULL));
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
   }
 
   it("should stop and set final answer when detect_failed_step exceeds the replan limit") {
@@ -587,32 +588,32 @@ spec("turbo agent graph api") {
     const char *final_answer;
 
     check_not_null(state);
-    check_int_eq(turbo_agent_state_set_replan_limit(state, 1), 0);
-    check_int_eq(turbo_agent_state_request_replan(state, "first failure"), 0);
+    check_equal(turbo_agent_state_set_replan_limit(state, 1), 0);
+    check_equal(turbo_agent_state_request_replan(state, "first failure"), 0);
 
-    executor_versions = turbo_json_create_array();
-    executor_events = turbo_json_create_array();
-    model_event = turbo_json_create_object();
+    executor_versions = json_create_array();
+    executor_events = json_create_array();
+    model_event = json_create_object();
     check_not_null(executor_versions);
     check_not_null(executor_events);
     check_not_null(model_event);
 
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "output_text", "FAILED: executor could not finish");
-    turbo_json_array_add(executor_events, model_event);
-    turbo_json_array_add(executor_versions, executor_events);
-    turbo_json_object_add(state, "executor_event_versions", executor_versions);
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "output_text", "FAILED: executor could not finish");
+    json_array_add(executor_events, model_event);
+    json_array_add(executor_versions, executor_events);
+    json_object_add(state, "executor_event_versions", executor_versions);
 
     ctx.state = state;
-    check_int_eq(turbo_agent_detect_failed_step_node(&ctx, NULL), 0);
+    check_equal(turbo_agent_detect_failed_step_node(&ctx, NULL), 0);
     check_true(ctx.stop != 0);
-    check_str_eq(turbo_agent_state_failure_kind(state), "limit");
-    check_str_eq(turbo_agent_state_failure_reason(state), "maximum replans exceeded");
+    check_equal(turbo_agent_state_failure_kind(state), "limit");
+    check_equal(turbo_agent_state_failure_reason(state), "maximum replans exceeded");
     final_answer = turbo_agent_state_final_answer_text(state);
     check_not_null(final_answer);
     check_true(strstr(final_answer, "FAILED: maximum replans exceeded after failure: ") == final_answer);
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
   }
 }
 

@@ -1,4 +1,5 @@
 /* turbo_agent_runtime_v1_util.c
+#include <json_parser.h>
  * Extracted from turbo_agent_runtime_v1.c  —  bind helpers, small
  * utilities, platform IO, JSON parse/filter helpers, and store adapter
  * layer.  No business logic lives here. */
@@ -29,7 +30,7 @@ int turbo_agent_runtime_json_value_object_set_string(
   if (!object || !key || !value) {
     return -1;
   }
-  field = turbo_json_create_string(value);
+  field = json_create_string(value);
   if (!field) {
     return -1;
   }
@@ -47,7 +48,7 @@ int turbo_agent_runtime_json_value_object_set_int64(
   if (!object || !key) {
     return -1;
   }
-  field = turbo_json_create_int64(value);
+  field = json_create_int64(value);
   if (!field) {
     return -1;
   }
@@ -66,7 +67,7 @@ int turbo_agent_runtime_json_value_object_set_clone(
   if (!object || !key || !value) {
     return -1;
   }
-  copy = turbo_json_clone(value);
+  copy = json_clone(value);
   if (!copy) {
     return -1;
   }
@@ -128,23 +129,23 @@ int turbo_agent_runtime_result_to_json(const turbo_graph_run_result_t *result,
     return -1;
   }
 
-  json_result = turbo_json_create_object();
+  json_result = json_create_object();
   if (!json_result) {
     return -1;
   }
 
-  turbo_json_object_set_number(json_result, "status", (double)result->status);
+  json_object_set_number(json_result, "status", (double)result->status);
   if (result->last_node) {
-    turbo_json_object_set_string(json_result, "last_node", result->last_node);
+    json_object_set_string(json_result, "last_node", result->last_node);
   } else {
-    turbo_json_object_set_null(json_result, "last_node");
+    json_object_set_null(json_result, "last_node");
   }
   if (result->next_node) {
-    turbo_json_object_set_string(json_result, "next_node", result->next_node);
+    json_object_set_string(json_result, "next_node", result->next_node);
   } else {
-    turbo_json_object_set_null(json_result, "next_node");
+    json_object_set_null(json_result, "next_node");
   }
-  turbo_json_object_set_number(json_result, "steps", (double)result->steps);
+  json_object_set_number(json_result, "steps", (double)result->steps);
 
   *out_result = json_result;
   return 0;
@@ -346,9 +347,9 @@ int turbo_agent_runtime_parse_json_string(const char *json_text, json_value_t **
   }
 
   *out_json = NULL;
-  if (turbo_parse_json((const uint8_t *)json_text, strlen(json_text), &json_root) != 0 ||
-      !json_root) {
-    turbo_free_json(&json_root);
+  json_root = json_parse(json_text, strlen(json_text));
+  if (!json_root) {
+    json_free(json_root); json_root = NULL;
     return -1;
   }
   *out_json = json_root;
@@ -363,7 +364,7 @@ int turbo_agent_runtime_json_matches_filter(const json_value_t *record,
   if (!filter_key || !filter_value) {
     return 1;
   }
-  value = turbo_json_get_string(record, filter_key);
+  value = json_get_string(record, filter_key);
   return value && strcmp(value, filter_value) == 0;
 }
 
@@ -386,12 +387,12 @@ int turbo_agent_runtime_store_put_json(turbo_agent_runtime_t *runtime,
     return -1;
   }
 
-  serialized = turbo_json_serialize(record_json, NULL);
+  serialized = json_serialize(record_json, NULL);
   if (!serialized) {
     return -1;
   }
   rc = runtime->store.put(runtime->store.user_data, collection, id, serialized);
-  turbo_json_serialize_free(serialized);
+  json_serialize_free(serialized);
   return rc;
 }
 
@@ -437,8 +438,8 @@ int turbo_agent_runtime_store_list_json(turbo_agent_runtime_t *runtime,
   }
   rc = turbo_agent_runtime_parse_json_string(serialized, out_records_json);
   free(serialized);
-  if (rc != 0 || !*out_records_json || turbo_json_type(*out_records_json) != TURBO_JSON_ARRAY) {
-    turbo_free_json(out_records_json);
+  if (rc != 0 || !*out_records_json || json_type(*out_records_json) != JSON_ARRAY) {
+    json_free(*out_records_json); *out_records_json = NULL;
     return -1;
   }
   return 0;

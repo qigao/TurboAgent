@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_POLICY_H
 #define TURBO_AGENT_POLICY_H
 
+#include <turbo_agent_api.h>
+
 #include "turbo_action_tool.h"
 
 #ifdef __cplusplus

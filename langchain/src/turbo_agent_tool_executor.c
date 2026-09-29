@@ -5,7 +5,8 @@
 #include "turbo_agent_runtime_v1_internal.h"
 
 #include <openssl/sha.h>
-#include <turbo_thread.h>
+#include <salts/thread.h>
+#include <salts/thread_pool.h>
 
 #include <limits.h>
 #include <stdlib.h>
@@ -21,8 +22,8 @@
 
 struct turbo_agent_tool_executor_s {
   turbo_agent_tool_executor_config_t config;
-  turbo_threadpool_t *pool;
-  turbo_mutex_t batch_mutex;
+  salts_threadpool_t *pool;
+  salts_mutex_t batch_mutex;
 };
 
 typedef struct turbo_agent_tool_task_s {
@@ -68,35 +69,35 @@ void turbo_agent_tool_executor_config_init(turbo_agent_tool_executor_config_t *c
 int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *config,
                                      turbo_agent_tool_executor_t **out_executor) {
   turbo_agent_tool_executor_config_t effective;
-  turbo_threadpool_config_t pool_config;
+  salts_threadpool_config_t pool_config;
   turbo_agent_tool_executor_t *executor;
-  if (!out_executor) return TURBO_EINVAL;
+  if (!out_executor) return SALTS_EINVAL;
   *out_executor = NULL;
   if (config) {
     effective = *config;
   } else {
     turbo_agent_tool_executor_config_init(&effective);
   }
-  if (!turbo_agent_tool_executor_config_valid(&effective)) return TURBO_EINVAL;
+  if (!turbo_agent_tool_executor_config_valid(&effective)) return SALTS_EINVAL;
   executor = (turbo_agent_tool_executor_t *)calloc(1, sizeof(*executor));
-  if (!executor) return TURBO_ENOMEM;
+  if (!executor) return SALTS_ENOMEM;
   executor->config = effective;
   pool_config.num_threads = (int)effective.max_workers;
   pool_config.queue_capacity = effective.queue_capacity;
-  executor->pool = turbo_threadpool_create_with_config(&pool_config);
+  executor->pool = salts_threadpool_create_with_config(&pool_config);
   if (!executor->pool) {
     free(executor);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
-  turbo_mutex_init(&executor->batch_mutex);
+  salts_mutex_init(&executor->batch_mutex);
   *out_executor = executor;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *executor) {
   if (!executor) return;
-  turbo_threadpool_destroy(executor->pool);
-  turbo_mutex_destroy(&executor->batch_mutex);
+  salts_threadpool_destroy(executor->pool);
+  salts_mutex_destroy(&executor->batch_mutex);
   free(executor);
 }
 
@@ -105,13 +106,13 @@ int turbo_agent_tool_executor_configure(turbo_agent_t *agent,
   turbo_agent_tool_executor_t *replacement = NULL;
   turbo_agent_tool_executor_t *previous;
   int rc;
-  if (!agent) return TURBO_EINVAL;
+  if (!agent) return SALTS_EINVAL;
   rc = turbo_agent_tool_executor_create(config, &replacement);
-  if (rc != TURBO_OK) return rc;
+  if (rc != SALTS_OK) return rc;
   previous = agent->tool_executor;
   agent->tool_executor = replacement;
   turbo_agent_tool_executor_destroy(previous);
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static char *turbo_agent_tool_sha256_parts(const char *first, const char *second) {
@@ -152,37 +153,37 @@ static int turbo_agent_tool_journal_write(turbo_agent_runtime_t *runtime, const 
   char *arguments_hash;
   char timestamp[32];
   int rc;
-  if (!runtime) return TURBO_OK;
+  if (!runtime) return SALTS_OK;
   if (!journal_id || !thread_id || !run_id || !call || !phase ||
       turbo_agent_runtime_make_timestamp(timestamp, sizeof(timestamp)) != 0)
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   arguments_hash = turbo_agent_tool_sha256_parts(call->tool_name, call->arguments_json);
-  record = turbo_json_create_object();
+  record = json_create_object();
   if (!arguments_hash || !record) {
     free(arguments_hash);
     turbo_runtime_json_destroy(record);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
-  turbo_json_object_set_number(record, "schema_version", TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION);
-  turbo_json_object_set_string(record, "journal_id", journal_id);
-  turbo_json_object_set_string(record, "thread_id", thread_id);
-  turbo_json_object_set_string(record, "run_id", run_id);
-  turbo_json_object_set_string(record, "call_id", call->call_id);
-  turbo_json_object_set_string(record, "turn_key", call->turn_key);
-  turbo_json_object_set_string(record, "tool_name", call->tool_name);
-  turbo_json_object_set_string(record, "arguments_hash", arguments_hash);
-  turbo_json_object_set_number(record, "execution_mode", (double)call->policy.mode);
-  turbo_json_object_set_number(record, "idempotency", (double)call->policy.idempotency);
-  turbo_json_object_set_string(record, "phase", phase);
-  turbo_json_object_set_string(record, "updated_at", timestamp);
-  turbo_json_object_set_number(record, "status", (double)call->status);
+  json_object_set_number(record, "schema_version", TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION);
+  json_object_set_string(record, "journal_id", journal_id);
+  json_object_set_string(record, "thread_id", thread_id);
+  json_object_set_string(record, "run_id", run_id);
+  json_object_set_string(record, "call_id", call->call_id);
+  json_object_set_string(record, "turn_key", call->turn_key);
+  json_object_set_string(record, "tool_name", call->tool_name);
+  json_object_set_string(record, "arguments_hash", arguments_hash);
+  json_object_set_number(record, "execution_mode", (double)call->policy.mode);
+  json_object_set_number(record, "idempotency", (double)call->policy.idempotency);
+  json_object_set_string(record, "phase", phase);
+  json_object_set_string(record, "updated_at", timestamp);
+  json_object_set_number(record, "status", (double)call->status);
   if (strcmp(phase, "committed") == 0 && call->output)
-    turbo_json_object_set_string(record, "output", call->output);
+    json_object_set_string(record, "output", call->output);
   rc = turbo_agent_runtime_store_put_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION, journal_id,
                                           record);
   free(arguments_hash);
   turbo_runtime_json_destroy(record);
-  return rc == 0 ? TURBO_OK : TURBO_EIO;
+  return rc == 0 ? SALTS_OK : SALTS_EIO;
 }
 
 static int turbo_agent_tool_journal_load(turbo_agent_runtime_t *runtime, const char *journal_id,
@@ -199,43 +200,43 @@ static int turbo_agent_tool_journal_load(turbo_agent_runtime_t *runtime, const c
   const char *stored_arguments_hash;
   char *arguments_hash = NULL;
   *out_record = NULL;
-  if (!runtime) return TURBO_ENOENT;
+  if (!runtime) return SALTS_ENOENT;
   if (turbo_agent_runtime_store_list_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
                                           "journal_id", journal_id, &records) != 0)
-    return TURBO_EIO;
-  if (turbo_json_array_size(records) == 0) {
+    return SALTS_EIO;
+  if (json_array_size(records) == 0) {
     turbo_runtime_json_destroy(records);
-    return TURBO_ENOENT;
+    return SALTS_ENOENT;
   }
-  if (turbo_json_array_size(records) != 1) {
+  if (json_array_size(records) != 1) {
     turbo_runtime_json_destroy(records);
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
-  record = turbo_json_array_get(records, 0);
-  stored_thread = turbo_json_get_string(record, "thread_id");
-  stored_run = turbo_json_get_string(record, "run_id");
-  stored_call = turbo_json_get_string(record, "call_id");
-  stored_turn = turbo_json_get_string(record, "turn_key");
-  stored_tool = turbo_json_get_string(record, "tool_name");
-  stored_arguments_hash = turbo_json_get_string(record, "arguments_hash");
+  record = json_array_get(records, 0);
+  stored_thread = json_get_string(record, "thread_id");
+  stored_run = json_get_string(record, "run_id");
+  stored_call = json_get_string(record, "call_id");
+  stored_turn = json_get_string(record, "turn_key");
+  stored_tool = json_get_string(record, "tool_name");
+  stored_arguments_hash = json_get_string(record, "arguments_hash");
   arguments_hash = turbo_agent_tool_sha256_parts(call->tool_name, call->arguments_json);
-  if (turbo_json_get_double(record, "schema_version", -1.0) !=
+  if (json_get_double(record, "schema_version", -1.0) !=
           (double)TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION ||
       !stored_thread || strcmp(stored_thread, thread_id) != 0 || !stored_run ||
       strcmp(stored_run, run_id) != 0 || !stored_call || strcmp(stored_call, call->call_id) != 0 ||
       !stored_turn || strcmp(stored_turn, call->turn_key) != 0 || !stored_tool ||
       strcmp(stored_tool, call->tool_name) != 0 || !stored_arguments_hash || !arguments_hash ||
       strcmp(stored_arguments_hash, arguments_hash) != 0 ||
-      turbo_json_get_double(record, "execution_mode", -1.0) != (double)call->policy.mode ||
-      turbo_json_get_double(record, "idempotency", -1.0) != (double)call->policy.idempotency) {
+      json_get_double(record, "execution_mode", -1.0) != (double)call->policy.mode ||
+      json_get_double(record, "idempotency", -1.0) != (double)call->policy.idempotency) {
     free(arguments_hash);
     turbo_runtime_json_destroy(records);
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   free(arguments_hash);
-  *out_record = turbo_json_clone(record);
+  *out_record = json_clone(record);
   turbo_runtime_json_destroy(records);
-  return *out_record ? TURBO_OK : TURBO_ENOMEM;
+  return *out_record ? SALTS_OK : SALTS_ENOMEM;
 }
 
 static turbo_tool_status_t
@@ -243,8 +244,8 @@ turbo_agent_tool_cancel_status(const turbo_cancel_token_t *cancel_token) {
   int rc;
   if (!cancel_token) return TURBO_TOOL_OK;
   rc = turbo_cancel_token_check(cancel_token);
-  if (rc == TURBO_OK) return TURBO_TOOL_OK;
-  return rc == TURBO_ETIMEDOUT ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
+  if (rc == SALTS_OK) return TURBO_TOOL_OK;
+  return rc == SALTS_ETIMEDOUT ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
 }
 
 static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executor,
@@ -257,35 +258,35 @@ static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executo
   char *journal_id;
   int rc;
   (void)executor;
-  if (!runtime) return TURBO_OK;
+  if (!runtime) return SALTS_OK;
   journal_id = turbo_agent_tool_journal_id(run_id, call->turn_key, call->call_id);
-  if (!journal_id) return TURBO_ENOMEM;
+  if (!journal_id) return SALTS_ENOMEM;
   rc = turbo_agent_tool_journal_load(runtime, journal_id, thread_id, run_id, call, &record);
-  if (rc == TURBO_ENOENT) {
+  if (rc == SALTS_ENOENT) {
     call->status = TURBO_TOOL_OK;
     rc = turbo_agent_tool_journal_write(runtime, journal_id, thread_id, run_id, call, "planned");
     free(journal_id);
     return rc;
   }
   free(journal_id);
-  if (rc != TURBO_OK) return rc;
-  phase = turbo_json_get_string(record, "phase");
+  if (rc != SALTS_OK) return rc;
+  phase = json_get_string(record, "phase");
   if (!phase) {
     turbo_runtime_json_destroy(record);
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   }
   if (strcmp(phase, "started") == 0) {
     call->status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
     call->replayed = 1;
   } else if (strcmp(phase, "committed") == 0) {
     call->status =
-        (turbo_tool_status_t)(int)turbo_json_get_double(record, "status", TURBO_TOOL_ERROR);
-    output = turbo_json_get_string(record, "output");
+        (turbo_tool_status_t)(int)json_get_double(record, "status", TURBO_TOOL_ERROR);
+    output = json_get_string(record, "output");
     if (output) call->output = turbo_agent_tool_strdup(output);
-    if (output && !call->output) rc = TURBO_ENOMEM;
+    if (output && !call->output) rc = SALTS_ENOMEM;
     call->replayed = 1;
   } else if (strcmp(phase, "planned") != 0) {
-    rc = TURBO_EPROTO;
+    rc = SALTS_EPROTO;
   }
   turbo_runtime_json_destroy(record);
   return rc;
@@ -309,7 +310,7 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
                                              task->call->call_id);
     if (!journal_id ||
         turbo_agent_tool_journal_write(task->runtime, journal_id, task->context.thread_id,
-                                       task->context.run_id, task->call, "started") != TURBO_OK) {
+                                       task->context.run_id, task->call, "started") != SALTS_OK) {
       task->call->status = TURBO_TOOL_ERROR;
       goto cleanup;
     }
@@ -323,7 +324,7 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
   }
   if (task->runtime &&
       turbo_agent_tool_journal_write(task->runtime, journal_id, task->context.thread_id,
-                                     task->context.run_id, task->call, "committed") != TURBO_OK) {
+                                     task->context.run_id, task->call, "committed") != SALTS_OK) {
     free(task->call->output);
     task->call->output = NULL;
     task->call->status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
@@ -349,7 +350,7 @@ static int turbo_agent_tool_execute_parallel_group(
     size_t index;
     if (wave_end > end) wave_end = end;
     tasks = (turbo_agent_tool_task_t *)calloc(wave_end - wave_begin, sizeof(*tasks));
-    if (!tasks) return TURBO_ENOMEM;
+    if (!tasks) return SALTS_ENOMEM;
     for (index = wave_begin; index < wave_end; ++index) {
       turbo_agent_tool_task_t *task = &tasks[index - wave_begin];
       task->executor = executor;
@@ -360,15 +361,15 @@ static int turbo_agent_tool_execute_parallel_group(
       task->context = *base_context;
       task->context.tool_call_id = calls[index].call_id;
       task->context.tool_name = calls[index].tool_name;
-      if (turbo_threadpool_try_submit(executor->pool, turbo_agent_tool_worker, task) != 0) {
+      if (salts_threadpool_try_submit(executor->pool, turbo_agent_tool_worker, task) != 0) {
         calls[index].status = TURBO_TOOL_BACKPRESSURE;
         calls[index].replayed = 1;
       }
     }
-    turbo_threadpool_wait(executor->pool);
+    salts_threadpool_wait(executor->pool);
     free(tasks);
   }
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
@@ -380,17 +381,17 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
                                       turbo_agent_tool_execution_t *calls, size_t call_count) {
   turbo_agent_execution_context_t base_context = {0};
   size_t index;
-  int rc = TURBO_OK;
+  int rc = SALTS_OK;
   if (!executor || !registry || !calls || call_count == 0 ||
       call_count > executor->config.max_batch_calls || (runtime && (!thread_id || !run_id)))
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   for (index = 0; index < call_count; ++index) {
     if (!calls[index].call_id || !calls[index].turn_key || !calls[index].tool_name ||
         !calls[index].arguments_json ||
         strlen(calls[index].arguments_json) > executor->config.max_arguments_bytes)
-      return TURBO_EMSGSIZE;
+      return SALTS_EMSGSIZE;
   }
-  turbo_mutex_lock(&executor->batch_mutex);
+  salts_mutex_lock(&executor->batch_mutex);
   for (index = 0; index < call_count; ++index) {
     const char *reason = NULL;
     const char *const *required_capabilities = NULL;
@@ -414,7 +415,7 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
   for (index = 0; index < call_count; ++index) {
     if (calls[index].replayed) continue;
     rc = turbo_agent_tool_prepare_journal(executor, runtime, thread_id, run_id, &calls[index]);
-    if (rc != TURBO_OK) goto cleanup;
+    if (rc != SALTS_OK) goto cleanup;
   }
   turbo_agent_execution_context_get(&base_context);
   if (runtime) {
@@ -431,7 +432,7 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
         ++end;
       rc = turbo_agent_tool_execute_parallel_group(executor, runtime, cancel_token, registry, calls,
                                                    index, end, &base_context);
-      if (rc != TURBO_OK) goto cleanup;
+      if (rc != SALTS_OK) goto cleanup;
       index = end;
     } else {
       turbo_agent_tool_task_t task = {executor, runtime,       cancel_token,
@@ -443,6 +444,6 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
     }
   }
 cleanup:
-  turbo_mutex_unlock(&executor->batch_mutex);
+  salts_mutex_unlock(&executor->batch_mutex);
   return rc;
 }

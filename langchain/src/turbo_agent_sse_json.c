@@ -1,4 +1,5 @@
 #include "turbo_agent_sse_json_internal.h"
+#include <json_parser.h>
 
 #include "turbo_prompt.h"
 
@@ -11,8 +12,8 @@ char *turbo_agent_sse_serialize_json_and_free(json_value_t *value) {
     return NULL;
   }
 
-  serialized = turbo_json_serialize(value, NULL);
-  turbo_free_json(&value);
+  serialized = json_serialize(value, NULL);
+  json_free(value); value = NULL;
   return serialized;
 }
 
@@ -25,7 +26,7 @@ json_value_t *turbo_agent_sse_build_chat_tool_calls_array(
     return NULL;
   }
 
-  tool_calls = turbo_json_create_array();
+  tool_calls = json_create_array();
   if (!tool_calls) {
     return NULL;
   }
@@ -35,7 +36,7 @@ json_value_t *turbo_agent_sse_build_chat_tool_calls_array(
     json_value_t *tool_call_object;
 
     if (!tool_call->id || !tool_call->name || !tool_call->arguments) {
-      turbo_free_json(&tool_calls);
+      json_free(tool_calls); tool_calls = NULL;
       return NULL;
     }
 
@@ -43,11 +44,11 @@ json_value_t *turbo_agent_sse_build_chat_tool_calls_array(
         tool_call->id, tool_call->type ? tool_call->type : "function", tool_call->name,
         tool_call->arguments);
     if (!tool_call_object) {
-      turbo_free_json(&tool_calls);
+      json_free(tool_calls); tool_calls = NULL;
       return NULL;
     }
 
-    turbo_json_array_add(tool_calls, tool_call_object);
+    json_array_add(tool_calls, tool_call_object);
   }
 
   return tool_calls;
@@ -62,13 +63,12 @@ json_value_t *turbo_agent_sse_tool_call_input_object(
   }
 
   if (tool_call->arguments && tool_call->arguments[0] != '\0') {
-    if (turbo_parse_json((const uint8_t *)tool_call->arguments, strlen(tool_call->arguments),
-                         &input) != 0) {
-      turbo_free_json(&input);
+    if (((input = json_parse((const char *)((const uint8_t *)tool_call->arguments), (strlen(tool_call->arguments)))) ? 0 : -1) != 0) {
+      json_free(input); input = NULL;
       return NULL;
     }
   } else {
-    input = turbo_json_create_object();
+    input = json_create_object();
   }
 
   return input;
@@ -86,26 +86,26 @@ json_value_t *turbo_agent_sse_chat_response_shell_create(
     return NULL;
   }
 
-  response = turbo_json_create_object();
-  choices = turbo_json_create_array();
-  choice = turbo_json_create_object();
+  response = json_create_object();
+  choices = json_create_array();
+  choice = json_create_object();
   message = turbo_prompt_message_create(state->role && state->role[0] != '\0' ? state->role
                                                                                : "assistant",
                                         state->content ? state->content : "");
   if (!response || !choices || !choice || !message) {
-    turbo_free_json(&response);
-    turbo_free_json(&choices);
-    turbo_free_json(&choice);
-    turbo_free_json(&message);
+    json_free(response); response = NULL;
+    json_free(choices); choices = NULL;
+    json_free(choice); choice = NULL;
+    json_free(message); message = NULL;
     return NULL;
   }
 
-  turbo_json_object_set_string(response, "id", state->id);
-  turbo_json_object_set_string(response, "object", "chat.completion");
-  turbo_json_object_set_number(choice, "index", 0);
-  turbo_json_object_add(choice, "message", message);
-  turbo_json_array_add(choices, choice);
-  turbo_json_object_add(response, "choices", choices);
+  json_object_set_string(response, "id", state->id);
+  json_object_set_string(response, "object", "chat.completion");
+  json_object_set_number(choice, "index", 0);
+  json_object_add(choice, "message", message);
+  json_array_add(choices, choice);
+  json_object_add(response, "choices", choices);
 
   *out_choice = choice;
   *out_message = message;
@@ -121,17 +121,17 @@ json_value_t *turbo_agent_sse_anthropic_response_shell_create(
     return NULL;
   }
 
-  response = turbo_json_create_object();
-  content = turbo_json_create_array();
+  response = json_create_object();
+  content = json_create_array();
   if (!response || !content) {
-    turbo_free_json(&response);
-    turbo_free_json(&content);
+    json_free(response); response = NULL;
+    json_free(content); content = NULL;
     return NULL;
   }
 
-  turbo_json_object_set_string(response, "id", state->id);
-  turbo_json_object_set_string(response, "role", state->role);
-  turbo_json_object_add(response, "content", content);
+  json_object_set_string(response, "id", state->id);
+  json_object_set_string(response, "role", state->role);
+  json_object_add(response, "content", content);
   *out_content = content;
   return response;
 }

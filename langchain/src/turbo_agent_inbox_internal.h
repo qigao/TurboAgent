@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_INBOX_INTERNAL_H
 #define TURBO_AGENT_INBOX_INTERNAL_H
 
+#include <stdint.h>
+
 #include "turbo_agent_inbox.h"
 #include "turbo_agent_runtime.h"
 

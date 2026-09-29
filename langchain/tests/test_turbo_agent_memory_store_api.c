@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #include "turbo_agent_test_support.h"
 #include "turbo_agent_memory_store.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #include <platform.h>
 #include <stdlib.h>
@@ -129,7 +129,7 @@ static turbo_agent_memory_store_t malformed_query_only_memory_store_create(void)
 static char *memory_store_temp_root(void) {
   int needed;
   char *path;
-  unsigned long long tick = (unsigned long long)turbo_hrtime();
+  unsigned long long tick = (unsigned long long)salts_hrtime();
 
 #ifdef _WIN32
   char temp_dir[MAX_PATH];
@@ -164,70 +164,70 @@ spec("turbo agent memory store api") {
     turbo_agent_memory_query_options_t options = {0};
     const json_value_t *record;
 
-    check_int_eq(
+    check_equal(
         turbo_agent_memory_put(&store, "user/alice", "profile", "{\"name\":\"Alice\"}"), 0);
-    check_int_eq(
+    check_equal(
         turbo_agent_memory_get(&store, "user/alice", "profile", &value_json), 0);
-    check_str_eq(value_json, "{\"name\":\"Alice\"}");
+    check_equal(value_json, "{\"name\":\"Alice\"}");
     free(value_json);
 
-    check_int_eq(turbo_agent_memory_list(&store, "user/", &records), 0);
-    check_size_eq(turbo_json_array_size(records), 1);
-    record = turbo_json_array_get(records, 0);
-    check_str_eq(turbo_json_get_string(record, "namespace"), "user/alice");
-    check_str_eq(turbo_json_get_string(record, "key"), "profile");
-    check_str_eq(turbo_json_get_string(record, "value_json"), "{\"name\":\"Alice\"}");
+    check_equal(turbo_agent_memory_list(&store, "user/", &records), 0);
+    check_equal(json_array_size(records), 1);
+    record = json_array_get(records, 0);
+    check_equal(json_get_string(record, "namespace"), "user/alice");
+    check_equal(json_get_string(record, "key"), "profile");
+    check_equal(json_get_string(record, "value_json"), "{\"name\":\"Alice\"}");
 
-    check_int_eq(turbo_agent_memory_put(&store, "project/demo", "notes", "{\"text\":\"remember\"}"),
+    check_equal(turbo_agent_memory_put(&store, "project/demo", "notes", "{\"text\":\"remember\"}"),
                  0);
-    check_int_eq(turbo_agent_memory_list_records(&store, "project/", &record_views), 0);
-    check_size_eq(turbo_json_array_size(record_views), 1);
-    turbo_agent_test_check_memory_record_fixture(turbo_json_array_get(record_views, 0),
+    check_equal(turbo_agent_memory_list_records(&store, "project/", &record_views), 0);
+    check_equal(json_array_size(record_views), 1);
+    turbo_agent_test_check_memory_record_fixture(json_array_get(record_views, 0),
                                                  "memory_json_record.golden.json", NULL);
-    turbo_free_json(&record_views);
-    check_int_eq(
+    json_free(record_views); record_views = NULL;
+    check_equal(
         turbo_agent_memory_put(&store, "project/demo", "context",
                                "{\"scope\":\"project\",\"path\":\"/tmp/notes.md\",\"text\":\"remember this\"}"),
         0);
 
-    check_int_eq(
+    check_equal(
         turbo_agent_memory_query_records(&store, "project/", "context", "con",
                                          "remember", &queried),
         0);
-    check_size_eq(turbo_json_array_size(queried), 1);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "id"), "project/demo::context");
-    check_str_eq(turbo_json_get_string(record, "namespace"), "project/demo");
-    check_str_eq(turbo_json_get_string(record, "kind"), "context");
-    check_str_eq(turbo_json_get_string(record, "key"), "context");
-    check_str_eq(turbo_json_get_string(record, "text"), "remember this");
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(record, "metadata"), "scope"),
+    check_equal(json_array_size(queried), 1);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "id"), "project/demo::context");
+    check_equal(json_get_string(record, "namespace"), "project/demo");
+    check_equal(json_get_string(record, "kind"), "context");
+    check_equal(json_get_string(record, "key"), "context");
+    check_equal(json_get_string(record, "text"), "remember this");
+    check_equal(json_get_string(json_object_get(record, "metadata"), "scope"),
                  "project");
-    check_str_eq(turbo_json_get_string(turbo_json_object_get(record, "metadata"), "path"),
+    check_equal(json_get_string(json_object_get(record, "metadata"), "path"),
                  "/tmp/notes.md");
-    check_true(turbo_json_type(turbo_json_object_get(record, "created_at")) == TURBO_JSON_NULL);
+    check_true(json_type(json_object_get(record, "created_at")) == JSON_NULL);
     options.namespace_prefix = "project/";
     options.kind = "context";
     options.key_prefix = "con";
     options.text_substring = "remember";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &record_views), 0);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &record_views), 0);
     turbo_agent_test_check_memory_record_array_fixture(record_views,
                                                        "memory_query_results.golden.json",
                                                        "context_query");
-    turbo_free_json(&record_views);
+    json_free(record_views); record_views = NULL;
     record_views = NULL;
-    check_int_eq(turbo_agent_memory_get_record(&store, "project/demo", "context", &record_view), 0);
-    check_int_eq(turbo_agent_memory_validate_record(record_view), 0);
+    check_equal(turbo_agent_memory_get_record(&store, "project/demo", "context", &record_view), 0);
+    check_equal(turbo_agent_memory_validate_record(record_view), 0);
     turbo_agent_test_check_memory_record_fixture(record_view, "memory_context_record.golden.json",
                                                  NULL);
 
-    check_int_eq(turbo_agent_memory_delete(&store, "user/alice", "profile"), 0);
-    check_int_eq(turbo_agent_memory_get(&store, "user/alice", "profile", &value_json), -1);
+    check_equal(turbo_agent_memory_delete(&store, "user/alice", "profile"), 0);
+    check_equal(turbo_agent_memory_get(&store, "user/alice", "profile", &value_json), -1);
 
-    turbo_free_json(&record_view);
-    turbo_free_json(&queried);
-    turbo_free_json(&record_views);
-    turbo_free_json(&records);
+    json_free(record_view); record_view = NULL;
+    json_free(queried); queried = NULL;
+    json_free(record_views); record_views = NULL;
+    json_free(records); records = NULL;
     turbo_agent_memory_store_destroy(&store);
   }
 
@@ -241,22 +241,22 @@ spec("turbo agent memory store api") {
     FILE *fp;
 
     check_not_null(root_dir);
-    check_int_eq(
+    check_equal(
         turbo_agent_memory_put(&store, "project/demo", "notes", "{\"done\":true}"), 0);
-    check_int_eq(
+    check_equal(
         turbo_agent_memory_get(&store, "project/demo", "notes", &value_json), 0);
-    check_str_eq(value_json, "{\"done\":true}");
+    check_equal(value_json, "{\"done\":true}");
     free(value_json);
     turbo_agent_memory_store_destroy(&store);
 
     reopened = turbo_agent_memory_store_file_create(root_dir);
-    check_int_eq(
+    check_equal(
         turbo_agent_memory_get(&reopened, "project/demo", "notes", &value_json), 0);
-    check_str_eq(value_json, "{\"done\":true}");
+    check_equal(value_json, "{\"done\":true}");
     free(value_json);
-    check_int_eq(turbo_agent_memory_list(&reopened, "project/", &records), 0);
-    check_size_eq(turbo_json_array_size(records), 1);
-    turbo_free_json(&records);
+    check_equal(turbo_agent_memory_list(&reopened, "project/", &records), 0);
+    check_equal(json_array_size(records), 1);
+    json_free(records); records = NULL;
 
     record_path = (char *)malloc(strlen(root_dir) + 128);
     check_not_null(record_path);
@@ -267,8 +267,8 @@ spec("turbo agent memory store api") {
     fputs("{bad json", fp);
     fclose(fp);
 
-    check_int_eq(turbo_agent_memory_get(&reopened, "project/demo", "notes", &value_json), -1);
-    check_int_eq(turbo_agent_memory_list(&reopened, "project/", &records), -1);
+    check_equal(turbo_agent_memory_get(&reopened, "project/demo", "notes", &value_json), -1);
+    check_equal(turbo_agent_memory_list(&reopened, "project/", &records), -1);
 
     free(record_path);
     free(root_dir);
@@ -280,20 +280,20 @@ spec("turbo agent memory store api") {
     json_value_t *record_views = NULL;
     json_value_t *queried = NULL;
 
-    check_int_eq(turbo_agent_memory_list_records(&store, "project", &record_views), 0);
-    check_size_eq(turbo_json_array_size(record_views), 1);
-    turbo_agent_test_check_memory_record_fixture(turbo_json_array_get(record_views, 0),
+    check_equal(turbo_agent_memory_list_records(&store, "project", &record_views), 0);
+    check_equal(json_array_size(record_views), 1);
+    turbo_agent_test_check_memory_record_fixture(json_array_get(record_views, 0),
                                                  "memory_context_record.golden.json", NULL);
 
-    check_int_eq(
+    check_equal(
         turbo_agent_memory_query_records(&store, "project", "context", "con", "remember",
                                          &queried),
         0);
     turbo_agent_test_check_memory_record_array_fixture(queried, "memory_query_results.golden.json",
                                                        "context_query");
 
-    turbo_free_json(&queried);
-    turbo_free_json(&record_views);
+    json_free(queried); queried = NULL;
+    json_free(record_views); record_views = NULL;
   }
 
   it("should sort and limit canonical memory query results locally") {
@@ -304,40 +304,40 @@ spec("turbo agent memory store api") {
 
     options.sort_by = "key";
     options.sort_order = "asc";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 3);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "alpha");
-    record = turbo_json_array_get(queried, 1);
-    check_str_eq(turbo_json_get_string(record, "key"), "beta");
-    record = turbo_json_array_get(queried, 2);
-    check_str_eq(turbo_json_get_string(record, "key"), "gamma");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 3);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "alpha");
+    record = json_array_get(queried, 1);
+    check_equal(json_get_string(record, "key"), "beta");
+    record = json_array_get(queried, 2);
+    check_equal(json_get_string(record, "key"), "gamma");
+    json_free(queried); queried = NULL;
     queried = NULL;
 
     options.sort_order = "desc";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 3);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "gamma");
-    record = turbo_json_array_get(queried, 1);
-    check_str_eq(turbo_json_get_string(record, "key"), "beta");
-    record = turbo_json_array_get(queried, 2);
-    check_str_eq(turbo_json_get_string(record, "key"), "alpha");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 3);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "gamma");
+    record = json_array_get(queried, 1);
+    check_equal(json_get_string(record, "key"), "beta");
+    record = json_array_get(queried, 2);
+    check_equal(json_get_string(record, "key"), "alpha");
+    json_free(queried); queried = NULL;
     queried = NULL;
 
     options.sort_by = NULL;
     options.sort_order = NULL;
     options.limit = 2;
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 2);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "gamma");
-    record = turbo_json_array_get(queried, 1);
-    check_str_eq(turbo_json_get_string(record, "key"), "alpha");
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 2);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "gamma");
+    record = json_array_get(queried, 1);
+    check_equal(json_get_string(record, "key"), "alpha");
 
-    turbo_free_json(&queried);
+    json_free(queried); queried = NULL;
   }
 
   it("should reject invalid canonical memory query sort options") {
@@ -347,12 +347,12 @@ spec("turbo agent memory store api") {
 
     options.sort_by = "created_at";
     options.sort_order = "asc";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), -1);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), -1);
     check_null(queried);
 
     options.sort_by = "key";
     options.sort_order = "sideways";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), -1);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), -1);
     check_null(queried);
   }
 
@@ -363,11 +363,11 @@ spec("turbo agent memory store api") {
     const json_value_t *record;
 
     options.id_prefix = "project/demo::a";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 1);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "alpha");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 1);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "alpha");
+    json_free(queried); queried = NULL;
     queried = NULL;
 
     memset(&options, 0, sizeof(options));
@@ -375,29 +375,29 @@ spec("turbo agent memory store api") {
     options.metadata_path_prefix = "/tmp/";
     options.sort_by = "key";
     options.sort_order = "asc";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 2);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "alpha");
-    record = turbo_json_array_get(queried, 1);
-    check_str_eq(turbo_json_get_string(record, "key"), "gamma");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 2);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "alpha");
+    record = json_array_get(queried, 1);
+    check_equal(json_get_string(record, "key"), "gamma");
+    json_free(queried); queried = NULL;
     queried = NULL;
 
     memset(&options, 0, sizeof(options));
     options.metadata_scope = "team";
     options.metadata_path_prefix = "/var/";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 1);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "beta");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 1);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "beta");
+    json_free(queried); queried = NULL;
     queried = NULL;
 
     options.metadata_path_prefix = "/tmp/";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 0);
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 0);
+    json_free(queried); queried = NULL;
   }
 
   it("should filter canonical memory query results by created_at window locally") {
@@ -408,50 +408,50 @@ spec("turbo agent memory store api") {
 
     options.created_after = "2026-01-10T09:00:00Z";
     options.created_before = "2026-01-31T23:59:59Z";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 1);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "alpha");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 1);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "alpha");
+    json_free(queried); queried = NULL;
     queried = NULL;
 
     memset(&options, 0, sizeof(options));
     options.created_after = "2026-02-01T00:00:00Z";
     options.sort_by = "key";
     options.sort_order = "asc";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 1);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "beta");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 1);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "beta");
+    json_free(queried); queried = NULL;
     queried = NULL;
 
     memset(&options, 0, sizeof(options));
     options.created_before = "2026-02-01T00:00:00Z";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 1);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "alpha");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 1);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "alpha");
+    json_free(queried); queried = NULL;
     queried = NULL;
 
     memset(&options, 0, sizeof(options));
     options.created_after = "2026-01-01T00:00:00Z";
     options.created_before = "2026-12-31T23:59:59Z";
-    check_int_eq(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
-    check_size_eq(turbo_json_array_size(queried), 2);
-    record = turbo_json_array_get(queried, 0);
-    check_str_eq(turbo_json_get_string(record, "key"), "alpha");
-    record = turbo_json_array_get(queried, 1);
-    check_str_eq(turbo_json_get_string(record, "key"), "beta");
-    turbo_free_json(&queried);
+    check_equal(turbo_agent_memory_query_records_ex(&store, &options, &queried), 0);
+    check_equal(json_array_size(queried), 2);
+    record = json_array_get(queried, 0);
+    check_equal(json_get_string(record, "key"), "alpha");
+    record = json_array_get(queried, 1);
+    check_equal(json_get_string(record, "key"), "beta");
+    json_free(queried); queried = NULL;
   }
 
   it("should fail loudly on malformed canonical query results") {
     turbo_agent_memory_store_t store = malformed_query_only_memory_store_create();
     json_value_t *queried = NULL;
 
-    check_int_eq(
+    check_equal(
         turbo_agent_memory_query_records(&store, "project", "context", NULL, NULL, &queried), -1);
     check_null(queried);
   }
@@ -462,33 +462,33 @@ spec("turbo agent memory store api") {
     json_value_t *loaded = NULL;
 
     check_not_null(record);
-    check_int_eq(turbo_agent_memory_validate_record(record), 0);
-    check_int_eq(turbo_agent_memory_put_record(&store, record), 0);
-    check_int_eq(turbo_agent_memory_get_record(&store, "project/demo", "context", &loaded), 0);
+    check_equal(turbo_agent_memory_validate_record(record), 0);
+    check_equal(turbo_agent_memory_put_record(&store, record), 0);
+    check_equal(turbo_agent_memory_get_record(&store, "project/demo", "context", &loaded), 0);
     turbo_agent_test_check_memory_record_fixture(loaded, "memory_context_record.golden.json", NULL);
 
-    turbo_free_json(&loaded);
-    turbo_free_json(&record);
+    json_free(loaded); loaded = NULL;
+    json_free(record); record = NULL;
     turbo_agent_memory_store_destroy(&store);
   }
 
   it("should reject malformed canonical records through record helpers") {
     turbo_agent_memory_store_t store = turbo_agent_memory_store_memory_create();
-    json_value_t *record = turbo_json_create_object();
+    json_value_t *record = json_create_object();
 
     check_not_null(record);
-    turbo_json_object_set_string(record, "id", "project/demo::context");
-    turbo_json_object_set_string(record, "namespace", "project/demo");
-    turbo_json_object_set_string(record, "kind", "context");
-    turbo_json_object_set_string(record, "key", "context");
-    turbo_json_object_set_string(record, "text", "remember this");
-    turbo_json_object_set_null(record, "metadata");
-    turbo_json_object_set_null(record, "created_at");
+    json_object_set_string(record, "id", "project/demo::context");
+    json_object_set_string(record, "namespace", "project/demo");
+    json_object_set_string(record, "kind", "context");
+    json_object_set_string(record, "key", "context");
+    json_object_set_string(record, "text", "remember this");
+    json_object_set_null(record, "metadata");
+    json_object_set_null(record, "created_at");
 
-    check_int_eq(turbo_agent_memory_validate_record(record), -1);
-    check_int_eq(turbo_agent_memory_put_record(&store, record), -1);
+    check_equal(turbo_agent_memory_validate_record(record), -1);
+    check_equal(turbo_agent_memory_put_record(&store, record), -1);
 
-    turbo_free_json(&record);
+    json_free(record); record = NULL;
     turbo_agent_memory_store_destroy(&store);
   }
 
@@ -505,14 +505,14 @@ spec("turbo agent memory store api") {
     turbo_agent_test_check_memory_record_fixture(json_record_fixture,
                                                  "memory_json_record.golden.json", NULL);
     turbo_agent_test_check_memory_record_array_fixture(
-        turbo_json_object_get(query_fixture, "context_query"), "memory_query_results.golden.json",
+        json_object_get(query_fixture, "context_query"), "memory_query_results.golden.json",
         "context_query");
     turbo_agent_test_check_memory_record_array_fixture(
-        turbo_json_object_get(query_fixture, "json_query"), "memory_query_results.golden.json",
+        json_object_get(query_fixture, "json_query"), "memory_query_results.golden.json",
         "json_query");
 
-    turbo_free_json(&query_fixture);
-    turbo_free_json(&json_record_fixture);
-    turbo_free_json(&record_fixture);
+    json_free(query_fixture); query_fixture = NULL;
+    json_free(json_record_fixture); json_record_fixture = NULL;
+    json_free(record_fixture); record_fixture = NULL;
   }
 }

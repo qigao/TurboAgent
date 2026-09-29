@@ -1,4 +1,5 @@
 #include "turbo_graph.h"
+#include <json_parser.h>
 #include "turbo_runtime_control.h"
 #include "turbo_agent_util_internal.h"
 #include <fmt.h>
@@ -9,8 +10,8 @@
 #include <string.h>
 
 typedef struct {
-  tstr_t name;
-  tstr_t semantic_id;
+  tstr name;
+  tstr semantic_id;
   turbo_graph_node_fn json_fn;
   turbo_graph_json_value_node_fn json_value_fn;
   void *user_data;
@@ -19,15 +20,15 @@ typedef struct {
 typedef struct {
   size_t from_index;
   size_t to_index;
-  tstr_t semantic_id;
+  tstr semantic_id;
   turbo_graph_edge_predicate_fn json_predicate;
   turbo_graph_json_value_edge_predicate_fn json_value_predicate;
   void *user_data;
 } turbo_graph_edge_entry_t;
 
 struct turbo_graph_s {
-  tstr_t name;
-  tstr_t entry_node;
+  tstr name;
+  tstr entry_node;
   turbo_graph_node_entry_t *nodes;
   size_t node_count;
   size_t node_capacity;
@@ -38,15 +39,15 @@ struct turbo_graph_s {
 };
 
 struct turbo_graph_checkpoint_s {
-  tstr_t next_node;
+  tstr next_node;
   size_t steps;
   json_value_t *state;
-  tstr_t topology_id;
+  tstr topology_id;
 };
 
 #define TURBO_GRAPH_CHECKPOINT_SCHEMA_VERSION 3
 
-static tstr_t turbo_graph_join_edge_semantic_id(const char *from, const char *to) {
+static tstr turbo_graph_join_edge_semantic_id(const char *from, const char *to) {
   return tstr_cat_typed(tstr_new(), "{}->{}", from ? from : "", to ? to : "");
 }
 
@@ -82,7 +83,7 @@ static void turbo_graph_invalidate_topology_id(turbo_graph_t *graph) {
     return;
   }
 
-  turbo_json_serialize_free(graph->topology_id);
+  json_serialize_free(graph->topology_id);
   graph->topology_id = NULL;
 }
 
@@ -153,22 +154,22 @@ static json_value_t *turbo_graph_topology_json_create(const turbo_graph_t *graph
   turbo_graph_edge_topology_ref_t **edge_refs = NULL;
   size_t i;
 
-  root = turbo_json_create_object();
-  nodes = turbo_json_create_array();
-  edges = turbo_json_create_array();
+  root = json_create_object();
+  nodes = json_create_array();
+  edges = json_create_array();
   if (!root || !nodes || !edges) {
-    turbo_free_json(&root);
-    turbo_free_json(&nodes);
-    turbo_free_json(&edges);
+    json_free(root); root = NULL;
+    json_free(nodes); nodes = NULL;
+    json_free(edges); edges = NULL;
     return NULL;
   }
 
   if (graph->node_count > 0) {
     node_refs = (const turbo_graph_node_entry_t **)calloc(graph->node_count, sizeof(*node_refs));
     if (!node_refs) {
-      turbo_free_json(&root);
-      turbo_free_json(&nodes);
-      turbo_free_json(&edges);
+      json_free(root); root = NULL;
+      json_free(nodes); nodes = NULL;
+      json_free(edges); edges = NULL;
       return NULL;
     }
     for (i = 0; i < graph->node_count; ++i) {
@@ -181,9 +182,9 @@ static json_value_t *turbo_graph_topology_json_create(const turbo_graph_t *graph
     edge_refs = (turbo_graph_edge_topology_ref_t **)calloc(graph->edge_count, sizeof(*edge_refs));
     if (!edge_refs) {
       free(node_refs);
-      turbo_free_json(&root);
-      turbo_free_json(&nodes);
-      turbo_free_json(&edges);
+      json_free(root); root = NULL;
+      json_free(nodes); nodes = NULL;
+      json_free(edges); edges = NULL;
       return NULL;
     }
     for (i = 0; i < graph->edge_count; ++i) {
@@ -197,9 +198,9 @@ static json_value_t *turbo_graph_topology_json_create(const turbo_graph_t *graph
         }
         free(edge_refs);
         free(node_refs);
-        turbo_free_json(&root);
-        turbo_free_json(&nodes);
-        turbo_free_json(&edges);
+        json_free(root); root = NULL;
+        json_free(nodes); nodes = NULL;
+        json_free(edges); edges = NULL;
         return NULL;
       }
       ref->semantic_id = edge->semantic_id;
@@ -211,13 +212,13 @@ static json_value_t *turbo_graph_topology_json_create(const turbo_graph_t *graph
     qsort(edge_refs, graph->edge_count, sizeof(*edge_refs), turbo_graph_edge_ptr_compare);
   }
 
-  turbo_json_object_set_string(root, "graph_name", graph->name ? graph->name : "");
-  turbo_json_object_set_string(root, "entry_node", graph->entry_node ? graph->entry_node : "");
-  turbo_json_object_add(root, "nodes", nodes);
-  turbo_json_object_add(root, "edges", edges);
+  json_object_set_string(root, "graph_name", graph->name ? graph->name : "");
+  json_object_set_string(root, "entry_node", graph->entry_node ? graph->entry_node : "");
+  json_object_add(root, "nodes", nodes);
+  json_object_add(root, "edges", edges);
 
   for (i = 0; i < graph->node_count; ++i) {
-    json_value_t *node = turbo_json_create_object();
+    json_value_t *node = json_create_object();
     if (!node) {
       free(node_refs);
       if (edge_refs) {
@@ -227,19 +228,19 @@ static json_value_t *turbo_graph_topology_json_create(const turbo_graph_t *graph
         }
         free(edge_refs);
       }
-      turbo_free_json(&root);
+      json_free(root); root = NULL;
       return NULL;
     }
-    turbo_json_object_set_string(node, "name", node_refs ? node_refs[i]->name : graph->nodes[i].name);
-    turbo_json_object_set_string(node, "semantic_id",
+    json_object_set_string(node, "name", node_refs ? node_refs[i]->name : graph->nodes[i].name);
+    json_object_set_string(node, "semantic_id",
                                  node_refs ? node_refs[i]->semantic_id : graph->nodes[i].semantic_id);
-    turbo_json_object_set_string(node, "kind",
+    json_object_set_string(node, "kind",
                                  turbo_graph_node_kind_text(node_refs ? node_refs[i] : &graph->nodes[i]));
-    turbo_json_array_add(nodes, node);
+    json_array_add(nodes, node);
   }
 
   for (i = 0; i < graph->edge_count; ++i) {
-    json_value_t *edge = turbo_json_create_object();
+    json_value_t *edge = json_create_object();
     const turbo_graph_edge_topology_ref_t *ref = edge_refs ? edge_refs[i] : NULL;
     if (!edge) {
       size_t j;
@@ -250,18 +251,18 @@ static json_value_t *turbo_graph_topology_json_create(const turbo_graph_t *graph
         }
         free(edge_refs);
       }
-      turbo_free_json(&root);
+      json_free(root); root = NULL;
       return NULL;
     }
-    turbo_json_object_set_string(edge, "from",
+    json_object_set_string(edge, "from",
                                  ref ? ref->from : graph->nodes[graph->edges[i].from_index].name);
-    turbo_json_object_set_string(edge, "to",
+    json_object_set_string(edge, "to",
                                  ref ? ref->to : graph->nodes[graph->edges[i].to_index].name);
-    turbo_json_object_set_string(edge, "semantic_id",
+    json_object_set_string(edge, "semantic_id",
                                  ref ? ref->semantic_id : graph->edges[i].semantic_id);
-    turbo_json_object_set_string(edge, "predicate_kind",
+    json_object_set_string(edge, "predicate_kind",
                                  ref ? ref->predicate_kind : turbo_graph_edge_predicate_kind_text(&graph->edges[i]));
-    turbo_json_array_add(edges, edge);
+    json_array_add(edges, edge);
   }
 
   free(node_refs);
@@ -288,8 +289,8 @@ static char *turbo_graph_topology_id_build(const turbo_graph_t *graph, size_t *o
     return NULL;
   }
 
-  serialized = turbo_json_serialize(root, out_len);
-  turbo_free_json(&root);
+  serialized = json_serialize(root, out_len);
+  json_free(root); root = NULL;
   return serialized;
 }
 
@@ -391,9 +392,9 @@ turbo_graph_clone_json_value_state(const json_value_t *state,
 
   *out_state = NULL;
   if (!state) {
-    *out_state = turbo_json_create_null();
+    *out_state = json_create_null();
   } else {
-    *out_state = turbo_json_clone(state);
+    *out_state = json_clone(state);
   }
 
   return *out_state ? TURBO_GRAPH_EXEC_OK : TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
@@ -407,11 +408,11 @@ static turbo_graph_exec_status_t turbo_graph_clone_json(const json_value_t *stat
 
   *out_state = NULL;
   if (!state) {
-    *out_state = turbo_json_create_null();
+    *out_state = json_create_null();
     return *out_state ? TURBO_GRAPH_EXEC_OK : TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
   }
 
-  *out_state = turbo_json_clone(state);
+  *out_state = json_clone(state);
   return *out_state ? TURBO_GRAPH_EXEC_OK : TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
 }
 
@@ -423,11 +424,11 @@ static turbo_graph_exec_status_t turbo_graph_json_value_state_to_json(
 
   *out_state = NULL;
   if (!state) {
-    *out_state = turbo_json_create_null();
+    *out_state = json_create_null();
     return *out_state ? TURBO_GRAPH_EXEC_OK : TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
   }
 
-  *out_state = turbo_json_clone(state);
+  *out_state = json_clone(state);
   if (!*out_state) {
     return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
   }
@@ -528,7 +529,7 @@ turbo_graph_emit_checkpoint_json_value(const turbo_graph_t *graph,
   }
 
   status = turbo_graph_checkpoint_create(next_node, steps, json_state, &checkpoint);
-  turbo_free_json(&json_state);
+  json_free(json_state); json_state = NULL;
   if (status != TURBO_GRAPH_EXEC_OK) {
     return status;
   }
@@ -571,13 +572,13 @@ turbo_graph_cancel_status(const turbo_cancel_token_t *cancel_token) {
     return TURBO_GRAPH_EXEC_OK;
   }
   status = turbo_cancel_token_check(cancel_token);
-  if (status == TURBO_OK) {
+  if (status == SALTS_OK) {
     return TURBO_GRAPH_EXEC_OK;
   }
-  if (status == TURBO_ETIMEDOUT) {
+  if (status == SALTS_ETIMEDOUT) {
     return TURBO_GRAPH_EXEC_DEADLINE;
   }
-  return status == TURBO_ECANCELED ? TURBO_GRAPH_EXEC_CANCELLED
+  return status == SALTS_ECANCELED ? TURBO_GRAPH_EXEC_CANCELLED
                                    : TURBO_GRAPH_EXEC_ERROR;
 }
 
@@ -858,7 +859,7 @@ turbo_graph_run_internal_json_value(turbo_graph_t *graph, json_value_t **state_p
     if (graph->nodes[current_index].json_value_fn) {
       node_status = graph->nodes[current_index].json_value_fn(&ctx, graph->nodes[current_index].user_data);
     } else if (graph->nodes[current_index].json_fn) {
-      json_value_t *json_state = turbo_json_clone(state);
+      json_value_t *json_state = json_clone(state);
       json_value_t *updated_state;
 
       if (!json_state) {
@@ -872,15 +873,15 @@ turbo_graph_run_internal_json_value(turbo_graph_t *graph, json_value_t **state_p
       if (ctx.next_node) {
         size_t next_index = turbo_graph_find_node_index(graph, ctx.next_node);
         if (next_index == (size_t)-1) {
-          turbo_free_json(&json_state);
+          json_free(json_state); json_state = NULL;
           turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_NODE_NOT_FOUND, last_node,
                                   ctx.next_node, steps);
           return TURBO_GRAPH_EXEC_NODE_NOT_FOUND;
         }
         ctx.next_node = graph->nodes[next_index].name;
       }
-      updated_state = turbo_json_clone(json_state);
-      turbo_free_json(&json_state);
+      updated_state = json_clone(json_state);
+      json_free(json_state); json_state = NULL;
       if (!updated_state) {
         turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_OUT_OF_MEMORY, last_node, current_node,
                                 steps);
@@ -965,7 +966,7 @@ turbo_graph_run_internal_json_value(turbo_graph_t *graph, json_value_t **state_p
         if (graph->edges[i].json_value_predicate) {
           predicate_status = graph->edges[i].json_value_predicate(&ctx, graph->edges[i].user_data);
         } else {
-          json_value_t *json_state = turbo_json_clone(state);
+          json_value_t *json_state = json_clone(state);
 
           if (!json_state) {
             turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_OUT_OF_MEMORY, last_node, NULL,
@@ -975,7 +976,7 @@ turbo_graph_run_internal_json_value(turbo_graph_t *graph, json_value_t **state_p
 
           ctx.state = json_state;
           predicate_status = graph->edges[i].json_predicate(&ctx, graph->edges[i].user_data);
-          turbo_free_json(&json_state);
+          json_free(json_state); json_state = NULL;
           ctx.state = NULL;
         }
         if (predicate_status < 0) {
@@ -1073,7 +1074,7 @@ void turbo_graph_destroy(turbo_graph_t *graph) {
 
   tstr_free(graph->name);
   tstr_free(graph->entry_node);
-  turbo_json_serialize_free(graph->topology_id);
+  json_serialize_free(graph->topology_id);
 
   for (i = 0; i < graph->node_count; ++i) {
     tstr_free(graph->nodes[i].name);
@@ -1493,7 +1494,7 @@ turbo_graph_run_checkpoint_json_value_stream_controlled(
   }
 
   *out_state = NULL;
-  bound_state = turbo_json_clone(checkpoint->state);
+  bound_state = json_clone(checkpoint->state);
   if (!bound_state) {
     turbo_graph_result_init(out_result, TURBO_GRAPH_EXEC_OUT_OF_MEMORY, NULL, checkpoint->next_node,
                             checkpoint->steps);
@@ -1562,7 +1563,7 @@ turbo_graph_checkpoint_create_json_value(const char *next_node, size_t steps,
   }
 
   status = turbo_graph_checkpoint_create(next_node, steps, json_state, out_checkpoint);
-  turbo_free_json(&json_state);
+  json_free(json_state); json_state = NULL;
   return status;
 }
 
@@ -1610,7 +1611,7 @@ void turbo_graph_checkpoint_destroy(turbo_graph_checkpoint_t *checkpoint) {
 
   tstr_free(checkpoint->next_node);
   tstr_free(checkpoint->topology_id);
-  turbo_free_json(&checkpoint->state);
+  json_free(checkpoint->state); checkpoint->state = NULL;
   free(checkpoint);
 }
 
@@ -1624,25 +1625,25 @@ char *turbo_graph_checkpoint_serialize(const turbo_graph_checkpoint_t *checkpoin
     return NULL;
   }
 
-  root = turbo_json_create_object();
+  root = json_create_object();
   if (!root) {
     return NULL;
   }
 
   if (turbo_graph_clone_json(checkpoint->state, &state_copy) != TURBO_GRAPH_EXEC_OK) {
-    turbo_free_json(&root);
+    json_free(root); root = NULL;
     return NULL;
   }
 
-  turbo_json_object_set_number(root, "checkpoint_version",
+  json_object_set_number(root, "checkpoint_version",
                                (double)TURBO_GRAPH_CHECKPOINT_SCHEMA_VERSION);
-  turbo_json_object_set_string(root, "next_node", checkpoint->next_node);
-  turbo_json_object_set_number(root, "steps", (double)checkpoint->steps);
-  turbo_json_object_set_string(root, "topology_id", checkpoint->topology_id ? checkpoint->topology_id : "");
-  turbo_json_object_add(root, "state", state_copy);
+  json_object_set_string(root, "next_node", checkpoint->next_node);
+  json_object_set_number(root, "steps", (double)checkpoint->steps);
+  json_object_set_string(root, "topology_id", checkpoint->topology_id ? checkpoint->topology_id : "");
+  json_object_add(root, "state", state_copy);
 
-  serialized = turbo_json_serialize(root, out_len);
-  turbo_free_json(&root);
+  serialized = json_serialize(root, out_len);
+  json_free(root); root = NULL;
   return serialized;
 }
 
@@ -1661,24 +1662,25 @@ turbo_graph_checkpoint_deserialize(const char *json, size_t len,
     return TURBO_GRAPH_EXEC_INVALID_ARGUMENT;
   }
 
-  if (turbo_parse_json((const uint8_t *)json, len, &root) != 0) {
+  root = json_parse(json, len);
+  if (!root) {
     return TURBO_GRAPH_EXEC_ERROR;
   }
 
-  next_node = turbo_json_get_string(root, "next_node");
-  topology_id_text = turbo_json_get_string(root, "topology_id");
-  state = turbo_json_object_get(root, "state");
-  checkpoint_version = (size_t)turbo_json_get_double(root, "checkpoint_version", 0);
+  next_node = json_get_string(root, "next_node");
+  topology_id_text = json_get_string(root, "topology_id");
+  state = json_object_get(root, "state");
+  checkpoint_version = (size_t)json_get_double(root, "checkpoint_version", 0);
   if (checkpoint_version != TURBO_GRAPH_CHECKPOINT_SCHEMA_VERSION || !next_node || !state ||
       !topology_id_text) {
-    turbo_free_json(&root);
+    json_free(root); root = NULL;
     return TURBO_GRAPH_EXEC_ERROR;
   }
 
-  status = turbo_graph_checkpoint_create(next_node, (size_t)turbo_json_get_double(root, "steps", 0),
+  status = turbo_graph_checkpoint_create(next_node, (size_t)json_get_double(root, "steps", 0),
                                          state, &checkpoint);
   if (status != TURBO_GRAPH_EXEC_OK) {
-    turbo_free_json(&root);
+    json_free(root); root = NULL;
     return status;
   }
 
@@ -1686,12 +1688,12 @@ turbo_graph_checkpoint_deserialize(const char *json, size_t len,
     checkpoint->topology_id = turbo_agent_util_strdup(topology_id_text);
     if (!checkpoint->topology_id) {
       turbo_graph_checkpoint_destroy(checkpoint);
-      turbo_free_json(&root);
+      json_free(root); root = NULL;
       return TURBO_GRAPH_EXEC_OUT_OF_MEMORY;
     }
   }
 
-  turbo_free_json(&root);
+  json_free(root); root = NULL;
 
   *out_checkpoint = checkpoint;
   return TURBO_GRAPH_EXEC_OK;
@@ -1715,5 +1717,5 @@ turbo_graph_checkpoint_state_json_value(const turbo_graph_checkpoint_t *checkpoi
     return NULL;
   }
 
-  return turbo_json_clone(checkpoint->state);
+  return json_clone(checkpoint->state);
 }

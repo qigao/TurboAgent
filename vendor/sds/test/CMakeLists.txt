@@ -2,7 +2,7 @@ add_executable(sds_test sds_test.c)
 
 target_link_libraries(sds_test PRIVATE
     sds 
-    TurboUtils::TinyTest
+    Salts::TinyTest
 )
 
 add_test(NAME sds_test COMMAND sds_test)

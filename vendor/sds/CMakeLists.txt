@@ -7,7 +7,6 @@ set(SDS_SOURCES
 )
 
 add_library(sds STATIC ${SDS_SOURCES})
-add_library(TurboNet::SDS ALIAS sds)
 add_library(TurboAgent::SDS ALIAS sds)
 
 target_include_directories(sds PUBLIC

@@ -1,9 +1,11 @@
 #include "turbo_agent_util_internal.h"
 
+#include <json_parser.h>
+
 #include <stdlib.h>
 #include <string.h>
 
-CXX_C_API tstr_t turbo_agent_util_strdup(const char *src) {
+CXX_C_API tstr turbo_agent_util_strdup(const char *src) {
   return tstr_dup(src);
 }
 
@@ -14,7 +16,7 @@ CXX_C_API int turbo_agent_util_json_value_object_set_string(
   if (!object || !key || !value) {
     return -1;
   }
-  field = turbo_json_create_string(value);
+  field = json_create_string(value);
   if (!field) {
     return -1;
   }
@@ -32,7 +34,7 @@ CXX_C_API int turbo_agent_util_json_value_object_set_int64(
   if (!object || !key) {
     return -1;
   }
-  field = turbo_json_create_int64(value);
+  field = json_create_int64(value);
   if (!field) {
     return -1;
   }
@@ -51,7 +53,7 @@ CXX_C_API int turbo_agent_util_json_value_object_set_clone(
   if (!object || !key || !value) {
     return -1;
   }
-  copy = turbo_json_clone(value);
+  copy = json_clone(value);
   if (!copy) {
     return -1;
   }
@@ -88,7 +90,7 @@ CXX_C_API void turbo_agent_util_free_user_data(void *user_data) { free(user_data
 
 CXX_C_API int turbo_agent_util_append_bytes(char **buffer, size_t *length, const char *data,
                                             size_t data_len) {
-  tstr_t next;
+  tstr next;
 
   if (!buffer || (!data && data_len > 0)) {
     return -1;

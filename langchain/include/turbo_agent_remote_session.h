@@ -1,7 +1,7 @@
 #ifndef TURBO_AGENT_REMOTE_SESSION_H
 #define TURBO_AGENT_REMOTE_SESSION_H
 
-#include <platform.h>
+#include <turbo_agent_api.h>
 
 #include "turbo_agent_memory_store.h"
 #include "turbo_agent_runtime_remote_client.h"

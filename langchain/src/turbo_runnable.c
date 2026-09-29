@@ -1,4 +1,5 @@
 #include "turbo_runnable.h"
+#include <json_parser.h>
 
 #include "turbo_agent_app.h"
 #include "turbo_agent_session.h"
@@ -106,23 +107,23 @@ static const char *turbo_runnable_agent_text_input(
   if (text) {
     return text;
   }
-  if (turbo_json_type(input) != TURBO_JSON_OBJECT) {
+  if (json_type(input) != JSON_OBJECT) {
     return NULL;
   }
 
-  field = turbo_json_object_get(input, "input");
+  field = json_object_get(input, "input");
   text = turbo_runtime_json_value_as_string(field);
   if (text) {
     return text;
   }
 
-  field = turbo_json_object_get(input, "text");
+  field = json_object_get(input, "text");
   text = turbo_runtime_json_value_as_string(field);
   if (text) {
     return text;
   }
 
-  field = turbo_json_object_get(input, "user_text");
+  field = json_object_get(input, "user_text");
   return turbo_runtime_json_value_as_string(field);
 }
 
@@ -130,11 +131,11 @@ static const json_value_t *turbo_runnable_agent_messages_input(
     const json_value_t *input) {
   const json_value_t *messages;
 
-  if (turbo_json_type(input) != TURBO_JSON_OBJECT) {
+  if (json_type(input) != JSON_OBJECT) {
     return NULL;
   }
-  messages = turbo_json_object_get(input, "messages");
-  if (turbo_json_type(messages) != TURBO_JSON_ARRAY) {
+  messages = json_object_get(input, "messages");
+  if (json_type(messages) != JSON_ARRAY) {
     return NULL;
   }
   return messages;
@@ -151,16 +152,16 @@ static int turbo_runnable_agent_result_json_value(
     return -1;
   }
 
-  result = turbo_json_create_object();
+  result = json_create_object();
   if (!result) {
     return -1;
   }
 
   if (summary_json && *summary_json) {
-    summary = turbo_json_clone(*summary_json);
-    turbo_free_json(summary_json);
+    summary = json_clone(*summary_json);
+    json_free(*summary_json); *summary_json = NULL;
   } else {
-    summary = turbo_json_create_null();
+    summary = json_create_null();
   }
   if (!summary ||
       turbo_runtime_json_object_set(result, "summary", summary) !=
@@ -178,8 +179,8 @@ static int turbo_runnable_agent_result_json_value(
   }
   *state = NULL;
 
-  text = output_text ? turbo_json_create_string(output_text)
-                     : turbo_json_create_null();
+  text = output_text ? json_create_string(output_text)
+                     : json_create_null();
   if (!text ||
       turbo_runtime_json_object_set(result, "output_text", text) !=
           TURBO_RUNTIME_JSON_OK) {
@@ -357,12 +358,12 @@ static int turbo_runnable_wrap_batch_json_value(
   size_t i;
 
   if (!adapter || !inputs || !out_outputs ||
-      turbo_json_type(inputs) != TURBO_JSON_ARRAY) {
+      json_type(inputs) != JSON_ARRAY) {
     return -1;
   }
 
   *out_outputs = NULL;
-  outputs = turbo_json_create_array();
+  outputs = json_create_array();
   if (!outputs) {
     return -1;
   }
@@ -370,7 +371,7 @@ static int turbo_runnable_wrap_batch_json_value(
   count = turbo_runtime_json_value_size(inputs);
   for (i = 0; i < count; ++i) {
     const json_value_t *input =
-        turbo_json_array_get(inputs, i);
+        json_array_get(inputs, i);
     json_value_t *output = NULL;
     int rc = turbo_runnable_wrap_invoke_common(adapter, input, NULL, NULL, 0, &output);
 
@@ -587,7 +588,7 @@ static int turbo_runnable_agent_session_invoke_common(
 
   if (rc != 0 || !state) {
     turbo_runtime_json_destroy(state);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return rc != 0 ? rc : -1;
   }
 
@@ -595,7 +596,7 @@ static int turbo_runnable_agent_session_invoke_common(
   rc = turbo_runnable_agent_result_json_value(&summary, &state, output_text, out_output);
   free(output_text);
   turbo_runtime_json_destroy(state);
-  turbo_free_json(&summary);
+  json_free(summary); summary = NULL;
   return rc;
 }
 
@@ -667,7 +668,7 @@ static int turbo_runnable_agent_app_invoke_common(
 
   if (rc != 0 || !state) {
     turbo_runtime_json_destroy(state);
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return rc != 0 ? rc : -1;
   }
 
@@ -675,7 +676,7 @@ static int turbo_runnable_agent_app_invoke_common(
   rc = turbo_runnable_agent_result_json_value(&summary, &state, output_text, out_output);
   free(output_text);
   turbo_runtime_json_destroy(state);
-  turbo_free_json(&summary);
+  json_free(summary); summary = NULL;
   return rc;
 }
 
@@ -826,11 +827,11 @@ int turbo_runnable_batch_json_value(const turbo_runnable_t *runnable,
   if (runnable->batch_json_value) {
     return runnable->batch_json_value(inputs, out_outputs, runnable->user_data);
   }
-  if (turbo_json_type(inputs) != TURBO_JSON_ARRAY) {
+  if (json_type(inputs) != JSON_ARRAY) {
     return -1;
   }
 
-  outputs = turbo_json_create_array();
+  outputs = json_create_array();
   if (!outputs) {
     return -1;
   }
@@ -838,7 +839,7 @@ int turbo_runnable_batch_json_value(const turbo_runnable_t *runnable,
   count = turbo_runtime_json_value_size(inputs);
   for (i = 0; i < count; ++i) {
     const json_value_t *input =
-        turbo_json_array_get(inputs, i);
+        json_array_get(inputs, i);
     json_value_t *output = NULL;
     int rc = turbo_runnable_invoke_json_value(runnable, input, &output);
 

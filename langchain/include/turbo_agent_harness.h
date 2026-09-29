@@ -1,6 +1,9 @@
 #ifndef TURBO_AGENT_HARNESS_H
 #define TURBO_AGENT_HARNESS_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <turbo_agent_api.h>
 #include <salts/thread.h>
 #include <salts/thread_pool.h>

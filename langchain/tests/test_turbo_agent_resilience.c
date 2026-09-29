@@ -128,7 +128,7 @@ spec("turbo agent resilience") {
 
     turbo_agent_state_add_user_message(state, "hello");
     ctx.state = state;
-    check_int_ne(turbo_agent_model_node(&ctx, agent), 0);
+    check_not_equal(turbo_agent_model_node(&ctx, agent), 0);
     check_equal(transport.calls, 1);
     check_equal(turbo_agent_state_model_error_phase(state), "transport");
 
@@ -155,7 +155,7 @@ spec("turbo agent resilience") {
     turbo_agent_execution_context_set(&current);
     turbo_agent_state_add_user_message(state, "hello");
     ctx.state = state;
-    check_int_ne(turbo_agent_model_node(&ctx, agent), 0);
+    check_not_equal(turbo_agent_model_node(&ctx, agent), 0);
     check_equal(transport.calls, 1);
     turbo_agent_execution_context_set(&saved);
 

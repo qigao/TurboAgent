@@ -148,7 +148,7 @@ spec("turbo agent harness") {
     check_equal(turbo_agent_harness_execution_wait(execution, UINT64_MAX), SALTS_OK);
     check_equal(turbo_agent_harness_execution_get_status(execution, &status), SALTS_OK);
     check_equal(status, TURBO_AGENT_EXECUTION_COMPLETED);
-    check_int_gt(atomic_load_explicit(&event_count, memory_order_relaxed), 0);
+    check_greater(atomic_load_explicit(&event_count, memory_order_relaxed), 0);
     check_equal(turbo_agent_harness_execution_take_result(execution, &summary, &state), SALTS_OK);
     check_equal(json_get_string(summary, "status"), "completed");
     run_id = json_get_string(summary, "run_id");

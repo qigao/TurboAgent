@@ -922,3 +922,31 @@ size_t turbo_praktor_tool_pack_workflow_count(
     const turbo_praktor_tool_pack_t *pack) {
   return pack ? pack->workflow_count : 0;
 }
+
+
+int turbo_praktor_tool_pack_supports_workflow_plan(
+    const turbo_praktor_tool_pack_t *pack) {
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  const praktor_api *api = pack ? pack->api : NULL;
+  return api &&
+         (api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
+         api->compile_workflow && api->describe_workflow_plan &&
+         api->execute_workflow_plan && api->release_workflow_plan;
+#else
+  (void)pack;
+  return 0;
+#endif
+}
+
+int turbo_praktor_tool_pack_supports_execution_events(
+    const turbo_praktor_tool_pack_t *pack) {
+#if TURBO_PRAKTOR_HAS_EXECUTION_EVENTS
+  const praktor_api *api = pack ? pack->api : NULL;
+  return api &&
+         (api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_EVENTS) != 0 &&
+         api->execute_workflow_plan_observed;
+#else
+  (void)pack;
+  return 0;
+#endif
+}

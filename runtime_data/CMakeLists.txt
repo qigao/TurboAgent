@@ -26,6 +26,8 @@ if(BUILD_TESTS)
     LIBS
     runtime_data
     Salts::TinyTest
+    Salts::CYamlJsonAdapter
+    Salts::XmlParser
     INCLUDES
     include
     FOLDER

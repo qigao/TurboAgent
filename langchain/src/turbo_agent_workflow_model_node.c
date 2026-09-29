@@ -134,7 +134,8 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       return -1;
     }
 
-    if (turbo_parse_json((const uint8_t *)response_json, strlen(response_json), &response) != 0) {
+    response = json_parse(response_json, strlen(response_json));
+    if (!response) {
       detail = turbo_agent_util_strdup(response_json);
       turbo_agent_state_set_model_error(ctx->state, "parse_response",
                                         detail ? detail : "failed to parse model response JSON");

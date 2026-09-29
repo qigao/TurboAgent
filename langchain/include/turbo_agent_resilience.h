@@ -2,6 +2,7 @@
 #define TURBO_AGENT_RESILIENCE_H
 
 #include <turbo_agent_api.h>
+#include <stddef.h>
 
 #include "turbo_runtime_control.h"
 

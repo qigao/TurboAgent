@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_embedding.h"
 
 typedef struct embedding_test_state_s {
@@ -16,10 +17,10 @@ static int embedding_test_embed(void *user_data, const char *text,
   check_not_null(out_embedding_json);
   state->call_count++;
 
-  embedding = turbo_json_create_array();
+  embedding = json_create_array();
   check_not_null(embedding);
-  turbo_json_array_add(embedding, turbo_json_create_number(7.0));
-  turbo_json_array_add(embedding, turbo_json_create_number(3.0));
+  json_array_add(embedding, json_create_number(7.0));
+  json_array_add(embedding, json_create_number(3.0));
   *out_embedding_json = embedding;
   return 0;
 }
@@ -35,24 +36,24 @@ static double embedding_test_sum(const json_value_t *embedding) {
   double sum = 0.0;
   size_t i;
 
-  for (i = 0; i < turbo_json_array_size(embedding); ++i) {
-    const json_value_t *value = turbo_json_array_get(embedding, i);
+  for (i = 0; i < json_array_size(embedding); ++i) {
+    const json_value_t *value = json_array_get(embedding, i);
 
-    check_true(turbo_json_type(value) == TURBO_JSON_NUMBER);
-    sum += turbo_json_number(value);
+    check_true(json_type(value) == JSON_NUMBER);
+    sum += json_number(value);
   }
   return sum;
 }
 
 static void embedding_test_check_same_values(const json_value_t *left,
                                              const json_value_t *right) {
-  size_t count = turbo_json_array_size(left);
+  size_t count = json_array_size(left);
   size_t i;
 
-  check_size_eq(turbo_json_array_size(right), count);
+  check_size_eq(json_array_size(right), count);
   for (i = 0; i < count; ++i) {
-    check_int_eq((int)turbo_json_number(turbo_json_array_get(left, i)),
-                 (int)turbo_json_number(turbo_json_array_get(right, i)));
+    check_int_eq((int)json_number(json_array_get(left, i)),
+                 (int)json_number(json_array_get(right, i)));
   }
 }
 
@@ -72,11 +73,11 @@ spec("turbo embedding api") {
     check_int_eq(turbo_embedding_model_embed_text(model, "custom text",
                                                   &embedding),
                  0);
-    check_size_eq(turbo_json_array_size(embedding), 2);
-    check_int_eq((int)turbo_json_number(turbo_json_array_get(embedding, 0)), 7);
+    check_size_eq(json_array_size(embedding), 2);
+    check_int_eq((int)json_number(json_array_get(embedding, 0)), 7);
     check_int_eq(state.call_count, 1);
 
-    turbo_free_json(&embedding);
+    json_free(embedding); embedding = NULL;
     turbo_embedding_model_destroy(model);
     check_int_eq(state.freed, 1);
   }
@@ -91,7 +92,7 @@ spec("turbo embedding api") {
     check_int_eq(turbo_embedding_model_embed_text(model, "Alpha beta alpha",
                                                   &embedding),
                  0);
-    check_size_eq(turbo_json_array_size(embedding), 8);
+    check_size_eq(json_array_size(embedding), 8);
     check_int_eq((int)embedding_test_sum(embedding), 3);
 
     check_int_eq(
@@ -100,9 +101,9 @@ spec("turbo embedding api") {
         turbo_embedding_model_embed_text(model, "alpha beta", &case_b), 0);
     embedding_test_check_same_values(case_a, case_b);
 
-    turbo_free_json(&case_b);
-    turbo_free_json(&case_a);
-    turbo_free_json(&embedding);
+    json_free(case_b); case_b = NULL;
+    json_free(case_a); case_a = NULL;
+    json_free(embedding); embedding = NULL;
     turbo_embedding_model_destroy(model);
   }
 

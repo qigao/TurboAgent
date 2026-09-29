@@ -152,6 +152,133 @@ jobs:
             -DCMAKE_PREFIX_PATH="$prefix;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
           cmake --build "$consumer/build" --parallel 2
 
+  praktor:
+    name: Linux x64 + Praktor
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/praktor
+          path: deps/praktor
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Prepare toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm
+          test -n "${VCPKG_ROOT:-}"
+          test -f "${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+
+      - name: Restore current foundation SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sdk_root="$RUNNER_TEMP/turboagent-praktor-sdks"
+          mkdir -p "$sdk_root"
+
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local config_rel="$4"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+              --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/linux-x64"
+            test -f "$root/$config_rel"
+            printf '%s\n' "$root"
+          }
+
+          {
+            echo "SALTS_ROOT=$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake')"
+            echo "SALTS_UTILS_ROOT=$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
+            echo "CHTTP_ROOT=$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake')"
+            echo "TURBOSCRIPT_ROOT=$(restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript 'lib/cmake/TurboScript/TurboScriptConfig.cmake')"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and install current Praktor
+        shell: bash
+        run: |
+          set -euxo pipefail
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          prefix="$RUNNER_TEMP/praktor-install"
+          cmake -S deps/praktor -B build/praktor-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/praktor-sdk" \
+            -DCMAKE_PREFIX_PATH="$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            -DENABLE_SCRIPT_ENGINE=ON \
+            -DENABLE_TESTS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$prefix"
+          cmake --build build/praktor-sdk --parallel 2
+          cmake --install build/praktor-sdk
+          test -f "$prefix/lib/cmake/Praktor/PraktorConfig.cmake"
+          if grep -E 'find_dependency\((Salts|SaltsUtils|Chttp|TurboScript) [0-9]' \
+              "$prefix/lib/cmake/Praktor/PraktorConfig.cmake"; then
+            echo "installed Praktor must not pin foundation dependency versions" >&2
+            exit 1
+          fi
+          echo "PRAKTOR_ROOT=$prefix" >> "$GITHUB_ENV"
+
+      - name: Build and run real Praktor tool-pack test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          cmake -S . -B build/praktor-agent -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/praktor-agent" \
+            -DCMAKE_PREFIX_PATH="$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            -DSALTS_ROOT="$SALTS_ROOT" \
+            -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT" \
+            -DCHTTP_ROOT="$CHTTP_ROOT" \
+            -DPRAKTOR_ROOT="$PRAKTOR_ROOT" \
+            -DENABLE_PRAKTOR_TOOLS=ON \
+            -DENABLE_MCP_TOOLS=OFF \
+            -DENABLE_CODEX_BRIDGE=OFF \
+            -DENABLE_CODING_TOOLS=OFF \
+            -DENABLE_LANGCHAIN=OFF \
+            -DENABLE_LLM_SANDBOX=OFF \
+            -DBUILD_TESTS=ON \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BENCHMARKS=OFF \
+            -DENABLE_ASAN=OFF
+          cmake --build build/praktor-agent --target test_turbo_praktor_tool_pack --parallel 2
+          praktor_vcpkg_libs="$(find "$GITHUB_WORKSPACE/vcpkg_installed/praktor-sdk" -type d \
+            \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
+          agent_vcpkg_libs="$(find "$GITHUB_WORKSPACE/vcpkg_installed/praktor-agent" -type d \
+            \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
+          export LD_LIBRARY_PATH="$PRAKTOR_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$praktor_vcpkg_libs:$agent_vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/praktor-agent -R '^test_turbo_praktor_tool_pack$' --no-tests=error --output-on-failure
+
   windows:
     name: Windows x64
     runs-on: windows-2025

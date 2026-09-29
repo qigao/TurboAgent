@@ -47,6 +47,13 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v2(
 CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v3(
     turbo_tool_registry_t *registry, const turbo_tool_definition_v3_t *definition);
 
+/**
+ * @brief Add a context-aware tool definition without changing legacy callbacks.
+ * @return INVALID_ARGUMENT for invalid metadata or unsupported ABI.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v4(
+    turbo_tool_registry_t *registry, const turbo_tool_definition_v4_t *definition);
+
 /** @brief Remove one tool and release its registry-owned resources. */
 CXX_C_API turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *registry,
                                                          const char *name);
@@ -142,6 +149,16 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_execute(const turbo_tool_regis
                                                           char **out_output);
 
 /**
+ * @brief Execute a tool with a borrowed generic execution context.
+ *
+ * Context-aware v4 callbacks are preferred. Legacy callbacks remain valid and
+ * are used as a compatibility fallback.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_execute_with_context(
+    const turbo_tool_registry_t *registry, const char *name, const char *arguments_json,
+    const turbo_tool_execution_context_t *context, char **out_output);
+
+/**
  * @brief Execute a tool by name through the TurboParser JSON boundary.
  *
  * This is direct registry execution. It does not invoke agent middleware,
@@ -157,6 +174,13 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_execute(const turbo_tool_regis
 CXX_C_API turbo_tool_status_t
 turbo_tool_registry_execute_json_value(const turbo_tool_registry_t *registry, const char *name,
                                        const json_value_t *arguments, json_value_t **out_result);
+
+/**
+ * @brief Execute a JSON-native tool with a borrowed generic execution context.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_execute_json_value_with_context(
+    const turbo_tool_registry_t *registry, const char *name, const json_value_t *arguments,
+    const turbo_tool_execution_context_t *context, json_value_t **out_result);
 
 /**
  * @brief Serialize registry tools into OpenAI Responses API shape.

@@ -50,7 +50,75 @@ static int test_echo_tool_json_value(const json_value_t *arguments, json_value_t
   return 0;
 }
 
+typedef struct test_tool_context_probe_s {
+  const turbo_tool_execution_context_t *seen_context;
+  const char *seen_turn_id;
+  int calls;
+} test_tool_context_probe_t;
+
+static turbo_tool_status_t test_context_echo_tool(
+    const char *arguments_json, const turbo_tool_execution_context_t *context,
+    char **out_output, void *user_data) {
+  test_tool_context_probe_t *probe = (test_tool_context_probe_t *)user_data;
+  size_t len;
+  char *copy;
+  if (!probe || !context || !out_output) return TURBO_TOOL_INVALID_ARGUMENT;
+  ++probe->calls;
+  probe->seen_context = context;
+  probe->seen_turn_id = context->turn_id;
+  len = strlen(arguments_json ? arguments_json : "{}") + 1;
+  copy = (char *)malloc(len);
+  if (!copy) return TURBO_TOOL_OUT_OF_MEMORY;
+  memcpy(copy, arguments_json ? arguments_json : "{}", len);
+  *out_output = copy;
+  return TURBO_TOOL_OK;
+}
+
 spec("turbo tool runtime") {
+
+  it("should propagate v4 execution context through projection and composition") {
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    turbo_tool_registry_t *composite = NULL;
+    const turbo_tool_registry_t *sources[1];
+    const char *names[] = {"context_echo"};
+    test_tool_context_probe_t probe = {0};
+    turbo_tool_definition_v4_t definition = {0};
+    turbo_tool_execution_context_t context = {0};
+    char *output = NULL;
+
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+    definition.definition.name = "context_echo";
+    definition.definition.description = "Context echo";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.strict = 1;
+    definition.definition.user_data = &probe;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    definition.context_handler = test_context_echo_tool;
+    check_equal(turbo_tool_registry_add_v4(source, &definition), TURBO_TOOL_OK);
+
+    check_equal(turbo_tool_registry_project(source, names, 1, &projection), TURBO_TOOL_OK);
+    sources[0] = projection;
+    check_equal(turbo_tool_registry_compose(sources, 1, &composite), TURBO_TOOL_OK);
+
+    context.struct_size = sizeof(context);
+    context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    context.turn_id = "turn-7";
+    context.tool_call_id = "call-9";
+    check_equal(turbo_tool_registry_execute_with_context(
+                    composite, "context_echo", "{\"ok\":true}", &context, &output),
+                TURBO_TOOL_OK);
+    check_equal(output, "{\"ok\":true}");
+    check_equal(probe.calls, 1);
+    check_equal(probe.seen_turn_id, "turn-7");
+
+    free(output);
+    turbo_tool_registry_destroy(composite);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+  }
 
   it("should preserve legacy policy and expose validated v2 policy") {
     turbo_tool_registry_t *registry = turbo_tool_registry_create();

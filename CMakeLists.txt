@@ -48,7 +48,6 @@ include(Sanitizers)
 include(CmakeUtils)
 
 find_package(OpenSSL REQUIRED)
-find_package(base64 CONFIG REQUIRED)
 if(DEFINED SALTS_ROOT AND NOT "${SALTS_ROOT}" STREQUAL "")
   set(ENV{SALTS_ROOT} "${SALTS_ROOT}")
 endif()
@@ -64,8 +63,6 @@ if(ENABLE_LLM_SANDBOX)
   find_package(TurboWasm CONFIG REQUIRED PATHS "${TURBOWASM_ROOT}")
 endif()
 find_package(Threads REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(STC REQUIRED IMPORTED_TARGET stc)
 
 # Additional components
 add_subdirectory(tools)

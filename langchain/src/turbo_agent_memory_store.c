@@ -3,6 +3,7 @@
 #include "turbo_agent_util_internal.h"
 #include <json_parser.h>
 #include <salts_fs.h>
+#include <platform.h>
 
 #include <limits.h>
 #include <stdint.h>
@@ -121,7 +122,7 @@ static char *turbo_agent_memory_join_path(const char *left, const char *right) {
 
 static int turbo_agent_memory_write_text_file(const char *path, const char *content) {
   enum { TURBO_AGENT_MEMORY_TEMP_SUFFIX_SIZE = 22 };
-  turbo_file_t file = TURBO_INVALID_FILE;
+  salts_file_t file = SALTS_INVALID_FILE;
   uint64_t nonce;
   char *temp_path = NULL;
   size_t path_len;
@@ -136,7 +137,7 @@ static int turbo_agent_memory_write_text_file(const char *path, const char *cont
   path_len = strlen(path);
   len = strlen(content);
   if (len > INT_MAX || path_len > SIZE_MAX - TURBO_AGENT_MEMORY_TEMP_SUFFIX_SIZE ||
-      turbo_secure_random(&nonce, sizeof(nonce)) != 0) {
+      salts_secure_random(&nonce, sizeof(nonce)) != 0) {
     return -1;
   }
   temp_path_size = path_len + TURBO_AGENT_MEMORY_TEMP_SUFFIX_SIZE;
@@ -152,7 +153,7 @@ static int turbo_agent_memory_write_text_file(const char *path, const char *cont
 
   file = salts_fs_open(temp_path, SALTS_FS_O_WRONLY | SALTS_FS_O_CREAT | SALTS_FS_O_TRUNC,
                        SALTS_FS_DEFAULT_MODE);
-  if (file == TURBO_INVALID_FILE) {
+  if (file == SALTS_INVALID_FILE) {
     goto cleanup;
   }
   if (len > 0 && salts_fs_write(file, content, len) != (int)len) {
@@ -162,17 +163,17 @@ static int turbo_agent_memory_write_text_file(const char *path, const char *cont
     goto cleanup;
   }
   if (salts_fs_close(file) != 0) {
-    file = TURBO_INVALID_FILE;
+    file = SALTS_INVALID_FILE;
     goto cleanup;
   }
-  file = TURBO_INVALID_FILE;
+  file = SALTS_INVALID_FILE;
   if (salts_fs_rename(temp_path, path) != 0) {
     goto cleanup;
   }
   status = 0;
 
 cleanup:
-  if (file != TURBO_INVALID_FILE) {
+  if (file != SALTS_INVALID_FILE) {
     salts_fs_close(file);
   }
   if (status != 0) {

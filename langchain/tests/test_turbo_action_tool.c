@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_action_tool.h"
 
 #include <stdlib.h>
@@ -14,7 +15,7 @@ static int ok_handler(const json_value_t *args, json_value_t **out_result, void 
     return -1;
   }
 
-  turbo_json_object_set_string(result, "note", "worked");
+  json_object_set_string(result, "note", "worked");
   *out_result = result;
   return 0;
 }
@@ -22,7 +23,7 @@ static int ok_handler(const json_value_t *args, json_value_t **out_result, void 
 static int invalid_handler(const json_value_t *args, json_value_t **out_result, void *user_data) {
   (void)args;
   (void)user_data;
-  *out_result = turbo_json_create_object();
+  *out_result = json_create_object();
   return *out_result ? 0 : -1;
 }
 
@@ -35,7 +36,7 @@ static int echo_handler(const json_value_t *args, json_value_t **out_result, voi
     return -1;
   }
 
-  turbo_json_object_set_string(result, "echo", turbo_json_get_string(args, "message"));
+  json_object_set_string(result, "echo", json_get_string(args, "message"));
   *out_result = result;
   return 0;
 }
@@ -52,7 +53,7 @@ spec("turbo action tool") {
         .kind = TURBO_ACTION_OBSERVE,
         .handler = ok_handler,
     };
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
     json_value_t *result = NULL;
 
     check_not_null(registry);
@@ -63,12 +64,12 @@ spec("turbo action tool") {
     check_int_eq(turbo_action_tool_registry_execute(registry, "read_file", args, &result),
                  TURBO_ACTION_TOOL_OK);
     check_not_null(result);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    check_str_eq(turbo_json_get_string(result, "summary"), "ok");
-    check_str_eq(turbo_json_get_string(result, "note"), "worked");
+    check_true(json_get_bool(result, "ok", false));
+    check_str_eq(json_get_string(result, "summary"), "ok");
+    check_str_eq(json_get_string(result, "note"), "worked");
 
-    turbo_free_json(&result);
-    turbo_free_json(&args);
+    json_free(result); result = NULL;
+    json_free(args); args = NULL;
     turbo_action_tool_registry_destroy(registry);
   }
 
@@ -102,17 +103,17 @@ spec("turbo action tool") {
                                                         "line 1\\line 2\n\"oops\""),
                  0);
 
-    serialized = turbo_json_serialize(result, NULL);
+    serialized = json_serialize(result, NULL);
     check_not_null(serialized);
     check_int_eq(turbo_parse_json((const uint8_t *)serialized, strlen(serialized), &parsed), 0);
     check_not_null(parsed);
-    check_false(turbo_json_get_bool(parsed, "ok", true));
-    check_str_eq(turbo_json_get_string(parsed, "summary"), "quote: \"bad\"\npath");
-    check_str_eq(turbo_json_get_string(parsed, "stderr"), "line 1\\line 2\n\"oops\"");
+    check_false(json_get_bool(parsed, "ok", true));
+    check_str_eq(json_get_string(parsed, "summary"), "quote: \"bad\"\npath");
+    check_str_eq(json_get_string(parsed, "stderr"), "line 1\\line 2\n\"oops\"");
 
-    turbo_free_json(&parsed);
+    json_free(parsed); parsed = NULL;
     free(serialized);
-    turbo_free_json(&result);
+    json_free(result); result = NULL;
   }
 
   it("should serialize action tools into chat function shape") {
@@ -134,14 +135,14 @@ spec("turbo action tool") {
     check_int_eq(turbo_action_tool_registry_add(registry, &definition), TURBO_ACTION_TOOL_OK);
     tools = turbo_action_tool_registry_build_openai_chat_tools(registry);
     check_not_null(tools);
-    check_size_eq(turbo_json_array_size(tools), 1);
-    tool = turbo_json_array_get(tools, 0);
-    function_object = turbo_json_object_get(tool, "function");
-    check_str_eq(turbo_json_get_string(tool, "type"), "function");
-    check_str_eq(turbo_json_get_string(function_object, "name"), "run_command");
-    check_true(turbo_json_get_bool(function_object, "strict", false));
+    check_size_eq(json_array_size(tools), 1);
+    tool = json_array_get(tools, 0);
+    function_object = json_object_get(tool, "function");
+    check_str_eq(json_get_string(tool, "type"), "function");
+    check_str_eq(json_get_string(function_object, "name"), "run_command");
+    check_true(json_get_bool(function_object, "strict", false));
 
-    turbo_free_json(&tools);
+    json_free(tools); tools = NULL;
     turbo_action_tool_registry_destroy(registry);
   }
 
@@ -171,10 +172,10 @@ spec("turbo action tool") {
                  TURBO_TOOL_OK);
     check_not_null(output);
     check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output), &result), 0);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    check_str_eq(turbo_json_get_string(result, "echo"), "hi");
+    check_true(json_get_bool(result, "ok", false));
+    check_str_eq(json_get_string(result, "echo"), "hi");
 
-    turbo_free_json(&result);
+    json_free(result); result = NULL;
     free(output);
     turbo_tool_registry_destroy(tool_registry);
     turbo_action_tool_registry_destroy(action_registry);
@@ -208,10 +209,10 @@ spec("turbo action tool") {
                  TURBO_TOOL_OK);
     check_not_null(output);
     check_int_eq(turbo_parse_json((const uint8_t *)output, strlen(output), &result), 0);
-    check_true(turbo_json_get_bool(result, "ok", false));
-    check_str_eq(turbo_json_get_string(result, "echo"), "hi");
+    check_true(json_get_bool(result, "ok", false));
+    check_str_eq(json_get_string(result, "echo"), "hi");
 
-    turbo_free_json(&result);
+    json_free(result); result = NULL;
     free(output);
     turbo_tool_registry_destroy(tool_registry);
   }
@@ -228,9 +229,9 @@ spec("turbo action tool") {
         .handler = echo_handler,
     };
     turbo_tool_registry_t *tool_registry;
-    json_value_t *args = turbo_json_create_object();
+    json_value_t *args = json_create_object();
     json_value_t *message =
-        turbo_json_create_string("hi");
+        json_create_string("hi");
     json_value_t *result = NULL;
 
     check_not_null(action_registry);
@@ -247,9 +248,9 @@ spec("turbo action tool") {
                  TURBO_TOOL_OK);
     check_not_null(result);
     check_true(turbo_runtime_json_value_as_bool(
-        turbo_json_object_get(result, "ok"), 0));
+        json_object_get(result, "ok"), 0));
     check_str_eq(turbo_runtime_json_value_as_string(
-                     turbo_json_object_get(result, "echo")),
+                     json_object_get(result, "echo")),
                  "hi");
 
     turbo_runtime_json_destroy(result);

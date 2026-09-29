@@ -3336,8 +3336,8 @@ spec("turbo agent app api") {
     check_not_null(child_run_id);
     output_text = json_get_string(output_item, "output");
     check_not_null(output_text);
-    check_int_eq(
-        turbo_parse_json((const uint8_t *)output_text, strlen(output_text), &output_json), 0);
+    output_json = json_parse(output_text, strlen(output_text));
+    check_not_null(output_json);
     check_str_eq(json_get_string(output_json, "parent_agent_run_id"), parent_run_id);
     check_str_eq(json_get_string(output_json, "parent_tool_call_id"), "call_parent_1");
     check_str_eq(json_get_string(output_json, "parent_tool_name"), "delegate");

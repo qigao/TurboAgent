@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_document_loader.h"
 
 #include <stdio.h>
@@ -78,16 +79,16 @@ spec("turbo document loader api") {
     document_loader_test_write_file(path, "loader reads local docs\n");
     check_int_eq(turbo_document_loader_load_text_file(path, "note", &document),
                  0);
-    check_str_eq(turbo_json_get_string(document, "id"), path);
-    check_str_eq(turbo_json_get_string(document, "uri"), path);
-    check_str_eq(turbo_json_get_string(document, "kind"), "note");
-    check_str_eq(turbo_json_get_string(document, "text"),
+    check_str_eq(json_get_string(document, "id"), path);
+    check_str_eq(json_get_string(document, "uri"), path);
+    check_str_eq(json_get_string(document, "kind"), "note");
+    check_str_eq(json_get_string(document, "text"),
                  "loader reads local docs\n");
-    check_not_null(turbo_json_get_string(document, "content_hash"));
-    check_int_eq(turbo_json_get_int(document, "size", -1),
+    check_not_null(json_get_string(document, "content_hash"));
+    check_int_eq(json_get_int(document, "size", -1),
                  (int)strlen("loader reads local docs\n"));
 
-    turbo_free_json(&document);
+    json_free(document); document = NULL;
     remove(path);
     free(path);
     TEST_RMDIR(dir);

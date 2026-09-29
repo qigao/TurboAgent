@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_event_log.h"
 #include "turbo_runnable.h"
 
@@ -46,11 +47,11 @@ static int increment_json_value(const json_value_t *input,
   check_not_null(counter);
 
   counter->count++;
-  output = turbo_json_clone(input);
+  output = json_clone(input);
   check_not_null(output);
   check_int_eq(
       turbo_runtime_json_object_set(output, "count",
-                                         turbo_json_create_int64(counter->count)),
+                                         json_create_int64(counter->count)),
       TURBO_RUNTIME_JSON_OK);
   *out_output = output;
   return 0;
@@ -67,11 +68,11 @@ static int wrap_before_json_value(const json_value_t *input,
   check_not_null(counter);
 
   counter->before_count++;
-  replacement = turbo_json_clone(input);
+  replacement = json_clone(input);
   check_not_null(replacement);
   check_int_eq(turbo_runtime_json_object_set(
                    replacement, "value",
-                   turbo_json_create_string("wrapped")),
+                   json_create_string("wrapped")),
                TURBO_RUNTIME_JSON_OK);
   *out_input = replacement;
   return 0;
@@ -89,14 +90,14 @@ static int wrap_after_json_value(const json_value_t *input,
   check_not_null(out_output);
   check_not_null(counter);
   check_str_eq(turbo_runtime_json_value_as_string(
-                   turbo_json_object_get(input, "value")),
+                   json_object_get(input, "value")),
                "wrapped");
 
   counter->after_count++;
-  replacement = turbo_json_clone(output);
+  replacement = json_clone(output);
   check_not_null(replacement);
   check_int_eq(turbo_runtime_json_object_set(
-                   replacement, "after", turbo_json_create_bool(1)),
+                   replacement, "after", json_create_bool(1)),
                TURBO_RUNTIME_JSON_OK);
   *out_output = replacement;
   return 0;
@@ -105,7 +106,7 @@ static int wrap_after_json_value(const json_value_t *input,
 static int graph_mark_json_value(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   (void)user_data;
   return turbo_runtime_json_object_set(
-             ctx->json_value_state, "graph_done", turbo_json_create_bool(1)) ==
+             ctx->json_value_state, "graph_done", json_create_bool(1)) ==
                  TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
@@ -114,7 +115,7 @@ static int graph_mark_json_value(turbo_graph_exec_ctx_t *ctx, void *user_data) {
 static int state_graph_mark_json_value(turbo_state_graph_exec_ctx_t *ctx, void *user_data) {
   (void)user_data;
   return turbo_runtime_json_object_set(
-             ctx->update, "state_done", turbo_json_create_bool(1)) ==
+             ctx->update, "state_done", json_create_bool(1)) ==
                  TURBO_RUNTIME_JSON_OK
              ? 0
              : -1;
@@ -129,9 +130,9 @@ static void capture_runnable_event(const json_value_t *event, void *user_data) {
   free((void *)capture->last_detail);
   free((void *)capture->last_name);
   capture->last_name = test_strdup_local(
-      turbo_runtime_json_value_as_string(turbo_json_object_get(event, "name")));
+      turbo_runtime_json_value_as_string(json_object_get(event, "name")));
   capture->last_detail = test_strdup_local(
-      turbo_runtime_json_value_as_string(turbo_json_object_get(event, "detail")));
+      turbo_runtime_json_value_as_string(json_object_get(event, "detail")));
   if (capture->last_name && strcmp(capture->last_name, "graph.node") == 0) {
     capture->saw_graph_node = 1;
   }
@@ -155,7 +156,7 @@ spec("turbo runnable runtime") {
       turbo_runnable_t *first = turbo_runnable_create(&first_config);
       turbo_runnable_t *second = turbo_runnable_create(&second_config);
       turbo_runnable_t *pipe = turbo_runnable_pipe(first, second);
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       json_value_t *output = NULL;
 
       check_not_null(first);
@@ -164,14 +165,14 @@ spec("turbo runnable runtime") {
       check_not_null(input);
 
       check_int_eq(turbo_runtime_json_object_set(
-                       input, "value", turbo_json_create_string("ok")),
+                       input, "value", json_create_string("ok")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runnable_invoke_json_value(pipe, input, &output), 0);
       check_int_eq((int)turbo_runtime_json_value_as_int64(
-                       turbo_json_object_get(output, "count"), 0),
+                       json_object_get(output, "count"), 0),
                    1);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(output, "value")),
+                       json_object_get(output, "value")),
                    "ok");
 
       turbo_runtime_json_destroy(output);
@@ -190,11 +191,11 @@ spec("turbo runnable runtime") {
           .user_data = &counter,
           .user_data_free = NULL};
       turbo_runnable_t *runnable = turbo_runnable_create(&config);
-      json_value_t *inputs = turbo_json_create_array();
+      json_value_t *inputs = json_create_array();
       json_value_t *first_input =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *second_input =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *outputs = NULL;
       const json_value_t *first_output;
       const json_value_t *second_output;
@@ -205,11 +206,11 @@ spec("turbo runnable runtime") {
       check_not_null(second_input);
       check_int_eq(turbo_runtime_json_object_set(
                        first_input, "value",
-                       turbo_json_create_string("first")),
+                       json_create_string("first")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
                        second_input, "value",
-                       turbo_json_create_string("second")),
+                       json_create_string("second")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_array_append(inputs, first_input),
                    TURBO_RUNTIME_JSON_OK);
@@ -218,13 +219,13 @@ spec("turbo runnable runtime") {
 
       check_int_eq(turbo_runnable_batch_json_value(runnable, inputs, &outputs), 0);
       check_size_eq(turbo_runtime_json_value_size(outputs), 2);
-      first_output = turbo_json_array_get(outputs, 0);
-      second_output = turbo_json_array_get(outputs, 1);
+      first_output = json_array_get(outputs, 0);
+      second_output = json_array_get(outputs, 1);
       check_int_eq((int)turbo_runtime_json_value_as_int64(
-                       turbo_json_object_get(first_output, "count"), 0),
+                       json_object_get(first_output, "count"), 0),
                    1);
       check_int_eq((int)turbo_runtime_json_value_as_int64(
-                       turbo_json_object_get(second_output, "count"), 0),
+                       json_object_get(second_output, "count"), 0),
                    2);
       check_int_eq(counter.count, 2);
 
@@ -251,11 +252,11 @@ spec("turbo runnable runtime") {
       turbo_runnable_t *first = turbo_runnable_create(&first_config);
       turbo_runnable_t *second = turbo_runnable_create(&second_config);
       turbo_runnable_t *pipe = turbo_runnable_pipe(first, second);
-      json_value_t *inputs = turbo_json_create_array();
+      json_value_t *inputs = json_create_array();
       json_value_t *first_input =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *second_input =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *outputs = NULL;
 
       check_not_null(first);
@@ -274,13 +275,13 @@ spec("turbo runnable runtime") {
       check_int_eq(first_counter.count, 2);
       check_int_eq(second_counter.count, 2);
       check_int_eq((int)turbo_runtime_json_value_as_int64(
-                       turbo_json_object_get(
-                           turbo_json_array_get(outputs, 0), "count"),
+                       json_object_get(
+                           json_array_get(outputs, 0), "count"),
                        0),
                    1);
       check_int_eq((int)turbo_runtime_json_value_as_int64(
-                       turbo_json_object_get(
-                           turbo_json_array_get(outputs, 1), "count"),
+                       json_object_get(
+                           json_array_get(outputs, 1), "count"),
                        0),
                    2);
 
@@ -307,7 +308,7 @@ spec("turbo runnable runtime") {
           .user_data_free = NULL};
       turbo_runnable_t *inner = turbo_runnable_create(&inner_config);
       turbo_runnable_t *wrapped = turbo_runnable_wrap_json_value(inner, &wrap_config);
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       json_value_t *output = NULL;
 
       check_not_null(inner);
@@ -315,18 +316,18 @@ spec("turbo runnable runtime") {
       check_not_null(input);
       check_int_eq(turbo_runtime_json_object_set(
                        input, "value",
-                       turbo_json_create_string("original")),
+                       json_create_string("original")),
                    TURBO_RUNTIME_JSON_OK);
 
       check_int_eq(turbo_runnable_invoke_json_value(wrapped, input, &output), 0);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(output, "value")),
+                       json_object_get(output, "value")),
                    "wrapped");
       check_int_eq((int)turbo_runtime_json_value_as_int64(
-                       turbo_json_object_get(output, "count"), 0),
+                       json_object_get(output, "count"), 0),
                    1);
       check_true(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(output, "after"), 0));
+          json_object_get(output, "after"), 0));
       check_int_eq(inner_counter.count, 1);
       check_int_eq(wrap_counter.before_count, 1);
       check_int_eq(wrap_counter.after_count, 1);
@@ -353,7 +354,7 @@ spec("turbo runnable runtime") {
           .user_data_free = NULL};
       turbo_runnable_t *inner = turbo_runnable_create(&inner_config);
       turbo_runnable_t *wrapped = turbo_runnable_wrap_json_value(inner, &wrap_config);
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       json_value_t *output = NULL;
       turbo_event_log_t *log = turbo_event_log_create();
 
@@ -371,7 +372,7 @@ spec("turbo runnable runtime") {
       check_int_eq(wrap_counter.before_count, 1);
       check_int_eq(wrap_counter.after_count, 1);
       check_true(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(output, "after"), 0));
+          json_object_get(output, "after"), 0));
 
       turbo_event_log_destroy(log);
       turbo_runtime_json_destroy(output);
@@ -396,11 +397,11 @@ spec("turbo runnable runtime") {
           .user_data_free = NULL};
       turbo_runnable_t *inner = turbo_runnable_create(&inner_config);
       turbo_runnable_t *wrapped = turbo_runnable_wrap_json_value(inner, &wrap_config);
-      json_value_t *inputs = turbo_json_create_array();
+      json_value_t *inputs = json_create_array();
       json_value_t *first_input =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *second_input =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *outputs = NULL;
 
       check_not_null(inner);
@@ -419,12 +420,12 @@ spec("turbo runnable runtime") {
       check_int_eq(wrap_counter.before_count, 2);
       check_int_eq(wrap_counter.after_count, 2);
       check_true(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(
-              turbo_json_array_get(outputs, 0), "after"),
+          json_object_get(
+              json_array_get(outputs, 0), "after"),
           0));
       check_true(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(
-              turbo_json_array_get(outputs, 1), "after"),
+          json_object_get(
+              json_array_get(outputs, 1), "after"),
           0));
 
       turbo_runtime_json_destroy(outputs);
@@ -448,9 +449,9 @@ spec("turbo runnable runtime") {
       check_not_null(input);
 
       check_int_eq(turbo_runtime_json_object_set(
-                       (json_value_t *)turbo_json_object_get(input,
+                       (json_value_t *)json_object_get(input,
                                                                                              "input"),
-                       "task", turbo_json_create_string("ship")),
+                       "task", json_create_string("ship")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_chain_add_prompt_step(chain, "prompt", "user", "Do {{task}} now."),
                    TURBO_CHAIN_OK);
@@ -468,9 +469,9 @@ spec("turbo runnable runtime") {
 
       check_int_eq(turbo_runnable_invoke_json_value(pipeline, input, &result), 0);
       check_true(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(result, "graph_done"), 0));
+          json_object_get(result, "graph_done"), 0));
       check_size_eq(turbo_runtime_json_value_size(
-                        turbo_json_object_get(result, "messages")),
+                        json_object_get(result, "messages")),
                     1);
       check_str_eq(graph_result.last_node, "done");
 
@@ -492,7 +493,7 @@ spec("turbo runnable runtime") {
           .user_data = &counter,
           .user_data_free = NULL};
       turbo_runnable_t *runnable = turbo_runnable_create(&config);
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       json_value_t *output = NULL;
 
       check_not_null(runnable);
@@ -521,9 +522,9 @@ spec("turbo runnable runtime") {
       check_not_null(chain);
       check_not_null(input);
       check_int_eq(turbo_runtime_json_object_set(
-                       (json_value_t *)turbo_json_object_get(input,
+                       (json_value_t *)json_object_get(input,
                                                                                              "input"),
-                       "task", turbo_json_create_string("stream")),
+                       "task", json_create_string("stream")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_chain_add_prompt_step(chain, "prompt", "user", "Do {{task}} now."),
                    TURBO_CHAIN_OK);
@@ -549,7 +550,7 @@ spec("turbo runnable runtime") {
     it("should forward graph stream events through runnable adapters") {
       turbo_graph_t *graph = turbo_graph_create("runnable-stream-graph");
       turbo_runnable_t *runnable;
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       json_value_t *output = NULL;
       runnable_event_capture_t capture = {0};
 
@@ -582,12 +583,12 @@ spec("turbo runnable runtime") {
       turbo_state_graph_t *graph = turbo_state_graph_create("runnable-state-graph");
       turbo_runnable_t *runnable;
       json_value_t *default_value =
-          turbo_json_create_bool(0);
-      json_value_t *input = turbo_json_create_object();
+          json_create_bool(0);
+      json_value_t *input = json_create_object();
       json_value_t *output = NULL;
       turbo_state_graph_channel_config_t channel = {
           .reducer = TURBO_STATE_GRAPH_REDUCER_REPLACE,
-          .value_kind = TURBO_JSON_BOOL,
+          .value_kind = JSON_BOOL,
           .default_value = default_value,
           .description = NULL};
       turbo_state_graph_run_result_t result = {0};
@@ -611,7 +612,7 @@ spec("turbo runnable runtime") {
       check_int_eq(turbo_runnable_invoke_json_value_log(runnable, input, log, &output), 0);
       check_not_null(output);
       check_true(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(output, "state_done"), 0));
+          json_object_get(output, "state_done"), 0));
       check_str_eq(result.thread_id, "thread-runnable");
       check_str_eq(result.last_node, "done");
       check_size_eq(turbo_event_log_size(log), 2);
@@ -619,10 +620,10 @@ spec("turbo runnable runtime") {
       last_event = turbo_event_log_get(log, turbo_event_log_size(log) - 1);
       check_not_null(last_event);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(last_event, "name")),
+                       json_object_get(last_event, "name")),
                    "runnable.state_graph");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(last_event, "detail")),
+                       json_object_get(last_event, "detail")),
                    "finish");
 
       turbo_event_log_destroy(log);
@@ -635,7 +636,7 @@ spec("turbo runnable runtime") {
     it("should capture runnable adapter streams into an event log") {
       turbo_graph_t *graph = turbo_graph_create("runnable-event-log-graph");
       turbo_runnable_t *runnable;
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       json_value_t *output = NULL;
       turbo_event_log_t *log = turbo_event_log_create();
       const json_value_t *last_event;
@@ -657,14 +658,14 @@ spec("turbo runnable runtime") {
           0);
       check_not_null(output);
       check_true(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(output, "graph_done"), 0));
+          json_object_get(output, "graph_done"), 0));
       check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
       check_true(turbo_event_log_size(log) > 2);
 
       for (i = 0; i < turbo_event_log_size(log); ++i) {
         const json_value_t *event = turbo_event_log_get(log, i);
         const char *name = turbo_runtime_json_value_as_string(
-            turbo_json_object_get(event, "name"));
+            json_object_get(event, "name"));
 
         if (name && strcmp(name, "graph.node") == 0) {
           saw_graph_node = 1;
@@ -676,10 +677,10 @@ spec("turbo runnable runtime") {
       last_event = turbo_event_log_get(log, turbo_event_log_size(log) - 1);
       check_not_null(last_event);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(last_event, "name")),
+                       json_object_get(last_event, "name")),
                    "runnable.graph");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(last_event, "detail")),
+                       json_object_get(last_event, "detail")),
                    "finish");
 
       turbo_event_log_destroy(log);
@@ -697,7 +698,7 @@ spec("turbo runnable runtime") {
           .user_data = &counter,
           .user_data_free = NULL};
       turbo_runnable_t *runnable = turbo_runnable_create(&config);
-      json_value_t *input = turbo_json_create_object();
+      json_value_t *input = json_create_object();
       json_value_t *output = NULL;
       turbo_event_log_t *log = turbo_event_log_create();
 
@@ -709,10 +710,10 @@ spec("turbo runnable runtime") {
       check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
       check_size_eq(turbo_event_log_size(log), 2);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(turbo_event_log_get(log, 0), "name")),
+                       json_object_get(turbo_event_log_get(log, 0), "name")),
                    "runnable.invoke");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(turbo_event_log_get(log, 1), "detail")),
+                       json_object_get(turbo_event_log_get(log, 1), "detail")),
                    "finish");
 
       turbo_event_log_destroy(log);

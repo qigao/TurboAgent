@@ -62,7 +62,8 @@ static json_value_t *turbo_agent_test_load_fixture_json(const char *fixture_name
   read_count = fread(buffer, 1, (size_t)length, stream);
   check_size_eq(read_count, (size_t)length);
   buffer[length] = '\0';
-  check_int_eq(turbo_parse_json((const uint8_t *)buffer, (size_t)length, &json), 0);
+  json = json_parse(buffer, (size_t)length);
+    check_not_null(json);
   fclose(stream);
   free(buffer);
   return json;

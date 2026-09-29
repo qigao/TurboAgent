@@ -48,16 +48,16 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       turbo_agent_state_set_model_error(ctx->state, "build_request",
                                         "failed to build model request");
       if (attempt_state != ctx->state) {
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       return -1;
     }
 
     if (turbo_agent_invoke_before_model_middlewares(agent, attempt_state, &request_json) != 0) {
       turbo_agent_state_set_model_error(ctx->state, "middleware", "before_model middleware failed");
-      turbo_json_serialize_free(request_json);
+      json_serialize_free(request_json);
       if (attempt_state != ctx->state) {
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       return -1;
     }
@@ -73,9 +73,9 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
           ctx->state, "guardrail",
           guardrail_reason ? guardrail_reason : "before_model guardrail rejected request");
       tstr_free(guardrail_reason);
-      turbo_json_serialize_free(request_json);
+      json_serialize_free(request_json);
       if (attempt_state != ctx->state) {
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       return -1;
     }
@@ -87,10 +87,10 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     if (turbo_agent_invoke_after_model_middlewares(agent, attempt_state, request_json,
                                                    &response_json, rc) != 0) {
       turbo_agent_state_set_model_error(ctx->state, "middleware", "after_model middleware failed");
-      turbo_json_serialize_free(request_json);
+      json_serialize_free(request_json);
       free(response_json);
       if (attempt_state != ctx->state) {
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       return -1;
     }
@@ -101,7 +101,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
                                                 agent->context_overflow_user_data);
       if (overflow_rc == 1) {
         overflow_retried = 1;
-        turbo_json_serialize_free(request_json);
+        json_serialize_free(request_json);
         request_json = NULL;
         free(response_json);
         response_json = NULL;
@@ -110,15 +110,15 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       if (overflow_rc < 0) {
         turbo_agent_state_set_model_error(ctx->state, "context_compaction",
                                           "context overflow recovery failed");
-        turbo_json_serialize_free(request_json);
+        json_serialize_free(request_json);
         free(response_json);
         if (attempt_state != ctx->state) {
-          turbo_free_json(&attempt_state);
+          json_free(attempt_state); attempt_state = NULL;
         }
         return -1;
       }
     }
-    turbo_json_serialize_free(request_json);
+    json_serialize_free(request_json);
     request_json = NULL;
     if (rc != 0 || !response_json) {
       detail = response_json && response_json[0] != '\0'
@@ -129,7 +129,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       tstr_free(detail);
       free(response_json);
       if (attempt_state != ctx->state) {
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       return -1;
     }
@@ -141,7 +141,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       tstr_free(detail);
       free(response_json);
       if (attempt_state != ctx->state) {
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       return -1;
     }
@@ -172,7 +172,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     }
     free(response_json);
     response_json = NULL;
-    turbo_free_json(&response);
+    json_free(response); response = NULL;
     response = NULL;
     if (rc != 0) {
       if (guardrail_reason) {
@@ -186,7 +186,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
                                           "failed to append model event to state");
       }
       if (attempt_state != ctx->state) {
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       return -1;
     }
@@ -204,14 +204,14 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
 
         if (!event || turbo_agent_clone_json(event, &event_clone) != TURBO_GRAPH_EXEC_OK ||
             turbo_agent_append_event(ctx->state, event_clone) != 0) {
-          turbo_free_json(&event_clone);
-          turbo_free_json(&attempt_state);
+          json_free(event_clone); event_clone = NULL;
+          json_free(attempt_state); attempt_state = NULL;
           tstr_free(structured_reason);
           turbo_agent_state_set_model_error(ctx->state, "append_model_event",
                                             "failed to append validated retry event");
           return -1;
         }
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       tstr_free(structured_reason);
       turbo_agent_state_set_model_error(ctx->state, "", "");
@@ -222,7 +222,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     if (!agent->structured_output_schema_json || agent->structured_output_max_retries == 0 ||
         attempt >= agent->structured_output_max_retries) {
       if (attempt_state != ctx->state) {
-        turbo_free_json(&attempt_state);
+        json_free(attempt_state); attempt_state = NULL;
       }
       turbo_agent_state_set_model_error(
           ctx->state, "structured_output",
@@ -239,7 +239,7 @@ int turbo_agent_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
                            structured_reason ? structured_reason : "schema_validation_failed", NULL,
                            (int)(attempt + 1));
     if (attempt_state != ctx->state) {
-      turbo_free_json(&attempt_state);
+      json_free(attempt_state); attempt_state = NULL;
     }
     attempt_state =
         turbo_agent_build_structured_retry_state(ctx->state, attempt, structured_reason);

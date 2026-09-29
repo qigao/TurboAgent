@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_EXECUTION_H
 #define TURBO_AGENT_EXECUTION_H
 
+#include <stdint.h>
+
 #include <turbo_agent_api.h>
 #include <salts/thread.h>
 #include <salts/thread_pool.h>

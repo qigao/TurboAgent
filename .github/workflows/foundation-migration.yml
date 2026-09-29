@@ -18,9 +18,6 @@ jobs:
     timeout-minutes: 60
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      SALTS_SDK_VERSION: "1.8.3"
-      SALTS_UTILS_SDK_VERSION: "4.1.3"
-      CHTTP_SDK_VERSION: "1.1.4"
       CMAKE_BUILD_PARALLEL_LEVEL: 2
 
     steps:
@@ -101,18 +98,21 @@ jobs:
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
             <ItemGroup>
-              <PackageReference Include="Salts.Native" Version="[$SALTS_SDK_VERSION]" />
-              <PackageReference Include="SaltsUtils.Native" Version="[$SALTS_UTILS_SDK_VERSION]" />
-              <PackageReference Include="CHttp.Native" Version="[$CHTTP_SDK_VERSION]" />
+              <PackageReference Include="Salts.Native" Version="*" />
+              <PackageReference Include="SaltsUtils.Native" Version="*" />
+              <PackageReference Include="CHttp.Native" Version="*" />
             </ItemGroup>
           </Project>
           EOF
 
           dotnet restore "$project" --packages "$packages" --configfile "$config" --no-cache
 
-          salts_root="$packages/salts.native/$SALTS_SDK_VERSION/sdk/linux-x64"
-          utils_root="$packages/saltsutils.native/$SALTS_UTILS_SDK_VERSION/sdk/linux-x64"
-          chttp_root="$packages/chttp.native/$CHTTP_SDK_VERSION/sdk/linux-x64"
+          salts_root="$(find "$packages/salts.native" -type d -path '*/sdk/linux-x64' -print -quit)"
+          utils_root="$(find "$packages/saltsutils.native" -type d -path '*/sdk/linux-x64' -print -quit)"
+          chttp_root="$(find "$packages/chttp.native" -type d -path '*/sdk/linux-x64' -print -quit)"
+          test -n "$salts_root"
+          test -n "$utils_root"
+          test -n "$chttp_root"
 
           test -f "$salts_root/lib/cmake/Salts/SaltsConfig.cmake"
           test -f "$utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
@@ -177,9 +177,13 @@ jobs:
           config=/opt/turboagent/debug/lib/cmake/TurboAgent/TurboAgentConfig.cmake
           test -f "$config"
           test -f /opt/turboagent/debug/lib/cmake/TurboAgent/TurboAgentTargets.cmake
-          grep -F 'find_dependency(Salts 1.8.3 EXACT CONFIG)' "$config"
-          grep -F 'find_dependency(SaltsUtils 4.1.3 EXACT CONFIG)' "$config"
-          grep -F 'find_dependency(Chttp 1.1.4 EXACT CONFIG)' "$config"
+          grep -F 'find_dependency(Salts CONFIG)' "$config"
+          grep -F 'find_dependency(SaltsUtils CONFIG)' "$config"
+          grep -F 'find_dependency(Chttp CONFIG)' "$config"
+          if grep -Eq 'find_dependency\((Salts|SaltsUtils|Chttp) [0-9]' "$config"; then
+            echo "foundation dependency version pin escaped into installed config" >&2
+            exit 1
+          fi
           if grep -Eq 'Turbo(Net|Http|Utils|Parser)' "$config"; then
             echo "retired package escaped into installed config" >&2
             exit 1

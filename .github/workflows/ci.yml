@@ -1,0 +1,353 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: turboagent-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+jobs:
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Prepare toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm
+          test -n "${VCPKG_ROOT:-}"
+          test -f "${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+
+      - name: Restore current foundation SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sdk_root="$RUNNER_TEMP/turboagent-native-sdks"
+          mkdir -p "$sdk_root"
+
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local rid="$4"
+            local config_rel="$5"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+              --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/$rid"
+            test -f "$root/$config_rel"
+            printf '%s\n' "$root"
+          }
+
+          salts_root="$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts linux-x64 'lib/cmake/Salts/SaltsConfig.cmake')"
+          utils_root="$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils linux-x64 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
+          chttp_root="$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp linux-x64 'lib/cmake/Chttp/ChttpConfig.cmake')"
+
+          {
+            echo "SALTS_ROOT=$salts_root"
+            echo "SALTS_UTILS_ROOT=$utils_root"
+            echo "CHTTP_ROOT=$chttp_root"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -euxo pipefail
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          cmake -S . -B build/linux -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/linux" \
+            -DCMAKE_PREFIX_PATH="$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            -DSALTS_ROOT="$SALTS_ROOT" \
+            -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT" \
+            -DCHTTP_ROOT="$CHTTP_ROOT" \
+            -DENABLE_LLM_SANDBOX=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BENCHMARKS=OFF \
+            -DENABLE_ASAN=OFF
+
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/linux --parallel 2
+          vcpkg_libs="$(find "$GITHUB_WORKSPACE/vcpkg_installed/linux" -type d \
+            \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
+          export LD_LIBRARY_PATH="$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/linux --no-tests=error --output-on-failure
+
+      - name: Install and verify consumer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          prefix="$GITHUB_WORKSPACE/stage/linux-x64"
+          cmake --install build/linux --prefix "$prefix"
+
+          consumer="$RUNNER_TEMP/turboagent-consumer"
+          mkdir -p "$consumer"
+          cat > "$consumer/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(turboagent_consumer LANGUAGES C)
+          find_package(TurboAgent CONFIG REQUIRED)
+          add_executable(turboagent_consumer main.c)
+          target_link_libraries(turboagent_consumer PRIVATE
+            TurboAgent::RuntimeCore
+            TurboAgent::RuntimeData
+            TurboAgent::RuntimeTools
+            TurboAgent::McpTools
+            TurboAgent::LangChain)
+          EOF
+          cat > "$consumer/main.c" <<'EOF'
+          #include <turbo_mcp_tool_pack.h>
+          int main(void) {
+            turbo_mcp_tool_pack_config_t config;
+            turbo_mcp_tool_pack_config_init(&config);
+            return config.abi_version == TURBO_MCP_TOOL_PACK_ABI_VERSION ? 0 : 1;
+          }
+          EOF
+
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/linux" \
+            -DCMAKE_PREFIX_PATH="$prefix;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
+          cmake --build "$consumer/build" --parallel 2
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Locate MSVC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstall = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) { throw "Visual Studio x64 C++ toolchain not found" }
+          "VSINSTALL=$vsInstall" >> $env:GITHUB_ENV
+
+      - name: Restore current foundation SDKs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sdkRoot = Join-Path $env:RUNNER_TEMP "turboagent-native-sdks"
+          New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null
+
+          function Restore-Sdk(
+            [string]$repo,
+            [string]$pattern,
+            [string]$name,
+            [string]$configRelative
+          ) {
+            $tag = (& gh release view --repo $repo --json tagName --jq .tagName).Trim()
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tag)) {
+              throw "failed to resolve latest release for $repo"
+            }
+
+            $dir = Join-Path $sdkRoot $name
+            $download = Join-Path $dir "download"
+            $package = Join-Path $dir "package"
+            New-Item -ItemType Directory -Force -Path $download, $package | Out-Null
+
+            gh release download $tag --repo $repo --pattern $pattern --dir $download --clobber
+            if ($LASTEXITCODE -ne 0) { throw "failed to download $pattern from $repo@$tag" }
+
+            $nupkg = Get-ChildItem -Path $download -File -Filter *.nupkg | Select-Object -First 1
+            if (-not $nupkg) { throw "missing downloaded Native package for $repo@$tag" }
+
+            $zip = "$($nupkg.FullName).zip"
+            Copy-Item -LiteralPath $nupkg.FullName -Destination $zip -Force
+            Expand-Archive -LiteralPath $zip -DestinationPath $package -Force
+
+            $root = Join-Path $package "sdk\windows-x64"
+            $config = Join-Path $root $configRelative
+            if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
+              throw "missing restored SDK config: $config"
+            }
+            return $root
+          }
+
+          $saltsRoot = Restore-Sdk "qigao/salts" "Salts.Native.*.nupkg" "salts" "lib\cmake\Salts\SaltsConfig.cmake"
+          $utilsRoot = Restore-Sdk "qigao/salts-utils" "SaltsUtils.Native.*.nupkg" "salts-utils" "lib\cmake\SaltsUtils\SaltsUtilsConfig.cmake"
+          $chttpRoot = Restore-Sdk "qigao/chttp" "CHttp.Native.*.nupkg" "chttp" "lib\cmake\Chttp\ChttpConfig.cmake"
+
+          "SALTS_ROOT=$saltsRoot" >> $env:GITHUB_ENV
+          "SALTS_UTILS_ROOT=$utilsRoot" >> $env:GITHUB_ENV
+          "CHTTP_ROOT=$chttpRoot" >> $env:GITHUB_ENV
+
+      - name: Configure, build, test and install
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "TOOLCHAIN=%QIGAO_VCPKG_TOOLCHAIN_FILE%"
+          if not defined TOOLCHAIN set "TOOLCHAIN=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+          cmake -S . -B build\windows -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^
+            -DVCPKG_TARGET_TRIPLET=x64-windows ^
+            -DVCPKG_MANIFEST_MODE=ON ^
+            -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed\windows" ^
+            -DCMAKE_PREFIX_PATH="%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
+            -DSALTS_ROOT="%SALTS_ROOT%" ^
+            -DSALTS_UTILS_ROOT="%SALTS_UTILS_ROOT%" ^
+            -DCHTTP_ROOT="%CHTTP_ROOT%" ^
+            -DENABLE_LLM_SANDBOX=OFF ^
+            -DBUILD_EXAMPLES=OFF ^
+            -DBUILD_BENCHMARKS=OFF ^
+            -DENABLE_ASAN=OFF
+          if errorlevel 1 exit /b 1
+
+          cmake --build build\windows --parallel 2
+          if errorlevel 1 exit /b 1
+
+          set "PATH=%GITHUB_WORKSPACE%\build\windows\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%GITHUB_WORKSPACE%\vcpkg_installed\windows\x64-windows\bin;%PATH%"
+          ctest --test-dir build\windows --output-on-failure
+          if errorlevel 1 exit /b 1
+
+          cmake --install build\windows --prefix "%GITHUB_WORKSPACE%\stage\windows-x64"
+          if errorlevel 1 exit /b 1
+
+  android:
+    name: Android arm64-v8a
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Prepare Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm
+          test -n "${VCPKG_ROOT:-}"
+          test -n "${ANDROID_NDK_HOME:-}"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+
+      - name: Restore current target SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sdk_root="$RUNNER_TEMP/turboagent-native-sdks"
+          mkdir -p "$sdk_root"
+
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local config_rel="$4"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+              --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/android-arm64-v8a"
+            test -f "$root/$config_rel"
+            printf '%s\n' "$root"
+          }
+
+          {
+            echo "SALTS_ROOT=$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake')"
+            echo "SALTS_UTILS_ROOT=$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
+            echo "CHTTP_ROOT=$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake')"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure, build and install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          prefix="$GITHUB_WORKSPACE/stage/android-arm64-v8a"
+          cmake -S . -B build/android -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-android \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/android" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_PREFIX_PATH="$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            -DSALTS_ROOT="$SALTS_ROOT" \
+            -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT" \
+            -DCHTTP_ROOT="$CHTTP_ROOT" \
+            -DENABLE_LLM_SANDBOX=OFF \
+            -DENABLE_CODEX_BRIDGE=OFF \
+            -DENABLE_TESTS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BENCHMARKS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$prefix"
+          cmake --build build/android --parallel 2
+          cmake --install build/android
+          test -f "$prefix/lib/cmake/TurboAgent/TurboAgentConfig.cmake"

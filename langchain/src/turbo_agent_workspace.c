@@ -91,8 +91,8 @@ static void turbo_agent_workspace_set_error(turbo_agent_workspace_t *workspace,
   snprintf(workspace->last_error, sizeof(workspace->last_error), "%s: %s", operation, detail);
 }
 
-static int turbo_agent_workspace_vec_init(vec_t *vec, size_t elem_size) {
-  return vec_init_bytes(vec, elem_size, _Alignof(max_align_t), SIZE_MAX) == STL_OK ? 0 : -1;
+static int turbo_agent_workspace_vec_init(vec_t *vec, size_t elem_size, size_t elem_align) {
+  return vec_init_bytes(vec, elem_size, elem_align, SIZE_MAX) == STL_OK ? 0 : -1;
 }
 
 static void turbo_agent_workspace_string_vec_destroy(vec_t *vec) {
@@ -562,9 +562,9 @@ turbo_agent_workspace_parse_skill(turbo_agent_workspace_t *workspace, const char
   int frontmatter;
   turbo_agent_workspace_status_t status;
   memset(out_skill, 0, sizeof(*out_skill));
-  if (turbo_agent_workspace_vec_init(&out_skill->triggers, sizeof(char *)) != 0 ||
-      turbo_agent_workspace_vec_init(&out_skill->tools, sizeof(char *)) != 0 ||
-      turbo_agent_workspace_vec_init(&out_skill->capabilities, sizeof(char *)) != 0) {
+  if (turbo_agent_workspace_vec_init(&out_skill->triggers, sizeof(char *), _Alignof(char *)) != 0 ||
+      turbo_agent_workspace_vec_init(&out_skill->tools, sizeof(char *), _Alignof(char *)) != 0 ||
+      turbo_agent_workspace_vec_init(&out_skill->capabilities, sizeof(char *), _Alignof(char *)) != 0) {
     turbo_agent_skill_destroy(out_skill);
     return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
   }
@@ -656,10 +656,10 @@ turbo_agent_workspace_load_skills(turbo_agent_workspace_t *workspace, vec_t *out
   size_t index;
   memset(&paths, 0, sizeof(paths));
   memset(out_skills, 0, sizeof(*out_skills));
-  if (turbo_agent_workspace_vec_init(&paths, sizeof(char *)) != 0) {
+  if (turbo_agent_workspace_vec_init(&paths, sizeof(char *), _Alignof(char *)) != 0) {
     return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
   }
-  if (turbo_agent_workspace_vec_init(out_skills, sizeof(turbo_agent_skill_t)) != 0) {
+  if (turbo_agent_workspace_vec_init(out_skills, sizeof(turbo_agent_skill_t), _Alignof(turbo_agent_skill_t)) != 0) {
     turbo_agent_workspace_string_vec_destroy(&paths);
     return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
   }
@@ -981,10 +981,11 @@ turbo_agent_workspace_create(const turbo_agent_workspace_config_t *config,
       strcmp(config->skills_directory, TURBO_AGENT_WORKSPACE_DEFAULT_SKILLS_DIR) != 0;
   if (!workspace->workspace_root || !workspace->working_directory || !workspace->skills_directory ||
       !workspace->agents_filename ||
-      turbo_agent_workspace_vec_init(&workspace->always_tools, sizeof(char *)) != 0 ||
+      turbo_agent_workspace_vec_init(&workspace->always_tools, sizeof(char *), _Alignof(char *)) != 0 ||
       turbo_agent_workspace_vec_init(&workspace->tool_capabilities,
-                                     sizeof(turbo_agent_workspace_tool_capability_entry_t)) != 0 ||
-      turbo_agent_workspace_vec_init(&workspace->skills, sizeof(turbo_agent_skill_t)) != 0) {
+                                     sizeof(turbo_agent_workspace_tool_capability_entry_t),
+                                     _Alignof(turbo_agent_workspace_tool_capability_entry_t)) != 0 ||
+      turbo_agent_workspace_vec_init(&workspace->skills, sizeof(turbo_agent_skill_t), _Alignof(turbo_agent_skill_t)) != 0) {
     turbo_agent_workspace_destroy(workspace);
     return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
   }
@@ -1100,9 +1101,9 @@ turbo_agent_workspace_prepare(turbo_agent_workspace_t *workspace, const char *ta
   selection = (turbo_agent_workspace_selection_t *)calloc(1, sizeof(*selection));
   if (!selection) return TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
   memset(&selected, 0, sizeof(selected));
-  if (turbo_agent_workspace_vec_init(&selected, sizeof(turbo_agent_skill_t *)) != 0 ||
-      turbo_agent_workspace_vec_init(&selection->skill_names, sizeof(char *)) != 0 ||
-      turbo_agent_workspace_vec_init(&selection->tool_names, sizeof(char *)) != 0) {
+  if (turbo_agent_workspace_vec_init(&selected, sizeof(turbo_agent_skill_t *), _Alignof(turbo_agent_skill_t *)) != 0 ||
+      turbo_agent_workspace_vec_init(&selection->skill_names, sizeof(char *), _Alignof(char *)) != 0 ||
+      turbo_agent_workspace_vec_init(&selection->tool_names, sizeof(char *), _Alignof(char *)) != 0) {
     status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
     goto cleanup;
   }

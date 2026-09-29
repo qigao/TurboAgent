@@ -373,7 +373,7 @@ static int turbo_mcp_tool_invoke(const json_value_t *arguments,
   json_value_t *params = NULL;
   json_value_t *arguments_copy = NULL;
   json_value_t *name_value = NULL;
-  vec_t headers;
+  vec_t headers = {0};
   size_t index;
   turbo_tool_status_t status;
 
@@ -441,7 +441,7 @@ static turbo_tool_status_t turbo_mcp_register_remote_tool(
   json_value_t *schema;
   turbo_mcp_tool_binding_t *binding = NULL;
   turbo_tool_definition_v3_t definition;
-  vec_t path;
+  vec_t path = {0};
   tstr local_name = NULL;
   int schema_status;
   turbo_tool_status_t status;

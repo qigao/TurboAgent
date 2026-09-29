@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent.h"
 #include "../src/turbo_agent_runtime_internal.h"
 #include "turbo_model_provider.h"
@@ -44,7 +45,7 @@ spec("turbo agent request internals") {
     check_true(strstr(request_json, "\"parallel_tool_calls\":true") != NULL);
 
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -68,16 +69,16 @@ spec("turbo agent request internals") {
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
 
     request = parse_request_json_or_fail(request_json);
-    check_not_null(turbo_json_object_get(request, "input"));
-    check_ptr_eq(turbo_json_object_get(request, "messages"), NULL);
-    check_str_eq(turbo_json_get_string(request, "instructions"), "Be terse.");
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(turbo_json_object_get(request, "input"), 0),
+    check_not_null(json_object_get(request, "input"));
+    check_ptr_eq(json_object_get(request, "messages"), NULL);
+    check_str_eq(json_get_string(request, "instructions"), "Be terse.");
+    check_str_eq(json_get_string(json_array_get(json_object_get(request, "input"), 0),
                                        "role"),
                  "user");
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -103,17 +104,17 @@ spec("turbo agent request internals") {
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
 
     request = parse_request_json_or_fail(request_json);
-    messages = turbo_json_object_get(request, "messages");
+    messages = json_object_get(request, "messages");
     check_not_null(messages);
-    check_ptr_eq(turbo_json_object_get(request, "input"), NULL);
-    check_true(turbo_json_get_bool(request, "parallel_tool_calls", false));
-    check_size_eq(turbo_json_array_size(messages), 2);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(messages, 0), "role"), "system");
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(messages, 1), "role"), "user");
+    check_ptr_eq(json_object_get(request, "input"), NULL);
+    check_true(json_get_bool(request, "parallel_tool_calls", false));
+    check_size_eq(json_array_size(messages), 2);
+    check_str_eq(json_get_string(json_array_get(messages, 0), "role"), "system");
+    check_str_eq(json_get_string(json_array_get(messages, 1), "role"), "user");
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -138,16 +139,16 @@ spec("turbo agent request internals") {
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
 
     request = parse_request_json_or_fail(request_json);
-    messages = turbo_json_object_get(request, "messages");
+    messages = json_object_get(request, "messages");
     check_not_null(messages);
-    check_ptr_eq(turbo_json_object_get(request, "input"), NULL);
-    check_str_eq(turbo_json_get_string(request, "system"), "Be terse.");
-    check_size_eq(turbo_json_array_size(messages), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(messages, 0), "role"), "user");
+    check_ptr_eq(json_object_get(request, "input"), NULL);
+    check_str_eq(json_get_string(request, "system"), "Be terse.");
+    check_size_eq(json_array_size(messages), 1);
+    check_str_eq(json_get_string(json_array_get(messages, 0), "role"), "user");
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -176,17 +177,17 @@ spec("turbo agent request internals") {
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
 
     request = parse_request_json_or_fail(request_json);
-    response_format = turbo_json_object_get(request, "response_format");
+    response_format = json_object_get(request, "response_format");
     check_not_null(response_format);
-    check_str_eq(turbo_json_get_string(response_format, "type"), "json_schema");
-    json_schema = turbo_json_object_get(response_format, "json_schema");
+    check_str_eq(json_get_string(response_format, "type"), "json_schema");
+    json_schema = json_object_get(response_format, "json_schema");
     check_not_null(json_schema);
-    check_str_eq(turbo_json_get_string(json_schema, "name"), "answer");
-    check_true(turbo_json_get_bool(json_schema, "strict", false));
+    check_str_eq(json_get_string(json_schema, "name"), "answer");
+    check_true(json_get_bool(json_schema, "strict", false));
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -215,17 +216,17 @@ spec("turbo agent request internals") {
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
 
     request = parse_request_json_or_fail(request_json);
-    text = turbo_json_object_get(request, "text");
+    text = json_object_get(request, "text");
     check_not_null(text);
-    format = turbo_json_object_get(text, "format");
+    format = json_object_get(text, "format");
     check_not_null(format);
-    check_str_eq(turbo_json_get_string(format, "type"), "json_schema");
-    check_str_eq(turbo_json_get_string(format, "name"), "answer");
-    check_true(turbo_json_get_bool(format, "strict", false));
+    check_str_eq(json_get_string(format, "type"), "json_schema");
+    check_str_eq(json_get_string(format, "name"), "answer");
+    check_true(json_get_bool(format, "strict", false));
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -257,7 +258,7 @@ spec("turbo agent request internals") {
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
 
     request = parse_request_json_or_fail(request_json);
-    system_text = turbo_json_get_string(request, "system");
+    system_text = json_get_string(request, "system");
     check_not_null(system_text);
     check_true(strncmp(system_text, "Be terse.", strlen("Be terse.")) == 0);
     memory_pos = strstr(system_text, memory_marker);
@@ -266,9 +267,9 @@ spec("turbo agent request internals") {
     second_instructions = strstr(system_text + strlen("Be terse."), "Be terse.");
     check_null(second_instructions);
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -292,7 +293,7 @@ spec("turbo agent request internals") {
     check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_ptr_eq(request_json, NULL);
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -316,7 +317,7 @@ spec("turbo agent request internals") {
     check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_ptr_eq(request_json, NULL);
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -343,42 +344,42 @@ spec("turbo agent request internals") {
     check_not_null(state);
     check_int_eq(turbo_agent_state_add_user_message(state, "Ping"), 0);
 
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    model_event = turbo_json_create_object();
+    model_event = json_create_object();
     check_not_null(model_event);
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "response_id", "resp_123");
-    turbo_json_array_add(events, model_event);
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "response_id", "resp_123");
+    json_array_add(events, model_event);
 
-    tool_results_event = turbo_json_create_object();
-    outputs = turbo_json_create_array();
-    output_item = turbo_json_create_object();
+    tool_results_event = json_create_object();
+    outputs = json_create_array();
+    output_item = json_create_object();
     check_not_null(tool_results_event);
     check_not_null(outputs);
     check_not_null(output_item);
-    turbo_json_object_set_string(tool_results_event, "kind", "tool_results");
-    turbo_json_object_set_string(output_item, "type", "function_call_output");
-    turbo_json_object_set_string(output_item, "call_id", "call_1");
-    turbo_json_object_set_string(output_item, "output", "{\"ok\":true,\"stdout\":\"done\"}");
-    turbo_json_array_add(outputs, output_item);
-    turbo_json_object_add(tool_results_event, "outputs", outputs);
-    turbo_json_array_add(events, tool_results_event);
+    json_object_set_string(tool_results_event, "kind", "tool_results");
+    json_object_set_string(output_item, "type", "function_call_output");
+    json_object_set_string(output_item, "call_id", "call_1");
+    json_object_set_string(output_item, "output", "{\"ok\":true,\"stdout\":\"done\"}");
+    json_array_add(outputs, output_item);
+    json_object_add(tool_results_event, "outputs", outputs);
+    json_array_add(events, tool_results_event);
 
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     request = parse_request_json_or_fail(request_json);
-    check_str_eq(turbo_json_get_string(request, "previous_response_id"), "resp_123");
-    input = turbo_json_object_get(request, "input");
+    check_str_eq(json_get_string(request, "previous_response_id"), "resp_123");
+    input = json_object_get(request, "input");
     check_not_null(input);
-    check_size_eq(turbo_json_array_size(input), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(input, 0), "type"),
+    check_size_eq(json_array_size(input), 1);
+    check_str_eq(json_get_string(json_array_get(input, 0), "type"),
                  "function_call_output");
-    check_ptr_eq(turbo_json_object_get(request, "messages"), NULL);
+    check_ptr_eq(json_object_get(request, "messages"), NULL);
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -403,32 +404,32 @@ spec("turbo agent request internals") {
     check_not_null(state);
     check_int_eq(turbo_agent_state_add_user_message(state, "Ping"), 0);
 
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    model_event = turbo_json_create_object();
+    model_event = json_create_object();
     check_not_null(model_event);
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "response_id", "resp_123");
-    turbo_json_array_add(events, model_event);
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "response_id", "resp_123");
+    json_array_add(events, model_event);
 
-    tool_results_event = turbo_json_create_object();
+    tool_results_event = json_create_object();
     check_not_null(tool_results_event);
-    turbo_json_object_set_string(tool_results_event, "kind", "tool_results");
-    turbo_json_object_set_string(tool_results_event, "outputs", "bad");
-    turbo_json_array_add(events, tool_results_event);
+    json_object_set_string(tool_results_event, "kind", "tool_results");
+    json_object_set_string(tool_results_event, "outputs", "bad");
+    json_array_add(events, tool_results_event);
 
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     request = parse_request_json_or_fail(request_json);
-    check_ptr_eq(turbo_json_object_get(request, "previous_response_id"), NULL);
-    input = turbo_json_object_get(request, "input");
+    check_ptr_eq(json_object_get(request, "previous_response_id"), NULL);
+    input = json_object_get(request, "input");
     check_not_null(input);
-    check_size_eq(turbo_json_array_size(input), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(input, 0), "role"), "user");
+    check_size_eq(json_array_size(input), 1);
+    check_str_eq(json_get_string(json_array_get(input, 0), "role"), "user");
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -454,34 +455,34 @@ spec("turbo agent request internals") {
     check_not_null(state);
     check_int_eq(turbo_agent_state_add_user_message(state, "Ping"), 0);
 
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    tool_results_event = turbo_json_create_object();
-    outputs = turbo_json_create_array();
-    output_item = turbo_json_create_object();
+    tool_results_event = json_create_object();
+    outputs = json_create_array();
+    output_item = json_create_object();
     check_not_null(tool_results_event);
     check_not_null(outputs);
     check_not_null(output_item);
-    turbo_json_object_set_string(tool_results_event, "kind", "tool_results");
-    turbo_json_object_set_string(output_item, "type", "function_call_output");
-    turbo_json_object_set_string(output_item, "call_id", "call_1");
-    turbo_json_object_set_string(output_item, "output", "{\"ok\":true,\"stdout\":\"done\"}");
-    turbo_json_array_add(outputs, output_item);
-    turbo_json_object_add(tool_results_event, "outputs", outputs);
-    turbo_json_array_add(events, tool_results_event);
+    json_object_set_string(tool_results_event, "kind", "tool_results");
+    json_object_set_string(output_item, "type", "function_call_output");
+    json_object_set_string(output_item, "call_id", "call_1");
+    json_object_set_string(output_item, "output", "{\"ok\":true,\"stdout\":\"done\"}");
+    json_array_add(outputs, output_item);
+    json_object_add(tool_results_event, "outputs", outputs);
+    json_array_add(events, tool_results_event);
 
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     request = parse_request_json_or_fail(request_json);
-    check_ptr_eq(turbo_json_object_get(request, "previous_response_id"), NULL);
-    input = turbo_json_object_get(request, "input");
+    check_ptr_eq(json_object_get(request, "previous_response_id"), NULL);
+    input = json_object_get(request, "input");
     check_not_null(input);
-    check_size_eq(turbo_json_array_size(input), 1);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(input, 0), "role"), "user");
+    check_size_eq(json_array_size(input), 1);
+    check_str_eq(json_get_string(json_array_get(input, 0), "role"), "user");
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -505,25 +506,25 @@ spec("turbo agent request internals") {
     check_not_null(state);
     check_int_eq(turbo_agent_state_add_user_message(state, "Ping"), 0);
 
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    tool_results_event = turbo_json_create_object();
-    outputs = turbo_json_create_array();
-    output_item = turbo_json_create_object();
+    tool_results_event = json_create_object();
+    outputs = json_create_array();
+    output_item = json_create_object();
     check_not_null(tool_results_event);
     check_not_null(outputs);
     check_not_null(output_item);
-    turbo_json_object_set_string(tool_results_event, "kind", "tool_results");
-    turbo_json_object_set_string(output_item, "call_id", "call_1");
-    turbo_json_array_add(outputs, output_item);
-    turbo_json_object_add(tool_results_event, "outputs", outputs);
-    turbo_json_array_add(events, tool_results_event);
+    json_object_set_string(tool_results_event, "kind", "tool_results");
+    json_object_set_string(output_item, "call_id", "call_1");
+    json_array_add(outputs, output_item);
+    json_object_add(tool_results_event, "outputs", outputs);
+    json_array_add(events, tool_results_event);
 
     check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_ptr_eq(request_json, NULL);
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -549,40 +550,40 @@ spec("turbo agent request internals") {
     check_not_null(state);
     check_int_eq(turbo_agent_state_add_user_message(state, "Ping"), 0);
 
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    tool_results_event = turbo_json_create_object();
-    outputs = turbo_json_create_array();
-    output_item = turbo_json_create_object();
+    tool_results_event = json_create_object();
+    outputs = json_create_array();
+    output_item = json_create_object();
     check_not_null(tool_results_event);
     check_not_null(outputs);
     check_not_null(output_item);
-    turbo_json_object_set_string(tool_results_event, "kind", "tool_results");
-    turbo_json_object_set_string(output_item, "call_id", "call_1");
-    turbo_json_object_set_string(
+    json_object_set_string(tool_results_event, "kind", "tool_results");
+    json_object_set_string(output_item, "call_id", "call_1");
+    json_object_set_string(
         output_item, "output",
         "{\"ok\":true,\"stdout\":\"done\",\"parent_agent_run_id\":\"run_parent\","
         "\"parent_tool_call_id\":\"call_parent\",\"parent_tool_name\":\"delegate\"}");
-    turbo_json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
-    turbo_json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
-    turbo_json_object_set_string(output_item, "parent_tool_name", "delegate");
-    turbo_json_array_add(outputs, output_item);
-    turbo_json_object_add(tool_results_event, "outputs", outputs);
-    turbo_json_array_add(events, tool_results_event);
+    json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
+    json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
+    json_object_set_string(output_item, "parent_tool_name", "delegate");
+    json_array_add(outputs, output_item);
+    json_object_add(tool_results_event, "outputs", outputs);
+    json_array_add(events, tool_results_event);
 
     check_int_eq(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     request = parse_request_json_or_fail(request_json);
-    messages = turbo_json_object_get(request, "messages");
+    messages = json_object_get(request, "messages");
     check_not_null(messages);
-    check_size_eq(turbo_json_array_size(messages), 2);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(messages, 1), "role"), "tool");
-    check_true(strstr(turbo_json_get_string(turbo_json_array_get(messages, 1), "content"),
+    check_size_eq(json_array_size(messages), 2);
+    check_str_eq(json_get_string(json_array_get(messages, 1), "role"), "tool");
+    check_true(strstr(json_get_string(json_array_get(messages, 1), "content"),
                       "\"parent_agent_run_id\":\"run_parent\"") != NULL);
 
-    turbo_free_json(&request);
+    json_free(request); request = NULL;
     free(request_json);
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -604,19 +605,19 @@ spec("turbo agent request internals") {
     check_not_null(state);
     check_int_eq(turbo_agent_state_add_user_message(state, "Ping"), 0);
 
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    tool_results_event = turbo_json_create_object();
+    tool_results_event = json_create_object();
     check_not_null(tool_results_event);
-    turbo_json_object_set_string(tool_results_event, "kind", "tool_results");
-    turbo_json_object_set_string(tool_results_event, "outputs", "bad");
-    turbo_json_array_add(events, tool_results_event);
+    json_object_set_string(tool_results_event, "kind", "tool_results");
+    json_object_set_string(tool_results_event, "outputs", "bad");
+    json_array_add(events, tool_results_event);
 
     check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_ptr_eq(request_json, NULL);
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
@@ -640,26 +641,26 @@ spec("turbo agent request internals") {
     check_not_null(state);
     check_int_eq(turbo_agent_state_add_user_message(state, "Ping"), 0);
 
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     check_not_null(events);
 
-    model_event = turbo_json_create_object();
-    tool_calls = turbo_json_create_array();
-    tool_call = turbo_json_create_object();
+    model_event = json_create_object();
+    tool_calls = json_create_array();
+    tool_call = json_create_object();
     check_not_null(model_event);
     check_not_null(tool_calls);
     check_not_null(tool_call);
-    turbo_json_object_set_string(model_event, "kind", "model");
-    turbo_json_object_set_string(model_event, "output_text", "");
-    turbo_json_object_set_string(tool_call, "call_id", "call_1");
-    turbo_json_array_add(tool_calls, tool_call);
-    turbo_json_object_add(model_event, "tool_calls", tool_calls);
-    turbo_json_array_add(events, model_event);
+    json_object_set_string(model_event, "kind", "model");
+    json_object_set_string(model_event, "output_text", "");
+    json_object_set_string(tool_call, "call_id", "call_1");
+    json_array_add(tool_calls, tool_call);
+    json_object_add(model_event, "tool_calls", tool_calls);
+    json_array_add(events, model_event);
 
     check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_ptr_eq(request_json, NULL);
 
-    turbo_free_json(&state);
+    json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 }

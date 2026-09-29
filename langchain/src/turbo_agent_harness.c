@@ -1,3 +1,4 @@
+#include <salts/thread_pool.h>
 #include "turbo_agent_harness.h"
 #include <json_parser.h>
 
@@ -18,7 +19,7 @@ struct turbo_agent_harness_s {
   atomic_size_t ref_count;
   salts_mutex_t mutex;
   turbo_agent_app_t *app;
-  turbo_threadpool_t *executor;
+  salts_threadpool_t *executor;
   turbo_agent_execution_t *active_execution;
   int submitting;
 };
@@ -36,8 +37,8 @@ struct turbo_agent_harness_execution_s {
 static int turbo_agent_harness_config_valid(const turbo_agent_harness_config_t *config) {
   return config && config->struct_size >= sizeof(*config) &&
          config->abi_version == TURBO_AGENT_HARNESS_ABI_VERSION && config->app_config &&
-         config->executor && turbo_threadpool_capacity(config->executor) > 0 &&
-         turbo_threadpool_is_accepting(config->executor);
+         config->executor && salts_threadpool_capacity(config->executor) > 0 &&
+         salts_threadpool_is_accepting(config->executor);
 }
 
 static int turbo_agent_harness_run_options_valid(const turbo_agent_harness_run_options_t *options) {
@@ -148,7 +149,7 @@ int turbo_agent_harness_get_capabilities(const turbo_agent_harness_t *harness,
   json_object_set_bool(capabilities, "supports_event_sink", 1);
   json_object_set_number(capabilities, "max_concurrent_executions", 1.0);
   json_object_set_number(capabilities, "executor_queue_capacity",
-                               (double)turbo_threadpool_capacity(harness->executor));
+                               (double)salts_threadpool_capacity(harness->executor));
   *out_capabilities_json = capabilities;
   return SALTS_OK;
 }

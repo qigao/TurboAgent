@@ -3,6 +3,7 @@
 
 #include <turbo_agent_api.h>
 #include <salts/thread.h>
+#include <salts/thread_pool.h>
 
 #include "turbo_agent_runtime.h"
 #include "turbo_runtime_control.h"
@@ -38,13 +39,14 @@ typedef struct turbo_agent_execution_options_s {
  * `executor`, `runtime`, `graph`, graph callback user data, checkpoint/event
  * callback user data, and the runtime store must outlive the terminal execution
  * state. Input JSON and option strings are copied before this function returns.
- * The executor should use an explicit queue capacity; queue rejection returns
- * SALTS_EBUSY without publishing an execution handle.
+ * The executor should use an explicit queue capacity. Submission preserves the
+ * Salts admission result (for example SALTS_ENOBUFS or SALTS_ESHUTDOWN) and
+ * never publishes an execution handle on rejection.
  *
  * A runtime/store may be used concurrently only when its store contract permits
  * it. The built-in memory and file stores should be treated as single-writer.
  */
-CXX_C_API int turbo_agent_execution_start(turbo_threadpool_t *executor,
+CXX_C_API int turbo_agent_execution_start(salts_threadpool_t *executor,
                                           turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
                                           const json_value_t *state,
                                           const turbo_graph_run_options_t *graph_options,
@@ -53,14 +55,14 @@ CXX_C_API int turbo_agent_execution_start(turbo_threadpool_t *executor,
                                           turbo_agent_execution_t **out_execution);
 
 CXX_C_API int
-turbo_agent_execution_resume(turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+turbo_agent_execution_resume(salts_threadpool_t *executor, turbo_agent_runtime_t *runtime,
                              turbo_graph_t *graph, const json_value_t *input,
                              const turbo_graph_run_options_t *graph_options,
                              const turbo_agent_runtime_exec_options_t *runtime_options,
                              const turbo_agent_execution_options_t *execution_options,
                              turbo_agent_execution_t **out_execution);
 
-CXX_C_API int turbo_agent_execution_fork(turbo_threadpool_t *executor,
+CXX_C_API int turbo_agent_execution_fork(salts_threadpool_t *executor,
                                          turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
                                          const json_value_t *input,
                                          const turbo_graph_run_options_t *graph_options,

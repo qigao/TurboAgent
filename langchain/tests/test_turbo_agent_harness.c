@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <salts/clock.h>
+#include <salts/thread_pool.h>
 
 typedef struct harness_transport_gate_s {
   atomic_int entered;
@@ -78,13 +79,13 @@ static int harness_gated_transport(const char *request_json, char **out_response
   (void)request_json;
   atomic_store_explicit(&gate->entered, 1, memory_order_release);
   while (!atomic_load_explicit(&gate->open, memory_order_acquire)) {
-    turbo_thread_yield();
+    salts_thread_yield();
   }
   return harness_copy_response(out_response_json);
 }
 
 static turbo_agent_harness_t *
-harness_create_kind(turbo_threadpool_t *executor, turbo_agent_transport_fn transport,
+harness_create_kind(salts_threadpool_t *executor, turbo_agent_transport_fn transport,
                     void *transport_user_data, turbo_agent_session_workflow_kind_t workflow_kind) {
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
@@ -102,7 +103,7 @@ harness_create_kind(turbo_threadpool_t *executor, turbo_agent_transport_fn trans
   return turbo_agent_harness_create(&harness_config);
 }
 
-static turbo_agent_harness_t *harness_create(turbo_threadpool_t *executor,
+static turbo_agent_harness_t *harness_create(salts_threadpool_t *executor,
                                              turbo_agent_transport_fn transport,
                                              void *transport_user_data) {
   return harness_create_kind(executor, transport, transport_user_data,
@@ -111,8 +112,8 @@ static turbo_agent_harness_t *harness_create(turbo_threadpool_t *executor,
 
 spec("turbo agent harness") {
   it("reports startup diagnostics and completes one asynchronous text run") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     turbo_agent_harness_t *harness = harness_create(pool, harness_success_transport, NULL);
     turbo_agent_harness_execution_t *execution = NULL;
     turbo_agent_harness_execution_t *next_execution = NULL;
@@ -166,12 +167,12 @@ spec("turbo agent harness") {
     turbo_agent_harness_execution_release(execution);
     turbo_agent_harness_execution_release(next_execution);
     turbo_agent_harness_release(harness);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("rejects a concurrent run and supports cooperative cancellation") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     harness_transport_gate_t gate;
     turbo_agent_harness_t *harness;
     turbo_agent_harness_execution_t *execution = NULL;
@@ -187,7 +188,7 @@ spec("turbo agent harness") {
     check_not_null(harness);
     check_int_eq(turbo_agent_harness_start_text(harness, "first", NULL, &execution), SALTS_OK);
     while (!atomic_load_explicit(&gate.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
     check_int_eq(turbo_agent_harness_start_text(harness, "second", NULL, &second), SALTS_EBUSY);
     check_null(second);
@@ -203,12 +204,12 @@ spec("turbo agent harness") {
     turbo_runtime_json_destroy(summary);
     turbo_agent_harness_execution_release(execution);
     turbo_agent_harness_release(harness);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("resumes and forks the default workflow with explicit command semantics") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     turbo_agent_harness_t *harness = harness_create_kind(pool, harness_review_transport, NULL,
                                                          TURBO_AGENT_SESSION_WORKFLOW_REVIEW);
     turbo_agent_harness_execution_t *start_execution = NULL;
@@ -284,12 +285,12 @@ spec("turbo agent harness") {
     turbo_agent_harness_execution_release(resume_execution);
     turbo_agent_harness_execution_release(start_execution);
     turbo_agent_harness_release(harness);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("propagates an execution deadline to the controlled runtime") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     turbo_agent_harness_t *harness = harness_create(pool, harness_success_transport, NULL);
     turbo_agent_harness_run_options_t options;
     turbo_agent_harness_execution_t *execution = NULL;
@@ -313,6 +314,6 @@ spec("turbo agent harness") {
     turbo_runtime_json_destroy(summary);
     turbo_agent_harness_execution_release(execution);
     turbo_agent_harness_release(harness);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 }

@@ -6,6 +6,7 @@
 
 #include <openssl/sha.h>
 #include <salts/thread.h>
+#include <salts/thread_pool.h>
 
 #include <limits.h>
 #include <stdlib.h>
@@ -21,7 +22,7 @@
 
 struct turbo_agent_tool_executor_s {
   turbo_agent_tool_executor_config_t config;
-  turbo_threadpool_t *pool;
+  salts_threadpool_t *pool;
   salts_mutex_t batch_mutex;
 };
 
@@ -68,7 +69,7 @@ void turbo_agent_tool_executor_config_init(turbo_agent_tool_executor_config_t *c
 int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *config,
                                      turbo_agent_tool_executor_t **out_executor) {
   turbo_agent_tool_executor_config_t effective;
-  turbo_threadpool_config_t pool_config;
+  salts_threadpool_config_t pool_config;
   turbo_agent_tool_executor_t *executor;
   if (!out_executor) return SALTS_EINVAL;
   *out_executor = NULL;
@@ -83,7 +84,7 @@ int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *c
   executor->config = effective;
   pool_config.num_threads = (int)effective.max_workers;
   pool_config.queue_capacity = effective.queue_capacity;
-  executor->pool = turbo_threadpool_create_with_config(&pool_config);
+  executor->pool = salts_threadpool_create_with_config(&pool_config);
   if (!executor->pool) {
     free(executor);
     return SALTS_ENOMEM;
@@ -95,7 +96,7 @@ int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *c
 
 void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *executor) {
   if (!executor) return;
-  turbo_threadpool_destroy(executor->pool);
+  salts_threadpool_destroy(executor->pool);
   salts_mutex_destroy(&executor->batch_mutex);
   free(executor);
 }
@@ -360,12 +361,12 @@ static int turbo_agent_tool_execute_parallel_group(
       task->context = *base_context;
       task->context.tool_call_id = calls[index].call_id;
       task->context.tool_name = calls[index].tool_name;
-      if (turbo_threadpool_try_submit(executor->pool, turbo_agent_tool_worker, task) != 0) {
+      if (salts_threadpool_try_submit(executor->pool, turbo_agent_tool_worker, task) != 0) {
         calls[index].status = TURBO_TOOL_BACKPRESSURE;
         calls[index].replayed = 1;
       }
     }
-    turbo_threadpool_wait(executor->pool);
+    salts_threadpool_wait(executor->pool);
     free(tasks);
   }
   return SALTS_OK;

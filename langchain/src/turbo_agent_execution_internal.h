@@ -1,6 +1,7 @@
 #ifndef TURBO_AGENT_EXECUTION_INTERNAL_H
 #define TURBO_AGENT_EXECUTION_INTERNAL_H
 
+#include <salts/thread_pool.h>
 #include "turbo_agent_execution.h"
 
 typedef int (*turbo_agent_execution_complete_fn)(void *user_data, turbo_graph_t *graph,
@@ -17,7 +18,7 @@ typedef struct turbo_agent_execution_hooks_s {
   void *user_data;
 } turbo_agent_execution_hooks_t;
 
-int turbo_agent_execution_start_internal(turbo_threadpool_t *executor,
+int turbo_agent_execution_start_internal(salts_threadpool_t *executor,
                                          turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
                                          const json_value_t *state,
                                          const turbo_graph_run_options_t *graph_options,
@@ -26,7 +27,7 @@ int turbo_agent_execution_start_internal(turbo_threadpool_t *executor,
                                          const turbo_agent_execution_hooks_t *hooks,
                                          turbo_agent_execution_t **out_execution);
 
-int turbo_agent_execution_resume_internal(turbo_threadpool_t *executor,
+int turbo_agent_execution_resume_internal(salts_threadpool_t *executor,
                                           turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
                                           const json_value_t *input,
                                           const turbo_graph_run_options_t *graph_options,
@@ -35,7 +36,7 @@ int turbo_agent_execution_resume_internal(turbo_threadpool_t *executor,
                                           const turbo_agent_execution_hooks_t *hooks,
                                           turbo_agent_execution_t **out_execution);
 
-int turbo_agent_execution_fork_internal(turbo_threadpool_t *executor,
+int turbo_agent_execution_fork_internal(salts_threadpool_t *executor,
                                         turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
                                         const json_value_t *input,
                                         const turbo_graph_run_options_t *graph_options,

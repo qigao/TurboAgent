@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include <string.h>
 #include <salts/clock.h>
+#include <salts/thread_pool.h>
 
 typedef struct execution_gate_s {
   atomic_int entered;
@@ -33,7 +34,7 @@ static int execution_gated_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
 
   atomic_store_explicit(&gate->entered, 1, memory_order_release);
   while (!atomic_load_explicit(&gate->open, memory_order_acquire)) {
-    turbo_thread_yield();
+    salts_thread_yield();
   }
   return execution_write_node(ctx, "visited_start");
 }
@@ -43,7 +44,7 @@ static void execution_blocking_task(void *user_data) {
 
   atomic_store_explicit(&gate->entered, 1, memory_order_release);
   while (!atomic_load_explicit(&gate->open, memory_order_acquire)) {
-    turbo_thread_yield();
+    salts_thread_yield();
   }
 }
 
@@ -63,8 +64,8 @@ static turbo_graph_t *execution_create_graph(turbo_graph_json_value_node_fn star
 
 spec("turbo agent execution") {
   it("runs a durable operation asynchronously and moves its result once") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
     turbo_graph_t *graph = execution_create_graph(execution_write_node, "visited_start");
@@ -102,12 +103,12 @@ spec("turbo agent execution") {
     turbo_runtime_json_destroy(input);
     turbo_graph_destroy(graph);
     turbo_agent_runtime_destroy(runtime);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("cancels after a running node and returns a resumable checkpoint") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
     execution_gate_t gate;
@@ -131,7 +132,7 @@ spec("turbo agent execution") {
                      &execution),
                  SALTS_OK);
     while (!atomic_load_explicit(&gate.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
     check_int_eq(turbo_agent_execution_wait(execution, 0), SALTS_ETIMEDOUT);
     check_int_eq(turbo_agent_execution_cancel(execution, TURBO_CANCEL_USER), SALTS_OK);
@@ -152,12 +153,12 @@ spec("turbo agent execution") {
     turbo_runtime_json_destroy(input);
     turbo_graph_destroy(graph);
     turbo_agent_runtime_destroy(runtime);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("turns an expired execution deadline into a timed-out run") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
     turbo_graph_t *graph = execution_create_graph(execution_write_node, "visited_start");
@@ -187,12 +188,12 @@ spec("turbo agent execution") {
     turbo_runtime_json_destroy(input);
     turbo_graph_destroy(graph);
     turbo_agent_runtime_destroy(runtime);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("fails fast when the caller-owned executor queue is full") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
     turbo_graph_t *graph = execution_create_graph(execution_write_node, "visited_start");
@@ -205,11 +206,11 @@ spec("turbo agent execution") {
     check_not_null(pool);
     check_not_null(runtime);
     check_not_null(input);
-    check_int_eq(turbo_threadpool_try_submit(pool, execution_blocking_task, &gate), 0);
+    check_int_eq(salts_threadpool_try_submit(pool, execution_blocking_task, &gate), 0);
     while (!atomic_load_explicit(&gate.entered, memory_order_acquire)) {
-      turbo_thread_yield();
+      salts_thread_yield();
     }
-    check_int_eq(turbo_threadpool_try_submit(pool, execution_blocking_task, &gate), 0);
+    check_int_eq(salts_threadpool_try_submit(pool, execution_blocking_task, &gate), 0);
     check_int_eq(turbo_agent_execution_start(
                      pool, runtime, graph, input, NULL,
                      &(turbo_agent_runtime_exec_options_t){.thread_id = "async-rejected"}, NULL,
@@ -218,10 +219,10 @@ spec("turbo agent execution") {
     check_null(execution);
 
     atomic_store_explicit(&gate.open, 1, memory_order_release);
-    turbo_threadpool_wait(pool);
+    salts_threadpool_wait(pool);
     turbo_runtime_json_destroy(input);
     turbo_graph_destroy(graph);
     turbo_agent_runtime_destroy(runtime);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 }

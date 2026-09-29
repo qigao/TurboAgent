@@ -11,6 +11,7 @@
 
 #include <salts_uuid.h>
 #include <salts/clock.h>
+#include <salts/thread_pool.h>
 
 #define TURBO_EXECUTION_WAIT_SLICE_MS (UINT32_MAX - UINT64_C(1))
 #define TURBO_EXECUTION_MS_TO_NS UINT64_C(1000000)
@@ -299,7 +300,7 @@ static int turbo_agent_execution_options_valid(const turbo_agent_execution_optio
 }
 
 static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
-                                        turbo_threadpool_t *executor,
+                                        salts_threadpool_t *executor,
                                         turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
                                         const json_value_t *input,
                                         const turbo_graph_run_options_t *graph_options,
@@ -380,17 +381,18 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
     turbo_agent_execution_release(execution);
     return SALTS_ERANGE;
   }
-  if (turbo_threadpool_try_submit(executor, turbo_agent_execution_worker, execution) != 0) {
+  rc = salts_threadpool_try_submit(executor, turbo_agent_execution_worker, execution);
+  if (rc != SALTS_OK) {
     turbo_agent_execution_release(execution);
     turbo_agent_execution_release(execution);
-    return SALTS_EBUSY;
+    return rc;
   }
 
   *out_execution = execution;
   return SALTS_OK;
 }
 
-int turbo_agent_execution_start(turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+int turbo_agent_execution_start(salts_threadpool_t *executor, turbo_agent_runtime_t *runtime,
                                 turbo_graph_t *graph, const json_value_t *state,
                                 const turbo_graph_run_options_t *graph_options,
                                 const turbo_agent_runtime_exec_options_t *runtime_options,
@@ -401,7 +403,7 @@ int turbo_agent_execution_start(turbo_threadpool_t *executor, turbo_agent_runtim
                                       out_execution);
 }
 
-int turbo_agent_execution_resume(turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+int turbo_agent_execution_resume(salts_threadpool_t *executor, turbo_agent_runtime_t *runtime,
                                  turbo_graph_t *graph, const json_value_t *input,
                                  const turbo_graph_run_options_t *graph_options,
                                  const turbo_agent_runtime_exec_options_t *runtime_options,
@@ -418,7 +420,7 @@ int turbo_agent_execution_resume(turbo_threadpool_t *executor, turbo_agent_runti
                                       out_execution);
 }
 
-int turbo_agent_execution_fork(turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+int turbo_agent_execution_fork(salts_threadpool_t *executor, turbo_agent_runtime_t *runtime,
                                turbo_graph_t *graph, const json_value_t *input,
                                const turbo_graph_run_options_t *graph_options,
                                const turbo_agent_runtime_exec_options_t *runtime_options,
@@ -436,7 +438,7 @@ int turbo_agent_execution_fork(turbo_threadpool_t *executor, turbo_agent_runtime
 }
 
 int turbo_agent_execution_start_internal(
-    turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+    salts_threadpool_t *executor, turbo_agent_runtime_t *runtime,
     turbo_graph_t *graph, const json_value_t *state,
     const turbo_graph_run_options_t *graph_options,
     const turbo_agent_runtime_exec_options_t *runtime_options,
@@ -449,7 +451,7 @@ int turbo_agent_execution_start_internal(
 }
 
 int turbo_agent_execution_resume_internal(
-    turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+    salts_threadpool_t *executor, turbo_agent_runtime_t *runtime,
     turbo_graph_t *graph, const json_value_t *input,
     const turbo_graph_run_options_t *graph_options,
     const turbo_agent_runtime_exec_options_t *runtime_options,
@@ -468,7 +470,7 @@ int turbo_agent_execution_resume_internal(
 }
 
 int turbo_agent_execution_fork_internal(
-    turbo_threadpool_t *executor, turbo_agent_runtime_t *runtime,
+    salts_threadpool_t *executor, turbo_agent_runtime_t *runtime,
     turbo_graph_t *graph, const json_value_t *input,
     const turbo_graph_run_options_t *graph_options,
     const turbo_agent_runtime_exec_options_t *runtime_options,

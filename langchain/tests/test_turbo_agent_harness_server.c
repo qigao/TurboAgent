@@ -8,9 +8,10 @@
 #include <string.h>
 #include <tstr.h>
 #include <salts/thread.h>
+#include <salts/thread_pool.h>
 
 typedef struct harness_server_factory_s {
-  turbo_threadpool_t *executor;
+  salts_threadpool_t *executor;
   turbo_agent_transport_fn transport;
   void *transport_user_data;
   turbo_agent_session_workflow_kind_t workflow_kind;
@@ -369,8 +370,8 @@ spec("turbo agent harness server") {
   it("enforces the connection handshake and streams one completed turn") {
     static const char *const expected_events[] = {"thread/started", "turn/started",
                                                   "turn/completed"};
-    turbo_threadpool_config_t pool_config = {.num_threads = 2, .queue_capacity = 8};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 2, .queue_capacity = 8};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     harness_server_factory_t factory = {pool, harness_server_success_transport, NULL,
                                         TURBO_AGENT_SESSION_WORKFLOW_LOOP};
     turbo_agent_harness_server_t *server = harness_server_create(&factory);
@@ -432,12 +433,12 @@ spec("turbo agent harness server") {
     tstr_free(thread_id);
     turbo_agent_harness_connection_close(connection);
     turbo_agent_harness_server_destroy(server);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("serializes turns and accepts steer before cooperative interruption") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     harness_server_gate_t gate;
     harness_server_factory_t factory = {pool, harness_server_gated_transport, &gate,
                                         TURBO_AGENT_SESSION_WORKFLOW_LOOP};
@@ -533,13 +534,13 @@ spec("turbo agent harness server") {
     turbo_agent_harness_connection_close(observer);
     turbo_agent_harness_connection_close(connection);
     turbo_agent_harness_server_destroy(server);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("resolves review approval and resumes the same logical turn") {
     static const char *const expected_events[] = {"serverRequest/resolved", "turn/completed"};
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     harness_server_factory_t factory = {pool, harness_server_review_transport, NULL,
                                         TURBO_AGENT_SESSION_WORKFLOW_REVIEW};
     turbo_agent_harness_server_t *server = harness_server_create(&factory);
@@ -682,12 +683,12 @@ spec("turbo agent harness server") {
     tstr_free(thread_id);
     turbo_agent_harness_connection_close(connection);
     turbo_agent_harness_server_destroy(server);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("cancels and joins an active turn when its owner connection closes") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     harness_server_gate_t gate;
     harness_server_factory_t factory = {pool, harness_server_gated_transport, &gate,
                                         TURBO_AGENT_SESSION_WORKFLOW_LOOP};
@@ -746,12 +747,12 @@ spec("turbo agent harness server") {
     tstr_free(thread_id);
     turbo_agent_harness_connection_close(observer);
     turbo_agent_harness_server_destroy(server);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("wakes a blocking journal consumer and releases only acknowledged events") {
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     harness_server_factory_t factory = {pool, harness_server_success_transport, NULL,
                                         TURBO_AGENT_SESSION_WORKFLOW_LOOP};
     turbo_agent_harness_server_t *server = harness_server_create(&factory);
@@ -803,7 +804,7 @@ spec("turbo agent harness server") {
 
     turbo_agent_harness_connection_close(connection);
     turbo_agent_harness_server_destroy(server);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 
   it("frames JSONL responses and replays an event after writer failure") {
@@ -812,8 +813,8 @@ spec("turbo agent harness server") {
         "\"name\":\"tinytest\",\"title\":\"TinyTest\",\"version\":\"1.0\"}}}";
     static const char initialized_line[] = "{\"method\":\"initialized\",\"params\":{}}";
     static const char thread_start_line[] = "{\"id\":2,\"method\":\"thread/start\",\"params\":{}}";
-    turbo_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
-    turbo_threadpool_t *pool = turbo_threadpool_create_with_config(&pool_config);
+    salts_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 4};
+    salts_threadpool_t *pool = salts_threadpool_create_with_config(&pool_config);
     harness_server_factory_t factory = {pool, harness_server_success_transport, NULL,
                                         TURBO_AGENT_SESSION_WORKFLOW_LOOP};
     turbo_agent_harness_server_t *server = harness_server_create(&factory);
@@ -895,6 +896,6 @@ spec("turbo agent harness server") {
     turbo_agent_harness_jsonl_transport_destroy(transport);
     harness_server_capture_destroy(&capture);
     turbo_agent_harness_server_destroy(server);
-    turbo_threadpool_destroy(pool);
+    salts_threadpool_destroy(pool);
   }
 }

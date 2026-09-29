@@ -170,7 +170,7 @@ static turbo_tool_status_t turbo_praktor_capability_add(
 static turbo_tool_status_t turbo_praktor_add_conservative_capabilities(
     turbo_praktor_capability_list_t *list) {
   static const char *const conservative[] = {
-      "network", "shell", "patch", "outside_workspace", "custom_tools"};
+      "network", "shell", "patch", "outside_workspace"};
   size_t index;
   turbo_tool_status_t status;
   for (index = 0; index < sizeof(conservative) / sizeof(conservative[0]); ++index) {
@@ -205,6 +205,8 @@ static turbo_tool_status_t turbo_praktor_capability_from_effect(
   if (strcmp(effect, "filesystem_read") == 0) {
     return TURBO_TOOL_OK;
   }
+  status = turbo_praktor_capability_add(list, "custom_tools");
+  if (status != TURBO_TOOL_OK) return status;
   return turbo_praktor_add_conservative_capabilities(list);
 }
 
@@ -237,6 +239,8 @@ static turbo_tool_status_t turbo_praktor_effect_capabilities(
     return turbo_praktor_add_conservative_capabilities(list);
   }
   if (json_get_bool(manifest, "unknown_effects", false)) {
+    status = turbo_praktor_capability_add(list, "custom_tools");
+    if (status != TURBO_TOOL_OK) return status;
     return turbo_praktor_add_conservative_capabilities(list);
   }
   effects = json_object_get(manifest, "effects");

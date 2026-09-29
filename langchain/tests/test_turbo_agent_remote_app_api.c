@@ -229,14 +229,14 @@ static turbo_graph_t *create_remote_app_graph(void) {
   static const char *final_output = "{\"ok\":true,\"source\":\"remote-app\"}";
 
   check_not_null(graph);
-  check_int_eq(
+  check_equal(
       turbo_graph_add_json_value_node(graph, "start", remote_app_write_bool_json_value_node, &start),
       TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_node(graph, "end", remote_app_complete_json_node, (void *)final_output),
+  check_equal(turbo_graph_add_node(graph, "end", remote_app_complete_json_node, (void *)final_output),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
+  check_equal(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+  check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
   return graph;
 }
 
@@ -252,10 +252,10 @@ static json_value_t *create_remote_app_supervisor_state_json_value(void) {
   json_value_t *bound;
 
   check_not_null(state);
-  check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
-  check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
-  check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
-  check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
+  check_equal(turbo_agent_state_set_active_agent(state, "planner"), 0);
+  check_equal(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
+  check_equal(turbo_agent_state_request_review(state, "need approval"), 0);
+  check_equal(turbo_agent_state_set_review_approved(state, 0), 0);
   bound = json_clone(state);
   json_free(state); state = NULL;
   return bound;
@@ -266,11 +266,11 @@ static json_value_t *create_remote_app_committed_supervisor_state_json_value(voi
   json_value_t *bound;
 
   check_not_null(state);
-  check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
-  check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
-  check_int_eq(turbo_agent_state_commit_handoff(state), 0);
-  check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
-  check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
+  check_equal(turbo_agent_state_set_active_agent(state, "planner"), 0);
+  check_equal(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
+  check_equal(turbo_agent_state_commit_handoff(state), 0);
+  check_equal(turbo_agent_state_request_review(state, "need approval"), 0);
+  check_equal(turbo_agent_state_set_review_approved(state, 0), 0);
   bound = json_clone(state);
   json_free(state); state = NULL;
   return bound;
@@ -351,11 +351,11 @@ static json_value_t *create_remote_app_command_json_value(const char *text) {
   json_value_t *command = json_create_object();
 
   check_not_null(command);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           command, "kind", json_create_string("append_user_message")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(command, "text",
                                          json_create_string(text)),
       TURBO_RUNTIME_JSON_OK);
@@ -370,22 +370,22 @@ static json_value_t *create_remote_app_messages_json_value(const char *text) {
   check_not_null(messages);
   check_not_null(system_message);
   check_not_null(user_message);
-  check_int_eq(turbo_runtime_json_object_set(
+  check_equal(turbo_runtime_json_object_set(
                    system_message, "role", json_create_string("system")),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(system_message, "content",
                                          json_create_string("Be terse.")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_object_set(
+  check_equal(turbo_runtime_json_object_set(
                    user_message, "role", json_create_string("user")),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_object_set(
+  check_equal(turbo_runtime_json_object_set(
                    user_message, "content", json_create_string(text)),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_array_append(messages, system_message),
+  check_equal(turbo_runtime_json_array_append(messages, system_message),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_array_append(messages, user_message),
+  check_equal(turbo_runtime_json_array_append(messages, user_message),
                TURBO_RUNTIME_JSON_OK);
   return messages;
 }
@@ -656,44 +656,44 @@ static void remote_app_test_coro(void *arg) {
   json_object_set_string(output_item, "parent_graph_run_id", "run_parent");
   json_object_set_string(output_item, "call_frame_id", "call_parent");
 
-  check_int_eq(turbo_agent_remote_app_get_child_run(state->app, output_item, &child_run_json),
+  check_equal(turbo_agent_remote_app_get_child_run(state->app, output_item, &child_run_json),
                0);
-  check_int_eq(turbo_agent_remote_app_get_child_checkpoint(state->app, output_item,
+  check_equal(turbo_agent_remote_app_get_child_checkpoint(state->app, output_item,
                                                            &child_checkpoint_json),
                0);
-  check_int_eq(turbo_agent_remote_app_get_child_checkpoint_context(
+  check_equal(turbo_agent_remote_app_get_child_checkpoint_context(
                    state->app, output_item, &child_checkpoint_context_json),
                0);
-  check_int_eq(turbo_agent_remote_app_get_child_thread_timeline_json_value(state->app, output_item,
+  check_equal(turbo_agent_remote_app_get_child_thread_timeline_json_value(state->app, output_item,
                                                                      &child_timeline),
                0);
-  check_int_eq(turbo_agent_remote_app_get_child_branch_tree(state->app, output_item,
+  check_equal(turbo_agent_remote_app_get_child_branch_tree(state->app, output_item,
                                                             &child_branch_tree_json),
                0);
-  check_int_eq(turbo_agent_remote_app_list_child_checkpoints(state->app, output_item,
+  check_equal(turbo_agent_remote_app_list_child_checkpoints(state->app, output_item,
                                                              &child_checkpoints_json),
                0);
-  check_int_eq(turbo_agent_remote_app_load_child_history_events_json_value(state->app, output_item,
+  check_equal(turbo_agent_remote_app_load_child_history_events_json_value(state->app, output_item,
                                                                      &child_history_events),
                0);
-  check_int_eq(turbo_agent_remote_app_get_child_trace_events_json_value(state->app, output_item,
+  check_equal(turbo_agent_remote_app_get_child_trace_events_json_value(state->app, output_item,
                                                                   &child_trace_events),
                0);
-  check_int_eq(turbo_agent_remote_app_get_child_inspect(state->app, output_item,
+  check_equal(turbo_agent_remote_app_get_child_inspect(state->app, output_item,
                                                         &child_inspect_json),
                0);
-  check_int_eq(turbo_agent_remote_app_get_child_orchestration_inspect(
+  check_equal(turbo_agent_remote_app_get_child_orchestration_inspect(
                    state->app, output_item, &child_orchestration_inspect_json),
                0);
-  check_int_eq(turbo_agent_remote_app_get_child_multi_agent_inspect(
+  check_equal(turbo_agent_remote_app_get_child_multi_agent_inspect(
                    state->app, output_item, &child_multi_agent_inspect_json),
                0);
-  check_str_eq(json_get_string(child_run_json, "id"),
+  check_equal(json_get_string(child_run_json, "id"),
                turbo_agent_remote_app_last_run_id(state->app));
-  check_str_eq(json_get_string(child_checkpoint_json, "id"),
+  check_equal(json_get_string(child_checkpoint_json, "id"),
                turbo_agent_remote_app_last_checkpoint_id(state->app));
-  check_size_eq(json_array_size(child_checkpoints_json), 1);
-  check_str_eq(json_get_string(json_array_get(child_checkpoints_json, 0), "id"),
+  check_equal(json_array_size(child_checkpoints_json), 1);
+  check_equal(json_get_string(json_array_get(child_checkpoints_json, 0), "id"),
                turbo_agent_remote_app_last_checkpoint_id(state->app));
   turbo_agent_test_check_checkpoint_context(
       child_checkpoint_context_json, turbo_agent_remote_app_thread_id(state->app),

@@ -168,22 +168,22 @@ spec("MCP tool pack") {
     size_t required_capability_count = 0;
 
     check_not_null(pack);
-    check_int_eq(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
-    check_size_eq(turbo_mcp_tool_pack_tool_count(pack), 1);
-    check_size_eq(turbo_mcp_tool_pack_rejected_tool_count(pack), 1);
-    check_int_eq(turbo_tool_registry_get_required_capabilities(
+    check_equal(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
+    check_equal(turbo_mcp_tool_pack_tool_count(pack), 1);
+    check_equal(turbo_mcp_tool_pack_rejected_tool_count(pack), 1);
+    check_equal(turbo_tool_registry_get_required_capabilities(
                      turbo_mcp_tool_pack_registry(pack), "mcp_demo_echo_remote",
                      &required_capabilities, &required_capability_count),
                  TURBO_TOOL_OK);
-    check_size_eq(required_capability_count, 2);
-    check_str_eq(required_capabilities[0], "runtime_tools");
-    check_str_eq(required_capabilities[1], "network");
+    check_equal(required_capability_count, 2);
+    check_equal(required_capabilities[0], "runtime_tools");
+    check_equal(required_capabilities[1], "network");
     check_true(transport.saw_protocol_version);
     check_true(transport.saw_method);
     arguments = json_parse("{\"region\":\"Hello, 世界\",\"routing\":{\"shard\":42,\"enabled\":true},\"value\":7}",
                            strlen("{\"region\":\"Hello, 世界\",\"routing\":{\"shard\":42,\"enabled\":true},\"value\":7}"));
     check_not_null(arguments);
-    check_int_eq(turbo_tool_registry_execute_json_value(turbo_mcp_tool_pack_registry(pack),
+    check_equal(turbo_tool_registry_execute_json_value(turbo_mcp_tool_pack_registry(pack),
                                                         "mcp_demo_echo_remote", arguments, &result),
                  TURBO_TOOL_OK);
     structured = json_object_get(result, "structuredContent");
@@ -202,9 +202,9 @@ spec("MCP tool pack") {
     test_mcp_transport_t transport = {.mode = TEST_MCP_SSE};
     turbo_mcp_tool_pack_t *pack = test_pack_create(&transport);
     check_not_null(pack);
-    check_int_eq(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
-    check_size_eq(turbo_mcp_tool_pack_tool_count(pack), 1);
-    check_int_eq(transport.page, 2);
+    check_equal(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
+    check_equal(turbo_mcp_tool_pack_tool_count(pack), 1);
+    check_equal(transport.page, 2);
     turbo_mcp_tool_pack_destroy(pack);
   }
 
@@ -213,12 +213,12 @@ spec("MCP tool pack") {
     turbo_mcp_tool_pack_t *pack = test_pack_create(&transport);
     turbo_tool_registry_t *registry;
     check_not_null(pack);
-    check_int_eq(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
+    check_equal(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
     registry = turbo_mcp_tool_pack_registry(pack);
     transport.mode = TEST_MCP_FAIL;
-    check_int_eq(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_ERROR);
-    check_ptr_eq(turbo_mcp_tool_pack_registry(pack), registry);
-    check_size_eq(turbo_mcp_tool_pack_tool_count(pack), 1);
+    check_equal(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_ERROR);
+    check_true((turbo_mcp_tool_pack_registry(pack)) == (registry));
+    check_equal(turbo_mcp_tool_pack_tool_count(pack), 1);
     check_true(strlen(turbo_mcp_tool_pack_last_error(pack)) > 0);
     turbo_mcp_tool_pack_destroy(pack);
   }

@@ -64,13 +64,13 @@ static turbo_graph_t *create_remote_graph(void) {
   static remote_bool_write_t end = {"visited_end", 1};
 
   check_not_null(graph);
-  check_int_eq(turbo_graph_add_json_value_node(graph, "start", remote_write_bool_json_value_node, &start),
+  check_equal(turbo_graph_add_json_value_node(graph, "start", remote_write_bool_json_value_node, &start),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_json_value_node(graph, "end", remote_write_bool_json_value_node, &end),
+  check_equal(turbo_graph_add_json_value_node(graph, "end", remote_write_bool_json_value_node, &end),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
+  check_equal(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+  check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
   return graph;
 }
 
@@ -151,8 +151,8 @@ static json_value_t *create_remote_jsonrpc_request_from_fixture(const char *fixt
 static void check_remote_jsonrpc_success(const json_value_t *response_json, const char *id) {
   check_not_null(response_json);
   check_true(json_type(response_json) == JSON_OBJECT);
-  check_str_eq(json_get_string(response_json, "jsonrpc"), "2.0");
-  check_str_eq(json_get_string(response_json, "id"), id);
+  check_equal(json_get_string(response_json, "jsonrpc"), "2.0");
+  check_equal(json_get_string(response_json, "id"), id);
   check_not_null(json_object_get(response_json, "result"));
   check_true(json_is_null(json_object_get(response_json, "error")));
 }
@@ -163,12 +163,12 @@ static void check_remote_jsonrpc_error(const json_value_t *response_json, const 
 
   check_not_null(response_json);
   check_true(json_type(response_json) == JSON_OBJECT);
-  check_str_eq(json_get_string(response_json, "jsonrpc"), "2.0");
-  check_str_eq(json_get_string(response_json, "id"), id);
+  check_equal(json_get_string(response_json, "jsonrpc"), "2.0");
+  check_equal(json_get_string(response_json, "id"), id);
   check_true(json_is_null(json_object_get(response_json, "result")));
   error_json = json_object_get(response_json, "error");
   check_not_null(error_json);
-  check_int_eq(json_get_int(error_json, "code", 0), code);
+  check_equal(json_get_int(error_json, "code", 0), code);
 }
 
 static void check_remote_jsonrpc_request_fixture(const json_value_t *request_json,
@@ -188,9 +188,9 @@ static void check_remote_jsonrpc_request_fixture(const json_value_t *request_jso
   check_not_null(request_json);
   check_not_null(fixture);
   check_true(json_type(fixture) == JSON_OBJECT);
-  check_str_eq(json_get_string(request_json, "jsonrpc"), "2.0");
-  check_str_eq(json_get_string(request_json, "id"), json_get_string(fixture, "id"));
-  check_str_eq(json_get_string(request_json, "method"),
+  check_equal(json_get_string(request_json, "jsonrpc"), "2.0");
+  check_equal(json_get_string(request_json, "id"), json_get_string(fixture, "id"));
+  check_equal(json_get_string(request_json, "method"),
                json_get_string(fixture, "method"));
 
   params_fixture = json_object_get(fixture, "params");
@@ -198,15 +198,15 @@ static void check_remote_jsonrpc_request_fixture(const json_value_t *request_jso
   if (params_fixture) {
     check_true(json_type(params_json) == JSON_OBJECT);
     if (json_get_string(params_fixture, "graph_name")) {
-      check_str_eq(json_get_string(params_json, "graph_name"),
+      check_equal(json_get_string(params_json, "graph_name"),
                    json_get_string(params_fixture, "graph_name"));
     }
     if (json_get_string(params_fixture, "thread_id")) {
-      check_str_eq(json_get_string(params_json, "thread_id"),
+      check_equal(json_get_string(params_json, "thread_id"),
                    json_get_string(params_fixture, "thread_id"));
     }
     if (json_get_string(params_fixture, "checkpoint_id")) {
-      check_str_eq(json_get_string(params_json, "checkpoint_id"),
+      check_equal(json_get_string(params_json, "checkpoint_id"),
                    json_get_string(params_fixture, "checkpoint_id"));
     }
     if (json_get_bool(params_fixture, "checkpoint_id_required", false)) {
@@ -225,8 +225,8 @@ static void check_remote_jsonrpc_request_fixture(const json_value_t *request_jso
           actual_options ? json_object_get(actual_options, "interrupt_before_nodes") : NULL;
       if (expected_nodes) {
         check_true(json_type(actual_nodes) == JSON_ARRAY);
-        check_size_eq(json_array_size(actual_nodes), json_array_size(expected_nodes));
-        check_str_eq(json_string(json_array_get(actual_nodes, 0)),
+        check_equal(json_array_size(actual_nodes), json_array_size(expected_nodes));
+        check_equal(json_string(json_array_get(actual_nodes, 0)),
                      json_string(json_array_get(expected_nodes, 0)));
       }
     }
@@ -236,15 +236,15 @@ static void check_remote_jsonrpc_request_fixture(const json_value_t *request_jso
       const json_value_t *actual_filters = json_object_get(params_json, "filters");
       check_true(json_type(actual_filters) == JSON_OBJECT);
       if (json_get_string(filters_fixture, "status")) {
-        check_str_eq(json_get_string(actual_filters, "status"),
+        check_equal(json_get_string(actual_filters, "status"),
                      json_get_string(filters_fixture, "status"));
       }
       if (json_get_string(filters_fixture, "thread_id_prefix")) {
-        check_str_eq(json_get_string(actual_filters, "thread_id_prefix"),
+        check_equal(json_get_string(actual_filters, "thread_id_prefix"),
                      json_get_string(filters_fixture, "thread_id_prefix"));
       }
       if (json_object_get(filters_fixture, "limit")) {
-        check_int_eq(json_get_int(actual_filters, "limit", 0),
+        check_equal(json_get_int(actual_filters, "limit", 0),
                      json_get_int(filters_fixture, "limit", 0));
       }
     }
@@ -254,11 +254,11 @@ static void check_remote_jsonrpc_request_fixture(const json_value_t *request_jso
       const json_value_t *actual_command = json_object_get(params_json, "command");
       check_true(json_type(actual_command) == JSON_OBJECT);
       if (json_get_string(command_fixture, "kind")) {
-        check_str_eq(json_get_string(actual_command, "kind"),
+        check_equal(json_get_string(actual_command, "kind"),
                      json_get_string(command_fixture, "kind"));
       }
       if (json_get_string(command_fixture, "text")) {
-        check_str_eq(json_get_string(actual_command, "text"),
+        check_equal(json_get_string(actual_command, "text"),
                      json_get_string(command_fixture, "text"));
       }
     }
@@ -331,11 +331,11 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
     const json_value_t *summary_json = json_object_get(result_json, "summary");
     check_true(json_type(summary_json) == JSON_OBJECT);
     if (json_get_string(summary_fixture, "thread_id")) {
-      check_str_eq(json_get_string(summary_json, "thread_id"),
+      check_equal(json_get_string(summary_json, "thread_id"),
                    json_get_string(summary_fixture, "thread_id"));
     }
     if (json_get_string(summary_fixture, "status")) {
-      check_str_eq(json_get_string(summary_json, "status"),
+      check_equal(json_get_string(summary_json, "status"),
                    json_get_string(summary_fixture, "status"));
     }
   }
@@ -365,14 +365,14 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
       const json_value_t *last_message_fixture = json_object_get(state_fixture, "last_message");
       const json_value_t *last_message_json;
       check_true(json_type(input_json) == JSON_ARRAY);
-      check_size_eq(json_array_size(input_json),
+      check_equal(json_array_size(input_json),
                     (size_t)json_get_int(state_fixture, "input_count", 0));
       if (last_message_fixture && json_type(last_message_fixture) == JSON_OBJECT) {
         last_message_json = json_array_get(input_json, json_array_size(input_json) - 1);
         check_true(json_type(last_message_json) == JSON_OBJECT);
-        check_str_eq(json_get_string(last_message_json, "role"),
+        check_equal(json_get_string(last_message_json, "role"),
                      json_get_string(last_message_fixture, "role"));
-        check_str_eq(json_get_string(last_message_json, "content"),
+        check_equal(json_get_string(last_message_json, "content"),
                      json_get_string(last_message_fixture, "content"));
       }
     }
@@ -387,14 +387,14 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
       check_not_null(json_get_string(run_json, "id"));
     }
     if (json_get_string(run_fixture, "id")) {
-      check_str_eq(json_get_string(run_json, "id"),
+      check_equal(json_get_string(run_json, "id"),
                    json_get_string(run_fixture, "id"));
     }
     if (json_get_bool(run_fixture, "thread_id_required", false)) {
       check_not_null(json_get_string(run_json, "thread_id"));
     }
     if (json_get_string(run_fixture, "thread_id")) {
-      check_str_eq(json_get_string(run_json, "thread_id"),
+      check_equal(json_get_string(run_json, "thread_id"),
                    json_get_string(run_fixture, "thread_id"));
     }
   }
@@ -408,14 +408,14 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
       check_not_null(json_get_string(checkpoint_json, "id"));
     }
     if (json_get_string(checkpoint_fixture, "id")) {
-      check_str_eq(json_get_string(checkpoint_json, "id"),
+      check_equal(json_get_string(checkpoint_json, "id"),
                    json_get_string(checkpoint_fixture, "id"));
     }
     if (json_get_bool(checkpoint_fixture, "run_id_required", false)) {
       check_not_null(json_get_string(checkpoint_json, "run_id"));
     }
     if (json_get_string(checkpoint_fixture, "run_id")) {
-      check_str_eq(json_get_string(checkpoint_json, "run_id"),
+      check_equal(json_get_string(checkpoint_json, "run_id"),
                    json_get_string(checkpoint_fixture, "run_id"));
     }
   }
@@ -429,7 +429,7 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
 
     check_true(json_type(checkpoints_json) == JSON_ARRAY);
     if (json_object_get(checkpoints_fixture, "expected_count")) {
-      check_size_eq(json_array_size(checkpoints_json),
+      check_equal(json_array_size(checkpoints_json),
                     (size_t)json_get_int(checkpoints_fixture, "expected_count", 0));
     }
     if (json_get_bool(checkpoints_fixture, "first_id_required", false)) {
@@ -441,11 +441,11 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
       check_not_null(json_get_string(json_array_get(checkpoints_json, 0), "run_id"));
     }
     if (expected_checkpoint_ids && json_type(expected_checkpoint_ids) == JSON_ARRAY) {
-      check_size_eq(json_array_size(checkpoints_json), json_array_size(expected_checkpoint_ids));
+      check_equal(json_array_size(checkpoints_json), json_array_size(expected_checkpoint_ids));
       for (i = 0; i < json_array_size(expected_checkpoint_ids); ++i) {
         const json_value_t *checkpoint_json = json_array_get(checkpoints_json, i);
         check_true(json_type(checkpoint_json) == JSON_OBJECT);
-        check_str_eq(json_get_string(checkpoint_json, "id"),
+        check_equal(json_get_string(checkpoint_json, "id"),
                      json_string(json_array_get(expected_checkpoint_ids, i)));
       }
     }
@@ -457,7 +457,7 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
 
     check_true(json_type(events_json) == JSON_ARRAY);
     if (json_object_get(events_fixture, "count")) {
-      check_size_eq(json_array_size(events_json),
+      check_equal(json_array_size(events_json),
                     (size_t)json_get_int(events_fixture, "count", 0));
     }
     if (json_object_get(events_fixture, "min")) {
@@ -474,11 +474,11 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
     if (json_get_string(index_fixture, "thread_id")) {
       thread_json = json_object_get(index_json, "thread");
       check_true(json_type(thread_json) == JSON_OBJECT);
-      check_str_eq(json_get_string(thread_json, "id"),
+      check_equal(json_get_string(thread_json, "id"),
                    json_get_string(index_fixture, "thread_id"));
     }
     if (json_get_string(index_fixture, "current_status")) {
-      check_str_eq(json_get_string(index_json, "current_status"),
+      check_equal(json_get_string(index_json, "current_status"),
                    json_get_string(index_fixture, "current_status"));
     }
     if (json_get_bool(index_fixture, "current_checkpoint_summary_required", false)) {
@@ -497,13 +497,13 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
     size_t i;
     check_true(json_type(indexes_json) == JSON_ARRAY);
     check_true(json_type(expected_thread_ids) == JSON_ARRAY);
-    check_size_eq(json_array_size(indexes_json), json_array_size(expected_thread_ids));
+    check_equal(json_array_size(indexes_json), json_array_size(expected_thread_ids));
     for (i = 0; i < json_array_size(expected_thread_ids); ++i) {
       const json_value_t *entry = json_array_get(indexes_json, i);
       const json_value_t *thread_json = entry ? json_object_get(entry, "thread") : NULL;
       check_true(json_type(entry) == JSON_OBJECT);
       check_true(json_type(thread_json) == JSON_OBJECT);
-      check_str_eq(json_get_string(thread_json, "id"),
+      check_equal(json_get_string(thread_json, "id"),
                    json_string(json_array_get(expected_thread_ids, i)));
     }
   }
@@ -519,7 +519,7 @@ static void check_remote_jsonrpc_success_fixture(const json_value_t *response_js
     if (json_get_string(context_fixture, "thread_id")) {
       thread_json = json_object_get(context_json, "thread");
       check_true(json_type(thread_json) == JSON_OBJECT);
-      check_str_eq(json_get_string(thread_json, "id"),
+      check_equal(json_get_string(thread_json, "id"),
                    json_get_string(context_fixture, "thread_id"));
     }
     if (json_get_bool(context_fixture, "checkpoint_summary_required", false)) {
@@ -557,7 +557,7 @@ static void check_remote_jsonrpc_error_fixture(const json_value_t *response_json
                              json_get_int(fixture, "error_code", 0));
   error_json = json_object_get(response_json, "error");
   if (json_get_string(fixture, "error_message")) {
-    check_str_eq(json_get_string(error_json, "message"),
+    check_equal(json_get_string(error_json, "message"),
                  json_get_string(fixture, "error_message"));
   }
   json_free(fixture_root); fixture_root = NULL;
@@ -593,19 +593,19 @@ spec("turbo agent runtime remote api") {
         "req-startup-diagnostics", "runtime.getStartupDiagnostics", params_json);
     check_not_null(request_json);
     json_free(params_json); params_json = NULL;
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json,
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json,
                                                              &response_json),
                  0);
     result_json = json_object_get(response_json, "result");
     check_true(json_type(result_json) == JSON_OBJECT);
     errors_json = json_object_get(result_json, "errors");
     graph_json = json_object_get(result_json, "graph");
-    check_int_eq(json_get_int(result_json, "schema_version", -1), 1);
+    check_equal(json_get_int(result_json, "schema_version", -1), 1);
     check_true(json_get_bool(result_json, "ok", false));
-    check_size_eq(json_array_size(errors_json), 0);
+    check_equal(json_array_size(errors_json), 0);
     check_true(json_get_bool(json_object_get(result_json, "runtime"), "ok",
                                    false));
-    check_str_eq(json_get_string(graph_json, "name"), graph_name);
+    check_equal(json_get_string(graph_json, "name"), graph_name);
     check_true(json_get_bool(graph_json, "resolvable", false));
 
     json_free(response_json); response_json = NULL;
@@ -672,7 +672,7 @@ spec("turbo agent runtime remote api") {
                                          "runtime_remote_thread_control.golden.json",
                                          "start_request");
     json_free(start_params); start_params = NULL;
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success_fixture(response_json,
                                          "runtime_remote_thread_control.golden.json",
@@ -683,8 +683,8 @@ spec("turbo agent runtime remote api") {
     state_json = json_object_get(result_json, "state");
     check_not_null(summary_json);
     check_not_null(state_json);
-    check_str_eq(json_get_string(summary_json, "thread_id"), thread_id);
-    check_str_eq(json_get_string(summary_json, "status"), "interrupted");
+    check_equal(json_get_string(summary_json, "thread_id"), thread_id);
+    check_equal(json_get_string(summary_json, "status"), "interrupted");
     check_not_null(json_get_string(summary_json, "checkpoint_id"));
     check_not_null(json_get_string(summary_json, "run_id"));
     check_true(json_get_bool(state_json, "visited_start", false));
@@ -709,7 +709,7 @@ spec("turbo agent runtime remote api") {
       check_remote_jsonrpc_request_fixture(request_json,
                                            "runtime_remote_thread_control.golden.json",
                                            "get_thread_state_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_thread_control.golden.json",
@@ -740,7 +740,7 @@ spec("turbo agent runtime remote api") {
       check_remote_jsonrpc_request_fixture(request_json,
                                            "runtime_remote_thread_control.golden.json",
                                            "update_thread_state_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_thread_control.golden.json",
@@ -772,7 +772,7 @@ spec("turbo agent runtime remote api") {
       check_remote_jsonrpc_request_fixture(request_json,
                                            "runtime_remote_thread_control.golden.json",
                                            "apply_thread_state_patch_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_thread_control.golden.json",
@@ -805,7 +805,7 @@ spec("turbo agent runtime remote api") {
       check_remote_jsonrpc_request_fixture(request_json,
                                            "runtime_remote_thread_control.golden.json",
                                            "apply_command_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_thread_control.golden.json",
@@ -815,7 +815,7 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(state_json);
       check_true(json_type(json_object_get(state_json, "input")) == JSON_ARRAY);
-      check_size_eq(json_array_size(json_object_get(state_json, "input")), 1);
+      check_equal(json_array_size(json_object_get(state_json, "input")), 1);
       check_true(json_get_bool(state_json, "visited_start", false));
 
       json_free(response_json); response_json = NULL;
@@ -834,7 +834,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "thread_observability_index_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_inspect.golden.json",
@@ -843,10 +843,10 @@ spec("turbo agent runtime remote api") {
       check_true(json_type(result_json) == JSON_OBJECT);
       state_json = json_object_get(result_json, "index");
       check_not_null(state_json);
-      check_str_eq(json_get_string(json_object_get(state_json, "thread"), "id"),
+      check_equal(json_get_string(json_object_get(state_json, "thread"), "id"),
                    thread_id);
-      check_str_eq(json_get_string(state_json, "current_status"), "interrupted");
-      check_str_eq(json_get_string(json_object_get(state_json,
+      check_equal(json_get_string(state_json, "current_status"), "interrupted");
+      check_equal(json_get_string(json_object_get(state_json,
                                                                "current_checkpoint_summary"),
                                          "id"),
                    checkpoint_id);
@@ -872,7 +872,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "list_observability_indexes_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_inspect.golden.json",
@@ -882,8 +882,8 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "indexes");
       check_not_null(state_json);
       check_true(json_type(state_json) == JSON_ARRAY);
-      check_size_eq(json_array_size(state_json), 1);
-      check_str_eq(json_get_string(json_object_get(json_array_get(state_json, 0),
+      check_equal(json_array_size(state_json), 1);
+      check_equal(json_get_string(json_object_get(json_array_get(state_json, 0),
                                                                "thread"),
                                          "id"),
                    thread_id);
@@ -903,7 +903,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
                                            "resume_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
@@ -914,9 +914,9 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(summary_json);
       check_not_null(state_json);
-      check_str_eq(json_get_string(summary_json, "thread_id"), thread_id);
-      check_str_eq(json_get_string(summary_json, "status"), "completed");
-      check_str_eq(json_get_string(summary_json, "run_id"), run_id);
+      check_equal(json_get_string(summary_json, "thread_id"), thread_id);
+      check_equal(json_get_string(summary_json, "status"), "completed");
+      check_equal(json_get_string(summary_json, "run_id"), run_id);
       check_true(json_get_bool(state_json, "visited_start", false));
       check_true(json_get_bool(state_json, "visited_end", false));
 
@@ -935,7 +935,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
                                            "fork_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
@@ -946,8 +946,8 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(summary_json);
       check_not_null(state_json);
-      check_str_eq(json_get_string(summary_json, "thread_id"), thread_id);
-      check_str_eq(json_get_string(summary_json, "status"), "completed");
+      check_equal(json_get_string(summary_json, "thread_id"), thread_id);
+      check_equal(json_get_string(summary_json, "status"), "completed");
       check_true(strcmp(json_get_string(summary_json, "run_id"), run_id) != 0);
       check_true(json_get_bool(state_json, "visited_start", false));
       check_true(json_get_bool(state_json, "visited_end", false));
@@ -968,7 +968,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "checkpoint_context_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_inspect.golden.json",
@@ -976,10 +976,10 @@ spec("turbo agent runtime remote api") {
       result_json = json_object_get(response_json, "result");
       state_json = json_object_get(result_json, "context");
       check_not_null(state_json);
-      check_str_eq(json_get_string(json_object_get(state_json, "checkpoint_summary"),
+      check_equal(json_get_string(json_object_get(state_json, "checkpoint_summary"),
                                          "id"),
                    checkpoint_id);
-      check_str_eq(json_get_string(json_object_get(state_json, "thread"), "id"),
+      check_equal(json_get_string(json_object_get(state_json, "thread"), "id"),
                    thread_id);
       check_true(json_type(json_object_get(state_json, "history_events")) ==
                  JSON_ARRAY);
@@ -998,7 +998,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "get_run_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json, "runtime_remote_inspect.golden.json",
                                            "get_run_response");
@@ -1019,7 +1019,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "get_checkpoint_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json, "runtime_remote_inspect.golden.json",
                                            "get_checkpoint_response");
@@ -1040,7 +1040,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "list_checkpoints_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json, "runtime_remote_inspect.golden.json",
                                            "list_checkpoints_response");
@@ -1061,7 +1061,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "load_history_events_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json, "runtime_remote_inspect.golden.json",
                                            "load_history_events_response");
@@ -1082,7 +1082,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "get_checkpoint_trace_events_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json, "runtime_remote_inspect.golden.json",
                                            "get_checkpoint_trace_events_response");
@@ -1103,7 +1103,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_inspect.golden.json",
                                            "get_run_trace_events_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json, "runtime_remote_inspect.golden.json",
                                            "get_run_trace_events_response");
@@ -1135,7 +1135,7 @@ spec("turbo agent runtime remote api") {
                                                  thread2_start_params);
     check_not_null(request_json);
     json_free(thread2_start_params); thread2_start_params = NULL;
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-start-2");
     result_json = json_object_get(response_json, "result");
@@ -1143,8 +1143,8 @@ spec("turbo agent runtime remote api") {
     state_json = json_object_get(result_json, "state");
     check_not_null(summary_json);
     check_not_null(state_json);
-    check_str_eq(json_get_string(summary_json, "thread_id"), thread2_id);
-    check_str_eq(json_get_string(summary_json, "status"), "interrupted");
+    check_equal(json_get_string(summary_json, "thread_id"), thread2_id);
+    check_equal(json_get_string(summary_json, "status"), "interrupted");
     thread2_run_id = remote_strdup(json_get_string(summary_json, "run_id"));
     check_not_null(thread2_run_id);
     json_free(response_json); response_json = NULL;
@@ -1167,7 +1167,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
                                            "thread_command_fork_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
@@ -1177,8 +1177,8 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(summary_json);
       check_not_null(state_json);
-      check_str_eq(json_get_string(summary_json, "thread_id"), thread2_id);
-      check_str_eq(json_get_string(summary_json, "status"), "completed");
+      check_equal(json_get_string(summary_json, "thread_id"), thread2_id);
+      check_equal(json_get_string(summary_json, "status"), "completed");
       check_true(strcmp(json_get_string(summary_json, "run_id"), thread2_run_id) != 0);
       check_true(json_get_bool(state_json, "visited_end", false));
       json_free(response_json); response_json = NULL;
@@ -1203,7 +1203,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
                                            "thread_command_resume_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
@@ -1213,9 +1213,9 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(summary_json);
       check_not_null(state_json);
-      check_str_eq(json_get_string(summary_json, "thread_id"), thread2_id);
-      check_str_eq(json_get_string(summary_json, "status"), "completed");
-      check_str_eq(json_get_string(summary_json, "run_id"), thread2_run_id);
+      check_equal(json_get_string(summary_json, "thread_id"), thread2_id);
+      check_equal(json_get_string(summary_json, "status"), "completed");
+      check_equal(json_get_string(summary_json, "run_id"), thread2_run_id);
       check_true(json_get_bool(state_json, "visited_end", false));
       json_free(response_json); response_json = NULL;
       json_free(request_json); request_json = NULL;
@@ -1250,7 +1250,7 @@ spec("turbo agent runtime remote api") {
       request_json = create_remote_jsonrpc_request("req-start-3", "runtime.start",
                                                    thread3_start_params);
       check_not_null(request_json);
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success(response_json, "req-start-3");
       json_free(response_json); response_json = NULL;
@@ -1267,7 +1267,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
                                            "thread_state_resume_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
@@ -1277,8 +1277,8 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(summary_json);
       check_not_null(state_json);
-      check_str_eq(json_get_string(summary_json, "thread_id"), thread3_id);
-      check_str_eq(json_get_string(summary_json, "status"), "completed");
+      check_equal(json_get_string(summary_json, "thread_id"), thread3_id);
+      check_equal(json_get_string(summary_json, "status"), "completed");
       check_true(json_get_bool(state_json, "patched", false));
       check_true(json_get_bool(state_json, "visited_end", false));
       json_free(response_json); response_json = NULL;
@@ -1315,7 +1315,7 @@ spec("turbo agent runtime remote api") {
       request_json = create_remote_jsonrpc_request("req-start-4", "runtime.start",
                                                    thread4_start_params);
       check_not_null(request_json);
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success(response_json, "req-start-4");
       result_json = json_object_get(response_json, "result");
@@ -1337,7 +1337,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
                                            "thread_state_fork_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
@@ -1347,8 +1347,8 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(summary_json);
       check_not_null(state_json);
-      check_str_eq(json_get_string(summary_json, "thread_id"), thread4_id);
-      check_str_eq(json_get_string(summary_json, "status"), "completed");
+      check_equal(json_get_string(summary_json, "thread_id"), thread4_id);
+      check_equal(json_get_string(summary_json, "status"), "completed");
       check_true(strcmp(json_get_string(summary_json, "run_id"), forked_run_id) != 0);
       check_true(json_get_bool(state_json, "patched", false));
       check_true(json_get_bool(state_json, "visited_end", false));
@@ -1386,7 +1386,7 @@ spec("turbo agent runtime remote api") {
       request_json = create_remote_jsonrpc_request("req-start-5", "runtime.start",
                                                    thread5_start_params);
       check_not_null(request_json);
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success(response_json, "req-start-5");
       json_free(response_json); response_json = NULL;
@@ -1403,7 +1403,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
                                            "thread_state_patch_resume_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
@@ -1413,8 +1413,8 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(summary_json);
       check_not_null(state_json);
-      check_str_eq(json_get_string(summary_json, "thread_id"), thread5_id);
-      check_str_eq(json_get_string(summary_json, "status"), "completed");
+      check_equal(json_get_string(summary_json, "thread_id"), thread5_id);
+      check_equal(json_get_string(summary_json, "status"), "completed");
       check_true(json_get_bool(state_json, "patched_via_state_patch", false));
       check_true(json_get_bool(state_json, "visited_end", false));
       json_free(response_json); response_json = NULL;
@@ -1451,7 +1451,7 @@ spec("turbo agent runtime remote api") {
       request_json = create_remote_jsonrpc_request("req-start-6", "runtime.start",
                                                    thread6_start_params);
       check_not_null(request_json);
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success(response_json, "req-start-6");
       result_json = json_object_get(response_json, "result");
@@ -1473,7 +1473,7 @@ spec("turbo agent runtime remote api") {
       check_not_null(request_json);
       check_remote_jsonrpc_request_fixture(request_json, "runtime_remote_graph_runs.golden.json",
                                            "thread_state_patch_fork_request");
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
@@ -1483,8 +1483,8 @@ spec("turbo agent runtime remote api") {
       state_json = json_object_get(result_json, "state");
       check_not_null(summary_json);
       check_not_null(state_json);
-      check_str_eq(json_get_string(summary_json, "thread_id"), thread6_id);
-      check_str_eq(json_get_string(summary_json, "status"), "completed");
+      check_equal(json_get_string(summary_json, "thread_id"), thread6_id);
+      check_equal(json_get_string(summary_json, "status"), "completed");
       check_true(strcmp(json_get_string(summary_json, "run_id"), thread6_run_id) != 0);
       check_true(json_get_bool(state_json, "patched_via_state_patch", false));
       check_true(json_get_bool(state_json, "visited_end", false));
@@ -1528,7 +1528,7 @@ spec("turbo agent runtime remote api") {
 
     request_json_text = json_serialize(request_json, NULL);
     check_not_null(request_json_text);
-    check_int_eq(
+    check_equal(
         turbo_agent_runtime_remote_dispatch_jsonrpc_text(remote, request_json_text,
                                                          &response_json_text),
         0);
@@ -1560,14 +1560,14 @@ spec("turbo agent runtime remote api") {
     remote = turbo_agent_runtime_remote_create(&config);
     check_not_null(remote);
 
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc_text(remote, "{\"jsonrpc\":",
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc_text(remote, "{\"jsonrpc\":",
                                                                   &response_json_text),
                  0);
     check_not_null(response_json_text);
     response_json = parse_remote_json_text(response_json_text);
     check_true(json_is_null(json_object_get(response_json, "id")));
     check_not_null(json_object_get(response_json, "error"));
-    check_int_eq(json_get_int(json_object_get(response_json, "error"), "code", 0),
+    check_equal(json_get_int(json_object_get(response_json, "error"), "code", 0),
                  -32600);
 
     json_free(response_json); response_json = NULL;
@@ -1595,7 +1595,7 @@ spec("turbo agent runtime remote api") {
     json_object_set_string(params_json, "thread_id", "remote-thread-2");
     request_json = create_remote_jsonrpc_request("req-invalid", "runtime.start", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error_fixture(response_json, "runtime_remote_errors.golden.json",
                                        "invalid_params_response");
@@ -1626,7 +1626,7 @@ spec("turbo agent runtime remote api") {
     json_object_set_string(request_json, "id", "req-invalid-request");
     json_object_set_string(request_json, "method", "runtime.start");
 
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error_fixture(response_json, "runtime_remote_errors.golden.json",
                                        "invalid_request_response");
@@ -1653,7 +1653,7 @@ spec("turbo agent runtime remote api") {
 
     request_json = create_remote_jsonrpc_request("req-unknown", "runtime.noSuchMethod", NULL);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error_fixture(response_json, "runtime_remote_errors.golden.json",
                                        "method_not_found_response");
@@ -1683,7 +1683,7 @@ spec("turbo agent runtime remote api") {
     json_object_set_string(params_json, "graph_name", "remote-skeleton");
     request_json = create_remote_jsonrpc_request("req-internal", "runtime.start", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error_fixture(response_json, "runtime_remote_errors.golden.json",
                                        "internal_error_response");
@@ -1731,7 +1731,7 @@ spec("turbo agent runtime remote api") {
     json_object_add(params_json, "record", record_clone);
     request_json = create_remote_jsonrpc_request("req-memory-put", "memory.putRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-memory-put");
     result_json = json_object_get(response_json, "result");
@@ -1751,7 +1751,7 @@ spec("turbo agent runtime remote api") {
     request_json =
         create_remote_jsonrpc_request("req-memory-validate", "memory.validateRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-memory-validate");
     result_json = json_object_get(response_json, "result");
@@ -1778,7 +1778,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-validate-invalid",
                                                  "memory.validateRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-memory-validate-invalid");
     result_json = json_object_get(response_json, "result");
@@ -1800,7 +1800,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-put-variant", "memory.putRecord",
                                                  params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-memory-put-variant");
     json_free(response_json); response_json = NULL;
@@ -1813,7 +1813,7 @@ spec("turbo agent runtime remote api") {
     json_object_set_string(params_json, "key", "context");
     request_json = create_remote_jsonrpc_request("req-memory-get", "memory.getRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-memory-get");
     result_json = json_object_get(response_json, "result");
@@ -1841,15 +1841,15 @@ spec("turbo agent runtime remote api") {
     request_json =
         create_remote_jsonrpc_request("req-memory-query", "memory.queryRecordsEx", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-memory-query");
     result_json = json_object_get(response_json, "result");
     check_not_null(result_json);
     records_json = json_object_get(result_json, "records");
     check_true(json_type(records_json) == JSON_ARRAY);
-    check_size_eq(json_array_size(records_json), 1);
-    check_str_eq(json_get_string(json_array_get(records_json, 0), "key"),
+    check_equal(json_array_size(records_json), 1);
+    check_equal(json_get_string(json_array_get(records_json, 0), "key"),
                  "zeta");
 
     json_free(response_json); response_json = NULL;
@@ -1862,14 +1862,14 @@ spec("turbo agent runtime remote api") {
     request_json =
         create_remote_jsonrpc_request("req-memory-list", "memory.listRecords", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-memory-list");
     result_json = json_object_get(response_json, "result");
     check_not_null(result_json);
     records_json = json_object_get(result_json, "records");
     check_true(json_type(records_json) == JSON_ARRAY);
-    check_size_eq(json_array_size(records_json), 2);
+    check_equal(json_array_size(records_json), 2);
 
     json_free(response_json); response_json = NULL;
     json_free(request_json); request_json = NULL;
@@ -1882,7 +1882,7 @@ spec("turbo agent runtime remote api") {
     request_json =
         create_remote_jsonrpc_request("req-memory-delete", "memory.deleteRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_success(response_json, "req-memory-delete");
     result_json = json_object_get(response_json, "result");
@@ -1902,7 +1902,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-get-missing", "memory.getRecord",
                                                  params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-get-missing", -32603);
 
@@ -1938,7 +1938,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-invalid", "memory.getRecord",
                                                  params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-invalid", -32602);
 
@@ -1951,7 +1951,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-validate-missing-record",
                                                  "memory.validateRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-validate-missing-record", -32602);
 
@@ -1965,7 +1965,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-validate-record-not-object",
                                                  "memory.validateRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-validate-record-not-object", -32602);
 
@@ -1979,7 +1979,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-delete-missing-namespace",
                                                  "memory.deleteRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-delete-missing-namespace", -32602);
 
@@ -1993,7 +1993,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-delete-missing-key",
                                                  "memory.deleteRecord", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-delete-missing-key", -32602);
 
@@ -2008,7 +2008,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-invalid-sort-by",
                                                  "memory.queryRecordsEx", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-invalid-sort-by", -32602);
 
@@ -2022,7 +2022,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-invalid-id-prefix",
                                                  "memory.queryRecordsEx", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-invalid-id-prefix", -32602);
 
@@ -2036,7 +2036,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-invalid-metadata-scope",
                                                  "memory.queryRecordsEx", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-invalid-metadata-scope", -32602);
 
@@ -2050,7 +2050,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-invalid-metadata-path-prefix",
                                                  "memory.queryRecordsEx", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-invalid-metadata-path-prefix", -32602);
 
@@ -2064,7 +2064,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-invalid-created-after",
                                                  "memory.queryRecordsEx", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-invalid-created-after", -32602);
 
@@ -2078,7 +2078,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-invalid-created-before",
                                                  "memory.queryRecordsEx", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-invalid-created-before", -32602);
 
@@ -2093,7 +2093,7 @@ spec("turbo agent runtime remote api") {
     request_json = create_remote_jsonrpc_request("req-memory-invalid-sort-order",
                                                  "memory.queryRecordsEx", params_json);
     check_not_null(request_json);
-    check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+    check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                  0);
     check_remote_jsonrpc_error(response_json, "req-memory-invalid-sort-order", -32602);
 
@@ -2137,7 +2137,7 @@ spec("turbo agent runtime remote api") {
       request_json = create_remote_jsonrpc_request_from_fixture(
           "runtime_remote_invalid_params.golden.json", cases[i]);
       check_not_null(request_json);
-      check_int_eq(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
       check_remote_jsonrpc_error_fixture(response_json, "runtime_remote_invalid_params.golden.json",
                                          cases[i]);

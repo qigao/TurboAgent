@@ -68,16 +68,12 @@ spec("turbo model provider helpers") {
   describe("provider lookup") {
 
     it("should resolve builtin provider aliases") {
-      check_ptr_eq(turbo_model_provider_by_name("openai"), turbo_model_provider_openai_responses());
-      check_ptr_eq(turbo_model_provider_by_name("responses"),
-                   turbo_model_provider_openai_responses());
-      check_ptr_eq(turbo_model_provider_by_name("chat_completions"),
-                   turbo_model_provider_openai_chat_completions());
-      check_ptr_eq(turbo_model_provider_by_name("openai_compatible_chat"),
-                   turbo_model_provider_openai_compatible_chat_completions());
-      check_ptr_eq(turbo_model_provider_by_name("anthropic"),
-                   turbo_model_provider_anthropic_messages());
-      check_ptr_eq(turbo_model_provider_by_name("missing"), NULL);
+      check_true((turbo_model_provider_by_name("openai")) == (turbo_model_provider_openai_responses()));
+      check_true((turbo_model_provider_by_name("responses")) == (turbo_model_provider_openai_responses()));
+      check_true((turbo_model_provider_by_name("chat_completions")) == (turbo_model_provider_openai_chat_completions()));
+      check_true((turbo_model_provider_by_name("openai_compatible_chat")) == (turbo_model_provider_openai_compatible_chat_completions()));
+      check_true((turbo_model_provider_by_name("anthropic")) == (turbo_model_provider_anthropic_messages()));
+      check_true((turbo_model_provider_by_name("missing")) == (NULL));
     }
   }
 
@@ -98,28 +94,28 @@ spec("turbo model provider helpers") {
     }
 
     it("should select provider-specific env defaults") {
-      check_str_eq(turbo_model_provider_select_api_key(turbo_model_provider_anthropic_messages(),
+      check_equal(turbo_model_provider_select_api_key(turbo_model_provider_anthropic_messages(),
                                                        "sk-openai", "sk-anthropic"),
                    "sk-anthropic");
-      check_str_eq(turbo_model_provider_select_api_key(turbo_model_provider_openai_responses(),
+      check_equal(turbo_model_provider_select_api_key(turbo_model_provider_openai_responses(),
                                                        "sk-openai", "sk-anthropic"),
                    "sk-openai");
 
-      check_str_eq(turbo_model_provider_select_base_url(
+      check_equal(turbo_model_provider_select_base_url(
                        turbo_model_provider_anthropic_messages(), "https://openai.example/v1",
                        "https://anthropic.example", "https://api.openai.com/v1"),
                    "https://anthropic.example");
-      check_str_eq(turbo_model_provider_select_base_url(
+      check_equal(turbo_model_provider_select_base_url(
                        turbo_model_provider_openai_responses(), "https://openai.example/v1",
                        "https://anthropic.example", "https://api.openai.com/v1"),
                    "https://openai.example/v1");
-      check_str_eq(turbo_model_provider_select_base_url(turbo_model_provider_openai_responses(),
+      check_equal(turbo_model_provider_select_base_url(turbo_model_provider_openai_responses(),
                                                         NULL, NULL, "https://api.openai.com/v1"),
                    "https://api.openai.com/v1");
-      check_str_eq(turbo_model_provider_select_endpoint_path(
+      check_equal(turbo_model_provider_select_endpoint_path(
                        turbo_model_provider_anthropic_messages(), NULL),
                    "messages");
-      check_str_eq(turbo_model_provider_select_endpoint_path(
+      check_equal(turbo_model_provider_select_endpoint_path(
                        turbo_model_provider_openai_chat_completions(), "custom/path"),
                    "custom/path");
     }
@@ -132,33 +128,33 @@ spec("turbo model provider helpers") {
       char *system_text = NULL;
 
       check_not_null(messages);
-      check_int_eq(turbo_runtime_json_array_append(
+      check_equal(turbo_runtime_json_array_append(
                        messages, turbo_prompt_message_create_json_value("system", "Rules")),
                    TURBO_RUNTIME_JSON_OK);
-      check_int_eq(turbo_runtime_json_array_append(
+      check_equal(turbo_runtime_json_array_append(
                        messages, turbo_prompt_message_create_json_value("user", "Ping")),
                    TURBO_RUNTIME_JSON_OK);
 
       chat_messages = turbo_model_provider_messages_to_wire_json(
           turbo_model_provider_openai_chat_completions(), messages, NULL);
       check_not_null(chat_messages);
-      check_size_eq(json_array_size(chat_messages), 2);
-      check_str_eq(json_get_string(json_array_get(chat_messages, 0), "role"),
+      check_equal(json_array_size(chat_messages), 2);
+      check_equal(json_get_string(json_array_get(chat_messages, 0), "role"),
                    "system");
 
       responses_messages = turbo_model_provider_messages_to_wire_json(
           turbo_model_provider_openai_responses(), messages, NULL);
       check_not_null(responses_messages);
-      check_size_eq(json_array_size(responses_messages), 2);
-      check_str_eq(json_get_string(json_array_get(responses_messages, 1), "content"),
+      check_equal(json_array_size(responses_messages), 2);
+      check_equal(json_get_string(json_array_get(responses_messages, 1), "content"),
                    "Ping");
 
       anthropic_messages = turbo_model_provider_messages_to_wire_json(
           turbo_model_provider_anthropic_messages(), messages, &system_text);
       check_not_null(anthropic_messages);
-      check_str_eq(system_text, "Rules");
-      check_size_eq(json_array_size(anthropic_messages), 1);
-      check_str_eq(json_get_string(json_array_get(anthropic_messages, 0), "role"),
+      check_equal(system_text, "Rules");
+      check_equal(json_array_size(anthropic_messages), 1);
+      check_equal(json_get_string(json_array_get(anthropic_messages, 0), "role"),
                    "user");
 
       free(system_text);
@@ -260,13 +256,13 @@ spec("turbo model provider helpers") {
       check_not_null(responses_event);
       check_not_null(chat_event);
       check_not_null(anthropic_event);
-      check_str_eq(json_get_string(responses_event, "kind"), "model");
-      check_str_eq(json_get_string(responses_event, "output_text"), "hello");
-      check_size_eq(json_array_size(json_object_get(responses_event, "tool_calls")), 1);
-      check_str_eq(json_get_string(chat_event, "output_text"), "world");
-      check_size_eq(json_array_size(json_object_get(chat_event, "tool_calls")), 1);
-      check_str_eq(json_get_string(anthropic_event, "output_text"), "anth");
-      check_size_eq(json_array_size(json_object_get(anthropic_event, "tool_calls")), 1);
+      check_equal(json_get_string(responses_event, "kind"), "model");
+      check_equal(json_get_string(responses_event, "output_text"), "hello");
+      check_equal(json_array_size(json_object_get(responses_event, "tool_calls")), 1);
+      check_equal(json_get_string(chat_event, "output_text"), "world");
+      check_equal(json_array_size(json_object_get(chat_event, "tool_calls")), 1);
+      check_equal(json_get_string(anthropic_event, "output_text"), "anth");
+      check_equal(json_array_size(json_object_get(anthropic_event, "tool_calls")), 1);
 
       json_free(anthropic_event); anthropic_event = NULL;
       json_free(chat_event); chat_event = NULL;
@@ -300,9 +296,9 @@ spec("turbo model provider helpers") {
       check_not_null(chat_event);
       check_not_null(responses_event);
       check_not_null(anthropic_event);
-      check_str_eq(json_get_string(chat_event, "output_text"), "hi");
-      check_str_eq(json_get_string(responses_event, "output_text"), "yo");
-      check_str_eq(json_get_string(anthropic_event, "output_text"), "anth");
+      check_equal(json_get_string(chat_event, "output_text"), "hi");
+      check_equal(json_get_string(responses_event, "output_text"), "yo");
+      check_equal(json_get_string(anthropic_event, "output_text"), "anth");
 
       json_free(anthropic_event); anthropic_event = NULL;
       json_free(responses_event); responses_event = NULL;
@@ -315,14 +311,14 @@ spec("turbo model provider helpers") {
           "data: [DONE]\n\n";
       model_provider_event_capture_t capture = {0};
 
-      check_int_eq(turbo_model_provider_sse_emit_json_value(
+      check_equal(turbo_model_provider_sse_emit_json_value(
                        turbo_model_provider_openai_chat_completions(), chat_sse, strlen(chat_sse),
                        capture_model_provider_event, &capture),
                     0);
-      check_int_eq(capture.count, 1);
-      check_str_eq(capture.kind, "model");
-      check_str_eq(capture.response_id, "chat_1");
-      check_str_eq(capture.output_text, "hi");
+      check_equal(capture.count, 1);
+      check_equal(capture.kind, "model");
+      check_equal(capture.response_id, "chat_1");
+      check_equal(capture.output_text, "hi");
       free(capture.first_tool_arguments);
       free(capture.output_text);
       free(capture.response_id);
@@ -340,20 +336,20 @@ spec("turbo model provider helpers") {
       const json_value_t *last_event;
 
       check_not_null(log);
-      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
+      check_equal(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
                                                       responses_sse, strlen(responses_sse),
                                                       turbo_event_log_capture_json_value, log),
                    0);
-      check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
-      check_size_eq(turbo_event_log_size(log), 2);
+      check_equal(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
+      check_equal(turbo_event_log_size(log), 2);
 
       last_event = turbo_event_log_get(log, turbo_event_log_size(log) - 1);
       check_not_null(last_event);
-      check_str_eq(turbo_event_kind_json_value(last_event), "model");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_event_kind_json_value(last_event), "model");
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(last_event, "response_id")),
                    "resp_log");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(last_event, "output_text")),
                    "42");
 
@@ -375,25 +371,25 @@ spec("turbo model provider helpers") {
       model_provider_event_capture_t responses_capture = {0};
       model_provider_event_capture_t anthropic_capture = {0};
 
-      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
+      check_equal(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
                                                       responses_sse, strlen(responses_sse),
                                                       capture_model_provider_event,
                                                       &responses_capture),
                    0);
-      check_int_eq(responses_capture.count, 2);
-      check_str_eq(responses_capture.kind, "model");
-      check_str_eq(responses_capture.response_id, "resp_stream");
-      check_str_eq(responses_capture.output_text, "42");
+      check_equal(responses_capture.count, 2);
+      check_equal(responses_capture.kind, "model");
+      check_equal(responses_capture.response_id, "resp_stream");
+      check_equal(responses_capture.output_text, "42");
 
-      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_anthropic_messages(),
+      check_equal(turbo_model_provider_sse_emit_json_value(turbo_model_provider_anthropic_messages(),
                                                       anthropic_sse, strlen(anthropic_sse),
                                                       capture_model_provider_event,
                                                       &anthropic_capture),
                    0);
-      check_int_eq(anthropic_capture.count, 2);
-      check_str_eq(anthropic_capture.kind, "model");
-      check_str_eq(anthropic_capture.response_id, "msg_text");
-      check_str_eq(anthropic_capture.output_text, "ok");
+      check_equal(anthropic_capture.count, 2);
+      check_equal(anthropic_capture.kind, "model");
+      check_equal(anthropic_capture.response_id, "msg_text");
+      check_equal(anthropic_capture.output_text, "ok");
 
       free(anthropic_capture.output_text);
       free(anthropic_capture.response_id);
@@ -422,25 +418,25 @@ spec("turbo model provider helpers") {
       model_provider_event_capture_t responses_capture = {0};
       model_provider_event_capture_t anthropic_capture = {0};
 
-      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
+      check_equal(turbo_model_provider_sse_emit_json_value(turbo_model_provider_openai_responses(),
                                                       responses_sse, strlen(responses_sse),
                                                       capture_model_provider_event,
                                                       &responses_capture),
                    0);
-      check_int_eq(responses_capture.count, 3);
-      check_size_eq(responses_capture.tool_call_count, 1);
-      check_str_eq(responses_capture.response_id, "resp_tool_stream");
-      check_str_eq(responses_capture.first_tool_arguments, "{\"a\":2,\"b\":3}");
+      check_equal(responses_capture.count, 3);
+      check_equal(responses_capture.tool_call_count, 1);
+      check_equal(responses_capture.response_id, "resp_tool_stream");
+      check_equal(responses_capture.first_tool_arguments, "{\"a\":2,\"b\":3}");
 
-      check_int_eq(turbo_model_provider_sse_emit_json_value(turbo_model_provider_anthropic_messages(),
+      check_equal(turbo_model_provider_sse_emit_json_value(turbo_model_provider_anthropic_messages(),
                                                       anthropic_sse, strlen(anthropic_sse),
                                                       capture_model_provider_event,
                                                       &anthropic_capture),
                    0);
-      check_int_eq(anthropic_capture.count, 3);
-      check_size_eq(anthropic_capture.tool_call_count, 1);
-      check_str_eq(anthropic_capture.response_id, "msg_tool");
-      check_str_eq(anthropic_capture.first_tool_arguments, "{\"a\":2,\"b\":3}");
+      check_equal(anthropic_capture.count, 3);
+      check_equal(anthropic_capture.tool_call_count, 1);
+      check_equal(anthropic_capture.response_id, "msg_tool");
+      check_equal(anthropic_capture.first_tool_arguments, "{\"a\":2,\"b\":3}");
 
       free(anthropic_capture.output_text);
       free(anthropic_capture.response_id);
@@ -465,12 +461,12 @@ spec("turbo model provider helpers") {
       json_array_add(choices, choice);
       json_object_add(chat_response, "choices", choices);
 
-      check_int_eq(turbo_model_provider_response_emit_json_value(
+      check_equal(turbo_model_provider_response_emit_json_value(
                        turbo_model_provider_openai_chat_completions(), chat_response,
                        capture_model_provider_event, &capture),
                    0);
-      check_int_eq(capture.count, 1);
-      check_str_eq(capture.kind, "model");
+      check_equal(capture.count, 1);
+      check_equal(capture.kind, "model");
 
       free(capture.output_text);
       free(capture.response_id);
@@ -514,21 +510,21 @@ spec("turbo model provider helpers") {
       event = turbo_model_provider_response_to_event_json_value(
           turbo_model_provider_openai_responses(), responses_response);
       check_not_null(event);
-      check_str_eq(turbo_event_kind_json_value(event), "model");
-      check_str_eq(
+      check_equal(turbo_event_kind_json_value(event), "model");
+      check_equal(
           turbo_runtime_json_value_as_string(
               json_object_get(event, "response_id")),
           "resp_json_value");
-      check_str_eq(
+      check_equal(
           turbo_runtime_json_value_as_string(
               json_object_get(event, "output_text")),
           "hello");
 
       tool_calls = json_object_get(event, "tool_calls");
       check_not_null(tool_calls);
-      check_size_eq(turbo_runtime_json_value_size(tool_calls), 1);
+      check_equal(turbo_runtime_json_value_size(tool_calls), 1);
       first_call = json_array_get(tool_calls, 0);
-      check_str_eq(
+      check_equal(
           turbo_runtime_json_value_as_string(
               json_object_get(first_call, "name")),
           "sum");

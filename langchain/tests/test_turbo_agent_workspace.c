@@ -65,35 +65,35 @@ spec("turbo agent workspace") {
     const char *instructions;
 
     check_not_null(root);
-    check_int_eq(workspace_join(src, sizeof(src), root, "src"), 0);
-    check_int_eq(workspace_join(skills, sizeof(skills), root, "skills"), 0);
-    check_int_eq(workspace_join(skill_dir, sizeof(skill_dir), skills, "repo-review"), 0);
-    check_int_eq(salts_fs_mkdir(src, 0700), 0);
-    check_int_eq(salts_fs_mkdir(skills, 0700), 0);
-    check_int_eq(salts_fs_mkdir(skill_dir, 0700), 0);
-    check_int_eq(workspace_join(root_agents, sizeof(root_agents), root, "AGENTS.md"), 0);
-    check_int_eq(workspace_join(nested_agents, sizeof(nested_agents), src, "AGENTS.md"), 0);
-    check_int_eq(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
-    check_int_eq(workspace_write_text(root_agents, "Root instructions."), 0);
-    check_int_eq(workspace_write_text(nested_agents, "Nested instructions."), 0);
-    check_int_eq(workspace_write_text(skill_path, skill_text), 0);
-    check_int_eq(turbo_tool_registry_add(registry, &read_tool), TURBO_TOOL_OK);
+    check_equal(workspace_join(src, sizeof(src), root, "src"), 0);
+    check_equal(workspace_join(skills, sizeof(skills), root, "skills"), 0);
+    check_equal(workspace_join(skill_dir, sizeof(skill_dir), skills, "repo-review"), 0);
+    check_equal(salts_fs_mkdir(src, 0700), 0);
+    check_equal(salts_fs_mkdir(skills, 0700), 0);
+    check_equal(salts_fs_mkdir(skill_dir, 0700), 0);
+    check_equal(workspace_join(root_agents, sizeof(root_agents), root, "AGENTS.md"), 0);
+    check_equal(workspace_join(nested_agents, sizeof(nested_agents), src, "AGENTS.md"), 0);
+    check_equal(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
+    check_equal(workspace_write_text(root_agents, "Root instructions."), 0);
+    check_equal(workspace_write_text(nested_agents, "Nested instructions."), 0);
+    check_equal(workspace_write_text(skill_path, skill_text), 0);
+    check_equal(turbo_tool_registry_add(registry, &read_tool), TURBO_TOOL_OK);
 
     turbo_agent_workspace_config_init(&config);
     config.workspace_root = root;
     config.working_directory = "src";
-    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_equal(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
     check_not_null(workspace);
-    check_size_eq(turbo_agent_workspace_skill_count(workspace), 1);
-    check_int_eq(turbo_agent_workspace_prepare(workspace, "review this repo", registry,
+    check_equal(turbo_agent_workspace_skill_count(workspace), 1);
+    check_equal(turbo_agent_workspace_prepare(workspace, "review this repo", registry,
                                                "Base instructions.", &selection),
                  TURBO_AGENT_WORKSPACE_OK);
     check_not_null(selection);
-    check_size_eq(turbo_agent_workspace_selection_skill_count(selection), 1);
-    check_str_eq(turbo_agent_workspace_selection_skill_name(selection, 0), "repo-review");
-    check_size_eq(turbo_agent_workspace_selection_tool_count(selection), 1);
-    check_str_eq(turbo_agent_workspace_selection_tool_name(selection, 0), "fs.read");
-    check_size_eq(turbo_tool_registry_count(turbo_agent_workspace_selection_tools(selection)), 1);
+    check_equal(turbo_agent_workspace_selection_skill_count(selection), 1);
+    check_equal(turbo_agent_workspace_selection_skill_name(selection, 0), "repo-review");
+    check_equal(turbo_agent_workspace_selection_tool_count(selection), 1);
+    check_equal(turbo_agent_workspace_selection_tool_name(selection, 0), "fs.read");
+    check_equal(turbo_tool_registry_count(turbo_agent_workspace_selection_tools(selection)), 1);
     instructions = turbo_agent_workspace_selection_instructions(selection);
     check_not_null(strstr(instructions, "Base instructions."));
     check_not_null(strstr(instructions, "Root instructions."));
@@ -106,11 +106,11 @@ spec("turbo agent workspace") {
     agent_config.tool_registry = registry;
     agent = turbo_agent_create_for_workspace(&agent_config, workspace, "review this repo");
     check_not_null(agent);
-    check_size_eq(turbo_agent_tool_count(agent), 1);
+    check_equal(turbo_agent_tool_count(agent), 1);
     turbo_agent_destroy(agent);
     turbo_agent_workspace_destroy(workspace);
     turbo_tool_registry_destroy(registry);
-    check_int_eq(tt_remove_tree(root), 0);
+    check_equal(tt_remove_tree(root), 0);
     free(root);
   }
 
@@ -136,20 +136,20 @@ spec("turbo agent workspace") {
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
 
     check_not_null(root);
-    check_int_eq(workspace_join(skills, sizeof(skills), root, "skills"), 0);
-    check_int_eq(workspace_join(skill_dir, sizeof(skill_dir), skills, "build-helper"), 0);
-    check_int_eq(salts_fs_mkdir(skills, 0700), 0);
-    check_int_eq(salts_fs_mkdir(skill_dir, 0700), 0);
-    check_int_eq(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
-    check_int_eq(workspace_write_text(skill_path, skill_text), 0);
+    check_equal(workspace_join(skills, sizeof(skills), root, "skills"), 0);
+    check_equal(workspace_join(skill_dir, sizeof(skill_dir), skills, "build-helper"), 0);
+    check_equal(salts_fs_mkdir(skills, 0700), 0);
+    check_equal(salts_fs_mkdir(skill_dir, 0700), 0);
+    check_equal(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
+    check_equal(workspace_write_text(skill_path, skill_text), 0);
     policy.allow_custom_tools = 0;
     turbo_agent_workspace_config_init(&config);
     config.workspace_root = root;
     config.policy = &policy;
     config.tool_capabilities = &capability;
     config.tool_capability_count = 1;
-    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
-    check_int_eq(
+    check_equal(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_equal(
         turbo_agent_workspace_prepare(workspace, "build the project", registry, NULL, &selection),
         TURBO_AGENT_WORKSPACE_TOOL_NOT_FOUND);
     check_null(selection);
@@ -157,7 +157,7 @@ spec("turbo agent workspace") {
 
     turbo_agent_workspace_destroy(workspace);
     turbo_tool_registry_destroy(registry);
-    check_int_eq(tt_remove_tree(root), 0);
+    check_equal(tt_remove_tree(root), 0);
     free(root);
   }
 
@@ -179,24 +179,24 @@ spec("turbo agent workspace") {
     turbo_agent_workspace_selection_t *selection = NULL;
 
     check_not_null(root);
-    check_int_eq(workspace_join(skills, sizeof(skills), root, "skills"), 0);
-    check_int_eq(workspace_join(skill_dir, sizeof(skill_dir), skills, "network-helper"), 0);
-    check_int_eq(salts_fs_mkdir(skills, 0700), 0);
-    check_int_eq(salts_fs_mkdir(skill_dir, 0700), 0);
-    check_int_eq(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
-    check_int_eq(workspace_write_text(skill_path, skill_text), 0);
+    check_equal(workspace_join(skills, sizeof(skills), root, "skills"), 0);
+    check_equal(workspace_join(skill_dir, sizeof(skill_dir), skills, "network-helper"), 0);
+    check_equal(salts_fs_mkdir(skills, 0700), 0);
+    check_equal(salts_fs_mkdir(skill_dir, 0700), 0);
+    check_equal(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
+    check_equal(workspace_write_text(skill_path, skill_text), 0);
     policy.allow_network = 0;
     turbo_agent_workspace_config_init(&config);
     config.workspace_root = root;
     config.policy = &policy;
-    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
-    check_int_eq(
+    check_equal(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_equal(
         turbo_agent_workspace_prepare(workspace, "download documentation", NULL, NULL, &selection),
         TURBO_AGENT_WORKSPACE_CAPABILITY_DENIED);
     check_null(selection);
 
     turbo_agent_workspace_destroy(workspace);
-    check_int_eq(tt_remove_tree(root), 0);
+    check_equal(tt_remove_tree(root), 0);
     free(root);
   }
 
@@ -225,7 +225,7 @@ spec("turbo agent workspace") {
 
     check_not_null(root);
     check_not_null(registry);
-    check_int_eq(turbo_tool_registry_add(registry, &tool), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_add(registry, &tool), TURBO_TOOL_OK);
     policy.allow_runtime_tools = 1;
     policy.allow_network = 0;
     turbo_agent_workspace_config_init(&config);
@@ -235,8 +235,8 @@ spec("turbo agent workspace") {
     config.always_tool_count = 1;
     config.tool_capabilities = capabilities;
     config.tool_capability_count = 2;
-    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
-    check_int_eq(
+    check_equal(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_equal(
         turbo_agent_workspace_prepare(workspace, "search remotely", registry, NULL, &selection),
         TURBO_AGENT_WORKSPACE_CAPABILITY_DENIED);
     check_null(selection);
@@ -244,24 +244,24 @@ spec("turbo agent workspace") {
     workspace = NULL;
 
     policy.allow_network = 1;
-    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
-    check_int_eq(
+    check_equal(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_equal(
         turbo_agent_workspace_prepare(workspace, "search remotely", registry, NULL, &selection),
         TURBO_AGENT_WORKSPACE_OK);
     check_not_null(selection);
-    check_size_eq(turbo_agent_workspace_selection_tool_count(selection), 1);
-    check_int_eq(turbo_tool_registry_get_required_capabilities(
+    check_equal(turbo_agent_workspace_selection_tool_count(selection), 1);
+    check_equal(turbo_tool_registry_get_required_capabilities(
                      turbo_agent_workspace_selection_tools(selection), "mcp_demo_search",
                      &required_capabilities, &required_capability_count),
                  TURBO_TOOL_OK);
-    check_size_eq(required_capability_count, 2);
-    check_str_eq(required_capabilities[0], "runtime_tools");
-    check_str_eq(required_capabilities[1], "network");
+    check_equal(required_capability_count, 2);
+    check_equal(required_capabilities[0], "runtime_tools");
+    check_equal(required_capabilities[1], "network");
 
     turbo_agent_workspace_selection_destroy(selection);
     turbo_agent_workspace_destroy(workspace);
     turbo_tool_registry_destroy(registry);
-    check_int_eq(tt_remove_tree(root), 0);
+    check_equal(tt_remove_tree(root), 0);
     free(root);
   }
 
@@ -285,7 +285,7 @@ spec("turbo agent workspace") {
 
     check_not_null(root);
     check_not_null(registry);
-    check_int_eq(turbo_tool_registry_add_v3(registry, &tool), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_add_v3(registry, &tool), TURBO_TOOL_OK);
     policy.allow_custom_tools = 0;
     policy.allow_runtime_tools = 1;
     turbo_agent_workspace_config_init(&config);
@@ -293,8 +293,8 @@ spec("turbo agent workspace") {
     config.policy = &policy;
     config.always_tools = &always_tool;
     config.always_tool_count = 1;
-    check_int_eq(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
-    check_int_eq(
+    check_equal(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
+    check_equal(
         turbo_agent_workspace_prepare(workspace, "use runtime", registry, NULL, &selection),
         TURBO_AGENT_WORKSPACE_OK);
     check_not_null(selection);
@@ -302,7 +302,7 @@ spec("turbo agent workspace") {
     turbo_agent_workspace_selection_destroy(selection);
     turbo_agent_workspace_destroy(workspace);
     turbo_tool_registry_destroy(registry);
-    check_int_eq(tt_remove_tree(root), 0);
+    check_equal(tt_remove_tree(root), 0);
     free(root);
   }
 }

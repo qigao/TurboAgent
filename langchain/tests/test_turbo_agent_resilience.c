@@ -99,22 +99,22 @@ spec("turbo agent resilience") {
     const json_value_t *cost;
 
     check_not_null(agent);
-    check_int_eq(turbo_agent_state_add_user_message(state, "hello"), 0);
+    check_equal(turbo_agent_state_add_user_message(state, "hello"), 0);
     ctx.state = state;
-    check_int_eq(turbo_agent_model_node(&ctx, agent), 0);
-    check_int_eq(transport.calls, 3);
+    check_equal(turbo_agent_model_node(&ctx, agent), 0);
+    check_equal(transport.calls, 3);
     attempts = json_object_get(state, "provider_attempts");
-    check_size_eq(json_array_size(attempts), 3);
-    check_str_eq(json_get_string(json_array_get(attempts, 0), "outcome"),
+    check_equal(json_array_size(attempts), 3);
+    check_equal(json_get_string(json_array_get(attempts, 0), "outcome"),
                  "retry_scheduled");
     usage_records = json_object_get(state, "usage_records");
-    check_size_eq(json_array_size(usage_records), 1);
+    check_equal(json_array_size(usage_records), 1);
     usage = json_array_get(usage_records, 0);
-    check_int_eq((int)json_get_double(usage, "input_tokens", -1), 10);
-    check_int_eq((int)json_get_double(usage, "output_tokens", -1), 2);
-    check_int_eq((int)json_get_double(usage, "total_tokens", -1), 12);
+    check_equal((int)json_get_double(usage, "input_tokens", -1), 10);
+    check_equal((int)json_get_double(usage, "output_tokens", -1), 2);
+    check_equal((int)json_get_double(usage, "total_tokens", -1), 12);
     cost = json_object_get(usage, "cost");
-    check_str_eq(json_get_string(cost, "status"), "unknown");
+    check_equal(json_get_string(cost, "status"), "unknown");
 
     turbo_runtime_json_destroy(state);
     turbo_agent_destroy(agent);
@@ -129,8 +129,8 @@ spec("turbo agent resilience") {
     turbo_agent_state_add_user_message(state, "hello");
     ctx.state = state;
     check_int_ne(turbo_agent_model_node(&ctx, agent), 0);
-    check_int_eq(transport.calls, 1);
-    check_str_eq(turbo_agent_state_model_error_phase(state), "transport");
+    check_equal(transport.calls, 1);
+    check_equal(turbo_agent_state_model_error_phase(state), "transport");
 
     turbo_runtime_json_destroy(state);
     turbo_agent_destroy(agent);
@@ -146,8 +146,8 @@ spec("turbo agent resilience") {
     json_value_t *state = turbo_agent_state_create();
     turbo_graph_exec_ctx_t ctx = {0};
 
-    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
-    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     transport.cancel_source = source;
     agent = resilience_agent(&transport, 3);
     turbo_agent_execution_context_get(&saved);
@@ -156,7 +156,7 @@ spec("turbo agent resilience") {
     turbo_agent_state_add_user_message(state, "hello");
     ctx.state = state;
     check_int_ne(turbo_agent_model_node(&ctx, agent), 0);
-    check_int_eq(transport.calls, 1);
+    check_equal(transport.calls, 1);
     turbo_agent_execution_context_set(&saved);
 
     turbo_runtime_json_destroy(state);

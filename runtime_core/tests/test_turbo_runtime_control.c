@@ -33,12 +33,12 @@ spec("runtime cancellation control") {
     turbo_cancel_source_t *source = NULL;
     turbo_cancel_token_t *token = NULL;
 
-    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
     check_not_null(source);
-    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     check_not_null(token);
-    check_int_eq(turbo_cancel_token_check(token), SALTS_OK);
-    check_int_eq(turbo_cancel_token_reason(token), TURBO_CANCEL_NONE);
+    check_equal(turbo_cancel_token_check(token), SALTS_OK);
+    check_equal(turbo_cancel_token_reason(token), TURBO_CANCEL_NONE);
     check_true(turbo_cancel_token_deadline_mono_ms(token) == UINT64_C(0));
 
     turbo_cancel_token_release(token);
@@ -49,13 +49,13 @@ spec("runtime cancellation control") {
     turbo_cancel_source_t *source = NULL;
     turbo_cancel_token_t *token = NULL;
 
-    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
-    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
-    check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
-    check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_SHUTDOWN), SALTS_EALREADY);
-    check_int_eq(turbo_cancel_token_check(token), SALTS_ECANCELED);
-    check_int_eq(turbo_cancel_token_reason(token), TURBO_CANCEL_USER);
-    check_int_eq(turbo_cancel_source_reason(source), TURBO_CANCEL_USER);
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
+    check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_SHUTDOWN), SALTS_EALREADY);
+    check_equal(turbo_cancel_token_check(token), SALTS_ECANCELED);
+    check_equal(turbo_cancel_token_reason(token), TURBO_CANCEL_USER);
+    check_equal(turbo_cancel_source_reason(source), TURBO_CANCEL_USER);
 
     turbo_cancel_token_release(token);
     turbo_cancel_source_destroy(source);
@@ -69,12 +69,12 @@ spec("runtime cancellation control") {
     turbo_cancel_token_t *token = NULL;
 
     atomic_init(&clock.now_ms, UINT64_C(100));
-    check_int_eq(turbo_cancel_source_create(&config, &source), SALTS_OK);
-    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
-    check_int_eq(turbo_cancel_token_check(token), SALTS_ETIMEDOUT);
-    check_int_eq(turbo_cancel_token_reason(token), TURBO_CANCEL_DEADLINE);
+    check_equal(turbo_cancel_source_create(&config, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_cancel_token_check(token), SALTS_ETIMEDOUT);
+    check_equal(turbo_cancel_token_reason(token), TURBO_CANCEL_DEADLINE);
     check_true(turbo_cancel_token_deadline_mono_ms(token) == UINT64_C(100));
-    check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_EALREADY);
+    check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_EALREADY);
 
     turbo_cancel_token_release(token);
     turbo_cancel_source_destroy(source);
@@ -85,13 +85,13 @@ spec("runtime cancellation control") {
     turbo_cancel_token_t *token = NULL;
     turbo_cancel_token_t *retained = NULL;
 
-    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
-    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     retained = turbo_cancel_token_retain(token);
-    check_ptr_eq(retained, token);
+    check_true((retained) == (token));
 
     turbo_cancel_source_destroy(source);
-    check_int_eq(turbo_cancel_token_check(token), SALTS_OK);
+    check_equal(turbo_cancel_token_check(token), SALTS_OK);
 
     turbo_cancel_token_release(retained);
     turbo_cancel_token_release(token);
@@ -101,10 +101,10 @@ spec("runtime cancellation control") {
     turbo_cancel_source_t *source = NULL;
     turbo_cancel_token_t *token = NULL;
 
-    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
-    check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
-    check_int_eq(turbo_cancel_token_wait(token, 0), TURBO_CANCEL_WAIT_TIMEOUT);
-    check_int_eq(turbo_cancel_token_reason(token), TURBO_CANCEL_NONE);
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_cancel_token_wait(token, 0), TURBO_CANCEL_WAIT_TIMEOUT);
+    check_equal(turbo_cancel_token_reason(token), TURBO_CANCEL_NONE);
 
     turbo_cancel_token_release(token);
     turbo_cancel_source_destroy(source);
@@ -117,11 +117,11 @@ spec("runtime cancellation control") {
     salts_thread_t threads[WAITER_COUNT] = {0};
     int i;
 
-    check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
     for (i = 0; i < WAITER_COUNT; ++i) {
-      check_int_eq(turbo_cancel_source_token(source, &waiters[i].token), SALTS_OK);
+      check_equal(turbo_cancel_source_token(source, &waiters[i].token), SALTS_OK);
       atomic_init(&waiters[i].entered, 0);
-      check_int_eq(salts_thread_create(&threads[i], cancel_waiter_run, &waiters[i]), SALTS_OK);
+      check_equal(salts_thread_create(&threads[i], cancel_waiter_run, &waiters[i]), SALTS_OK);
     }
 
     for (i = 0; i < WAITER_COUNT; ++i) {
@@ -129,12 +129,12 @@ spec("runtime cancellation control") {
         salts_thread_yield();
       }
     }
-    check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_SHUTDOWN), SALTS_OK);
+    check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_SHUTDOWN), SALTS_OK);
 
     for (i = 0; i < WAITER_COUNT; ++i) {
-      check_int_eq(salts_thread_join(&threads[i]), SALTS_OK);
-      check_int_eq(waiters[i].wait_status, TURBO_CANCEL_WAIT_SIGNALED);
-      check_int_eq(waiters[i].reason, TURBO_CANCEL_SHUTDOWN);
+      check_equal(salts_thread_join(&threads[i]), SALTS_OK);
+      check_equal(waiters[i].wait_status, TURBO_CANCEL_WAIT_SIGNALED);
+      check_equal(waiters[i].reason, TURBO_CANCEL_SHUTDOWN);
       turbo_cancel_token_release(waiters[i].token);
     }
     turbo_cancel_source_destroy(source);
@@ -145,8 +145,8 @@ spec("runtime cancellation control") {
                                            0, NULL, NULL};
     turbo_cancel_source_t *source = (turbo_cancel_source_t *)(uintptr_t)1;
 
-    check_int_eq(turbo_cancel_source_create(&config, &source), SALTS_EINVAL);
+    check_equal(turbo_cancel_source_create(&config, &source), SALTS_EINVAL);
     check_null(source);
-    check_int_eq(turbo_cancel_source_cancel(NULL, TURBO_CANCEL_USER), SALTS_EINVAL);
+    check_equal(turbo_cancel_source_cancel(NULL, TURBO_CANCEL_USER), SALTS_EINVAL);
   }
 }

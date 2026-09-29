@@ -73,21 +73,21 @@ spec("TurboWasm tool sandbox") {
     char *output = NULL;
 
     check_not_null(runtime);
-    check_size_eq(turbo_tool_runtime_count(runtime), 1);
-    check_int_eq(turbo_tool_runtime_get_tool(runtime, 0, &tool), TURBO_TOOL_OK);
-    check_str_eq(tool.name, "echo_json");
-    check_str_eq(
+    check_equal(turbo_tool_runtime_count(runtime), 1);
+    check_equal(turbo_tool_runtime_get_tool(runtime, 0, &tool), TURBO_TOOL_OK);
+    check_equal(tool.name, "echo_json");
+    check_equal(
         turbo_runtime_json_value_as_string(turbo_json_object_get(tool.parameters_schema, "type")),
         "object");
-    check_int_eq(turbo_tool_runtime_invoke(runtime, "echo_json", "{\"wasm\":true}", &output),
+    check_equal(turbo_tool_runtime_invoke(runtime, "echo_json", "{\"wasm\":true}", &output),
                  TURBO_TOOL_OK);
-    check_str_eq(output, "{\"wasm\":true}");
+    check_equal(output, "{\"wasm\":true}");
 
     arguments = turbo_json_create_object();
     check_not_null(arguments);
-    check_int_eq(turbo_runtime_json_object_set(arguments, "wasm", turbo_json_create_bool(1)),
+    check_equal(turbo_runtime_json_object_set(arguments, "wasm", turbo_json_create_bool(1)),
                  TURBO_RUNTIME_JSON_OK);
-    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "echo_json", arguments, &result),
+    check_equal(turbo_tool_runtime_invoke_json_value(runtime, "echo_json", arguments, &result),
                  TURBO_TOOL_OK);
     check_true(turbo_runtime_json_value_as_bool(turbo_json_object_get(result, "wasm"), 0));
 
@@ -103,7 +103,7 @@ spec("TurboWasm tool sandbox") {
     config.module_path = LLM_SANDBOX_WASM_TOOL_WASM_PATH;
     runtime = turbo_tool_runtime_default_create(&config);
     check_not_null(runtime);
-    check_size_eq(turbo_tool_runtime_count(runtime), 1);
+    check_equal(turbo_tool_runtime_count(runtime), 1);
     turbo_tool_runtime_destroy(runtime);
   }
 
@@ -131,7 +131,7 @@ spec("TurboWasm tool sandbox") {
                                                  TURBO_WASM_CAP_CORE | TURBO_WASM_CAP_APP, 0, 0, 0);
     check_null(negative);
     check_not_null(empty);
-    check_size_eq(turbo_tool_runtime_count(empty), 0);
+    check_equal(turbo_tool_runtime_count(empty), 0);
     turbo_tool_runtime_destroy(empty);
   }
 
@@ -153,13 +153,13 @@ spec("TurboWasm tool sandbox") {
 
     check_not_null(input_limited);
     check_not_null(output_limited);
-    check_int_eq(turbo_tool_runtime_invoke(input_limited, "echo_json", "{\"long\":true}", &output),
+    check_equal(turbo_tool_runtime_invoke(input_limited, "echo_json", "{\"long\":true}", &output),
                  TURBO_TOOL_ERROR);
     check_null(output);
-    check_int_eq(turbo_tool_runtime_invoke(output_limited, "overflow_output", "{}", &output),
+    check_equal(turbo_tool_runtime_invoke(output_limited, "overflow_output", "{}", &output),
                  TURBO_TOOL_ERROR);
     check_null(output);
-    check_int_eq(turbo_tool_runtime_invoke(output_limited, "fail_negative", "{}", &output),
+    check_equal(turbo_tool_runtime_invoke(output_limited, "fail_negative", "{}", &output),
                  TURBO_TOOL_ERROR);
     check_null(output);
 
@@ -181,7 +181,7 @@ spec("TurboWasm tool sandbox") {
     char *output = NULL;
 
     check_not_null(runtime);
-    check_int_eq(turbo_tool_runtime_invoke(runtime, "grow_echo_json", "{}", &output),
+    check_equal(turbo_tool_runtime_invoke(runtime, "grow_echo_json", "{}", &output),
                  TURBO_TOOL_ERROR);
     check_null(output);
 
@@ -193,7 +193,7 @@ spec("TurboWasm tool sandbox") {
         LLM_SANDBOX_WASM_TOOL_WASM_PATH, TURBO_WASM_CAP_CORE | TURBO_WASM_CAP_APP, 0, 0, 0);
     char *output = NULL;
     check_not_null(runtime);
-    check_int_eq(turbo_tool_runtime_invoke(runtime, "missing", "{}", &output),
+    check_equal(turbo_tool_runtime_invoke(runtime, "missing", "{}", &output),
                  TURBO_TOOL_NOT_FOUND);
     check_null(output);
     turbo_tool_runtime_destroy(runtime);

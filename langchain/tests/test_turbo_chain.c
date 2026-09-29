@@ -136,52 +136,52 @@ static int fake_child_lineage_tool_json_value(const json_value_t *arguments,
   if (!result) {
     return TURBO_TOOL_OUT_OF_MEMORY;
   }
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "ok",
                                          json_create_bool(1)),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "summary",
                                          json_create_string("ok")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "stdout",
                                          json_create_string("")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "stderr",
                                          json_create_string("")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           result, "child_thread_id",
           json_create_string("thr_child")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "child_run_id",
                                          json_create_string(
                                              "run_child")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "child_checkpoint_id",
                                          json_create_null()),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           result, "child_status",
           json_create_string("completed")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           result, "parent_agent_run_id",
           json_create_string("run_parent")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           result, "parent_tool_call_id",
           json_create_string("call_parent")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           result, "parent_tool_name",
           json_create_string("delegate")),
@@ -208,18 +208,18 @@ static int fake_model_invoke(void *user_data, const json_value_t *messages,
   last = json_array_get(messages, json_array_size(messages) - 1);
 
   if (model->call_count == 1) {
-    check_size_eq(json_array_size(messages), 1);
-    check_str_eq(json_get_string(first, "role"), "user");
-    check_str_eq(json_get_string(first, "content"), "Add 41 and 1");
+    check_equal(json_array_size(messages), 1);
+    check_equal(json_get_string(first, "role"), "user");
+    check_equal(json_get_string(first, "content"), "Add 41 and 1");
     out_result->output_text = "Calling sum";
     out_result->tool_name = "sum";
     out_result->tool_arguments_json = "{\"a\":41,\"b\":1}";
     return 0;
   }
 
-  check_size_eq(json_array_size(messages), 3);
-  check_str_eq(json_get_string(last, "role"), "tool");
-  check_str_eq(json_get_string(last, "content"), "42");
+  check_equal(json_array_size(messages), 3);
+  check_equal(json_get_string(last, "role"), "tool");
+  check_equal(json_get_string(last, "content"), "42");
   out_result->output_text = "42";
   out_result->tool_name = NULL;
   out_result->tool_arguments_json = NULL;
@@ -246,11 +246,11 @@ static int fake_model_invoke_json_value(void *user_data, const json_value_t *mes
   last = json_array_get(messages, turbo_runtime_json_value_size(messages) - 1);
 
   if (model->call_count == 1) {
-    check_size_eq(turbo_runtime_json_value_size(messages), 1);
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_size(messages), 1);
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(first, "role")),
                  "user");
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(first, "content")),
                  "Add 41 and 1");
 
@@ -260,8 +260,8 @@ static int fake_model_invoke_json_value(void *user_data, const json_value_t *mes
     check_not_null(args);
     check_not_null(a);
     check_not_null(b);
-    check_int_eq(turbo_runtime_json_object_set(args, "a", a), TURBO_RUNTIME_JSON_OK);
-    check_int_eq(turbo_runtime_json_object_set(args, "b", b), TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_runtime_json_object_set(args, "a", a), TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_runtime_json_object_set(args, "b", b), TURBO_RUNTIME_JSON_OK);
 
     out_result->output_text = "Calling sum";
     out_result->tool_name = "sum";
@@ -269,11 +269,11 @@ static int fake_model_invoke_json_value(void *user_data, const json_value_t *mes
     return 0;
   }
 
-  check_size_eq(turbo_runtime_json_value_size(messages), 3);
-  check_str_eq(turbo_runtime_json_value_as_string(
+  check_equal(turbo_runtime_json_value_size(messages), 3);
+  check_equal(turbo_runtime_json_value_as_string(
                    json_object_get(last, "role")),
                "tool");
-  check_str_eq(turbo_runtime_json_value_as_string(
+  check_equal(turbo_runtime_json_value_as_string(
                    json_object_get(last, "content")),
                "42");
   out_result->output_text = "42";
@@ -300,7 +300,7 @@ static int fake_model_invoke_json_value_child_lineage(
   if (model->call_count == 1) {
     args = json_create_object();
     check_not_null(args);
-    check_int_eq(
+    check_equal(
         turbo_runtime_json_object_set(args, "input",
                                            json_create_string(
                                                "delegate")),
@@ -317,7 +317,7 @@ static int fake_model_invoke_json_value_child_lineage(
       json_object_get(last, "role"));
   last_content = turbo_runtime_json_value_as_string(
       json_object_get(last, "content"));
-  check_str_eq(last_role, "tool");
+  check_equal(last_role, "tool");
   check_true(last_content != NULL);
   check_true(strstr(last_content, "child_run_id") != NULL);
   out_result->output_text = "done";
@@ -340,11 +340,11 @@ spec("turbo chain runtime") {
     };
 
     check_not_null(chain);
-    check_int_eq(turbo_chain_add_model_step(chain, "first", &model, NULL), TURBO_CHAIN_OK);
-    check_int_eq(turbo_chain_add_model_step(chain, "second", &model, NULL), TURBO_CHAIN_OK);
+    check_equal(turbo_chain_add_model_step(chain, "first", &model, NULL), TURBO_CHAIN_OK);
+    check_equal(turbo_chain_add_model_step(chain, "second", &model, NULL), TURBO_CHAIN_OK);
 
     turbo_chain_destroy(chain);
-    check_int_eq(free_count, 0);
+    check_equal(free_count, 0);
   }
 
   describe("prompt rendering") {
@@ -357,19 +357,19 @@ spec("turbo chain runtime") {
 
       check_not_null(chain);
       check_not_null(state);
-      check_int_eq(turbo_chain_state_input_set_string(state, "task", "read README"),
+      check_equal(turbo_chain_state_input_set_string(state, "task", "read README"),
                    TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
                                                "Please {{task}} now."),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_run(chain, state), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_run(chain, state), TURBO_CHAIN_OK);
 
       messages = turbo_chain_state_messages(state);
-      check_size_eq(json_array_size(messages), 1);
+      check_equal(json_array_size(messages), 1);
       msg = json_array_get(messages, 0);
-      check_str_eq(json_get_string(msg, "role"), "user");
-      check_str_eq(json_get_string(msg, "content"), "Please read README now.");
+      check_equal(json_get_string(msg, "role"), "user");
+      check_equal(json_get_string(msg, "content"), "Please read README now.");
 
       json_free(state); state = NULL;
       turbo_chain_destroy(chain);
@@ -391,23 +391,23 @@ spec("turbo chain runtime") {
       check_not_null(input);
       task = json_create_string("read README");
       check_not_null(task);
-      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input,
+      check_equal(turbo_runtime_json_object_set((json_value_t *)input,
                                                       "task", task),
                    TURBO_RUNTIME_JSON_OK);
 
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
                                                "Please {{task}} now."),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
 
       messages = json_object_get(result, "messages");
       check_not_null(messages);
-      check_size_eq(turbo_runtime_json_value_size(messages), 1);
+      check_equal(turbo_runtime_json_value_size(messages), 1);
       message = json_array_get(messages, 0);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(message, "role")),
                    "user");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(message, "content")),
                    "Please read README now.");
 
@@ -447,36 +447,36 @@ spec("turbo chain runtime") {
       check_not_null(chain);
       check_not_null(tools);
       check_not_null(state);
-      check_int_eq(turbo_chain_state_input_set_string(state, "a", "41"), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_state_input_set_string(state, "b", "1"), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_state_input_set_string(state, "a", "41"), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_state_input_set_string(state, "b", "1"), TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
+      check_equal(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
                                                "Add {{a}} and {{b}}"),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "planner", &model, tools),
+      check_equal(turbo_chain_add_model_step(chain, "planner", &model, tools),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools),
+      check_equal(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "finalizer", &model, tools),
                    TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run(chain, state), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_run(chain, state), TURBO_CHAIN_OK);
 
-      check_int_eq(model_state.call_count, 2);
-      check_str_eq(turbo_chain_state_last_output_text(state), "42");
-      check_ptr_eq(turbo_chain_state_pending_tool_name(state), NULL);
+      check_equal(model_state.call_count, 2);
+      check_equal(turbo_chain_state_last_output_text(state), "42");
+      check_true((turbo_chain_state_pending_tool_name(state)) == (NULL));
 
       messages = turbo_chain_state_messages(state);
-      check_size_eq(json_array_size(messages), 4);
-      check_str_eq(json_get_string(json_array_get(messages, 1), "content"),
+      check_equal(json_array_size(messages), 4);
+      check_equal(json_get_string(json_array_get(messages, 1), "content"),
                    "Calling sum");
-      check_str_eq(json_get_string(json_array_get(messages, 2), "content"), "42");
-      check_str_eq(json_get_string(json_array_get(messages, 3), "content"), "42");
+      check_equal(json_get_string(json_array_get(messages, 2), "content"), "42");
+      check_equal(json_get_string(json_array_get(messages, 3), "content"), "42");
 
       tool_results = turbo_chain_state_tool_results(state);
       check_not_null(tool_results);
-      check_size_eq(json_array_size(tool_results), 1);
-      check_str_eq(json_get_string(json_array_get(tool_results, 0), "name"), "sum");
+      check_equal(json_array_size(tool_results), 1);
+      check_equal(json_get_string(json_array_get(tool_results, 0), "name"), "sum");
 
       json_free(state); state = NULL;
       turbo_tool_registry_destroy(tools);
@@ -513,35 +513,35 @@ spec("turbo chain runtime") {
       check_not_null(chain);
       check_not_null(tools);
       check_not_null(state);
-      check_int_eq(turbo_chain_state_input_set_string(state, "a", "41"), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_state_input_set_string(state, "b", "1"), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_state_input_set_string(state, "a", "41"), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_state_input_set_string(state, "b", "1"), TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
+      check_equal(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
                                                "Add {{a}} and {{b}}"),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "planner", &model, tools),
+      check_equal(turbo_chain_add_model_step(chain, "planner", &model, tools),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools),
+      check_equal(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "finalizer", &model, tools),
                    TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run(chain, state), TURBO_CHAIN_OK);
-      check_int_eq(model_state.call_count, 2);
+      check_equal(turbo_chain_run(chain, state), TURBO_CHAIN_OK);
+      check_equal(model_state.call_count, 2);
 
       tool_requests = turbo_chain_state_tool_requests(state);
-      check_size_eq(json_array_size(tool_requests), 1);
+      check_equal(json_array_size(tool_requests), 1);
       arguments = json_object_get(json_array_get(tool_requests, 0), "arguments");
       check_not_null(arguments);
-      check_int_eq((int)json_get_double(arguments, "a", 0), 41);
-      check_int_eq((int)json_get_double(arguments, "b", 0), 1);
+      check_equal((int)json_get_double(arguments, "a", 0), 41);
+      check_equal((int)json_get_double(arguments, "b", 0), 1);
 
       tool_results = turbo_chain_state_tool_results(state);
-      check_size_eq(json_array_size(tool_results), 1);
+      check_equal(json_array_size(tool_results), 1);
       output_value = json_object_get(json_array_get(tool_results, 0), "output_value");
       check_not_null(output_value);
-      check_int_eq((int)json_number(output_value), 42);
-      check_str_eq(json_get_string(json_array_get(turbo_chain_state_messages(state), 2),
+      check_equal((int)json_number(output_value), 42);
+      check_equal(json_get_string(json_array_get(turbo_chain_state_messages(state), 2),
                                          "content"),
                    "42");
 
@@ -590,34 +590,34 @@ spec("turbo chain runtime") {
 
       input = json_object_get(state, "input");
       check_not_null(input);
-      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input, "a",
+      check_equal(turbo_runtime_json_object_set((json_value_t *)input, "a",
                                                       a_value),
                    TURBO_RUNTIME_JSON_OK);
-      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input, "b",
+      check_equal(turbo_runtime_json_object_set((json_value_t *)input, "b",
                                                       b_value),
                    TURBO_RUNTIME_JSON_OK);
 
-      check_int_eq(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
+      check_equal(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
                                                "Add {{a}} and {{b}}"),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "planner", &model, tools),
+      check_equal(turbo_chain_add_model_step(chain, "planner", &model, tools),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools),
+      check_equal(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "finalizer", &model, tools),
                    TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
-      check_int_eq(model_state.call_count, 2);
+      check_equal(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
+      check_equal(model_state.call_count, 2);
 
       tool_requests = json_object_get(result, "tool_requests");
       check_not_null(tool_requests);
-      check_size_eq(turbo_runtime_json_value_size(tool_requests), 1);
+      check_equal(turbo_runtime_json_value_size(tool_requests), 1);
       tool_request = json_array_get(tool_requests, 0);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_request, "name")),
                    "sum");
-      check_int_eq((int)turbo_runtime_json_value_as_int64(
+      check_equal((int)turbo_runtime_json_value_as_int64(
                        json_object_get(
                            json_object_get(tool_request, "arguments"), "a"),
                        0),
@@ -625,16 +625,16 @@ spec("turbo chain runtime") {
 
       tool_results = json_object_get(result, "tool_results");
       check_not_null(tool_results);
-      check_size_eq(turbo_runtime_json_value_size(tool_results), 1);
+      check_equal(turbo_runtime_json_value_size(tool_results), 1);
       tool_result = json_array_get(tool_results, 0);
-      check_int_eq((int)turbo_runtime_json_value_as_int64(
+      check_equal((int)turbo_runtime_json_value_as_int64(
                        json_object_get(tool_result, "output_value"), 0),
                    42);
 
       messages = json_object_get(result, "messages");
       check_not_null(messages);
-      check_size_eq(turbo_runtime_json_value_size(messages), 4);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_size(messages), 4);
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(
                            json_array_get(messages, 2), "content")),
                    "42");
@@ -653,14 +653,14 @@ spec("turbo chain runtime") {
 
       check_not_null(chain);
       check_not_null(state);
-      check_int_eq(turbo_chain_add_json_value_step(chain, "custom", custom_json_value_append_message, NULL, NULL),
+      check_equal(turbo_chain_add_json_value_step(chain, "custom", custom_json_value_append_message, NULL, NULL),
                    TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_run_json_value(chain, state, &result), TURBO_CHAIN_OK);
       messages = json_object_get(result, "messages");
       check_not_null(messages);
-      check_size_eq(turbo_runtime_json_value_size(messages), 1);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_size(messages), 1);
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(
                            json_array_get(messages, 0), "content")),
                    "custom bind");
@@ -702,30 +702,30 @@ spec("turbo chain runtime") {
 
       input = json_object_get(state, "input");
       check_not_null(input);
-      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input, "a",
+      check_equal(turbo_runtime_json_object_set((json_value_t *)input, "a",
                                                       json_create_string("41")),
                    TURBO_RUNTIME_JSON_OK);
-      check_int_eq(turbo_runtime_json_object_set((json_value_t *)input, "b",
+      check_equal(turbo_runtime_json_object_set((json_value_t *)input, "b",
                                                       json_create_string("1")),
                    TURBO_RUNTIME_JSON_OK);
 
-      check_int_eq(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
+      check_equal(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user",
                                                "Add {{a}} and {{b}}"),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_json_value_stream(chain, state, capture_chain_event, &capture, &result),
+      check_equal(turbo_chain_run_json_value_stream(chain, state, capture_chain_event, &capture, &result),
                    TURBO_CHAIN_OK);
       check_not_null(result);
-      check_int_eq(model_state.call_count, 2);
-      check_int_eq(capture.count, 3);
-      check_int_eq(capture.model_count, 2);
-      check_int_eq(capture.tool_result_count, 1);
-      check_str_eq(capture.last_kind, "model");
-      check_str_eq(capture.last_output_text, "42");
+      check_equal(model_state.call_count, 2);
+      check_equal(capture.count, 3);
+      check_equal(capture.model_count, 2);
+      check_equal(capture.tool_result_count, 1);
+      check_equal(capture.last_kind, "model");
+      check_equal(capture.last_output_text, "42");
 
       free(capture.last_tool_name);
       free(capture.last_output_text);
@@ -765,21 +765,21 @@ spec("turbo chain runtime") {
       check_not_null(tools);
       check_not_null(log);
       check_not_null(state);
-      check_int_eq(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user", "Add 41 and 1"),
+      check_equal(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user", "Add 41 and 1"),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_json_value_log(chain, state, log, &result), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_run_json_value_log(chain, state, log, &result), TURBO_CHAIN_OK);
       check_not_null(result);
-      check_int_eq(model_state.call_count, 2);
-      check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
-      check_size_eq(turbo_event_log_size(log), 3);
-      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 0)), "model");
-      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 1)), "tool_result");
-      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 2)), "model");
+      check_equal(model_state.call_count, 2);
+      check_equal(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
+      check_equal(turbo_event_log_size(log), 3);
+      check_equal(turbo_event_kind_json_value(turbo_event_log_get(log, 0)), "model");
+      check_equal(turbo_event_kind_json_value(turbo_event_log_get(log, 1)), "tool_result");
+      check_equal(turbo_event_kind_json_value(turbo_event_log_get(log, 2)), "model");
 
       turbo_runtime_json_destroy(result);
       turbo_runtime_json_destroy(state);
@@ -818,39 +818,39 @@ spec("turbo chain runtime") {
       check_not_null(tools);
       check_not_null(log);
       check_not_null(state);
-      check_int_eq(turbo_tool_registry_add(tools, &delegate_tool), TURBO_TOOL_OK);
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user", "delegate"),
+      check_equal(turbo_tool_registry_add(tools, &delegate_tool), TURBO_TOOL_OK);
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user", "delegate"),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
 
-      check_int_eq(turbo_chain_run_json_value_log(chain, state, log, &result), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_run_json_value_log(chain, state, log, &result), TURBO_CHAIN_OK);
       check_not_null(result);
-      check_int_eq(model_state.call_count, 2);
-      check_size_eq(turbo_event_log_size(log), 3);
+      check_equal(model_state.call_count, 2);
+      check_equal(turbo_event_log_size(log), 3);
 
       tool_event = turbo_event_log_get(log, 1);
-      check_str_eq(turbo_event_kind_json_value(tool_event), "tool_result");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_event_kind_json_value(tool_event), "tool_result");
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "child_thread_id")),
                    "thr_child");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "child_run_id")),
                    "run_child");
-      check_int_eq(json_type(
+      check_equal(json_type(
                        json_object_get(tool_event, "child_checkpoint_id")),
                    JSON_NULL);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "child_status")),
                    "completed");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "parent_agent_run_id")),
                    "run_parent");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "parent_tool_call_id")),
                    "call_parent");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "parent_tool_name")),
                    "delegate");
 

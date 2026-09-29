@@ -186,7 +186,7 @@ spec("turbo agent planner tools") {
     int invoke_result;
 
     check_not_null(registry);
-    check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     agent_config.model = "gpt-5.4";
     agent_config.transport_fn = planner_tool_test_transport;
     agent_config.transport_user_data = &state;
@@ -202,13 +202,13 @@ spec("turbo agent planner tools") {
                                                &result_state);
     check_true(state.saw_tool_schema);
     check_not_null(result_state);
-    check_size_eq(state.tool_calls, 1);
+    check_equal(state.tool_calls, 1);
     check_true(state.saw_tool_result);
-    check_size_eq(state.transport_calls, 3);
-    check_int_eq(invoke_result, 0);
+    check_equal(state.transport_calls, 3);
+    check_equal(invoke_result, 0);
     text = turbo_agent_app_result_text(result_state);
-    check_str_eq(text, "step done");
-    check_str_eq(json_get_string(summary, "status"), "completed");
+    check_equal(text, "step done");
+    check_equal(json_get_string(summary, "status"), "completed");
 
     free(text);
     turbo_runtime_json_destroy(summary);
@@ -237,7 +237,7 @@ spec("turbo agent planner tools") {
     definition.strict = 1;
     definition.handler = planner_tool_test_handler;
     definition.user_data = &state;
-    check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     agent_config.model = "gpt-5.4";
     agent_config.transport_fn = replanner_tool_test_transport;
     agent_config.transport_user_data = &state;
@@ -249,12 +249,12 @@ spec("turbo agent planner tools") {
     app = turbo_agent_app_create(&app_config);
     check_not_null(app);
 
-    check_int_eq(turbo_agent_app_invoke_text(app, "recover after failure", NULL, &text, &summary),
+    check_equal(turbo_agent_app_invoke_text(app, "recover after failure", NULL, &text, &summary),
                  0);
-    check_str_eq(text, "recovered");
-    check_str_eq(json_get_string(summary, "status"), "completed");
-    check_size_eq(state.transport_calls, 5);
-    check_size_eq(state.tool_calls, 1);
+    check_equal(text, "recovered");
+    check_equal(json_get_string(summary, "status"), "completed");
+    check_equal(state.transport_calls, 5);
+    check_equal(state.tool_calls, 1);
     check_true(state.saw_tool_schema);
     check_true(state.saw_tool_result);
 
@@ -284,7 +284,7 @@ spec("turbo agent planner tools") {
     definition.strict = 1;
     definition.handler = planner_tool_test_handler;
     definition.user_data = &state;
-    check_int_eq(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     agent_config.model = "gpt-5.4";
     agent_config.transport_fn = executor_tool_test_transport;
     agent_config.transport_user_data = &state;
@@ -296,12 +296,12 @@ spec("turbo agent planner tools") {
     app = turbo_agent_app_create(&app_config);
     check_not_null(app);
 
-    check_int_eq(
+    check_equal(
         turbo_agent_app_invoke_text(app, "use a tool while executing", NULL, &text, &summary), 0);
-    check_str_eq(text, "executor tool done");
-    check_str_eq(json_get_string(summary, "status"), "completed");
-    check_size_eq(state.transport_calls, 3);
-    check_size_eq(state.tool_calls, 1);
+    check_equal(text, "executor tool done");
+    check_equal(json_get_string(summary, "status"), "completed");
+    check_equal(state.transport_calls, 3);
+    check_equal(state.tool_calls, 1);
     check_true(state.saw_tool_schema);
     check_true(state.saw_tool_result);
 

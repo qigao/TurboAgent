@@ -123,7 +123,7 @@ static int stop_and_resume_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   const char *next_node = (const char *)user_data;
 
   json_object_set_bool(ctx->state, "needs_review", true);
-  check_int_eq(turbo_graph_ctx_set_next(ctx, next_node), TURBO_GRAPH_EXEC_OK);
+  check_equal(turbo_graph_ctx_set_next(ctx, next_node), TURBO_GRAPH_EXEC_OK);
   turbo_graph_ctx_stop(ctx);
   return 0;
 }
@@ -181,7 +181,7 @@ static void capture_checkpoint_copy(const turbo_graph_checkpoint_t *checkpoint, 
 
   serialized = turbo_graph_checkpoint_serialize(checkpoint, &len);
   check_not_null(serialized);
-  check_int_eq(turbo_graph_checkpoint_deserialize(serialized, len, out_checkpoint),
+  check_equal(turbo_graph_checkpoint_deserialize(serialized, len, out_checkpoint),
                TURBO_GRAPH_EXEC_OK);
   json_serialize_free(serialized);
 }
@@ -223,16 +223,16 @@ spec("turbo graph runtime") {
       string_payload_t end = {"end"};
 
       check_not_null(graph);
-      check_int_eq(turbo_graph_add_node(graph, "start", write_phase_node, &start),
+      check_equal(turbo_graph_add_node(graph, "start", write_phase_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "end", write_phase_node, &end),
+      check_equal(turbo_graph_add_node(graph, "end", write_phase_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
-      check_size_eq(turbo_graph_node_count(graph), 2);
-      check_size_eq(turbo_graph_edge_count(graph), 1);
-      check_str_eq(turbo_graph_get_entry(graph), "start");
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_node_count(graph), 2);
+      check_equal(turbo_graph_edge_count(graph), 1);
+      check_equal(turbo_graph_get_entry(graph), "start");
 
       turbo_graph_destroy(graph);
     }
@@ -242,9 +242,9 @@ spec("turbo graph runtime") {
       string_payload_t node = {"x"};
 
       check_not_null(graph);
-      check_int_eq(turbo_graph_add_node(graph, "dup", write_phase_node, &node),
+      check_equal(turbo_graph_add_node(graph, "dup", write_phase_node, &node),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "dup", write_phase_node, &node),
+      check_equal(turbo_graph_add_node(graph, "dup", write_phase_node, &node),
                    TURBO_GRAPH_EXEC_DUPLICATE_NODE);
 
       turbo_graph_destroy(graph);
@@ -263,23 +263,23 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(graph, "start", write_phase_node, &start),
+      check_equal(turbo_graph_add_node(graph, "start", write_phase_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "middle", write_phase_node, &middle),
+      check_equal(turbo_graph_add_node(graph, "middle", write_phase_node, &middle),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "end", write_phase_node, &end),
+      check_equal(turbo_graph_add_node(graph, "end", write_phase_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "start", "middle", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "start", "middle", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "middle", "end", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "middle", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run(graph, state, NULL, &result), TURBO_GRAPH_EXEC_OK);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_OK);
-      check_str_eq(result.last_node, "end");
+      check_equal(turbo_graph_run(graph, state, NULL, &result), TURBO_GRAPH_EXEC_OK);
+      check_equal(result.status, TURBO_GRAPH_EXEC_OK);
+      check_equal(result.last_node, "end");
       check_null(result.next_node);
-      check_size_eq(result.steps, 3);
+      check_equal(result.steps, 3);
       check_true(json_get_bool(state, "visited_end", false));
 
       json_free(state); state = NULL;
@@ -297,22 +297,22 @@ spec("turbo graph runtime") {
       check_not_null(state);
       json_object_set_string(state, "mode", "tool");
 
-      check_int_eq(turbo_graph_add_node(graph, "router", router_node, NULL),
+      check_equal(turbo_graph_add_node(graph, "router", router_node, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "tool", write_phase_node, &tool),
+      check_equal(turbo_graph_add_node(graph, "tool", write_phase_node, &tool),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "done", write_phase_node, &done),
+      check_equal(turbo_graph_add_node(graph, "done", write_phase_node, &done),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(
+      check_equal(
           turbo_graph_add_edge(graph, "router", "tool", predicate_mode_equals, "tool"),
           TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "router", "done", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "router", "done", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "router"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "router"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run(graph, state, NULL, &result), TURBO_GRAPH_EXEC_OK);
-      check_str_eq(result.last_node, "tool");
-      check_size_eq(result.steps, 2);
+      check_equal(turbo_graph_run(graph, state, NULL, &result), TURBO_GRAPH_EXEC_OK);
+      check_equal(result.last_node, "tool");
+      check_equal(result.steps, 2);
       check_true(json_get_bool(state, "visited_tool", false));
 
       json_free(state); state = NULL;
@@ -328,18 +328,18 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(graph, "start", override_node, NULL),
+      check_equal(turbo_graph_add_node(graph, "start", override_node, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "chosen", write_phase_node, &chosen),
+      check_equal(turbo_graph_add_node(graph, "chosen", write_phase_node, &chosen),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "skipped", write_phase_node, &skipped),
+      check_equal(turbo_graph_add_node(graph, "skipped", write_phase_node, &skipped),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "start", "skipped", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "start", "skipped", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run(graph, state, NULL, &result), TURBO_GRAPH_EXEC_OK);
-      check_str_eq(result.last_node, "chosen");
+      check_equal(turbo_graph_run(graph, state, NULL, &result), TURBO_GRAPH_EXEC_OK);
+      check_equal(result.last_node, "chosen");
       check_true(json_get_bool(state, "visited_chosen", false));
 
       json_free(state); state = NULL;
@@ -356,23 +356,23 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(graph, "A", write_phase_node, &a),
+      check_equal(turbo_graph_add_node(graph, "A", write_phase_node, &a),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "B", write_phase_node, &b),
+      check_equal(turbo_graph_add_node(graph, "B", write_phase_node, &b),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "A", "B", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "A", "B", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "B", "A", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "B", "A", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "A"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "A"), TURBO_GRAPH_EXEC_OK);
 
       options.max_steps = 2;
-      check_int_eq(turbo_graph_run(graph, state, &options, &result),
+      check_equal(turbo_graph_run(graph, state, &options, &result),
                    TURBO_GRAPH_EXEC_STEP_LIMIT);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_STEP_LIMIT);
-      check_str_eq(result.last_node, "B");
-      check_str_eq(result.next_node, "A");
-      check_size_eq(result.steps, 2);
+      check_equal(result.status, TURBO_GRAPH_EXEC_STEP_LIMIT);
+      check_equal(result.last_node, "B");
+      check_equal(result.next_node, "A");
+      check_equal(result.steps, 2);
       check_true(json_get_bool(state, "visited_B", false));
 
       json_free(state); state = NULL;
@@ -392,27 +392,27 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_json_value_node(
+      check_equal(turbo_graph_add_json_value_node(
                        graph, "start", write_phase_json_value_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"),
+      check_equal(turbo_graph_set_entry(graph, "start"),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
-      check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
-      check_int_eq(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER),
+      check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+      check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+      check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER),
                    SALTS_OK);
 
       options.checkpoint_cb = capture_checkpoint;
       options.checkpoint_user_data = &capture;
-      check_int_eq(turbo_graph_run_json_value_stream_controlled(
+      check_equal(turbo_graph_run_json_value_stream_controlled(
                        graph, state, &options, token, NULL, NULL, &result,
                        &result_state),
                    TURBO_GRAPH_EXEC_CANCELLED);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_CANCELLED);
+      check_equal(result.status, TURBO_GRAPH_EXEC_CANCELLED);
       check_null(result.last_node);
-      check_str_eq(result.next_node, "start");
-      check_size_eq(result.steps, 0);
-      check_int_eq(capture.count, 1);
+      check_equal(result.next_node, "start");
+      check_equal(result.steps, 0);
+      check_equal(capture.count, 1);
       check_false(turbo_runtime_json_value_as_bool(
           json_object_get(result_state, "visited_start"), 0));
 
@@ -440,44 +440,44 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_cancel_source_create(NULL, &source), SALTS_OK);
-      check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
+      check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+      check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
       start.source = source;
       start.value = "start";
 
-      check_int_eq(turbo_graph_add_json_value_node(
+      check_equal(turbo_graph_add_json_value_node(
                        graph, "start", cancel_after_write_json_value_node,
                        &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(
+      check_equal(turbo_graph_add_json_value_node(
                        graph, "end", write_phase_json_value_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"),
+      check_equal(turbo_graph_set_entry(graph, "start"),
                    TURBO_GRAPH_EXEC_OK);
 
       options.checkpoint_cb = capture_checkpoint_copy;
       options.checkpoint_user_data = &checkpoint;
-      check_int_eq(turbo_graph_run_json_value_stream_controlled(
+      check_equal(turbo_graph_run_json_value_stream_controlled(
                        graph, state, &options, token, NULL, NULL,
                        &cancelled_result, &cancelled_state),
                    TURBO_GRAPH_EXEC_CANCELLED);
-      check_str_eq(cancelled_result.last_node, "start");
-      check_str_eq(cancelled_result.next_node, "end");
-      check_size_eq(cancelled_result.steps, 1);
+      check_equal(cancelled_result.last_node, "start");
+      check_equal(cancelled_result.next_node, "end");
+      check_equal(cancelled_result.steps, 1);
       check_not_null(checkpoint);
       check_true(turbo_runtime_json_value_as_bool(
           json_object_get(cancelled_state, "visited_start"), 0));
       check_false(turbo_runtime_json_value_as_bool(
           json_object_get(cancelled_state, "visited_end"), 0));
 
-      check_int_eq(turbo_graph_run_checkpoint_json_value(
+      check_equal(turbo_graph_run_checkpoint_json_value(
                        graph, checkpoint, NULL, &resumed_result,
                        &resumed_state),
                    TURBO_GRAPH_EXEC_OK);
-      check_str_eq(resumed_result.last_node, "end");
-      check_size_eq(resumed_result.steps, 2);
+      check_equal(resumed_result.last_node, "end");
+      check_equal(resumed_result.steps, 2);
       check_true(turbo_runtime_json_value_as_bool(
           json_object_get(resumed_state, "visited_end"), 0));
 
@@ -504,21 +504,21 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_json_value_node(
+      check_equal(turbo_graph_add_json_value_node(
                        graph, "start", write_phase_json_value_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"),
+      check_equal(turbo_graph_set_entry(graph, "start"),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_cancel_source_create(&config, &source), SALTS_OK);
-      check_int_eq(turbo_cancel_source_token(source, &token), SALTS_OK);
+      check_equal(turbo_cancel_source_create(&config, &source), SALTS_OK);
+      check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
 
-      check_int_eq(turbo_graph_run_json_value_stream_controlled(
+      check_equal(turbo_graph_run_json_value_stream_controlled(
                        graph, state, NULL, token, NULL, NULL, &result,
                        &result_state),
                    TURBO_GRAPH_EXEC_DEADLINE);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_DEADLINE);
-      check_str_eq(result.next_node, "start");
-      check_int_eq(turbo_cancel_token_reason(token), TURBO_CANCEL_DEADLINE);
+      check_equal(result.status, TURBO_GRAPH_EXEC_DEADLINE);
+      check_equal(result.next_node, "start");
+      check_equal(turbo_cancel_token_reason(token), TURBO_CANCEL_DEADLINE);
 
       turbo_cancel_token_release(token);
       turbo_cancel_source_destroy(source);
@@ -537,17 +537,17 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(graph, "start", write_phase_node, &start),
+      check_equal(turbo_graph_add_node(graph, "start", write_phase_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "end", write_phase_node, &end),
+      check_equal(turbo_graph_add_node(graph, "end", write_phase_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run_json_value(graph, state, NULL, &result, &result_state),
+      check_equal(turbo_graph_run_json_value(graph, state, NULL, &result, &result_state),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_OK);
+      check_equal(result.status, TURBO_GRAPH_EXEC_OK);
       check_true(turbo_runtime_json_value_as_bool(
           json_object_get(result_state, "visited_end"), 0));
 
@@ -566,28 +566,28 @@ spec("turbo graph runtime") {
       check_not_null(graph);
       check_not_null(state);
       check_not_null(mode);
-      check_int_eq(turbo_runtime_json_object_set(state, "mode", mode),
+      check_equal(turbo_runtime_json_object_set(state, "mode", mode),
                    TURBO_RUNTIME_JSON_OK);
 
-      check_int_eq(turbo_graph_add_json_value_node(graph, "router", write_phase_json_value_node,
+      check_equal(turbo_graph_add_json_value_node(graph, "router", write_phase_json_value_node,
                                              (void *)&s_router_payload),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "tool", write_phase_json_value_node,
+      check_equal(turbo_graph_add_json_value_node(graph, "tool", write_phase_json_value_node,
                                              (void *)&s_tool_payload),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "done", write_phase_json_value_node,
+      check_equal(turbo_graph_add_json_value_node(graph, "done", write_phase_json_value_node,
                                              (void *)&s_done_payload),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(
+      check_equal(
           turbo_graph_add_json_value_edge(graph, "router", "tool", predicate_mode_equals_json_value, "tool"),
           TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_edge(graph, "router", "done", NULL, NULL),
+      check_equal(turbo_graph_add_json_value_edge(graph, "router", "done", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "router"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "router"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run_json_value(graph, state, NULL, &result, &result_state),
+      check_equal(turbo_graph_run_json_value(graph, state, NULL, &result, &result_state),
                    TURBO_GRAPH_EXEC_OK);
-      check_str_eq(result.last_node, "tool");
+      check_equal(result.last_node, "tool");
       check_true(turbo_runtime_json_value_as_bool(
           json_object_get(result_state, "visited_tool"), 0));
       check_true(turbo_runtime_json_value_as_bool(
@@ -609,25 +609,25 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
+      check_equal(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
+      check_equal(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
+      check_equal(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(
+      check_equal(
           turbo_graph_run_json_value_stream(graph, state, NULL, capture_graph_event, &capture, &result,
                                       &result_state),
           TURBO_GRAPH_EXEC_OK);
       check_not_null(result_state);
-      check_int_eq(capture.count, 6);
-      check_int_eq(capture.node_events, 4);
-      check_int_eq(capture.route_events, 2);
-      check_str_eq(capture.last_name, "graph.route");
-      check_str_eq(capture.last_detail, "complete");
-      check_str_eq(capture.last_payload, "end");
+      check_equal(capture.count, 6);
+      check_equal(capture.node_events, 4);
+      check_equal(capture.route_events, 2);
+      check_equal(capture.last_name, "graph.route");
+      check_equal(capture.last_detail, "complete");
+      check_equal(capture.last_payload, "end");
 
       turbo_runtime_json_destroy(result_state);
       turbo_runtime_json_destroy(state);
@@ -642,15 +642,15 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "error", write_error_json_value_node, NULL),
+      check_equal(turbo_graph_add_json_value_node(graph, "error", write_error_json_value_node, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "error"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "error"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_run_json_value_stream(graph, state, NULL, NULL, NULL, &result,
+      check_equal(turbo_graph_run_json_value_stream(graph, state, NULL, NULL, NULL, &result,
                                                &result_state),
                    TURBO_GRAPH_EXEC_ERROR);
       check_not_null(result_state);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_ERROR);
+      check_equal(result.status, TURBO_GRAPH_EXEC_ERROR);
       check_true(turbo_runtime_json_value_as_bool(
           json_object_get(result_state, "error_recorded"), 0));
 
@@ -677,62 +677,62 @@ spec("turbo graph runtime") {
       check_not_null(graph);
       check_not_null(state);
       check_not_null(log);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
+      check_equal(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "middle", write_phase_json_value_node, &middle),
+      check_equal(turbo_graph_add_json_value_node(graph, "middle", write_phase_json_value_node, &middle),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
+      check_equal(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "middle", NULL, NULL),
+      check_equal(turbo_graph_add_json_value_edge(graph, "start", "middle", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_edge(graph, "middle", "end", NULL, NULL),
+      check_equal(turbo_graph_add_json_value_edge(graph, "middle", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       options.interrupt_before_nodes = interrupt_before;
       options.interrupt_before_count = 1;
       options.checkpoint_cb = capture_checkpoint_copy;
       options.checkpoint_user_data = &checkpoint;
 
-      check_int_eq(turbo_graph_run_json_value_stream(graph, state, &options, turbo_event_log_capture_json_value,
+      check_equal(turbo_graph_run_json_value_stream(graph, state, &options, turbo_event_log_capture_json_value,
                                                log, &result, &result_state),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
       check_not_null(checkpoint);
       check_not_null(result_state);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
-      check_str_eq(turbo_graph_checkpoint_next_node(checkpoint), "end");
-      check_size_eq(turbo_graph_checkpoint_steps(checkpoint), 2);
+      check_equal(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
+      check_equal(turbo_graph_checkpoint_next_node(checkpoint), "end");
+      check_equal(turbo_graph_checkpoint_steps(checkpoint), 2);
       check_true(turbo_runtime_json_value_as_bool(
           json_object_get(result_state, "visited_middle"), 0));
       check_false(turbo_runtime_json_value_as_bool(
           json_object_get(result_state, "visited_end"), 0));
-      check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
-      check_int_eq((int)turbo_event_log_size(log), 6);
+      check_equal(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
+      check_equal((int)turbo_event_log_size(log), 6);
 
       turbo_runtime_json_destroy(result_state);
       result_state = NULL;
 
-      check_int_eq(turbo_graph_run_checkpoint_json_value_stream(graph, checkpoint, NULL,
+      check_equal(turbo_graph_run_checkpoint_json_value_stream(graph, checkpoint, NULL,
                                                           turbo_event_log_capture_json_value, log,
                                                           &resumed, &result_state),
                    TURBO_GRAPH_EXEC_OK);
       check_not_null(result_state);
-      check_int_eq(resumed.status, TURBO_GRAPH_EXEC_OK);
-      check_str_eq(resumed.last_node, "end");
+      check_equal(resumed.status, TURBO_GRAPH_EXEC_OK);
+      check_equal(resumed.last_node, "end");
       check_true(turbo_runtime_json_value_as_bool(
           json_object_get(result_state, "visited_end"), 0));
-      check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
-      check_int_eq((int)turbo_event_log_size(log), 9);
+      check_equal(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
+      check_equal((int)turbo_event_log_size(log), 9);
 
       last_event = turbo_event_log_get(log, turbo_event_log_size(log) - 1);
       check_not_null(last_event);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(last_event, "name")),
                    "graph.route");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(last_event, "detail")),
                    "complete");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(last_event, "payload")),
                    "end");
 
@@ -764,67 +764,67 @@ spec("turbo graph runtime") {
       check_not_null(source_graph);
       check_not_null(other_graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node_ex(source_graph, "start", "node.start", write_phase_node,
+      check_equal(turbo_graph_add_node_ex(source_graph, "start", "node.start", write_phase_node,
                                            &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node_ex(source_graph, "review", "node.review", write_phase_node,
+      check_equal(turbo_graph_add_node_ex(source_graph, "review", "node.review", write_phase_node,
                                            &review),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node_ex(source_graph, "done", "node.done", write_phase_node,
+      check_equal(turbo_graph_add_node_ex(source_graph, "done", "node.done", write_phase_node,
                                            &done),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge_ex(source_graph, "start", "review",
+      check_equal(turbo_graph_add_edge_ex(source_graph, "start", "review",
                                            "edge.start.review", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge_ex(source_graph, "review", "done", "edge.review.done",
+      check_equal(turbo_graph_add_edge_ex(source_graph, "review", "done", "edge.review.done",
                                            NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(source_graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(source_graph, "start"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_add_node_ex(other_graph, "done", "node.done",
+      check_equal(turbo_graph_add_node_ex(other_graph, "done", "node.done",
                                            write_phase_node_alt, &done),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node_ex(other_graph, "start", "node.start",
+      check_equal(turbo_graph_add_node_ex(other_graph, "start", "node.start",
                                            write_phase_node_alt, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node_ex(other_graph, "review", "node.review",
+      check_equal(turbo_graph_add_node_ex(other_graph, "review", "node.review",
                                            write_phase_node_alt, &review),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge_ex(other_graph, "review", "done", "edge.review.done",
+      check_equal(turbo_graph_add_edge_ex(other_graph, "review", "done", "edge.review.done",
                                            NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge_ex(other_graph, "start", "review",
+      check_equal(turbo_graph_add_edge_ex(other_graph, "start", "review",
                                            "edge.start.review", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(other_graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(other_graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       source_topology_id = turbo_graph_topology_id(source_graph);
       other_topology_id = turbo_graph_topology_id(other_graph);
       check_not_null(source_topology_id);
       check_not_null(other_topology_id);
-      check_str_eq(source_topology_id, other_topology_id);
+      check_equal(source_topology_id, other_topology_id);
 
       options.interrupt_before_nodes = interrupt_nodes;
       options.interrupt_before_count = 1;
       options.checkpoint_cb = capture_checkpoint;
       options.checkpoint_user_data = &capture;
-      check_int_eq(turbo_graph_run(source_graph, state, &options, &result),
+      check_equal(turbo_graph_run(source_graph, state, &options, &result),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
       check_not_null(capture.serialized);
       check_true(strstr(capture.serialized, "\"topology_id\":") != NULL);
-      check_int_eq(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
+      check_equal(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
                                                       &checkpoint),
                    TURBO_GRAPH_EXEC_OK);
       check_not_null(turbo_graph_checkpoint_topology_id(checkpoint));
-      check_str_eq(turbo_graph_checkpoint_topology_id(checkpoint), source_topology_id);
+      check_equal(turbo_graph_checkpoint_topology_id(checkpoint), source_topology_id);
 
       options.interrupt_before_nodes = NULL;
       options.interrupt_before_count = 0;
-      check_int_eq(turbo_graph_run_checkpoint(other_graph, checkpoint, &options, &result),
+      check_equal(turbo_graph_run_checkpoint(other_graph, checkpoint, &options, &result),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_OK);
-      check_str_eq(result.last_node, "done");
-      check_size_eq(result.steps, 3);
+      check_equal(result.status, TURBO_GRAPH_EXEC_OK);
+      check_equal(result.last_node, "done");
+      check_equal(result.steps, 3);
 
       turbo_graph_checkpoint_destroy(checkpoint);
       json_serialize_free(capture.serialized);
@@ -846,36 +846,36 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(graph, "start", write_phase_node, &start),
+      check_equal(turbo_graph_add_node(graph, "start", write_phase_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "end", write_phase_node, &end),
+      check_equal(turbo_graph_add_node(graph, "end", write_phase_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "start", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       options.checkpoint_cb = capture_checkpoint;
       options.checkpoint_user_data = &capture;
-      check_int_eq(turbo_graph_run(graph, state, &options, &result), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_run(graph, state, &options, &result), TURBO_GRAPH_EXEC_OK);
       check_true(capture.count >= 1);
       check_not_null(capture.serialized);
       check_true(strstr(capture.serialized, "\"topology_id\":") != NULL);
 
-      check_int_eq(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
+      check_equal(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
                                                       &checkpoint),
                    TURBO_GRAPH_EXEC_OK);
-      check_str_eq(turbo_graph_checkpoint_next_node(checkpoint), "end");
-      check_size_eq(turbo_graph_checkpoint_steps(checkpoint), 1);
+      check_equal(turbo_graph_checkpoint_next_node(checkpoint), "end");
+      check_equal(turbo_graph_checkpoint_steps(checkpoint), 1);
       check_not_null(turbo_graph_checkpoint_topology_id(checkpoint));
-      check_str_eq(turbo_graph_checkpoint_topology_id(checkpoint), turbo_graph_topology_id(graph));
+      check_equal(turbo_graph_checkpoint_topology_id(checkpoint), turbo_graph_topology_id(graph));
       check_true(json_get_bool(turbo_graph_checkpoint_state(checkpoint),
                                      "visited_start", false));
-      check_int_eq(turbo_graph_checkpoint_clone(checkpoint, &checkpoint_clone),
+      check_equal(turbo_graph_checkpoint_clone(checkpoint, &checkpoint_clone),
                    TURBO_GRAPH_EXEC_OK);
-      check_str_eq(turbo_graph_checkpoint_next_node(checkpoint_clone), "end");
-      check_size_eq(turbo_graph_checkpoint_steps(checkpoint_clone), 1);
+      check_equal(turbo_graph_checkpoint_next_node(checkpoint_clone), "end");
+      check_equal(turbo_graph_checkpoint_steps(checkpoint_clone), 1);
       check_not_null(turbo_graph_checkpoint_topology_id(checkpoint_clone));
-      check_str_eq(turbo_graph_checkpoint_topology_id(checkpoint_clone),
+      check_equal(turbo_graph_checkpoint_topology_id(checkpoint_clone),
                    turbo_graph_topology_id(graph));
       check_true(json_get_bool(turbo_graph_checkpoint_state(checkpoint_clone),
                                      "visited_start", false));
@@ -897,21 +897,21 @@ spec("turbo graph runtime") {
       check_not_null(state);
       json_object_set_string(state, "phase", "tool_result");
 
-      check_int_eq(
+      check_equal(
           turbo_graph_checkpoint_create("tool_node", 3, state, &checkpoint),
           TURBO_GRAPH_EXEC_OK);
-      check_size_eq(turbo_graph_checkpoint_schema_version(), 3);
+      check_equal(turbo_graph_checkpoint_schema_version(), 3);
       json = turbo_graph_checkpoint_serialize(checkpoint, &len);
       check_not_null(json);
       check_size_gt(len, 0);
       check_true(strstr(json, "\"checkpoint_version\":3") != NULL);
       check_true(strstr(json, "\"topology_id\":\"\"") != NULL);
-      check_int_eq(turbo_graph_checkpoint_deserialize(json, len, &parsed),
+      check_equal(turbo_graph_checkpoint_deserialize(json, len, &parsed),
                    TURBO_GRAPH_EXEC_OK);
-      check_str_eq(turbo_graph_checkpoint_next_node(parsed), "tool_node");
-      check_size_eq(turbo_graph_checkpoint_steps(parsed), 3);
+      check_equal(turbo_graph_checkpoint_next_node(parsed), "tool_node");
+      check_equal(turbo_graph_checkpoint_steps(parsed), 3);
       check_null(turbo_graph_checkpoint_topology_id(parsed));
-      check_str_eq(json_get_string(turbo_graph_checkpoint_state(parsed), "phase"),
+      check_equal(json_get_string(turbo_graph_checkpoint_state(parsed), "phase"),
                    "tool_result");
 
       turbo_graph_checkpoint_destroy(parsed);
@@ -926,7 +926,7 @@ spec("turbo graph runtime") {
           "\"state\":{\"phase\":\"tool_result\"}}";
       turbo_graph_checkpoint_t *parsed = NULL;
 
-      check_int_eq(turbo_graph_checkpoint_deserialize(json, strlen(json), &parsed),
+      check_equal(turbo_graph_checkpoint_deserialize(json, strlen(json), &parsed),
                    TURBO_GRAPH_EXEC_ERROR);
       check_null(parsed);
     }
@@ -939,14 +939,14 @@ spec("turbo graph runtime") {
 
       check_not_null(state);
       check_not_null(phase);
-      check_int_eq(turbo_runtime_json_object_set(state, "phase", phase),
+      check_equal(turbo_runtime_json_object_set(state, "phase", phase),
                    TURBO_RUNTIME_JSON_OK);
-      check_int_eq(turbo_graph_checkpoint_create_json_value("tool_node", 3, state, &checkpoint),
+      check_equal(turbo_graph_checkpoint_create_json_value("tool_node", 3, state, &checkpoint),
                    TURBO_GRAPH_EXEC_OK);
 
       bound = turbo_graph_checkpoint_state_json_value(checkpoint);
       check_not_null(bound);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(bound, "phase")),
                    "tool");
 
@@ -968,33 +968,33 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(graph, "start", write_phase_node, &start),
+      check_equal(turbo_graph_add_node(graph, "start", write_phase_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "review", write_phase_node, &review),
+      check_equal(turbo_graph_add_node(graph, "review", write_phase_node, &review),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "start", "review", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "start", "review", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       options.checkpoint_cb = capture_checkpoint;
       options.checkpoint_user_data = &capture;
       options.interrupt_before_nodes = interrupt_nodes;
       options.interrupt_before_count = 1;
 
-      check_int_eq(turbo_graph_run(graph, state, &options, &result),
+      check_equal(turbo_graph_run(graph, state, &options, &result),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
-      check_str_eq(result.last_node, "start");
-      check_str_eq(result.next_node, "review");
-      check_size_eq(result.steps, 1);
-      check_int_eq(capture.count, 1);
+      check_equal(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
+      check_equal(result.last_node, "start");
+      check_equal(result.next_node, "review");
+      check_equal(result.steps, 1);
+      check_equal(capture.count, 1);
       check_not_null(capture.serialized);
 
-      check_int_eq(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
+      check_equal(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
                                                       &checkpoint),
                    TURBO_GRAPH_EXEC_OK);
-      check_str_eq(turbo_graph_checkpoint_next_node(checkpoint), "review");
-      check_size_eq(turbo_graph_checkpoint_steps(checkpoint), 1);
+      check_equal(turbo_graph_checkpoint_next_node(checkpoint), "review");
+      check_equal(turbo_graph_checkpoint_steps(checkpoint), 1);
       check_true(json_get_bool(turbo_graph_checkpoint_state(checkpoint),
                                      "visited_start", false));
 
@@ -1015,25 +1015,25 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(graph, "tool", stop_and_resume_node, "tool"),
+      check_equal(turbo_graph_add_node(graph, "tool", stop_and_resume_node, "tool"),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "tool"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "tool"), TURBO_GRAPH_EXEC_OK);
 
       options.checkpoint_cb = capture_checkpoint;
       options.checkpoint_user_data = &capture;
 
-      check_int_eq(turbo_graph_run(graph, state, &options, &result),
+      check_equal(turbo_graph_run(graph, state, &options, &result),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
-      check_str_eq(result.last_node, "tool");
-      check_str_eq(result.next_node, "tool");
-      check_size_eq(result.steps, 1);
-      check_int_eq(capture.count, 1);
+      check_equal(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
+      check_equal(result.last_node, "tool");
+      check_equal(result.next_node, "tool");
+      check_equal(result.steps, 1);
+      check_equal(capture.count, 1);
       check_not_null(capture.serialized);
-      check_int_eq(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
+      check_equal(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
                                                       &checkpoint),
                    TURBO_GRAPH_EXEC_OK);
-      check_str_eq(turbo_graph_checkpoint_next_node(checkpoint), "tool");
+      check_equal(turbo_graph_checkpoint_next_node(checkpoint), "tool");
       check_true(json_get_bool(turbo_graph_checkpoint_state(checkpoint),
                                      "needs_review", false));
 
@@ -1058,36 +1058,36 @@ spec("turbo graph runtime") {
 
       check_not_null(graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(graph, "start", write_phase_node, &start),
+      check_equal(turbo_graph_add_node(graph, "start", write_phase_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "review", write_phase_node, &review),
+      check_equal(turbo_graph_add_node(graph, "review", write_phase_node, &review),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(graph, "done", write_phase_node, &done),
+      check_equal(turbo_graph_add_node(graph, "done", write_phase_node, &done),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "start", "review", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "start", "review", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(graph, "review", "done", NULL, NULL),
+      check_equal(turbo_graph_add_edge(graph, "review", "done", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       options.checkpoint_cb = capture_checkpoint;
       options.checkpoint_user_data = &capture;
       options.interrupt_before_nodes = interrupt_nodes;
       options.interrupt_before_count = 1;
 
-      check_int_eq(turbo_graph_run(graph, state, &options, &result),
+      check_equal(turbo_graph_run(graph, state, &options, &result),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
-      check_int_eq(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
+      check_equal(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len,
                                                       &checkpoint),
                    TURBO_GRAPH_EXEC_OK);
 
       options.interrupt_before_nodes = NULL;
       options.interrupt_before_count = 0;
-      check_int_eq(turbo_graph_run_checkpoint(graph, checkpoint, &options, &result),
+      check_equal(turbo_graph_run_checkpoint(graph, checkpoint, &options, &result),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_OK);
-      check_str_eq(result.last_node, "done");
-      check_size_eq(result.steps, 3);
+      check_equal(result.status, TURBO_GRAPH_EXEC_OK);
+      check_equal(result.last_node, "done");
+      check_equal(result.steps, 3);
       check_true(json_get_bool(turbo_graph_checkpoint_state(checkpoint),
                                      "visited_review", false));
       check_true(json_get_bool(turbo_graph_checkpoint_state(checkpoint),
@@ -1116,47 +1116,47 @@ spec("turbo graph runtime") {
       check_not_null(source_graph);
       check_not_null(other_graph);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_node(source_graph, "start", write_phase_node, &start),
+      check_equal(turbo_graph_add_node(source_graph, "start", write_phase_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(source_graph, "review", write_phase_node, &review),
+      check_equal(turbo_graph_add_node(source_graph, "review", write_phase_node, &review),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(source_graph, "done", write_phase_node, &done),
+      check_equal(turbo_graph_add_node(source_graph, "done", write_phase_node, &done),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(source_graph, "start", "review", NULL, NULL),
+      check_equal(turbo_graph_add_edge(source_graph, "start", "review", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(source_graph, "review", "done", NULL, NULL),
+      check_equal(turbo_graph_add_edge(source_graph, "review", "done", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(source_graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(source_graph, "start"), TURBO_GRAPH_EXEC_OK);
 
-      check_int_eq(turbo_graph_add_node(other_graph, "start", write_phase_node, &start),
+      check_equal(turbo_graph_add_node(other_graph, "start", write_phase_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(other_graph, "review", write_phase_node, &review),
+      check_equal(turbo_graph_add_node(other_graph, "review", write_phase_node, &review),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_node(other_graph, "other", write_phase_node, &other),
+      check_equal(turbo_graph_add_node(other_graph, "other", write_phase_node, &other),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(other_graph, "start", "review", NULL, NULL),
+      check_equal(turbo_graph_add_edge(other_graph, "start", "review", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_edge(other_graph, "review", "other", NULL, NULL),
+      check_equal(turbo_graph_add_edge(other_graph, "review", "other", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(other_graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(other_graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       options.checkpoint_cb = capture_checkpoint;
       options.checkpoint_user_data = &capture;
       options.interrupt_before_nodes = interrupt_nodes;
       options.interrupt_before_count = 1;
 
-      check_int_eq(turbo_graph_run(source_graph, state, &options, &result),
+      check_equal(turbo_graph_run(source_graph, state, &options, &result),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
-      check_int_eq(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len, &checkpoint),
+      check_equal(turbo_graph_checkpoint_deserialize(capture.serialized, capture.len, &checkpoint),
                    TURBO_GRAPH_EXEC_OK);
 
       options.interrupt_before_nodes = NULL;
       options.interrupt_before_count = 0;
-      check_int_eq(turbo_graph_run_checkpoint(other_graph, checkpoint, &options, &result),
+      check_equal(turbo_graph_run_checkpoint(other_graph, checkpoint, &options, &result),
                    TURBO_GRAPH_EXEC_CHECKPOINT_MISMATCH);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_CHECKPOINT_MISMATCH);
-      check_str_eq(result.next_node, "review");
-      check_size_eq(result.steps, 1);
+      check_equal(result.status, TURBO_GRAPH_EXEC_CHECKPOINT_MISMATCH);
+      check_equal(result.next_node, "review");
+      check_equal(result.steps, 1);
 
       turbo_graph_checkpoint_destroy(checkpoint);
       json_serialize_free(capture.serialized);

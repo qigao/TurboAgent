@@ -225,11 +225,11 @@ spec("Codex App Server bridge") {
     check_true(rejected_transport.closed);
     client = test_codex_client(&transport, NULL, NULL, NULL, NULL);
     check_not_null(client);
-    check_int_eq(turbo_codex_client_initialize(client, &server_info), SALTS_OK);
+    check_equal(turbo_codex_client_initialize(client, &server_info), SALTS_OK);
     check_true(transport.initialized);
-    check_str_eq(json_get_string(json_object_get(server_info, "serverInfo"), "name"),
+    check_equal(json_get_string(json_object_get(server_info, "serverInfo"), "name"),
                  "codex-app-server");
-    check_int_eq(turbo_codex_client_initialize(client, NULL), SALTS_EALREADY);
+    check_equal(turbo_codex_client_initialize(client, NULL), SALTS_EALREADY);
     json_free(server_info); server_info = NULL;
     turbo_codex_client_destroy(client);
     check_true(transport.closed);
@@ -250,18 +250,18 @@ spec("Codex App Server bridge") {
     check_not_null(client);
     turbo_codex_run_options_init(&options);
     options.cwd = "C:/workspace";
-    check_int_eq(turbo_codex_client_run_text(client, "review the repository", &options,
+    check_equal(turbo_codex_client_run_text(client, "review the repository", &options,
                                               &thread_id, &turn_id, &text, &turn),
                  SALTS_OK);
-    check_str_eq(thread_id, "thread-1");
-    check_str_eq(turn_id, "turn-1");
-    check_str_eq(text, "Codex completed the task");
-    check_str_eq(json_get_string(turn, "status"), "completed");
-    check_int_eq(approval_calls, 1);
+    check_equal(thread_id, "thread-1");
+    check_equal(turn_id, "turn-1");
+    check_equal(text, "Codex completed the task");
+    check_equal(json_get_string(turn, "status"), "completed");
+    check_equal(approval_calls, 1);
     check_true(transport.approval_response_seen);
     check_false(transport.approval_declined);
-    check_int_eq(events.deltas, 1);
-    check_int_eq(events.completed, 1);
+    check_equal(events.deltas, 1);
+    check_equal(events.completed, 1);
     free(thread_id);
     free(turn_id);
     free(text);
@@ -275,7 +275,7 @@ spec("Codex App Server bridge") {
     turbo_codex_client_t *client = test_codex_client(&transport, NULL, NULL, NULL, NULL);
     char *text = NULL;
     check_not_null(client);
-    check_int_eq(turbo_codex_client_run_text(client, "read only", NULL, NULL, NULL, &text, NULL),
+    check_equal(turbo_codex_client_run_text(client, "read only", NULL, NULL, NULL, &text, NULL),
                  SALTS_OK);
     check_true(transport.approval_response_seen);
     check_true(transport.approval_declined);
@@ -299,22 +299,22 @@ spec("Codex App Server bridge") {
     turbo_codex_delegate_tool_config_init(&config);
     config.client = client;
     config.cwd = "C:/workspace";
-    check_int_eq(turbo_codex_delegate_tool_register(registry, &config), TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_registry_get_execution_policy(registry, "codex.delegate", &policy),
+    check_equal(turbo_codex_delegate_tool_register(registry, &config), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_execution_policy(registry, "codex.delegate", &policy),
                  TURBO_TOOL_OK);
-    check_int_eq(policy.mode, TURBO_TOOL_EXECUTION_EXCLUSIVE);
-    check_int_eq(turbo_tool_registry_get_required_capabilities(
+    check_equal(policy.mode, TURBO_TOOL_EXECUTION_EXCLUSIVE);
+    check_equal(turbo_tool_registry_get_required_capabilities(
                      registry, "codex.delegate", &capabilities, &capability_count),
                  TURBO_TOOL_OK);
-    check_size_eq(capability_count, 1);
-    check_str_eq(capabilities[0], "delegate");
+    check_equal(capability_count, 1);
+    check_equal(capabilities[0], "delegate");
     arguments = json_parse("{\"task\":\"inspect build failure\"}",
                            strlen("{\"task\":\"inspect build failure\"}"));
     check_not_null(arguments);
-    check_int_eq(turbo_tool_registry_execute_json_value(registry, "codex.delegate", arguments,
+    check_equal(turbo_tool_registry_execute_json_value(registry, "codex.delegate", arguments,
                                                         &result),
                  TURBO_TOOL_OK);
-    check_str_eq(json_get_string(result, "text"), "Codex completed the task");
+    check_equal(json_get_string(result, "text"), "Codex completed the task");
     json_free(result); result = NULL;
     json_free(arguments); arguments = NULL;
     turbo_tool_registry_destroy(registry);

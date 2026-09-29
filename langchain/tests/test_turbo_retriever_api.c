@@ -66,7 +66,7 @@ static char *retriever_test_temp_dir(void) {
   snprintf(path, sizeof(path), "/tmp/turbonet_retriever_%lu",
            (unsigned long)getpid());
 #endif
-  check_int_eq(TEST_MKDIR(path), 0);
+  check_equal(TEST_MKDIR(path), 0);
   return retriever_test_strdup(path);
 }
 
@@ -89,9 +89,9 @@ static int retriever_test_query(
   check_not_null(options);
   check_not_null(out_results_json);
   state->call_count++;
-  check_str_eq(query, "planner context");
-  check_str_eq(options->kind, "note");
-  check_size_eq(options->limit, 3);
+  check_equal(query, "planner context");
+  check_equal(options->kind, "note");
+  check_equal(options->limit, 3);
 
   results = json_create_array();
   item = json_create_object();
@@ -128,17 +128,17 @@ spec("turbo retriever api") {
 
     retriever = turbo_retriever_create(&config);
     check_not_null(retriever);
-    check_int_eq(turbo_retriever_query(retriever, "planner context", &options,
+    check_equal(turbo_retriever_query(retriever, "planner context", &options,
                                        &results),
                  0);
-    check_size_eq(json_array_size(results), 1);
+    check_equal(json_array_size(results), 1);
     first = json_array_get(results, 0);
-    check_str_eq(json_get_string(first, "document_id"), "custom-1");
-    check_int_eq(state.call_count, 1);
+    check_equal(json_get_string(first, "document_id"), "custom-1");
+    check_equal(state.call_count, 1);
 
     json_free(results); results = NULL;
     turbo_retriever_destroy(retriever);
-    check_int_eq(state.freed, 1);
+    check_equal(state.freed, 1);
   }
 
   it("should build generic context from retriever results") {
@@ -157,19 +157,19 @@ spec("turbo retriever api") {
 
     retriever = turbo_retriever_create(&config);
     check_not_null(retriever);
-    check_int_eq(turbo_retriever_build_context(
+    check_equal(turbo_retriever_build_context(
                      retriever, "planner context", &options, &context),
                  0);
-    check_str_eq(json_get_string(context, "query"), "planner context");
-    check_str_eq(json_get_string(context, "kind"), "note");
-    check_int_eq(json_get_int(context, "layer_count", 0), 1);
+    check_equal(json_get_string(context, "query"), "planner context");
+    check_equal(json_get_string(context, "kind"), "note");
+    check_equal(json_get_int(context, "layer_count", 0), 1);
     check_not_null(strstr(json_get_string(context, "context_text"),
                           "custom retriever result"));
     layers = json_object_get(context, "layers");
     evidence = json_object_get(context, "evidence");
-    check_size_eq(json_array_size(layers), 1);
-    check_size_eq(json_array_size(evidence), 1);
-    check_str_eq(json_get_string(json_array_get(evidence, 0),
+    check_equal(json_array_size(layers), 1);
+    check_equal(json_array_size(evidence), 1);
+    check_equal(json_get_string(json_array_get(evidence, 0),
                                        "document_id"),
                  "custom-1");
 
@@ -193,12 +193,12 @@ spec("turbo retriever api") {
     retriever = turbo_retriever_create(&config);
     check_not_null(retriever);
     check_not_null(agent_state);
-    check_int_eq(turbo_retriever_load_context(
+    check_equal(turbo_retriever_load_context(
                      retriever, agent_state, "planner context", &options,
                      "vector"),
                  0);
-    check_size_eq(turbo_agent_state_memory_layer_count(agent_state), 1);
-    check_str_eq(json_get_string(
+    check_equal(turbo_agent_state_memory_layer_count(agent_state), 1);
+    check_equal(json_get_string(
                      turbo_agent_state_memory_layer_at(agent_state, 0), "scope"),
                  "vector");
     check_not_null(strstr(json_get_string(
@@ -227,7 +227,7 @@ spec("turbo retriever api") {
     retriever = turbo_retriever_create(&retriever_config);
     check_not_null(retriever);
     check_not_null(agent_state);
-    check_int_eq(turbo_agent_state_add_user_message(agent_state,
+    check_equal(turbo_agent_state_add_user_message(agent_state,
                                                     "planner context"),
                  0);
     context_config.retriever = retriever;
@@ -236,9 +236,9 @@ spec("turbo retriever api") {
     context_config.scope = "retriever";
     ctx.state = agent_state;
 
-    check_int_eq(turbo_retriever_context_node(&ctx, &context_config), 0);
-    check_size_eq(turbo_agent_state_memory_layer_count(agent_state), 1);
-    check_str_eq(json_get_string(
+    check_equal(turbo_retriever_context_node(&ctx, &context_config), 0);
+    check_equal(turbo_agent_state_memory_layer_count(agent_state), 1);
+    check_equal(json_get_string(
                      turbo_agent_state_memory_layer_at(agent_state, 0), "scope"),
                  "retriever");
     check_not_null(strstr(json_get_string(
@@ -270,15 +270,15 @@ spec("turbo retriever api") {
     context_config.kind = "note";
     context_config.limit = 3;
 
-    check_int_eq(turbo_agent_install_retriever_engineering_loop(
+    check_equal(turbo_agent_install_retriever_engineering_loop(
                      graph, &context_config, planner, executor, "retriever",
                      "planner", "plan_commit", "plan_step", "review",
                      "executor", "tools", "detect_failure", "replan_route",
                      "replan_prepare", "plan_advance", "end", 1),
                  TURBO_GRAPH_EXEC_OK);
-    check_str_eq(turbo_graph_get_entry(graph), "retriever");
-    check_size_eq(turbo_graph_node_count(graph), 13);
-    check_size_eq(turbo_graph_edge_count(graph), 17);
+    check_equal(turbo_graph_get_entry(graph), "retriever");
+    check_equal(turbo_graph_node_count(graph), 13);
+    check_equal(turbo_graph_edge_count(graph), 17);
     check_not_null(turbo_graph_topology_id(graph));
 
     turbo_retriever_destroy(retriever);
@@ -303,7 +303,7 @@ spec("turbo retriever api") {
     document.uri = "memory://retriever-doc";
     document.kind = "note";
     document.title = "Retriever note";
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &document,
                      "retriever adapter returns local planner context", 128),
                  0);
@@ -313,13 +313,13 @@ spec("turbo retriever api") {
     options.kind = "note";
     options.uri_prefix = "memory://";
     options.limit = 2;
-    check_int_eq(turbo_retriever_query(
+    check_equal(turbo_retriever_query(
                      retriever, "please retrieve local planner context", &options,
                      &results),
                  0);
     first = json_array_get(results, 0);
     check_not_null(first);
-    check_str_eq(json_get_string(first, "document_id"), "retriever-doc");
+    check_equal(json_get_string(first, "document_id"), "retriever-doc");
     check_not_null(strstr(json_get_string(first, "text"), "planner context"));
 
     json_free(results); results = NULL;

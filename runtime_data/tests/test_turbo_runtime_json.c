@@ -14,14 +14,14 @@ spec("runtime json") {
 
     check_not_null(root);
     check_not_null(items);
-    check_int_eq(turbo_runtime_json_array_append(items, json_create_string("one")),
+    check_equal(turbo_runtime_json_array_append(items, json_create_string("one")),
                  TURBO_RUNTIME_JSON_OK);
-    check_int_eq(turbo_runtime_json_object_set(root, "items", items),
+    check_equal(turbo_runtime_json_object_set(root, "items", items),
                  TURBO_RUNTIME_JSON_OK);
-    check_size_eq(turbo_runtime_json_value_size(
+    check_equal(turbo_runtime_json_value_size(
                       json_object_get(root, "items")),
                   1);
-    check_str_eq(turbo_runtime_json_value_as_string(json_array_get(
+    check_equal(turbo_runtime_json_value_as_string(json_array_get(
                      json_object_get(root, "items"), 0)),
                  "one");
 
@@ -31,11 +31,11 @@ spec("runtime json") {
   it("replaces an existing object member") {
     json_value_t *root = json_create_object();
 
-    check_int_eq(turbo_runtime_json_object_set(root, "value", json_create_int64(1)),
+    check_equal(turbo_runtime_json_object_set(root, "value", json_create_int64(1)),
                  TURBO_RUNTIME_JSON_OK);
-    check_int_eq(turbo_runtime_json_object_set(root, "value", json_create_int64(2)),
+    check_equal(turbo_runtime_json_object_set(root, "value", json_create_int64(2)),
                  TURBO_RUNTIME_JSON_OK);
-    check_size_eq(json_object_size(root), 1);
+    check_equal(json_object_size(root), 1);
     check_true(turbo_runtime_json_value_as_int64(
                    json_object_get(root, "value"), 0) == INT64_C(2));
 
@@ -66,13 +66,13 @@ spec("runtime json") {
     check_not_null(yaml_doc);
     yaml_json = json_value_from_cyaml(yaml_doc);
     check_not_null(yaml_json);
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(yaml_json, "name")),
                  "agent");
     check_true(turbo_runtime_json_value_as_int64(
                    json_object_get(yaml_json, "count"), 0) == INT64_C(2));
 
-    check_int_eq(salts_xml_parse(&xml_doc, xml, sizeof(xml) - 1, NULL, NULL),
+    check_equal(salts_xml_parse(&xml_doc, xml, sizeof(xml) - 1, NULL, NULL),
                  SALTS_XML_OK);
     xml_root = salts_xml_document_root(&xml_doc);
     check_true(xml_root.impl != NULL);
@@ -80,7 +80,7 @@ spec("runtime json") {
     xml_name_node = salts_xml_node_child_at(xml_root, 0);
     check_true(xml_name_node.impl != NULL);
     xml_name = salts_xml_node_text_dup(xml_name_node);
-    check_str_eq(xml_name, "agent");
+    check_equal(xml_name, "agent");
 
     salts_xml_owned_string_free(xml_name);
     salts_xml_document_destroy(&xml_doc);

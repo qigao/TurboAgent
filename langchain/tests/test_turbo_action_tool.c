@@ -58,15 +58,15 @@ spec("turbo action tool") {
 
     check_not_null(registry);
     check_not_null(args);
-    check_int_eq(turbo_action_tool_registry_add(registry, &definition), TURBO_ACTION_TOOL_OK);
-    check_size_eq(turbo_action_tool_registry_count(registry), 1);
+    check_equal(turbo_action_tool_registry_add(registry, &definition), TURBO_ACTION_TOOL_OK);
+    check_equal(turbo_action_tool_registry_count(registry), 1);
     check_not_null(turbo_action_tool_registry_find(registry, "read_file"));
-    check_int_eq(turbo_action_tool_registry_execute(registry, "read_file", args, &result),
+    check_equal(turbo_action_tool_registry_execute(registry, "read_file", args, &result),
                  TURBO_ACTION_TOOL_OK);
     check_not_null(result);
     check_true(json_get_bool(result, "ok", false));
-    check_str_eq(json_get_string(result, "summary"), "ok");
-    check_str_eq(json_get_string(result, "note"), "worked");
+    check_equal(json_get_string(result, "summary"), "ok");
+    check_equal(json_get_string(result, "note"), "worked");
 
     json_free(result); result = NULL;
     json_free(args); args = NULL;
@@ -85,8 +85,8 @@ spec("turbo action tool") {
     json_value_t *result = NULL;
 
     check_not_null(registry);
-    check_int_eq(turbo_action_tool_registry_add(registry, &definition), TURBO_ACTION_TOOL_OK);
-    check_int_eq(turbo_action_tool_registry_execute(registry, "bad", NULL, &result),
+    check_equal(turbo_action_tool_registry_add(registry, &definition), TURBO_ACTION_TOOL_OK);
+    check_equal(turbo_action_tool_registry_execute(registry, "bad", NULL, &result),
                  TURBO_ACTION_TOOL_ERROR);
     check_null(result);
 
@@ -99,7 +99,7 @@ spec("turbo action tool") {
     json_value_t *parsed = NULL;
 
     check_not_null(result);
-    check_int_eq(turbo_action_result_set_command_fields(result, 17, "",
+    check_equal(turbo_action_result_set_command_fields(result, 17, "",
                                                         "line 1\\line 2\n\"oops\""),
                  0);
 
@@ -109,8 +109,8 @@ spec("turbo action tool") {
     check_not_null(parsed);
     check_not_null(parsed);
     check_false(json_get_bool(parsed, "ok", true));
-    check_str_eq(json_get_string(parsed, "summary"), "quote: \"bad\"\npath");
-    check_str_eq(json_get_string(parsed, "stderr"), "line 1\\line 2\n\"oops\"");
+    check_equal(json_get_string(parsed, "summary"), "quote: \"bad\"\npath");
+    check_equal(json_get_string(parsed, "stderr"), "line 1\\line 2\n\"oops\"");
 
     json_free(parsed); parsed = NULL;
     free(serialized);
@@ -133,14 +133,14 @@ spec("turbo action tool") {
     const json_value_t *function_object;
 
     check_not_null(registry);
-    check_int_eq(turbo_action_tool_registry_add(registry, &definition), TURBO_ACTION_TOOL_OK);
+    check_equal(turbo_action_tool_registry_add(registry, &definition), TURBO_ACTION_TOOL_OK);
     tools = turbo_action_tool_registry_build_openai_chat_tools(registry);
     check_not_null(tools);
-    check_size_eq(json_array_size(tools), 1);
+    check_equal(json_array_size(tools), 1);
     tool = json_array_get(tools, 0);
     function_object = json_object_get(tool, "function");
-    check_str_eq(json_get_string(tool, "type"), "function");
-    check_str_eq(json_get_string(function_object, "name"), "run_command");
+    check_equal(json_get_string(tool, "type"), "function");
+    check_equal(json_get_string(function_object, "name"), "run_command");
     check_true(json_get_bool(function_object, "strict", false));
 
     json_free(tools); tools = NULL;
@@ -163,19 +163,19 @@ spec("turbo action tool") {
     json_value_t *result = NULL;
 
     check_not_null(action_registry);
-    check_int_eq(turbo_action_tool_registry_add(action_registry, &definition),
+    check_equal(turbo_action_tool_registry_add(action_registry, &definition),
                  TURBO_ACTION_TOOL_OK);
 
     tool_registry = turbo_action_tool_registry_build_tool_registry_bridge(action_registry);
     check_not_null(tool_registry);
-    check_size_eq(turbo_tool_registry_count(tool_registry), 1);
-    check_int_eq(turbo_tool_registry_execute(tool_registry, "echo", "{\"message\":\"hi\"}", &output),
+    check_equal(turbo_tool_registry_count(tool_registry), 1);
+    check_equal(turbo_tool_registry_execute(tool_registry, "echo", "{\"message\":\"hi\"}", &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
     result = json_parse(output, strlen(output));
     check_not_null(result);
     check_true(json_get_bool(result, "ok", false));
-    check_str_eq(json_get_string(result, "echo"), "hi");
+    check_equal(json_get_string(result, "echo"), "hi");
 
     json_free(result); result = NULL;
     free(output);
@@ -199,7 +199,7 @@ spec("turbo action tool") {
     json_value_t *result = NULL;
 
     check_not_null(action_registry);
-    check_int_eq(turbo_action_tool_registry_add(action_registry, &definition),
+    check_equal(turbo_action_tool_registry_add(action_registry, &definition),
                  TURBO_ACTION_TOOL_OK);
 
     tool_registry = turbo_action_tool_registry_build_tool_registry_bridge(action_registry);
@@ -207,13 +207,13 @@ spec("turbo action tool") {
     turbo_action_tool_registry_destroy(action_registry);
     action_registry = NULL;
 
-    check_int_eq(turbo_tool_registry_execute(tool_registry, "echo", "{\"message\":\"hi\"}", &output),
+    check_equal(turbo_tool_registry_execute(tool_registry, "echo", "{\"message\":\"hi\"}", &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
     result = json_parse(output, strlen(output));
     check_not_null(result);
     check_true(json_get_bool(result, "ok", false));
-    check_str_eq(json_get_string(result, "echo"), "hi");
+    check_equal(json_get_string(result, "echo"), "hi");
 
     json_free(result); result = NULL;
     free(output);
@@ -240,19 +240,19 @@ spec("turbo action tool") {
     check_not_null(action_registry);
     check_not_null(args);
     check_not_null(message);
-    check_int_eq(turbo_runtime_json_object_set(args, "message", message),
+    check_equal(turbo_runtime_json_object_set(args, "message", message),
                  TURBO_RUNTIME_JSON_OK);
-    check_int_eq(turbo_action_tool_registry_add(action_registry, &definition),
+    check_equal(turbo_action_tool_registry_add(action_registry, &definition),
                  TURBO_ACTION_TOOL_OK);
 
     tool_registry = turbo_action_tool_registry_build_tool_registry_bridge(action_registry);
     check_not_null(tool_registry);
-    check_int_eq(turbo_tool_registry_execute_json_value(tool_registry, "echo", args, &result),
+    check_equal(turbo_tool_registry_execute_json_value(tool_registry, "echo", args, &result),
                  TURBO_TOOL_OK);
     check_not_null(result);
     check_true(turbo_runtime_json_value_as_bool(
         json_object_get(result, "ok"), 0));
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result, "echo")),
                  "hi");
 

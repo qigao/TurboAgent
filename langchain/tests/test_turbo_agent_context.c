@@ -172,13 +172,13 @@ static json_value_t *context_state_with_model_events(void) {
   check_not_null(state);
   check_not_null(tool_calls);
   if (!state || !tool_calls) return state;
-  check_int_eq(turbo_agent_state_add_user_message(state, "current question"), 0);
+  check_equal(turbo_agent_state_add_user_message(state, "current question"), 0);
   event = turbo_event_model_create_json_value("resp-old", "old answer", tool_calls);
   check_not_null(event);
-  check_int_eq(turbo_agent_append_event(state, event), 0);
+  check_equal(turbo_agent_append_event(state, event), 0);
   event = turbo_event_model_create_json_value("resp-recent", "recent answer", tool_calls);
   check_not_null(event);
-  check_int_eq(turbo_agent_append_event(state, event), 0);
+  check_equal(turbo_agent_append_event(state, event), 0);
   turbo_runtime_json_destroy(tool_calls);
   return state;
 }
@@ -197,14 +197,14 @@ static json_value_t *context_state_with_tool_pair(void) {
   check_not_null(recent_tool_calls);
   check_not_null(tool_call);
   if (!state || !tool_calls || !recent_tool_calls || !tool_call) return state;
-  check_int_eq(turbo_agent_state_add_user_message(state, "current question"), 0);
+  check_equal(turbo_agent_state_add_user_message(state, "current question"), 0);
   json_object_set_string(tool_call, "call_id", "call-old");
   json_object_set_string(tool_call, "name", "read_file");
   json_object_set_string(tool_call, "arguments", "{\"path\":\"old.txt\"}");
   json_array_add(tool_calls, tool_call);
   event = turbo_event_model_create_json_value("resp-tool", "", tool_calls);
   check_not_null(event);
-  check_int_eq(turbo_agent_append_event(state, event), 0);
+  check_equal(turbo_agent_append_event(state, event), 0);
 
   event = turbo_agent_event_create("tool_results");
   outputs = json_create_array();
@@ -214,11 +214,11 @@ static json_value_t *context_state_with_tool_pair(void) {
   check_not_null(output);
   json_array_add(outputs, output);
   json_object_add(event, "outputs", outputs);
-  check_int_eq(turbo_agent_append_event(state, event), 0);
+  check_equal(turbo_agent_append_event(state, event), 0);
 
   event = turbo_event_model_create_json_value("resp-recent", "recent answer", recent_tool_calls);
   check_not_null(event);
-  check_int_eq(turbo_agent_append_event(state, event), 0);
+  check_equal(turbo_agent_append_event(state, event), 0);
   turbo_runtime_json_destroy(tool_calls);
   turbo_runtime_json_destroy(recent_tool_calls);
   return state;
@@ -261,21 +261,21 @@ spec("turbo agent context") {
     json_value_t *result_state = NULL;
     json_value_t *status = NULL;
 
-    check_int_eq(turbo_agent_session_context_configure(session, &policy), SALTS_OK);
-    check_int_eq(turbo_agent_session_start_preset(session, TURBO_AGENT_SESSION_WORKFLOW_LOOP, state,
+    check_equal(turbo_agent_session_context_configure(session, &policy), SALTS_OK);
+    check_equal(turbo_agent_session_start_preset(session, TURBO_AGENT_SESSION_WORKFLOW_LOOP, state,
                                                   NULL, NULL, NULL, &summary, &result_state),
                  SALTS_OK);
-    check_size_eq(strategy.summarize_calls, 1);
-    check_size_eq(strategy.source_event_count, 1);
-    check_size_eq(turbo_agent_state_event_count(result_state), 3);
+    check_equal(strategy.summarize_calls, 1);
+    check_equal(strategy.source_event_count, 1);
+    check_equal(turbo_agent_state_event_count(result_state), 3);
     check_not_null(strstr(transport.last_request, "summary-old-history"));
     check_null(strstr(transport.last_request, "old answer"));
     check_not_null(strstr(transport.last_request, "recent answer"));
-    check_size_eq(context_text_count(transport.last_request, "Be concise."), 1);
-    check_int_eq(turbo_agent_session_context_status(session, &status), SALTS_OK);
-    check_str_eq(json_get_string(status, "status"), "committed");
-    check_size_eq((size_t)json_get_double(status, "source_event_end", 0), 1);
-    check_size_eq(turbo_agent_state_event_count(state), 2);
+    check_equal(context_text_count(transport.last_request, "Be concise."), 1);
+    check_equal(turbo_agent_session_context_status(session, &status), SALTS_OK);
+    check_equal(json_get_string(status, "status"), "committed");
+    check_equal((size_t)json_get_double(status, "source_event_end", 0), 1);
+    check_equal(turbo_agent_state_event_count(state), 2);
 
     free(transport.last_request);
     turbo_runtime_json_destroy(status);
@@ -293,12 +293,12 @@ spec("turbo agent context") {
     turbo_agent_session_t *session = context_create_session("context-tool-pair", store, &transport);
     json_value_t *state = context_state_with_tool_pair();
 
-    check_int_eq(turbo_agent_session_context_configure(session, &policy), SALTS_OK);
-    check_int_eq(turbo_agent_session_context_compact(session, state), SALTS_OK);
-    check_size_eq(strategy.source_event_count, 2);
-    check_str_eq(strategy.first_kind, "model");
-    check_str_eq(strategy.last_kind, "tool_results");
-    check_size_eq(turbo_agent_state_event_count(state), 3);
+    check_equal(turbo_agent_session_context_configure(session, &policy), SALTS_OK);
+    check_equal(turbo_agent_session_context_compact(session, state), SALTS_OK);
+    check_equal(strategy.source_event_count, 2);
+    check_equal(strategy.first_kind, "model");
+    check_equal(strategy.last_kind, "tool_results");
+    check_equal(turbo_agent_state_event_count(state), 3);
 
     turbo_runtime_json_destroy(state);
     turbo_agent_session_destroy(session);
@@ -319,14 +319,14 @@ spec("turbo agent context") {
 
     shared_store.user_data_free = NULL;
     first = context_create_session("context-recovery", shared_store, &first_transport);
-    check_int_eq(turbo_agent_session_context_configure(first, &policy), SALTS_OK);
-    check_int_eq(turbo_agent_session_context_compact(first, state), SALTS_OK);
+    check_equal(turbo_agent_session_context_configure(first, &policy), SALTS_OK);
+    check_equal(turbo_agent_session_context_compact(first, state), SALTS_OK);
     turbo_agent_session_destroy(first);
 
     second = context_create_session("context-recovery", shared_store, &second_transport);
-    check_int_eq(turbo_agent_session_context_configure(second, &policy), SALTS_OK);
-    check_int_eq(turbo_agent_session_context_status(second, &status), SALTS_OK);
-    check_int_eq(
+    check_equal(turbo_agent_session_context_configure(second, &policy), SALTS_OK);
+    check_equal(turbo_agent_session_context_status(second, &status), SALTS_OK);
+    check_equal(
         turbo_agent_build_turn_request(turbo_agent_session_agent(second), state, &request_json), 0);
     check_not_null(strstr(request_json, "summary-old-history"));
     check_null(strstr(request_json, "old answer"));
@@ -359,16 +359,16 @@ spec("turbo agent context") {
     shared.list = context_failing_store_list;
     shared.user_data = &failing;
     first = context_create_session("context-prepared-only", shared, &first_transport);
-    check_int_eq(turbo_agent_session_context_configure(first, &policy), SALTS_OK);
-    check_int_eq(turbo_agent_session_context_compact(first, state), SALTS_EIO);
-    check_int_eq(turbo_agent_session_context_status(first, &status), SALTS_ENOENT);
+    check_equal(turbo_agent_session_context_configure(first, &policy), SALTS_OK);
+    check_equal(turbo_agent_session_context_compact(first, state), SALTS_EIO);
+    check_equal(turbo_agent_session_context_status(first, &status), SALTS_ENOENT);
     check_null(status);
     turbo_agent_session_destroy(first);
 
     second = context_create_session("context-prepared-only", shared, &second_transport);
-    check_int_eq(turbo_agent_session_context_configure(second, &policy), SALTS_OK);
-    check_int_eq(turbo_agent_session_context_status(second, &status), SALTS_ENOENT);
-    check_int_eq(
+    check_equal(turbo_agent_session_context_configure(second, &policy), SALTS_OK);
+    check_equal(turbo_agent_session_context_status(second, &status), SALTS_ENOENT);
+    check_equal(
         turbo_agent_build_turn_request(turbo_agent_session_agent(second), state, &request_json), 0);
     check_not_null(strstr(request_json, "current question"));
     check_null(strstr(request_json, "summary-old-history"));
@@ -390,15 +390,15 @@ spec("turbo agent context") {
     json_value_t *result_state = NULL;
 
     transport.overflow_calls = 1;
-    check_int_eq(turbo_agent_session_context_configure(session, &policy), SALTS_OK);
-    check_int_eq(turbo_agent_session_start_preset(session, TURBO_AGENT_SESSION_WORKFLOW_LOOP, state,
+    check_equal(turbo_agent_session_context_configure(session, &policy), SALTS_OK);
+    check_equal(turbo_agent_session_start_preset(session, TURBO_AGENT_SESSION_WORKFLOW_LOOP, state,
                                                   NULL, NULL, NULL, &summary, &result_state),
                  SALTS_OK);
-    check_size_eq(transport.call_count, 2);
-    check_size_eq(strategy.summarize_calls, 1);
+    check_equal(transport.call_count, 2);
+    check_equal(strategy.summarize_calls, 1);
     check_not_null(strstr(transport.last_request, "summary-old-history"));
     check_null(strstr(transport.last_request, "old answer"));
-    check_size_eq(turbo_agent_state_event_count(result_state), 3);
+    check_equal(turbo_agent_state_event_count(result_state), 3);
 
     free(transport.last_request);
     turbo_runtime_json_destroy(result_state);
@@ -419,12 +419,12 @@ spec("turbo agent context") {
     json_value_t *result_state = NULL;
 
     transport.overflow_calls = 2;
-    check_int_eq(turbo_agent_session_context_configure(session, &policy), SALTS_OK);
+    check_equal(turbo_agent_session_context_configure(session, &policy), SALTS_OK);
     check_true(turbo_agent_session_start_preset(session, TURBO_AGENT_SESSION_WORKFLOW_LOOP, state,
                                                 NULL, NULL, NULL, &summary,
                                                 &result_state) != SALTS_OK);
-    check_size_eq(transport.call_count, 2);
-    check_size_eq(strategy.summarize_calls, 1);
+    check_equal(transport.call_count, 2);
+    check_equal(strategy.summarize_calls, 1);
 
     free(transport.last_request);
     turbo_runtime_json_destroy(result_state);

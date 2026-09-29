@@ -45,7 +45,7 @@ static char *vector_store_test_temp_dir(void) {
   snprintf(path, sizeof(path), "/tmp/turbonet_vector_store_%lu",
            (unsigned long)getpid());
 #endif
-  check_int_eq(VECTOR_STORE_TEST_MKDIR(path), 0);
+  check_equal(VECTOR_STORE_TEST_MKDIR(path), 0);
   return vector_store_test_strdup(path);
 }
 
@@ -60,8 +60,8 @@ static void vector_store_test_write_file(const char *path, const char *text) {
   FILE *file = fopen(path, "wb");
 
   check_not_null(file);
-  check_size_eq(fwrite(text, 1, strlen(text), file), strlen(text));
-  check_int_eq(fclose(file), 0);
+  check_equal(fwrite(text, 1, strlen(text), file), strlen(text));
+  check_equal(fclose(file), 0);
 }
 
 static void vector_store_test_write_binary_file(const char *path) {
@@ -69,8 +69,8 @@ static void vector_store_test_write_binary_file(const char *path) {
   FILE *file = fopen(path, "wb");
 
   check_not_null(file);
-  check_size_eq(fwrite(bytes, 1, sizeof(bytes), file), sizeof(bytes));
-  check_int_eq(fclose(file), 0);
+  check_equal(fwrite(bytes, 1, sizeof(bytes), file), sizeof(bytes));
+  check_equal(fclose(file), 0);
 }
 
 static json_value_t *vector_store_test_embedding2(double a, double b) {
@@ -109,29 +109,29 @@ spec("turbo vector store api") {
     const json_value_t *first;
 
     check_not_null(store);
-    check_int_eq(vector_store_test_upsert2(
+    check_equal(vector_store_test_upsert2(
                      store, "planner-doc", "memory://planner", "note",
                      "Planner note", "planner local docs", 1.0, 0.0),
                  0);
-    check_int_eq(vector_store_test_upsert2(
+    check_equal(vector_store_test_upsert2(
                      store, "tool-doc", "memory://tool", "note", "Tool note",
                      "tool registry docs", 0.0, 1.0),
                  0);
-    check_int_eq(vector_store_test_upsert2(
+    check_equal(vector_store_test_upsert2(
                      store, "log-doc", "log://planner", "log", "Planner log",
                      "planner trace docs", 1.0, 0.0),
                  0);
-    check_size_eq(turbo_vector_store_count(store), 3);
+    check_equal(turbo_vector_store_count(store), 3);
 
     options.kind = "note";
     options.uri_prefix = "memory://";
     options.limit = 1;
-    check_int_eq(turbo_vector_store_query(store, query, &options, &results), 0);
-    check_size_eq(json_array_size(results), 1);
+    check_equal(turbo_vector_store_query(store, query, &options, &results), 0);
+    check_equal(json_array_size(results), 1);
     first = json_array_get(results, 0);
-    check_str_eq(json_get_string(first, "document_id"), "planner-doc");
-    check_str_eq(json_get_string(first, "text"), "planner local docs");
-    check_int_eq((int)json_get_double(first, "score", 0.0), 1);
+    check_equal(json_get_string(first, "document_id"), "planner-doc");
+    check_equal(json_get_string(first, "text"), "planner local docs");
+    check_equal((int)json_get_double(first, "score", 0.0), 1);
 
     json_free(results); results = NULL;
     json_free(query); query = NULL;
@@ -145,25 +145,25 @@ spec("turbo vector store api") {
     const json_value_t *first;
 
     check_not_null(store);
-    check_int_eq(vector_store_test_upsert2(
+    check_equal(vector_store_test_upsert2(
                      store, "doc", "memory://old", "note", "Old",
                      "old vector", 1.0, 0.0),
                  0);
-    check_int_eq(vector_store_test_upsert2(
+    check_equal(vector_store_test_upsert2(
                      store, "doc", "memory://new", "note", "New",
                      "new vector", 0.0, 1.0),
                  0);
-    check_size_eq(turbo_vector_store_count(store), 1);
-    check_int_eq(turbo_vector_store_query(store, query, NULL, &results), 0);
+    check_equal(turbo_vector_store_count(store), 1);
+    check_equal(turbo_vector_store_query(store, query, NULL, &results), 0);
     first = json_array_get(results, 0);
-    check_str_eq(json_get_string(first, "uri"), "memory://new");
-    check_str_eq(json_get_string(first, "title"), "New");
+    check_equal(json_get_string(first, "uri"), "memory://new");
+    check_equal(json_get_string(first, "title"), "New");
 
     json_free(results); results = NULL;
-    check_int_eq(turbo_vector_store_delete_document(store, "doc"), 0);
-    check_size_eq(turbo_vector_store_count(store), 0);
-    check_int_eq(turbo_vector_store_query(store, query, NULL, &results), 0);
-    check_size_eq(json_array_size(results), 0);
+    check_equal(turbo_vector_store_delete_document(store, "doc"), 0);
+    check_equal(turbo_vector_store_count(store), 0);
+    check_equal(turbo_vector_store_query(store, query, NULL, &results), 0);
+    check_equal(json_array_size(results), 0);
 
     json_free(results); results = NULL;
     json_free(query); query = NULL;
@@ -183,28 +183,28 @@ spec("turbo vector store api") {
 
     check_not_null(store);
     check_not_null(embedding);
-    check_int_eq(vector_store_test_upsert2(
+    check_equal(vector_store_test_upsert2(
                      store, "planner-doc", "sqlite://planner", "note",
                      "Planner note", "planner persisted docs", 1.0, 0.0),
                  0);
-    check_int_eq(vector_store_test_upsert2(
+    check_equal(vector_store_test_upsert2(
                      store, "tool-doc", "sqlite://tool", "note", "Tool note",
                      "tool persisted docs", 0.0, 1.0),
                  0);
-    check_size_eq(turbo_vector_store_count(store), 2);
+    check_equal(turbo_vector_store_count(store), 2);
     turbo_vector_store_destroy(store);
 
     store = turbo_vector_store_sqlite_open(db_path);
     check_not_null(store);
-    check_size_eq(turbo_vector_store_count(store), 2);
+    check_equal(turbo_vector_store_count(store), 2);
     options.kind = "note";
     options.uri_prefix = "sqlite://";
     options.limit = 1;
-    check_int_eq(turbo_vector_store_query(store, query, &options, &results), 0);
-    check_size_eq(json_array_size(results), 1);
+    check_equal(turbo_vector_store_query(store, query, &options, &results), 0);
+    check_equal(json_array_size(results), 1);
     first = json_array_get(results, 0);
-    check_str_eq(json_get_string(first, "document_id"), "planner-doc");
-    check_str_eq(json_get_string(first, "text"), "planner persisted docs");
+    check_equal(json_get_string(first, "document_id"), "planner-doc");
+    check_equal(json_get_string(first, "text"), "planner persisted docs");
     json_free(results); results = NULL;
 
     document.id = "bad-dimension";
@@ -212,19 +212,19 @@ spec("turbo vector store api") {
     json_array_add(embedding, json_create_number(1.0));
     json_array_add(embedding, json_create_number(0.0));
     json_array_add(embedding, json_create_number(0.0));
-    check_int_eq(turbo_vector_store_upsert(store, &document, embedding), -1);
+    check_equal(turbo_vector_store_upsert(store, &document, embedding), -1);
 
-    check_int_eq(turbo_vector_store_delete_document(store, "planner-doc"), 0);
-    check_size_eq(turbo_vector_store_count(store), 1);
+    check_equal(turbo_vector_store_delete_document(store, "planner-doc"), 0);
+    check_equal(turbo_vector_store_count(store), 1);
     turbo_vector_store_destroy(store);
 
     store = turbo_vector_store_sqlite_open(db_path);
     check_not_null(store);
-    check_size_eq(turbo_vector_store_count(store), 1);
-    check_int_eq(turbo_vector_store_query(store, query, &options, &results), 0);
-    check_size_eq(json_array_size(results), 1);
+    check_equal(turbo_vector_store_count(store), 1);
+    check_equal(turbo_vector_store_query(store, query, &options, &results), 0);
+    check_equal(json_array_size(results), 1);
     first = json_array_get(results, 0);
-    check_str_eq(json_get_string(first, "document_id"), "tool-doc");
+    check_equal(json_get_string(first, "document_id"), "tool-doc");
 
     json_free(results); results = NULL;
     json_free(embedding); embedding = NULL;
@@ -242,7 +242,7 @@ spec("turbo vector store api") {
     json_value_t *embedding = json_create_array();
 
     check_not_null(store);
-    check_int_eq(vector_store_test_upsert2(
+    check_equal(vector_store_test_upsert2(
                      store, "doc-a", "memory://a", "note", "A", "alpha",
                      1.0, 0.0),
                  0);
@@ -253,7 +253,7 @@ spec("turbo vector store api") {
     json_array_add(embedding, json_create_number(1.0));
     json_array_add(embedding, json_create_number(0.0));
     json_array_add(embedding, json_create_number(0.0));
-    check_int_eq(turbo_vector_store_upsert(store, &document, embedding), -1);
+    check_equal(turbo_vector_store_upsert(store, &document, embedding), -1);
 
     json_free(embedding); embedding = NULL;
     turbo_vector_store_destroy(store);
@@ -278,22 +278,22 @@ spec("turbo vector store api") {
     document.kind = "note";
     document.title = "Planner vector";
     document.text = "planner context local retrieval";
-    check_int_eq(turbo_embedding_model_embed_text(embedding_model, document.text,
+    check_equal(turbo_embedding_model_embed_text(embedding_model, document.text,
                                                   &document_embedding),
                  0);
-    check_int_eq(turbo_vector_store_upsert(store, &document, document_embedding),
+    check_equal(turbo_vector_store_upsert(store, &document, document_embedding),
                  0);
 
     retriever = turbo_retriever_from_vector_store(store, embedding_model);
     check_not_null(retriever);
     options.kind = "note";
     options.limit = 1;
-    check_int_eq(turbo_retriever_query(retriever, "planner context",
+    check_equal(turbo_retriever_query(retriever, "planner context",
                                        &options, &results),
                  0);
     first = json_array_get(results, 0);
     check_not_null(first);
-    check_str_eq(json_get_string(first, "document_id"),
+    check_equal(json_get_string(first, "document_id"),
                  "planner-vector");
 
     json_free(results); results = NULL;
@@ -325,23 +325,23 @@ spec("turbo vector store api") {
                     "tool registry execution details\n";
     splitter_options.chunk_size = 32;
 
-    check_int_eq(turbo_vector_store_index_text(store, embedding_model, &document,
+    check_equal(turbo_vector_store_index_text(store, embedding_model, &document,
                                                &splitter_options, &summary),
                  0);
     check_true(json_get_bool(summary, "ok", false));
-    check_int_eq(json_get_int(summary, "chunk_count", 0), 2);
-    check_size_eq(turbo_vector_store_count(store), 2);
+    check_equal(json_get_int(summary, "chunk_count", 0), 2);
+    check_equal(turbo_vector_store_count(store), 2);
 
     retriever = turbo_retriever_from_vector_store(store, embedding_model);
     check_not_null(retriever);
     query_options.kind = "note";
     query_options.limit = 1;
-    check_int_eq(turbo_retriever_query(retriever, "tool registry",
+    check_equal(turbo_retriever_query(retriever, "tool registry",
                                        &query_options, &results),
                  0);
     first = json_array_get(results, 0);
     check_not_null(first);
-    check_str_eq(json_get_string(first, "document_id"),
+    check_equal(json_get_string(first, "document_id"),
                  "local-doc#chunk-1");
     check_not_null(strstr(json_get_string(first, "text"),
                           "tool registry"));
@@ -352,20 +352,20 @@ spec("turbo vector store api") {
 
     document.text = "replacement retrieval only";
     splitter_options.chunk_size = 128;
-    check_int_eq(turbo_vector_store_index_text(store, embedding_model, &document,
+    check_equal(turbo_vector_store_index_text(store, embedding_model, &document,
                                                &splitter_options, &summary),
                  0);
     check_true(json_get_bool(summary, "ok", false));
-    check_int_eq(json_get_int(summary, "chunk_count", 0), 1);
-    check_size_eq(turbo_vector_store_count(store), 1);
-    check_int_eq(turbo_retriever_query(retriever, "replacement retrieval",
+    check_equal(json_get_int(summary, "chunk_count", 0), 1);
+    check_equal(turbo_vector_store_count(store), 1);
+    check_equal(turbo_retriever_query(retriever, "replacement retrieval",
                                        &query_options, &results),
                  0);
-    check_size_eq(json_array_size(results), 1);
+    check_equal(json_array_size(results), 1);
     first = json_array_get(results, 0);
-    check_str_eq(json_get_string(first, "document_id"),
+    check_equal(json_get_string(first, "document_id"),
                  "local-doc#chunk-0");
-    check_str_eq(json_get_string(first, "text"),
+    check_equal(json_get_string(first, "text"),
                  "replacement retrieval only");
 
     json_free(results); results = NULL;
@@ -398,36 +398,36 @@ spec("turbo vector store api") {
     document.text = "planner context local retrieval\n"
                     "tool registry execution details\n";
     splitter_options.chunk_size = 32;
-    check_int_eq(turbo_vector_store_index_text(store, embedding_model, &document,
+    check_equal(turbo_vector_store_index_text(store, embedding_model, &document,
                                                &splitter_options, &summary),
                  0);
-    check_int_eq(json_get_int(summary, "chunk_count", 0), 2);
-    check_size_eq(turbo_vector_store_count(store), 2);
+    check_equal(json_get_int(summary, "chunk_count", 0), 2);
+    check_equal(turbo_vector_store_count(store), 2);
     json_free(summary); summary = NULL;
 
     document.text = "sqlite replacement retrieval only";
     splitter_options.chunk_size = 128;
-    check_int_eq(turbo_vector_store_index_text(store, embedding_model, &document,
+    check_equal(turbo_vector_store_index_text(store, embedding_model, &document,
                                                &splitter_options, &summary),
                  0);
     check_true(json_get_bool(summary, "ok", false));
-    check_int_eq(json_get_int(summary, "chunk_count", 0), 1);
-    check_size_eq(turbo_vector_store_count(store), 1);
+    check_equal(json_get_int(summary, "chunk_count", 0), 1);
+    check_equal(turbo_vector_store_count(store), 1);
 
-    check_int_eq(turbo_embedding_model_embed_text(embedding_model,
+    check_equal(turbo_embedding_model_embed_text(embedding_model,
                                                   "sqlite replacement",
                                                   &query_embedding),
                  0);
     query_options.kind = "note";
     query_options.limit = 8;
-    check_int_eq(turbo_vector_store_query(store, query_embedding,
+    check_equal(turbo_vector_store_query(store, query_embedding,
                                           &query_options, &results),
                  0);
-    check_size_eq(json_array_size(results), 1);
+    check_equal(json_array_size(results), 1);
     first = json_array_get(results, 0);
-    check_str_eq(json_get_string(first, "document_id"),
+    check_equal(json_get_string(first, "document_id"),
                  "sqlite-local-doc#chunk-0");
-    check_str_eq(json_get_string(first, "text"),
+    check_equal(json_get_string(first, "text"),
                  "sqlite replacement retrieval only");
 
     json_free(results); results = NULL;
@@ -459,20 +459,20 @@ spec("turbo vector store api") {
     vector_store_test_write_file(path, "loader vector retrieval\n"
                                        "planner file context\n");
     splitter_options.chunk_size = 28;
-    check_int_eq(turbo_vector_store_index_text_file(
+    check_equal(turbo_vector_store_index_text_file(
                      store, embedding_model, path, "file", &splitter_options,
                      &summary),
                  0);
     check_true(json_get_bool(summary, "ok", false));
-    check_int_eq(json_get_int(summary, "chunk_count", 0), 2);
-    check_size_eq(turbo_vector_store_count(store), 2);
+    check_equal(json_get_int(summary, "chunk_count", 0), 2);
+    check_equal(turbo_vector_store_count(store), 2);
 
     retriever = turbo_retriever_from_vector_store(store, embedding_model);
     check_not_null(retriever);
     query_options.kind = "file";
     query_options.uri_prefix = dir;
     query_options.limit = 1;
-    check_int_eq(turbo_retriever_query(retriever, "planner context",
+    check_equal(turbo_retriever_query(retriever, "planner context",
                                        &query_options, &results),
                  0);
     first = json_array_get(results, 0);
@@ -514,9 +514,9 @@ spec("turbo vector store api") {
 
     check_not_null(store);
     check_not_null(embedding_model);
-    check_int_eq(VECTOR_STORE_TEST_MKDIR(docs_dir), 0);
-    check_int_eq(VECTOR_STORE_TEST_MKDIR(nested_dir), 0);
-    check_int_eq(VECTOR_STORE_TEST_MKDIR(build_dir), 0);
+    check_equal(VECTOR_STORE_TEST_MKDIR(docs_dir), 0);
+    check_equal(VECTOR_STORE_TEST_MKDIR(nested_dir), 0);
+    check_equal(VECTOR_STORE_TEST_MKDIR(build_dir), 0);
     vector_store_test_write_file(root_path, "directory vector root document\n");
     vector_store_test_write_file(nested_path, "nested vector planner document\n");
     vector_store_test_write_binary_file(binary_path);
@@ -532,35 +532,35 @@ spec("turbo vector store api") {
     options.recursive = 1;
     options.max_file_bytes = 80;
     options.include_extensions = ".txt,.md";
-    check_int_eq(turbo_vector_store_index_directory_ex(
+    check_equal(turbo_vector_store_index_directory_ex(
                      store, embedding_model, docs_dir, &options, &summary),
                  0);
     check_not_null(summary);
-    check_int_eq(json_get_int(summary, "visited", -1), 5);
-    check_int_eq(json_get_int(summary, "indexed", -1), 2);
-    check_int_eq(json_get_int(summary, "indexed_chunks", -1), 2);
-    check_int_eq(json_get_int(summary, "skipped", -1), 3);
-    check_int_eq(json_get_int(summary, "skipped_by_extension", -1), 1);
-    check_int_eq(json_get_int(summary, "skipped_too_large", -1), 1);
-    check_int_eq(json_get_int(summary, "skipped_index_error", -1), 1);
-    check_int_eq(json_get_int(summary, "failed", -1), 0);
+    check_equal(json_get_int(summary, "visited", -1), 5);
+    check_equal(json_get_int(summary, "indexed", -1), 2);
+    check_equal(json_get_int(summary, "indexed_chunks", -1), 2);
+    check_equal(json_get_int(summary, "skipped", -1), 3);
+    check_equal(json_get_int(summary, "skipped_by_extension", -1), 1);
+    check_equal(json_get_int(summary, "skipped_too_large", -1), 1);
+    check_equal(json_get_int(summary, "skipped_index_error", -1), 1);
+    check_equal(json_get_int(summary, "failed", -1), 0);
     check_false(json_get_bool(summary, "truncated", true));
-    check_size_eq(turbo_vector_store_count(store), 2);
+    check_equal(turbo_vector_store_count(store), 2);
 
     retriever = turbo_retriever_from_vector_store(store, embedding_model);
     check_not_null(retriever);
     query_options.kind = "docs";
     query_options.uri_prefix = docs_dir;
     query_options.limit = 1;
-    check_int_eq(turbo_retriever_query(retriever, "nested planner document",
+    check_equal(turbo_retriever_query(retriever, "nested planner document",
                                        &query_options, &results),
                  0);
     first = json_array_get(results, 0);
     check_not_null(first);
-    check_str_eq(json_get_string(first, "uri"), nested_path);
+    check_equal(json_get_string(first, "uri"), nested_path);
     json_free(results); results = NULL;
 
-    check_int_eq(turbo_retriever_query(retriever, "ignored build artifact",
+    check_equal(turbo_retriever_query(retriever, "ignored build artifact",
                                        &query_options, &results),
                  0);
     check_true(json_array_size(results) <= 1);
@@ -621,16 +621,16 @@ spec("turbo vector store api") {
     document.kind = "note";
     document.title = "Tool vector";
     document.text = "planner context vector registry";
-    check_int_eq(turbo_embedding_model_embed_text(embedding_model, document.text,
+    check_equal(turbo_embedding_model_embed_text(embedding_model, document.text,
                                                   &embedding),
                  0);
-    check_int_eq(turbo_vector_store_upsert(store, &document, embedding), 0);
+    check_equal(turbo_vector_store_upsert(store, &document, embedding), 0);
 
     binding = turbo_vector_store_tool_binding_create(store, embedding_model);
     check_not_null(binding);
-    check_int_eq(turbo_vector_store_add_tools(registry, binding), 0);
-    check_size_eq(turbo_tool_registry_count(registry), 4);
-    check_int_eq(turbo_tool_registry_execute(
+    check_equal(turbo_vector_store_add_tools(registry, binding), 0);
+    check_equal(turbo_tool_registry_count(registry), 4);
+    check_equal(turbo_tool_registry_execute(
                      registry, "agent.vector.search",
                      "{\"query\":\"planner context\",\"kind\":\"note\","
                      "\"limit\":1}",
@@ -641,7 +641,7 @@ spec("turbo vector store api") {
     free(output);
     output = NULL;
 
-    check_int_eq(turbo_tool_registry_execute(
+    check_equal(turbo_tool_registry_execute(
                      registry, "agent.vector.build_context",
                      "{\"query\":\"planner context\",\"kind\":\"note\","
                      "\"limit\":1}",
@@ -652,21 +652,21 @@ spec("turbo vector store api") {
     free(output);
     output = NULL;
 
-    check_int_eq(turbo_vector_store_add_action_tools(action_registry, binding), 0);
-    check_size_eq(turbo_action_tool_registry_count(action_registry), 4);
+    check_equal(turbo_vector_store_add_action_tools(action_registry, binding), 0);
+    check_equal(turbo_action_tool_registry_count(action_registry), 4);
     action_args = json_create_object();
     check_not_null(action_args);
     json_object_set_string(action_args, "query", "planner context");
     json_object_set_string(action_args, "kind", "note");
     json_object_set_number(action_args, "limit", 1);
-    check_int_eq(turbo_action_tool_registry_execute(
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.vector.search", action_args,
                      &action_result),
                  TURBO_ACTION_TOOL_OK);
     check_true(json_get_bool(action_result, "ok", false));
     check_not_null(json_object_get(action_result, "results"));
 
-    check_int_eq(turbo_vector_store_tool_graph(&graph), 0);
+    check_equal(turbo_vector_store_tool_graph(&graph), 0);
     check_true(json_array_size(json_object_get(graph, "nodes")) >= 4);
     check_true(json_array_size(json_object_get(graph, "edges")) >= 2);
 
@@ -705,16 +705,16 @@ spec("turbo vector store api") {
     check_not_null(store);
     check_not_null(embedding_model);
     check_not_null(action_registry);
-    check_int_eq(VECTOR_STORE_TEST_MKDIR(docs_dir), 0);
+    check_equal(VECTOR_STORE_TEST_MKDIR(docs_dir), 0);
     vector_store_test_write_file(text_path, "vector action file context\n");
     vector_store_test_write_file(docs_path, "vector directory action context\n");
 
     binding = turbo_vector_store_tool_binding_create(store, embedding_model);
     check_not_null(binding);
-    check_int_eq(turbo_vector_store_add_indexing_action_tools(action_registry,
+    check_equal(turbo_vector_store_add_indexing_action_tools(action_registry,
                                                               binding),
                  0);
-    check_size_eq(turbo_action_tool_registry_count(action_registry), 4);
+    check_equal(turbo_action_tool_registry_count(action_registry), 4);
     upsert_definition =
         turbo_action_tool_registry_find(action_registry, "agent.vector.upsert_text");
     index_file_definition =
@@ -729,10 +729,10 @@ spec("turbo vector store api") {
     check_not_null(index_file_definition);
     check_not_null(index_directory_definition);
     check_not_null(delete_definition);
-    check_int_eq(upsert_definition->kind, TURBO_ACTION_MUTATE);
-    check_int_eq(index_file_definition->kind, TURBO_ACTION_MUTATE);
-    check_int_eq(index_directory_definition->kind, TURBO_ACTION_MUTATE);
-    check_int_eq(delete_definition->kind, TURBO_ACTION_MUTATE);
+    check_equal(upsert_definition->kind, TURBO_ACTION_MUTATE);
+    check_equal(index_file_definition->kind, TURBO_ACTION_MUTATE);
+    check_equal(index_directory_definition->kind, TURBO_ACTION_MUTATE);
+    check_equal(delete_definition->kind, TURBO_ACTION_MUTATE);
 
     args = json_create_object();
     check_not_null(args);
@@ -742,7 +742,7 @@ spec("turbo vector store api") {
     json_object_set_string(args, "text",
                                  "vector action tools index text context");
     json_object_set_number(args, "chunk_size", 128);
-    check_int_eq(turbo_action_tool_registry_execute(
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.vector.upsert_text", args,
                      &result),
                  TURBO_ACTION_TOOL_OK);
@@ -756,7 +756,7 @@ spec("turbo vector store api") {
     json_object_set_string(args, "path", text_path);
     json_object_set_string(args, "kind", "file");
     json_object_set_number(args, "chunk_size", 128);
-    check_int_eq(turbo_action_tool_registry_execute(
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.vector.index_file", args, &result),
                  TURBO_ACTION_TOOL_OK);
     check_true(json_get_bool(result, "ok", false));
@@ -770,41 +770,41 @@ spec("turbo vector store api") {
     json_object_set_bool(args, "recursive", true);
     json_object_set_string(args, "include_extensions", ".txt");
     json_object_set_number(args, "chunk_size", 128);
-    check_int_eq(turbo_action_tool_registry_execute(
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.vector.index_directory", args,
                      &result),
                  TURBO_ACTION_TOOL_OK);
     check_true(json_get_bool(result, "ok", false));
-    check_int_eq(json_get_int(json_object_get(result, "index"),
+    check_equal(json_get_int(json_object_get(result, "index"),
                                     "indexed", 0),
                  1);
     json_free(result); result = NULL;
     json_free(args); args = NULL;
 
-    check_size_eq(turbo_vector_store_count(store), 3);
-    check_int_eq(turbo_embedding_model_embed_text(embedding_model,
+    check_equal(turbo_vector_store_count(store), 3);
+    check_equal(turbo_embedding_model_embed_text(embedding_model,
                                                   "directory action context",
                                                   &query_embedding),
                  0);
     query_options.kind = "docs";
     query_options.uri_prefix = docs_dir;
     query_options.limit = 1;
-    check_int_eq(turbo_vector_store_query(store, query_embedding,
+    check_equal(turbo_vector_store_query(store, query_embedding,
                                           &query_options, &results),
                  0);
-    check_size_eq(json_array_size(results), 1);
+    check_equal(json_array_size(results), 1);
     json_free(results); results = NULL;
     json_free(query_embedding); query_embedding = NULL;
 
     args = json_create_object();
     check_not_null(args);
     json_object_set_string(args, "document_id", "action-text#chunk-0");
-    check_int_eq(turbo_action_tool_registry_execute(
+    check_equal(turbo_action_tool_registry_execute(
                      action_registry, "agent.vector.delete_document", args,
                      &result),
                  TURBO_ACTION_TOOL_OK);
     check_true(json_get_bool(result, "ok", false));
-    check_size_eq(turbo_vector_store_count(store), 2);
+    check_equal(turbo_vector_store_count(store), 2);
 
     json_free(result); result = NULL;
     json_free(args); args = NULL;

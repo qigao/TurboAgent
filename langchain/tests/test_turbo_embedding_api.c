@@ -13,7 +13,7 @@ static int embedding_test_embed(void *user_data, const char *text,
   json_value_t *embedding;
 
   check_not_null(state);
-  check_str_eq(text, "custom text");
+  check_equal(text, "custom text");
   check_not_null(out_embedding_json);
   state->call_count++;
 
@@ -50,9 +50,9 @@ static void embedding_test_check_same_values(const json_value_t *left,
   size_t count = json_array_size(left);
   size_t i;
 
-  check_size_eq(json_array_size(right), count);
+  check_equal(json_array_size(right), count);
   for (i = 0; i < count; ++i) {
-    check_int_eq((int)json_number(json_array_get(left, i)),
+    check_equal((int)json_number(json_array_get(left, i)),
                  (int)json_number(json_array_get(right, i)));
   }
 }
@@ -70,16 +70,16 @@ spec("turbo embedding api") {
 
     model = turbo_embedding_model_create(&config);
     check_not_null(model);
-    check_int_eq(turbo_embedding_model_embed_text(model, "custom text",
+    check_equal(turbo_embedding_model_embed_text(model, "custom text",
                                                   &embedding),
                  0);
-    check_size_eq(json_array_size(embedding), 2);
-    check_int_eq((int)json_number(json_array_get(embedding, 0)), 7);
-    check_int_eq(state.call_count, 1);
+    check_equal(json_array_size(embedding), 2);
+    check_equal((int)json_number(json_array_get(embedding, 0)), 7);
+    check_equal(state.call_count, 1);
 
     json_free(embedding); embedding = NULL;
     turbo_embedding_model_destroy(model);
-    check_int_eq(state.freed, 1);
+    check_equal(state.freed, 1);
   }
 
   it("should create deterministic local hashing embeddings") {
@@ -89,15 +89,15 @@ spec("turbo embedding api") {
     json_value_t *case_b = NULL;
 
     check_not_null(model);
-    check_int_eq(turbo_embedding_model_embed_text(model, "Alpha beta alpha",
+    check_equal(turbo_embedding_model_embed_text(model, "Alpha beta alpha",
                                                   &embedding),
                  0);
-    check_size_eq(json_array_size(embedding), 8);
-    check_int_eq((int)embedding_test_sum(embedding), 3);
+    check_equal(json_array_size(embedding), 8);
+    check_equal((int)embedding_test_sum(embedding), 3);
 
-    check_int_eq(
+    check_equal(
         turbo_embedding_model_embed_text(model, "Alpha beta", &case_a), 0);
-    check_int_eq(
+    check_equal(
         turbo_embedding_model_embed_text(model, "alpha beta", &case_b), 0);
     embedding_test_check_same_values(case_a, case_b);
 

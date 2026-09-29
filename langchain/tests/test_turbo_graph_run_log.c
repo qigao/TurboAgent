@@ -42,32 +42,32 @@ spec("turbo graph run log runtime") {
       check_not_null(graph);
       check_not_null(log);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
+      check_equal(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "middle", write_phase_json_value_node, &middle),
+      check_equal(turbo_graph_add_json_value_node(graph, "middle", write_phase_json_value_node, &middle),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
+      check_equal(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "middle", NULL, NULL),
+      check_equal(turbo_graph_add_json_value_edge(graph, "start", "middle", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_edge(graph, "middle", "end", NULL, NULL),
+      check_equal(turbo_graph_add_json_value_edge(graph, "middle", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       options.interrupt_before_nodes = interrupt_before;
       options.interrupt_before_count = 1;
 
-      check_int_eq(turbo_graph_run_json_value_log(graph, state, &options, log, &result, &result_state),
+      check_equal(turbo_graph_run_json_value_log(graph, state, &options, log, &result, &result_state),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
       check_not_null(result_state);
-      check_int_eq(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
-      check_int_eq((int)turbo_event_log_size(turbo_graph_run_log_events(log)), 6);
+      check_equal(result.status, TURBO_GRAPH_EXEC_INTERRUPTED);
+      check_equal((int)turbo_event_log_size(turbo_graph_run_log_events(log)), 6);
       checkpoint = turbo_graph_run_log_checkpoint(log);
       check_not_null(checkpoint);
-      check_str_eq(turbo_graph_checkpoint_next_node(checkpoint), "end");
-      check_size_eq(turbo_graph_checkpoint_steps(checkpoint), 2);
+      check_equal(turbo_graph_checkpoint_next_node(checkpoint), "end");
+      check_equal(turbo_graph_checkpoint_steps(checkpoint), 2);
       check_not_null(turbo_graph_checkpoint_topology_id(checkpoint));
-      check_str_eq(turbo_graph_checkpoint_topology_id(checkpoint), turbo_graph_topology_id(graph));
+      check_equal(turbo_graph_checkpoint_topology_id(checkpoint), turbo_graph_topology_id(graph));
 
       turbo_runtime_json_destroy(result_state);
       turbo_runtime_json_destroy(state);
@@ -93,21 +93,21 @@ spec("turbo graph run log runtime") {
       check_not_null(graph);
       check_not_null(log);
       check_not_null(state);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
+      check_equal(turbo_graph_add_json_value_node(graph, "start", write_phase_json_value_node, &start),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "middle", write_phase_json_value_node, &middle),
+      check_equal(turbo_graph_add_json_value_node(graph, "middle", write_phase_json_value_node, &middle),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
+      check_equal(turbo_graph_add_json_value_node(graph, "end", write_phase_json_value_node, &end),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "middle", NULL, NULL),
+      check_equal(turbo_graph_add_json_value_edge(graph, "start", "middle", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_add_json_value_edge(graph, "middle", "end", NULL, NULL),
+      check_equal(turbo_graph_add_json_value_edge(graph, "middle", "end", NULL, NULL),
                    TURBO_GRAPH_EXEC_OK);
-      check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
 
       options.interrupt_before_nodes = interrupt_before;
       options.interrupt_before_count = 1;
-      check_int_eq(turbo_graph_run_json_value_log(graph, state, &options, log, &result, &result_state),
+      check_equal(turbo_graph_run_json_value_log(graph, state, &options, log, &result, &result_state),
                    TURBO_GRAPH_EXEC_INTERRUPTED);
       check_not_null(result_state);
       checkpoint = turbo_graph_run_log_checkpoint(log);
@@ -115,23 +115,23 @@ spec("turbo graph run log runtime") {
       turbo_runtime_json_destroy(result_state);
       result_state = NULL;
 
-      check_int_eq(
+      check_equal(
           turbo_graph_run_checkpoint_json_value_log(graph, checkpoint, NULL, log, &resumed, &result_state),
           TURBO_GRAPH_EXEC_OK);
       check_not_null(result_state);
-      check_int_eq(resumed.status, TURBO_GRAPH_EXEC_OK);
+      check_equal(resumed.status, TURBO_GRAPH_EXEC_OK);
       check_true(turbo_runtime_json_value_as_bool(
           json_object_get(result_state, "visited_end"), 0));
       check_null(turbo_graph_run_log_checkpoint(log));
-      check_int_eq((int)turbo_event_log_size(turbo_graph_run_log_events(log)), 3);
+      check_equal((int)turbo_event_log_size(turbo_graph_run_log_events(log)), 3);
 
       last_event = turbo_event_log_get(turbo_graph_run_log_events(log),
                                        turbo_event_log_size(turbo_graph_run_log_events(log)) - 1);
       check_not_null(last_event);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(last_event, "name")),
                    "graph.route");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(last_event, "detail")),
                    "complete");
 

@@ -54,33 +54,33 @@ static int fake_parent_lineage_tool_json_value(const json_value_t *arguments,
 
   result = json_create_object();
   check_not_null(result);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "ok",
                                          json_create_bool(1)),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "summary",
                                          json_create_string("ok")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "stdout",
                                          json_create_string("")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(result, "stderr",
                                          json_create_string("")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           result, "parent_agent_run_id",
           json_create_string("run_parent")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           result, "parent_tool_call_id",
           json_create_string("call_parent")),
       TURBO_RUNTIME_JSON_OK);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(
           result, "parent_tool_name",
           json_create_string("delegate")),
@@ -105,7 +105,7 @@ static int fake_parent_lineage_model_invoke_json_value(
   if (model->call_count == 1) {
     args = json_create_object();
     check_not_null(args);
-    check_int_eq(
+    check_equal(
         turbo_runtime_json_object_set(args, "input",
                                            json_create_string(
                                                "delegate")),
@@ -143,8 +143,8 @@ static int fake_model_invoke_json_value(void *user_data, const json_value_t *mes
     check_not_null(args);
     check_not_null(a);
     check_not_null(b);
-    check_int_eq(turbo_runtime_json_object_set(args, "a", a), TURBO_RUNTIME_JSON_OK);
-    check_int_eq(turbo_runtime_json_object_set(args, "b", b), TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_runtime_json_object_set(args, "a", a), TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_runtime_json_object_set(args, "b", b), TURBO_RUNTIME_JSON_OK);
     out_result->output_text = "Calling sum";
     out_result->tool_name = "sum";
     out_result->tool_arguments = args;
@@ -232,34 +232,34 @@ spec("turbo event log runtime") {
       check_not_null(state);
       check_not_null(log);
 
-      check_int_eq(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user", "Add 41 and 1"),
+      check_equal(turbo_tool_registry_add(tools, &sum_tool), TURBO_TOOL_OK);
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user", "Add 41 and 1"),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
 
-      check_int_eq(
+      check_equal(
           turbo_chain_run_json_value_stream(chain, state, turbo_event_log_capture_json_value, log, &result),
           TURBO_CHAIN_OK);
       check_not_null(result);
-      check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
-      check_size_eq(turbo_event_log_size(log), 3);
-      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 0)), "model");
-      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 1)), "tool_result");
-      check_str_eq(turbo_event_kind_json_value(turbo_event_log_get(log, 2)), "model");
+      check_equal(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
+      check_equal(turbo_event_log_size(log), 3);
+      check_equal(turbo_event_kind_json_value(turbo_event_log_get(log, 0)), "model");
+      check_equal(turbo_event_kind_json_value(turbo_event_log_get(log, 1)), "tool_result");
+      check_equal(turbo_event_kind_json_value(turbo_event_log_get(log, 2)), "model");
 
       events = turbo_event_log_events_json_value(log);
       check_not_null(events);
-      check_size_eq(turbo_runtime_json_value_size(events), 3);
-      check_str_eq(turbo_event_kind_json_value(json_array_get(events, 1)),
+      check_equal(turbo_runtime_json_value_size(events), 3);
+      check_equal(turbo_event_kind_json_value(json_array_get(events, 1)),
                    "tool_result");
 
-      check_int_eq(turbo_event_log_replay_json_value(log, capture_replayed_event, &replay),
+      check_equal(turbo_event_log_replay_json_value(log, capture_replayed_event, &replay),
                    TURBO_EVENT_LOG_OK);
-      check_int_eq(replay.count, 3);
-      check_int_eq(replay.model_count, 2);
-      check_int_eq(replay.tool_result_count, 1);
+      check_equal(replay.count, 3);
+      check_equal(replay.model_count, 2);
+      check_equal(replay.tool_result_count, 1);
 
       turbo_runtime_json_destroy(events);
       turbo_runtime_json_destroy(result);
@@ -275,9 +275,9 @@ spec("turbo event log runtime") {
 
       check_not_null(log);
       check_not_null(event);
-      check_int_eq(turbo_event_log_append_json_value(log, event), TURBO_EVENT_LOG_INVALID_EVENT);
-      check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_INVALID_EVENT);
-      check_size_eq(turbo_event_log_size(log), 0);
+      check_equal(turbo_event_log_append_json_value(log, event), TURBO_EVENT_LOG_INVALID_EVENT);
+      check_equal(turbo_event_log_status(log), TURBO_EVENT_LOG_INVALID_EVENT);
+      check_equal(turbo_event_log_size(log), 0);
 
       turbo_runtime_json_destroy(event);
       turbo_event_log_destroy(log);
@@ -290,11 +290,11 @@ spec("turbo event log runtime") {
 
       check_not_null(log);
       check_not_null(event);
-      check_int_eq(turbo_event_log_append_json_value(log, event), TURBO_EVENT_LOG_OK);
-      check_size_eq(turbo_event_log_size(log), 1);
-      check_int_eq(turbo_event_log_reset(log), TURBO_EVENT_LOG_OK);
-      check_int_eq(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
-      check_size_eq(turbo_event_log_size(log), 0);
+      check_equal(turbo_event_log_append_json_value(log, event), TURBO_EVENT_LOG_OK);
+      check_equal(turbo_event_log_size(log), 1);
+      check_equal(turbo_event_log_reset(log), TURBO_EVENT_LOG_OK);
+      check_equal(turbo_event_log_status(log), TURBO_EVENT_LOG_OK);
+      check_equal(turbo_event_log_size(log), 0);
       check_null(turbo_event_log_get(log, 0));
 
       turbo_runtime_json_destroy(event);
@@ -307,21 +307,21 @@ spec("turbo event log runtime") {
 
       check_not_null(log);
       check_not_null(events);
-      check_int_eq(
+      check_equal(
           turbo_runtime_json_array_append(
               events, turbo_event_trace_create_json_value("trace.a", "start", "x", 0)),
           TURBO_RUNTIME_JSON_OK);
-      check_int_eq(
+      check_equal(
           turbo_runtime_json_array_append(
               events, turbo_event_trace_create_json_value("trace.a", "finish", "x", 0)),
           TURBO_RUNTIME_JSON_OK);
 
-      check_int_eq(turbo_event_log_load_events_json_value(log, events), TURBO_EVENT_LOG_OK);
-      check_size_eq(turbo_event_log_size(log), 2);
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_event_log_load_events_json_value(log, events), TURBO_EVENT_LOG_OK);
+      check_equal(turbo_event_log_size(log), 2);
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(turbo_event_log_get(log, 0), "detail")),
                    "start");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(turbo_event_log_get(log, 1), "detail")),
                    "finish");
 
@@ -361,36 +361,36 @@ spec("turbo event log runtime") {
       check_not_null(state);
       check_not_null(log);
 
-      check_int_eq(turbo_tool_registry_add(tools, &delegate_tool), TURBO_TOOL_OK);
-      check_int_eq(turbo_chain_add_prompt_step(chain, "user_prompt", "user", "delegate"),
+      check_equal(turbo_tool_registry_add(tools, &delegate_tool), TURBO_TOOL_OK);
+      check_equal(turbo_chain_add_prompt_step(chain, "user_prompt", "user", "delegate"),
                    TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
-      check_int_eq(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "planner", &model, tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_tool_step(chain, "tool_exec", tools), TURBO_CHAIN_OK);
+      check_equal(turbo_chain_add_model_step(chain, "finalizer", &model, tools), TURBO_CHAIN_OK);
 
-      check_int_eq(
+      check_equal(
           turbo_chain_run_json_value_stream(chain, state, turbo_event_log_capture_json_value, log, &result),
           TURBO_CHAIN_OK);
       check_not_null(result);
-      check_size_eq(turbo_event_log_size(log), 3);
+      check_equal(turbo_event_log_size(log), 3);
       tool_event = turbo_event_log_get(log, 1);
-      check_str_eq(turbo_event_kind_json_value(tool_event), "tool_result");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_event_kind_json_value(tool_event), "tool_result");
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "parent_agent_run_id")),
                    "run_parent");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "parent_tool_call_id")),
                    "call_parent");
-      check_str_eq(turbo_runtime_json_value_as_string(
+      check_equal(turbo_runtime_json_value_as_string(
                        json_object_get(tool_event, "parent_tool_name")),
                    "delegate");
-      check_int_eq(
+      check_equal(
           turbo_event_log_replay_json_value(log, capture_parent_lineage_replayed_event, &replay),
           TURBO_EVENT_LOG_OK);
-      check_int_eq(replay.tool_result_count, 1);
-      check_str_eq(replay.parent_agent_run_id, "run_parent");
-      check_str_eq(replay.parent_tool_call_id, "call_parent");
-      check_str_eq(replay.parent_tool_name, "delegate");
+      check_equal(replay.tool_result_count, 1);
+      check_equal(replay.parent_agent_run_id, "run_parent");
+      check_equal(replay.parent_tool_call_id, "call_parent");
+      check_equal(replay.parent_tool_name, "delegate");
 
       turbo_runtime_json_destroy(result);
       turbo_event_log_destroy(log);

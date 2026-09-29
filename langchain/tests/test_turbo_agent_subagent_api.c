@@ -99,9 +99,9 @@ static int subagent_retriever_query(
     return -1;
   }
   state->call_count++;
-  check_str_eq(query, "hello");
-  check_str_eq(options->kind, "note");
-  check_size_eq(options->limit, 2);
+  check_equal(query, "hello");
+  check_equal(options->kind, "note");
+  check_equal(options->limit, 2);
 
   results = json_create_array();
   item = json_create_object();
@@ -156,7 +156,7 @@ static json_value_t *subagent_create_text_args(const char *text) {
   if (!arguments) {
     return NULL;
   }
-  check_int_eq(turbo_runtime_json_object_set(
+  check_equal(turbo_runtime_json_object_set(
                    arguments, "input", json_create_string(text)),
                TURBO_RUNTIME_JSON_OK);
   return arguments;
@@ -176,25 +176,25 @@ static json_value_t *subagent_create_messages_args(void) {
     return NULL;
   }
 
-  check_int_eq(turbo_runtime_json_object_set(
+  check_equal(turbo_runtime_json_object_set(
                    system_message, "role", json_create_string("system")),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_object_set(
+  check_equal(turbo_runtime_json_object_set(
                    system_message, "content",
                    json_create_string("Be terse.")),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_object_set(
+  check_equal(turbo_runtime_json_object_set(
                    user_message, "role", json_create_string("user")),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_object_set(
+  check_equal(turbo_runtime_json_object_set(
                    user_message, "content",
                    json_create_string("hello from tool")),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_array_append(messages, system_message),
+  check_equal(turbo_runtime_json_array_append(messages, system_message),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_array_append(messages, user_message),
+  check_equal(turbo_runtime_json_array_append(messages, user_message),
                TURBO_RUNTIME_JSON_OK);
-  check_int_eq(turbo_runtime_json_object_set(arguments, "messages", messages),
+  check_equal(turbo_runtime_json_object_set(arguments, "messages", messages),
                TURBO_RUNTIME_JSON_OK);
   return arguments;
 }
@@ -230,21 +230,21 @@ spec("turbo agent subagent api") {
     tool_config.session_config = &session_config;
 
     check_not_null(runtime);
-    check_int_eq(turbo_agent_subagent_add_tool_runtime(runtime, &tool_config), TURBO_TOOL_OK);
+    check_equal(turbo_agent_subagent_add_tool_runtime(runtime, &tool_config), TURBO_TOOL_OK);
 
     args1 = subagent_create_text_args("first");
     args2 = subagent_create_text_args("second");
     check_not_null(args1);
     check_not_null(args2);
 
-    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate", args1, &result1),
+    check_equal(turbo_tool_runtime_invoke_json_value(runtime, "delegate", args1, &result1),
                  TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate", args2, &result2),
+    check_equal(turbo_tool_runtime_invoke_json_value(runtime, "delegate", args2, &result2),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result1, "output_text")),
                  "ok");
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result2, "output_text")),
                  "ok");
 
@@ -267,15 +267,15 @@ spec("turbo agent subagent api") {
     check_not_null(thread2);
     check_not_null(run1);
     check_not_null(run2);
-    check_str_eq(thread1, thread2);
+    check_equal(thread1, thread2);
     check(strcmp(run1, run2) != 0);
-    check_str_eq(child_thread1, thread1);
-    check_str_eq(child_run1, run1);
-    check_str_eq(child_status1, "completed");
-    check_int_eq(json_type(
+    check_equal(child_thread1, thread1);
+    check_equal(child_run1, run1);
+    check_equal(child_status1, "completed");
+    check_equal(json_type(
                      json_object_get(result1, "checkpoint_id")),
                  JSON_NULL);
-    check_int_eq(json_type(
+    check_equal(json_type(
                      json_object_get(result1, "child_checkpoint_id")),
                  JSON_NULL);
 
@@ -309,16 +309,16 @@ spec("turbo agent subagent api") {
     tool_config.session_config = &session_config;
 
     check_not_null(runtime);
-    check_int_eq(turbo_agent_subagent_add_tool_runtime(runtime, &tool_config), TURBO_TOOL_OK);
+    check_equal(turbo_agent_subagent_add_tool_runtime(runtime, &tool_config), TURBO_TOOL_OK);
 
     args1 = subagent_create_text_args("first");
     args2 = subagent_create_text_args("second");
     check_not_null(args1);
     check_not_null(args2);
 
-    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate_once", args1, &result1),
+    check_equal(turbo_tool_runtime_invoke_json_value(runtime, "delegate_once", args1, &result1),
                  TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate_once", args2, &result2),
+    check_equal(turbo_tool_runtime_invoke_json_value(runtime, "delegate_once", args2, &result2),
                  TURBO_TOOL_OK);
 
     thread1 = turbo_runtime_json_value_as_string(
@@ -357,7 +357,7 @@ spec("turbo agent subagent api") {
     document.uri = "memory://doc-knowledge";
     document.title = "Knowledge note";
     document.kind = "note";
-    check_int_eq(turbo_agent_knowledge_store_upsert_text(
+    check_equal(turbo_agent_knowledge_store_upsert_text(
                      store, &document, "Knowledge context says hello.", 64),
                  0);
 
@@ -375,17 +375,17 @@ spec("turbo agent subagent api") {
     tool_config.result_kind = TURBO_AGENT_SUBAGENT_RESULT_TEXT;
     tool_config.session_config = &session_config;
 
-    check_int_eq(turbo_agent_subagent_add_tool_runtime(runtime, &tool_config),
+    check_equal(turbo_agent_subagent_add_tool_runtime(runtime, &tool_config),
                  TURBO_TOOL_OK);
     args = subagent_create_text_args("use local knowledge");
     check_not_null(args);
-    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate_knowledge",
+    check_equal(turbo_tool_runtime_invoke_json_value(runtime, "delegate_knowledge",
                                                 args, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result, "status")),
                  "completed");
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result, "output_text")),
                  "ok");
 
@@ -430,22 +430,22 @@ spec("turbo agent subagent api") {
     tool_config.result_kind = TURBO_AGENT_SUBAGENT_RESULT_TEXT;
     tool_config.session_config = &session_config;
 
-    check_int_eq(turbo_agent_subagent_add_tool_runtime(runtime, &tool_config),
+    check_equal(turbo_agent_subagent_add_tool_runtime(runtime, &tool_config),
                  TURBO_TOOL_OK);
     args = subagent_create_text_args("use retriever context");
     check_not_null(args);
-    check_int_eq(turbo_tool_runtime_invoke_json_value(runtime, "delegate_retriever",
+    check_equal(turbo_tool_runtime_invoke_json_value(runtime, "delegate_retriever",
                                                 args, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result, "status")),
                  "completed");
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result, "output_text")),
                  "ok");
-    check_int_eq(query_state.call_count, 1);
-    check_int_eq(transport_state.call_count, 2);
-    check_int_eq(transport_state.saw_retriever_context, 1);
+    check_equal(query_state.call_count, 1);
+    check_equal(transport_state.call_count, 2);
+    check_equal(transport_state.saw_retriever_context, 1);
 
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(args);
@@ -473,20 +473,20 @@ spec("turbo agent subagent api") {
     tool_config.session_config = &session_config;
 
     check_not_null(registry);
-    check_int_eq(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
-    check_int_eq(turbo_tool_registry_execute(registry, "delegate_json", "{\"input\":\"hello\"}",
+    check_equal(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_execute(registry, "delegate_json", "{\"input\":\"hello\"}",
                                              &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
     result_json = json_parse(output, strlen(output));
     check_not_null(result_json);
     check_true(json_get_bool(result_json, "ok", false));
-    check_str_eq(json_get_string(result_json, "status"), "completed");
-    check_int_eq(json_get_int(json_object_get(result_json, "output_json"), "value", 0),
+    check_equal(json_get_string(result_json, "status"), "completed");
+    check_equal(json_get_int(json_object_get(result_json, "output_json"), "value", 0),
                  42);
     check_not_null(json_get_string(result_json, "thread_id"));
     check_not_null(json_get_string(result_json, "run_id"));
-    check_str_eq(json_get_string(result_json, "child_status"), "completed");
+    check_equal(json_get_string(result_json, "child_status"), "completed");
     check_not_null(json_get_string(result_json, "child_thread_id"));
     check_not_null(json_get_string(result_json, "child_run_id"));
     check_true(json_object_get(result_json, "child_checkpoint_id") != NULL);
@@ -517,16 +517,16 @@ spec("turbo agent subagent api") {
     tool_config.session_config = &session_config;
 
     check_not_null(registry);
-    check_int_eq(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
+    check_equal(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
 
     args = subagent_create_messages_args();
     check_not_null(args);
-    check_int_eq(turbo_tool_registry_execute_json_value(registry, "delegate_messages", args, &result),
+    check_equal(turbo_tool_registry_execute_json_value(registry, "delegate_messages", args, &result),
                  TURBO_TOOL_OK);
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result, "status")),
                  "completed");
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(result, "output_text")),
                  "ok");
 
@@ -556,8 +556,8 @@ spec("turbo agent subagent api") {
     tool_config.session_config = &session_config;
 
     check_not_null(registry);
-    check_int_eq(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
-    check_int_eq(
+    check_equal(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
+    check_equal(
         turbo_tool_registry_execute(registry, "delegate_child_surface", "{\"input\":\"hello\"}",
                                     &output),
         TURBO_TOOL_OK);
@@ -567,17 +567,17 @@ spec("turbo agent subagent api") {
     check_not_null(result_json);
     summary = json_object_get(result_json, "summary");
     check_not_null(summary);
-    check_str_eq(json_get_string(result_json, "child_thread_id"),
+    check_equal(json_get_string(result_json, "child_thread_id"),
                  json_get_string(result_json, "thread_id"));
-    check_str_eq(json_get_string(result_json, "child_run_id"),
+    check_equal(json_get_string(result_json, "child_run_id"),
                  json_get_string(result_json, "run_id"));
-    check_str_eq(json_get_string(result_json, "child_status"),
+    check_equal(json_get_string(result_json, "child_status"),
                  json_get_string(result_json, "status"));
-    check_str_eq(json_get_string(result_json, "child_thread_id"),
+    check_equal(json_get_string(result_json, "child_thread_id"),
                  json_get_string(summary, "thread_id"));
-    check_str_eq(json_get_string(result_json, "child_run_id"),
+    check_equal(json_get_string(result_json, "child_run_id"),
                  json_get_string(summary, "run_id"));
-    check_str_eq(json_get_string(result_json, "child_status"),
+    check_equal(json_get_string(result_json, "child_status"),
                  json_get_string(summary, "status"));
     check_true(json_object_get(result_json, "active_agent") != NULL);
     check_true(json_object_get(result_json, "handoff_target_agent") != NULL);
@@ -620,8 +620,8 @@ spec("turbo agent subagent api") {
     tool_config.session_config = &session_config;
 
     check_not_null(registry);
-    check_int_eq(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
-    check_int_eq(
+    check_equal(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
+    check_equal(
         turbo_tool_registry_execute(registry, "delegate_null_parent_surface",
                                     "{\"input\":\"hello\"}", &output),
         TURBO_TOOL_OK);
@@ -695,8 +695,8 @@ spec("turbo agent subagent api") {
     tool_config.session_config = &session_config;
 
     check_not_null(registry);
-    check_int_eq(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
-    check_int_eq(
+    check_equal(turbo_agent_subagent_add_tool_registry(registry, &tool_config), TURBO_TOOL_OK);
+    check_equal(
         turbo_tool_registry_execute(registry, "delegate_parent_surface", "{\"input\":\"hello\"}",
                                     &output),
         TURBO_TOOL_OK);
@@ -706,21 +706,21 @@ spec("turbo agent subagent api") {
     check_not_null(result_json);
     summary = json_object_get(result_json, "summary");
     check_not_null(summary);
-    check_str_eq(json_get_string(result_json, "parent_agent_run_id"), "run_parent");
-    check_str_eq(json_get_string(result_json, "parent_tool_call_id"), "call_parent");
-    check_str_eq(json_get_string(result_json, "parent_tool_name"), "delegate");
-    check_str_eq(json_get_string(result_json, "parent_graph_run_id"),
+    check_equal(json_get_string(result_json, "parent_agent_run_id"), "run_parent");
+    check_equal(json_get_string(result_json, "parent_tool_call_id"), "call_parent");
+    check_equal(json_get_string(result_json, "parent_tool_name"), "delegate");
+    check_equal(json_get_string(result_json, "parent_graph_run_id"),
                  "run_graph_parent");
-    check_str_eq(json_get_string(result_json, "call_frame_id"), "frame_parent");
-    check_str_eq(json_get_string(result_json, "parent_agent_run_id"),
+    check_equal(json_get_string(result_json, "call_frame_id"), "frame_parent");
+    check_equal(json_get_string(result_json, "parent_agent_run_id"),
                  json_get_string(summary, "parent_agent_run_id"));
-    check_str_eq(json_get_string(result_json, "parent_tool_call_id"),
+    check_equal(json_get_string(result_json, "parent_tool_call_id"),
                  json_get_string(summary, "parent_tool_call_id"));
-    check_str_eq(json_get_string(result_json, "parent_tool_name"),
+    check_equal(json_get_string(result_json, "parent_tool_name"),
                  json_get_string(summary, "parent_tool_name"));
-    check_str_eq(json_get_string(result_json, "parent_graph_run_id"),
+    check_equal(json_get_string(result_json, "parent_graph_run_id"),
                  json_get_string(summary, "parent_graph_run_id"));
-    check_str_eq(json_get_string(result_json, "call_frame_id"),
+    check_equal(json_get_string(result_json, "call_frame_id"),
                  json_get_string(summary, "call_frame_id"));
 
     json_free(result_json); result_json = NULL;

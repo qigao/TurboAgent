@@ -68,19 +68,19 @@ spec("turbo agent extensions api") {
     check_not_null(agent);
 
     store = turbo_agent_store_memory_create();
-    check_int_eq(turbo_agent_set_store(agent, &store), 0);
+    check_equal(turbo_agent_set_store(agent, &store), 0);
 
     sink.callback = capture_trace_json_value;
     sink.user_data = &capture;
-    check_int_eq(turbo_agent_add_trace_json_value_sink(agent, &sink), 0);
+    check_equal(turbo_agent_add_trace_json_value_sink(agent, &sink), 0);
 
     state = turbo_agent_state_create();
     check_not_null(state);
-    check_int_eq(turbo_agent_state_set_memory_json(state, "session", "{\"ok\":true}"), 0);
-    check_int_eq(turbo_agent_state_save_memory(agent, state, "session"), 0);
-    check_int_eq(turbo_agent_state_load_memory(agent, state, "session"), 0);
+    check_equal(turbo_agent_state_set_memory_json(state, "session", "{\"ok\":true}"), 0);
+    check_equal(turbo_agent_state_save_memory(agent, state, "session"), 0);
+    check_equal(turbo_agent_state_load_memory(agent, state, "session"), 0);
     check_true(capture.count >= 2);
-    check_str_eq(capture.last_name, "memory_load");
+    check_equal(capture.last_name, "memory_load");
 
     json_free(state); state = NULL;
     turbo_agent_destroy(agent);

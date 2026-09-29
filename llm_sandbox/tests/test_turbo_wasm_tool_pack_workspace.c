@@ -63,12 +63,12 @@ spec("TurboWasm tool pack workspace integration") {
 
     check_not_null(root);
     check_not_null(wasm_policy);
-    check_int_eq(salts_fs_path_join(skills, sizeof(skills), root, "skills"), 0);
-    check_int_eq(salts_fs_path_join(skill_dir, sizeof(skill_dir), skills, "wasm-echo"), 0);
-    check_int_eq(salts_fs_mkdir(skills, 0700), 0);
-    check_int_eq(salts_fs_mkdir(skill_dir, 0700), 0);
-    check_int_eq(salts_fs_path_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
-    check_int_eq(pack_workspace_write_text(skill_path, skill_text), 0);
+    check_equal(salts_fs_path_join(skills, sizeof(skills), root, "skills"), 0);
+    check_equal(salts_fs_path_join(skill_dir, sizeof(skill_dir), skills, "wasm-echo"), 0);
+    check_equal(salts_fs_mkdir(skills, 0700), 0);
+    check_equal(salts_fs_mkdir(skill_dir, 0700), 0);
+    check_equal(salts_fs_path_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
+    check_equal(pack_workspace_write_text(skill_path, skill_text), 0);
 
     turbo_wasm_tool_pack_config_init(&pack_config);
     pack = turbo_wasm_tool_pack_create(&pack_config);
@@ -76,7 +76,7 @@ spec("TurboWasm tool pack workspace integration") {
     turbo_wasm_tool_pack_module_config_init(&module_config);
     module_config.runtime.module_path = module_name;
     module_config.runtime.policy = wasm_policy;
-    check_int_eq(turbo_wasm_tool_pack_add_module(pack, &module_config), TURBO_TOOL_OK);
+    check_equal(turbo_wasm_tool_pack_add_module(pack, &module_config), TURBO_TOOL_OK);
     turbo_wasm_policy_destroy(wasm_policy);
     wasm_policy = NULL;
 
@@ -86,19 +86,19 @@ spec("TurboWasm tool pack workspace integration") {
     workspace_config.policy = &agent_policy;
     workspace_config.tool_capabilities = &capability;
     workspace_config.tool_capability_count = 1;
-    check_int_eq(turbo_agent_workspace_create(&workspace_config, &workspace),
+    check_equal(turbo_agent_workspace_create(&workspace_config, &workspace),
                  TURBO_AGENT_WORKSPACE_OK);
-    check_int_eq(turbo_agent_workspace_prepare(workspace, "use wasm echo",
+    check_equal(turbo_agent_workspace_prepare(workspace, "use wasm echo",
                                                turbo_wasm_tool_pack_registry(pack), NULL,
                                                &selection),
                  TURBO_AGENT_WORKSPACE_OK);
     check_not_null(selection);
-    check_size_eq(turbo_agent_workspace_selection_tool_count(selection), 1);
-    check_str_eq(turbo_agent_workspace_selection_tool_name(selection, 0), "echo_json");
-    check_int_eq(turbo_tool_registry_execute(turbo_agent_workspace_selection_tools(selection),
+    check_equal(turbo_agent_workspace_selection_tool_count(selection), 1);
+    check_equal(turbo_agent_workspace_selection_tool_name(selection, 0), "echo_json");
+    check_equal(turbo_tool_registry_execute(turbo_agent_workspace_selection_tools(selection),
                                              "echo_json", "{\"workspace\":true}", &output),
                  TURBO_TOOL_OK);
-    check_str_eq(output, "{\"workspace\":true}");
+    check_equal(output, "{\"workspace\":true}");
     free(output);
     output = NULL;
     turbo_agent_workspace_selection_destroy(selection);
@@ -107,9 +107,9 @@ spec("TurboWasm tool pack workspace integration") {
     workspace = NULL;
 
     agent_policy.allow_runtime_tools = 0;
-    check_int_eq(turbo_agent_workspace_create(&workspace_config, &workspace),
+    check_equal(turbo_agent_workspace_create(&workspace_config, &workspace),
                  TURBO_AGENT_WORKSPACE_OK);
-    check_int_eq(turbo_agent_workspace_prepare(workspace, "use wasm echo",
+    check_equal(turbo_agent_workspace_prepare(workspace, "use wasm echo",
                                                turbo_wasm_tool_pack_registry(pack), NULL,
                                                &selection),
                  TURBO_AGENT_WORKSPACE_CAPABILITY_DENIED);
@@ -117,7 +117,7 @@ spec("TurboWasm tool pack workspace integration") {
 
     turbo_agent_workspace_destroy(workspace);
     turbo_wasm_tool_pack_destroy(pack);
-    check_int_eq(tt_remove_tree(root), 0);
+    check_equal(tt_remove_tree(root), 0);
     free(root);
   }
 }

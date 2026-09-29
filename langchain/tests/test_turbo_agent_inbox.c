@@ -21,7 +21,7 @@ static turbo_agent_session_t *inbox_create_session(const char *thread_id,
   session = turbo_agent_session_create(&session_config);
   check_not_null(session);
   if (session) {
-    check_int_eq(turbo_agent_session_inbox_configure(session, inbox_config), SALTS_OK);
+    check_equal(turbo_agent_session_inbox_configure(session, inbox_config), SALTS_OK);
   }
   return session;
 }
@@ -132,45 +132,45 @@ spec("turbo agent inbox") {
     const json_value_t *payload;
     char *inbox_id = NULL;
 
-    check_int_eq(
+    check_equal(
         turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, message, 0, &inbox_id),
         SALTS_OK);
     check_not_null(inbox_id);
     json_object_set_string(message, "content", "mutated");
 
-    check_int_eq(turbo_agent_session_inbox_status(session, inbox_id, &status), SALTS_OK);
-    check_str_eq(json_get_string(status, "status"), "queued");
+    check_equal(turbo_agent_session_inbox_status(session, inbox_id, &status), SALTS_OK);
+    check_equal(json_get_string(status, "status"), "queued");
     payload = json_object_get(status, "payload");
-    check_str_eq(json_get_string(payload, "content"), "original");
+    check_equal(json_get_string(payload, "content"), "original");
     turbo_runtime_json_destroy(status);
     status = NULL;
 
-    check_int_eq(
+    check_equal(
         turbo_agent_session_inbox_claim(session, TURBO_AGENT_INBOX_STEER, "run-1", &claimed),
         SALTS_OK);
-    check_str_eq(json_get_string(claimed, "inbox_id"), inbox_id);
-    check_int_eq(
+    check_equal(json_get_string(claimed, "inbox_id"), inbox_id);
+    check_equal(
         turbo_agent_session_inbox_claim(session, TURBO_AGENT_INBOX_FOLLOW_UP, "run-1", &status),
         SALTS_EBUSY);
     check_null(status);
     turbo_runtime_json_destroy(claimed);
     claimed = NULL;
 
-    check_int_eq(turbo_agent_session_inbox_requeue(session, inbox_id), SALTS_OK);
-    check_int_eq(
+    check_equal(turbo_agent_session_inbox_requeue(session, inbox_id), SALTS_OK);
+    check_equal(
         turbo_agent_session_inbox_claim(session, TURBO_AGENT_INBOX_STEER, "run-2", &claimed),
         SALTS_OK);
     turbo_runtime_json_destroy(claimed);
     claimed = NULL;
-    check_int_eq(turbo_agent_session_inbox_mark_applied(session, inbox_id, "event-1"), SALTS_OK);
-    check_int_eq(turbo_agent_session_inbox_status(session, inbox_id, &status), SALTS_OK);
-    check_str_eq(json_get_string(status, "status"), "applied");
-    check_str_eq(json_get_string(json_object_get(status, "latest_transition"),
+    check_equal(turbo_agent_session_inbox_mark_applied(session, inbox_id, "event-1"), SALTS_OK);
+    check_equal(turbo_agent_session_inbox_status(session, inbox_id, &status), SALTS_OK);
+    check_equal(json_get_string(status, "status"), "applied");
+    check_equal(json_get_string(json_object_get(status, "latest_transition"),
                                        "applied_event_id"),
                  "event-1");
     turbo_runtime_json_destroy(status);
     status = NULL;
-    check_int_eq(
+    check_equal(
         turbo_agent_session_inbox_claim(session, TURBO_AGENT_INBOX_STEER, "run-3", &claimed),
         SALTS_ENOENT);
     check_null(claimed);
@@ -191,23 +191,23 @@ spec("turbo agent inbox") {
     char *first_id = NULL;
     char *second_id = NULL;
 
-    check_int_eq(turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, first, 0, &first_id),
+    check_equal(turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, first, 0, &first_id),
                  SALTS_OK);
-    check_int_eq(
+    check_equal(
         turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, second, 0, &second_id),
         SALTS_EBUSY);
     check_null(second_id);
-    check_int_eq(
+    check_equal(
         turbo_agent_session_inbox_claim(session, TURBO_AGENT_INBOX_STEER, "run-capacity", &claimed),
         SALTS_OK);
     turbo_runtime_json_destroy(claimed);
     claimed = NULL;
-    check_int_eq(
+    check_equal(
         turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, second, 0, &second_id),
         SALTS_EBUSY);
-    check_int_eq(turbo_agent_session_inbox_mark_applied(session, first_id, "event-capacity"),
+    check_equal(turbo_agent_session_inbox_mark_applied(session, first_id, "event-capacity"),
                  SALTS_OK);
-    check_int_eq(
+    check_equal(
         turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, second, 0, &second_id),
         SALTS_OK);
 
@@ -229,23 +229,23 @@ spec("turbo agent inbox") {
     salts_thread_t producer = NULL;
     inbox_enqueue_task_t task = {0};
 
-    check_int_eq(turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, first, 0, &first_id),
+    check_equal(turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, first, 0, &first_id),
                  SALTS_OK);
     task.session = session;
     task.message = blocked;
     task.kind = TURBO_AGENT_INBOX_FOLLOW_UP;
     task.result = TURBO_UNKNOWN;
     atomic_init(&task.entered, 0);
-    check_int_eq(salts_thread_create(&producer, inbox_enqueue_task, &task), 0);
+    check_equal(salts_thread_create(&producer, inbox_enqueue_task, &task), 0);
     while (!atomic_load_explicit(&task.entered, memory_order_acquire)) {
       salts_thread_yield();
     }
-    check_int_eq(turbo_agent_session_inbox_close(session), SALTS_OK);
-    check_int_eq(salts_thread_join(&producer), 0);
+    check_equal(turbo_agent_session_inbox_close(session), SALTS_OK);
+    check_equal(salts_thread_join(&producer), 0);
     salts_thread_destroy(&producer);
-    check_int_eq(task.result, SALTS_ECANCELED);
+    check_equal(task.result, SALTS_ECANCELED);
     check_null(task.inbox_id);
-    check_int_eq(turbo_agent_session_inbox_close(session), SALTS_EALREADY);
+    check_equal(turbo_agent_session_inbox_close(session), SALTS_EALREADY);
 
     free(first_id);
     turbo_runtime_json_destroy(first);
@@ -266,10 +266,10 @@ spec("turbo agent inbox") {
 
     shared_store.user_data_free = NULL;
     first_session = inbox_create_session("inbox-recovery", shared_store, &config);
-    check_int_eq(turbo_agent_session_enqueue(first_session, TURBO_AGENT_INBOX_FOLLOW_UP, message, 0,
+    check_equal(turbo_agent_session_enqueue(first_session, TURBO_AGENT_INBOX_FOLLOW_UP, message, 0,
                                              &inbox_id),
                  SALTS_OK);
-    check_int_eq(turbo_agent_session_inbox_claim(first_session, TURBO_AGENT_INBOX_FOLLOW_UP,
+    check_equal(turbo_agent_session_inbox_claim(first_session, TURBO_AGENT_INBOX_FOLLOW_UP,
                                                  "run-before-restart", &claimed),
                  SALTS_OK);
     turbo_runtime_json_destroy(claimed);
@@ -277,12 +277,12 @@ spec("turbo agent inbox") {
     turbo_agent_session_destroy(first_session);
 
     second_session = inbox_create_session("inbox-recovery", shared_store, &config);
-    check_int_eq(turbo_agent_session_inbox_claim(second_session, TURBO_AGENT_INBOX_FOLLOW_UP,
+    check_equal(turbo_agent_session_inbox_claim(second_session, TURBO_AGENT_INBOX_FOLLOW_UP,
                                                  "run-after-restart", &claimed),
                  SALTS_OK);
-    check_str_eq(json_get_string(claimed, "inbox_id"), inbox_id);
+    check_equal(json_get_string(claimed, "inbox_id"), inbox_id);
     turbo_runtime_json_destroy(claimed);
-    check_int_eq(
+    check_equal(
         turbo_agent_session_inbox_mark_applied(second_session, inbox_id, "event-after-restart"),
         SALTS_OK);
 
@@ -314,18 +314,18 @@ spec("turbo agent inbox") {
     session_config.agent_config.transport_user_data = &capture;
     session = turbo_agent_session_create(&session_config);
     check_not_null(session);
-    check_int_eq(turbo_agent_session_inbox_configure(session, &config), SALTS_OK);
-    check_int_eq(
+    check_equal(turbo_agent_session_inbox_configure(session, &config), SALTS_OK);
+    check_equal(
         turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_STEER, message, 0, &inbox_id),
         SALTS_OK);
-    check_int_eq(turbo_agent_session_start_text(session, "initial request", NULL, &summary, &state),
+    check_equal(turbo_agent_session_start_text(session, "initial request", NULL, &summary, &state),
                  SALTS_OK);
     check_not_null(capture.request_json);
     check_not_null(strstr(capture.request_json, "change direction now"));
     input = json_object_get(state, "input");
     check_not_null(input);
-    check_size_eq(json_array_size(input), 2);
-    check_str_eq(json_get_string(json_array_get(input, 1), "content"),
+    check_equal(json_array_size(input), 2);
+    check_equal(json_get_string(json_array_get(input, 1), "content"),
                  "change direction now");
     for (index = 0; index < turbo_agent_state_event_count(state); ++index) {
       const json_value_t *candidate = turbo_agent_state_event_at(state, index);
@@ -336,11 +336,11 @@ spec("turbo agent inbox") {
       }
     }
     check_not_null(event);
-    check_str_eq(json_get_string(event, "inbox_id"), inbox_id);
+    check_equal(json_get_string(event, "inbox_id"), inbox_id);
     check_not_null(json_get_string(event, "event_id"));
-    check_int_eq(turbo_agent_session_inbox_status(session, inbox_id, &status), SALTS_OK);
-    check_str_eq(json_get_string(status, "status"), "applied");
-    check_str_eq(json_get_string(json_object_get(status, "latest_transition"),
+    check_equal(turbo_agent_session_inbox_status(session, inbox_id, &status), SALTS_OK);
+    check_equal(json_get_string(status, "status"), "applied");
+    check_equal(json_get_string(json_object_get(status, "latest_transition"),
                                        "applied_event_id"),
                  json_get_string(event, "event_id"));
 
@@ -375,27 +375,27 @@ spec("turbo agent inbox") {
     session_config.agent_config.transport_user_data = &capture;
     session = turbo_agent_session_create(&session_config);
     check_not_null(session);
-    check_int_eq(turbo_agent_session_inbox_configure(session, &config), SALTS_OK);
-    check_int_eq(
+    check_equal(turbo_agent_session_inbox_configure(session, &config), SALTS_OK);
+    check_equal(
         turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_FOLLOW_UP, message, 0, &inbox_id),
         SALTS_OK);
-    check_int_eq(turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_FOLLOW_UP, deferred_message,
+    check_equal(turbo_agent_session_enqueue(session, TURBO_AGENT_INBOX_FOLLOW_UP, deferred_message,
                                              0, &deferred_id),
                  SALTS_OK);
-    check_int_eq(turbo_agent_session_start_text(session, "initial request", NULL, &summary, &state),
+    check_equal(turbo_agent_session_start_text(session, "initial request", NULL, &summary, &state),
                  SALTS_OK);
-    check_size_eq(capture.call_count, 2);
+    check_equal(capture.call_count, 2);
     check_not_null(strstr(capture.request_json, "one more request"));
     input = json_object_get(state, "input");
-    check_size_eq(json_array_size(input), 2);
-    check_str_eq(json_get_string(json_array_get(input, 1), "content"),
+    check_equal(json_array_size(input), 2);
+    check_equal(json_get_string(json_array_get(input, 1), "content"),
                  "one more request");
-    check_int_eq(turbo_agent_session_inbox_status(session, inbox_id, &status), SALTS_OK);
-    check_str_eq(json_get_string(status, "status"), "applied");
+    check_equal(turbo_agent_session_inbox_status(session, inbox_id, &status), SALTS_OK);
+    check_equal(json_get_string(status, "status"), "applied");
     turbo_runtime_json_destroy(status);
     status = NULL;
-    check_int_eq(turbo_agent_session_inbox_status(session, deferred_id, &status), SALTS_OK);
-    check_str_eq(json_get_string(status, "status"), "queued");
+    check_equal(turbo_agent_session_inbox_status(session, deferred_id, &status), SALTS_OK);
+    check_equal(json_get_string(status, "status"), "queued");
 
     free(capture.request_json);
     free(inbox_id);
@@ -437,14 +437,14 @@ spec("turbo agent inbox") {
     first_config.agent_config.transport_user_data = &capture;
     first_session = turbo_agent_session_create(&first_config);
     check_not_null(first_session);
-    check_int_eq(turbo_agent_session_inbox_configure(first_session, &config), SALTS_OK);
-    check_int_eq(
+    check_equal(turbo_agent_session_inbox_configure(first_session, &config), SALTS_OK);
+    check_equal(
         turbo_agent_session_enqueue(first_session, TURBO_AGENT_INBOX_STEER, message, 0, &inbox_id),
         SALTS_OK);
-    check_int_eq(turbo_agent_session_start_text(first_session, "initial", NULL, &summary, &state),
+    check_equal(turbo_agent_session_start_text(first_session, "initial", NULL, &summary, &state),
                  SALTS_EIO);
-    check_int_eq(turbo_agent_session_inbox_status(first_session, inbox_id, &status), SALTS_OK);
-    check_str_eq(json_get_string(status, "status"), "claimed");
+    check_equal(turbo_agent_session_inbox_status(first_session, inbox_id, &status), SALTS_OK);
+    check_equal(json_get_string(status, "status"), "claimed");
     turbo_runtime_json_destroy(status);
     status = NULL;
     turbo_runtime_json_destroy(state);
@@ -455,9 +455,9 @@ spec("turbo agent inbox") {
     second_config.runtime_store = shared_store;
     second_session = turbo_agent_session_create(&second_config);
     check_not_null(second_session);
-    check_int_eq(turbo_agent_session_inbox_configure(second_session, &config), SALTS_OK);
-    check_int_eq(turbo_agent_session_inbox_status(second_session, inbox_id, &status), SALTS_OK);
-    check_str_eq(json_get_string(status, "status"), "applied");
+    check_equal(turbo_agent_session_inbox_configure(second_session, &config), SALTS_OK);
+    check_equal(turbo_agent_session_inbox_status(second_session, inbox_id, &status), SALTS_OK);
+    check_equal(json_get_string(status, "status"), "applied");
 
     free(capture.request_json);
     free(inbox_id);
@@ -488,23 +488,23 @@ spec("turbo agent inbox") {
     for (index = 0; index < 2; ++index) {
       tasks[index].result = TURBO_UNKNOWN;
       atomic_init(&tasks[index].entered, 0);
-      check_int_eq(salts_thread_create(&producers[index], inbox_enqueue_task, &tasks[index]), 0);
+      check_equal(salts_thread_create(&producers[index], inbox_enqueue_task, &tasks[index]), 0);
     }
     for (index = 0; index < 2; ++index) {
-      check_int_eq(salts_thread_join(&producers[index]), 0);
+      check_equal(salts_thread_join(&producers[index]), 0);
       salts_thread_destroy(&producers[index]);
-      check_int_eq(tasks[index].result, SALTS_OK);
+      check_equal(tasks[index].result, SALTS_OK);
       check_not_null(tasks[index].inbox_id);
     }
     check_true(strcmp(tasks[0].inbox_id, tasks[1].inbox_id) != 0);
     for (index = 0; index < 2; ++index) {
       const char *claimed_id;
-      check_int_eq(
+      check_equal(
           turbo_agent_session_inbox_claim(session, TURBO_AGENT_INBOX_STEER, "run-mpsc", &claimed),
           SALTS_OK);
       claimed_id = json_get_string(claimed, "inbox_id");
       check_not_null(claimed_id);
-      check_int_eq(turbo_agent_session_inbox_mark_applied(session, claimed_id, "event-mpsc"),
+      check_equal(turbo_agent_session_inbox_mark_applied(session, claimed_id, "event-mpsc"),
                    SALTS_OK);
       turbo_runtime_json_destroy(claimed);
       claimed = NULL;

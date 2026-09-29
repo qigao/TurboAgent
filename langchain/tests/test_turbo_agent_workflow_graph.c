@@ -31,7 +31,7 @@ static int supervisor_planner_handoff_node(turbo_graph_exec_ctx_t *ctx, void *us
   check_not_null(ctx);
   check_not_null(ctx->state);
   json_object_set_bool(ctx->state, "planner_visited", true);
-  check_int_eq(turbo_agent_state_request_handoff(ctx->state, "executor", "delegate execution"), 0);
+  check_equal(turbo_agent_state_request_handoff(ctx->state, "executor", "delegate execution"), 0);
   return turbo_graph_ctx_set_next(ctx, "handoff");
 }
 
@@ -54,13 +54,13 @@ spec("turbo agent workflow graph") {
     check_not_null(graph);
     check_not_null(planner);
     check_not_null(executor);
-    check_int_eq(
+    check_equal(
         turbo_agent_install_planner_loop(graph, planner, executor, "planner", "commit", "step",
                                          "executor", "tools", "advance", "end", 1),
         TURBO_GRAPH_EXEC_OK);
-    check_str_eq(turbo_graph_get_entry(graph), "planner");
-    check_size_eq(turbo_graph_node_count(graph), 8);
-    check_size_eq(turbo_graph_edge_count(graph), 10);
+    check_equal(turbo_graph_get_entry(graph), "planner");
+    check_equal(turbo_graph_node_count(graph), 8);
+    check_equal(turbo_graph_edge_count(graph), 10);
     check_not_null(turbo_graph_topology_id(graph));
 
     turbo_agent_destroy(executor);
@@ -76,13 +76,13 @@ spec("turbo agent workflow graph") {
     check_not_null(graph);
     check_not_null(planner);
     check_not_null(executor);
-    check_int_eq(
+    check_equal(
         turbo_agent_install_review_loop(graph, planner, executor, "planner", "commit", "step",
                                         "review", "executor", "tools", "advance", "end", 1),
         TURBO_GRAPH_EXEC_OK);
-    check_str_eq(turbo_graph_get_entry(graph), "planner");
-    check_size_eq(turbo_graph_node_count(graph), 9);
-    check_size_eq(turbo_graph_edge_count(graph), 12);
+    check_equal(turbo_graph_get_entry(graph), "planner");
+    check_equal(turbo_graph_node_count(graph), 9);
+    check_equal(turbo_graph_edge_count(graph), 12);
     check_not_null(turbo_graph_topology_id(graph));
 
     turbo_agent_destroy(executor);
@@ -98,15 +98,15 @@ spec("turbo agent workflow graph") {
     check_not_null(graph);
     check_not_null(planner);
     check_not_null(executor);
-    check_int_eq(
+    check_equal(
         turbo_agent_install_review_replan_loop(
             graph, planner, executor, "planner", "commit", "step", "review", "executor",
             "tools", "detect", dummy_detect_replan, NULL, "route", "prepare", "advance", "end",
             1),
         TURBO_GRAPH_EXEC_OK);
-    check_str_eq(turbo_graph_get_entry(graph), "planner");
-    check_size_eq(turbo_graph_node_count(graph), 12);
-    check_size_eq(turbo_graph_edge_count(graph), 16);
+    check_equal(turbo_graph_get_entry(graph), "planner");
+    check_equal(turbo_graph_node_count(graph), 12);
+    check_equal(turbo_graph_edge_count(graph), 16);
     check_not_null(turbo_graph_topology_id(graph));
 
     turbo_agent_destroy(executor);
@@ -118,12 +118,12 @@ spec("turbo agent workflow graph") {
     turbo_graph_t *graph = turbo_graph_create("supervisor-loop");
 
     check_not_null(graph);
-    check_int_eq(
+    check_equal(
         turbo_agent_install_supervisor_loop(graph, "supervisor", "handoff", "end", 1),
         TURBO_GRAPH_EXEC_OK);
-    check_str_eq(turbo_graph_get_entry(graph), "supervisor");
-    check_size_eq(turbo_graph_node_count(graph), 3);
-    check_size_eq(turbo_graph_edge_count(graph), 2);
+    check_equal(turbo_graph_get_entry(graph), "supervisor");
+    check_equal(turbo_graph_node_count(graph), 3);
+    check_equal(turbo_graph_edge_count(graph), 2);
     check_not_null(turbo_graph_topology_id(graph));
 
     turbo_graph_destroy(graph);
@@ -141,42 +141,42 @@ spec("turbo agent workflow graph") {
 
     check_not_null(graph);
     check_not_null(state);
-    check_int_eq(
+    check_equal(
         turbo_agent_install_supervisor_loop(graph, "supervisor", "handoff", "end", 1),
         TURBO_GRAPH_EXEC_OK);
-    check_int_eq(
+    check_equal(
         turbo_graph_add_node(graph, "planner", supervisor_planner_handoff_node, NULL),
         TURBO_GRAPH_EXEC_OK);
-    check_int_eq(
+    check_equal(
         turbo_graph_add_node(graph, "executor", supervisor_executor_node, NULL),
         TURBO_GRAPH_EXEC_OK);
-    check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
+    check_equal(turbo_agent_state_set_active_agent(state, "planner"), 0);
 
     input = json_clone(state);
     json_free(state); state = NULL;
     check_not_null(input);
 
-    check_int_eq(turbo_graph_run_json_value(graph, input, NULL, &result, &result_state),
+    check_equal(turbo_graph_run_json_value(graph, input, NULL, &result, &result_state),
                  TURBO_GRAPH_EXEC_STOP);
-    check_int_eq(result.status, TURBO_GRAPH_EXEC_STOP);
-    check_str_eq(result.last_node, "end");
+    check_equal(result.status, TURBO_GRAPH_EXEC_STOP);
+    check_equal(result.last_node, "end");
     check_not_null(result_state);
 
     result_json = json_clone(result_state);
     check_not_null(result_json);
     check_true(json_get_bool(result_json, "planner_visited", false));
     check_true(json_get_bool(result_json, "executor_visited", false));
-    check_str_eq(turbo_agent_state_active_agent(result_json), "executor");
+    check_equal(turbo_agent_state_active_agent(result_json), "executor");
     check_null(turbo_agent_state_handoff_target_agent(result_json));
     check_null(turbo_agent_state_handoff_reason(result_json));
     handoff_history = turbo_agent_state_supervisor_handoff_history(result_json);
     check_not_null(handoff_history);
-    check_size_eq(json_array_size(handoff_history), 1);
+    check_equal(json_array_size(handoff_history), 1);
     handoff_entry = json_array_get(handoff_history, 0);
     check_not_null(handoff_entry);
-    check_str_eq(json_get_string(handoff_entry, "from_agent"), "planner");
-    check_str_eq(json_get_string(handoff_entry, "target_agent"), "executor");
-    check_str_eq(json_get_string(handoff_entry, "reason"), "delegate execution");
+    check_equal(json_get_string(handoff_entry, "from_agent"), "planner");
+    check_equal(json_get_string(handoff_entry, "target_agent"), "executor");
+    check_equal(json_get_string(handoff_entry, "reason"), "delegate execution");
 
     json_free(result_json); result_json = NULL;
     turbo_runtime_json_destroy(result_state);

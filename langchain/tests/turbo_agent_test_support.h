@@ -50,17 +50,17 @@ static json_value_t *turbo_agent_test_load_fixture_json(const char *fixture_name
   size_t read_count;
   json_value_t *json = NULL;
 
-  check_int_eq(turbo_agent_test_fixture_path(fixture_name, path, sizeof(path)), 0);
+  check_equal(turbo_agent_test_fixture_path(fixture_name, path, sizeof(path)), 0);
   stream = fopen(path, "rb");
   check_not_null(stream);
-  check_int_eq(fseek(stream, 0, SEEK_END), 0);
+  check_equal(fseek(stream, 0, SEEK_END), 0);
   length = ftell(stream);
   check_true(length >= 0);
-  check_int_eq(fseek(stream, 0, SEEK_SET), 0);
+  check_equal(fseek(stream, 0, SEEK_SET), 0);
   buffer = (char *)malloc((size_t)length + 1);
   check_not_null(buffer);
   read_count = fread(buffer, 1, (size_t)length, stream);
-  check_size_eq(read_count, (size_t)length);
+  check_equal(read_count, (size_t)length);
   buffer[length] = '\0';
   json = json_parse(buffer, (size_t)length);
     check_not_null(json);
@@ -155,7 +155,7 @@ static void turbo_agent_test_check_string_array_equals_fixture(const json_value_
   check_true(json_type(actual_array) == JSON_ARRAY);
   check_true(json_type(expected_array) == JSON_ARRAY);
   expected_count = json_array_size(expected_array);
-  check_size_eq(json_array_size(actual_array), expected_count);
+  check_equal(json_array_size(actual_array), expected_count);
   for (i = 0; i < expected_count; ++i) {
     const json_value_t *entry = json_array_get(expected_array, i);
     const char *entry_text = entry ? json_string(entry) : NULL;
@@ -237,7 +237,7 @@ static void turbo_agent_test_capture_observer_event(
       json_object_get(event, "kind"));
   type = turbo_runtime_json_value_as_string(
       json_object_get(event, "type"));
-  check_str_eq(kind, "observer");
+  check_equal(kind, "observer");
   check_not_null(json_object_get(event, "event"));
 
   if (!type) {
@@ -344,25 +344,25 @@ static void turbo_agent_test_check_thread_timeline_json_value(
               JSON_ARRAY);
   check_true(json_type(history_events) ==
               JSON_ARRAY);
-  check_str_eq(
+  check_equal(
       turbo_runtime_json_value_as_string(json_object_get(thread, "id")),
       thread_id);
-  check_str_eq(
+  check_equal(
       turbo_runtime_json_value_as_string(json_object_get(latest_run, "id")),
       latest_run_id);
-  check_str_eq(
+  check_equal(
       turbo_runtime_json_value_as_string(
           json_object_get(resolved_current_run, "id")),
       latest_run_id);
   if (resolved_current_checkpoint_id) {
-    check_str_eq(turbo_runtime_json_value_as_string(resolved_current_checkpoint_id_value),
+    check_equal(turbo_runtime_json_value_as_string(resolved_current_checkpoint_id_value),
                  resolved_current_checkpoint_id);
     check_true(json_type(resolved_current_checkpoint) ==
                JSON_OBJECT);
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(resolved_current_checkpoint, "id")),
                  resolved_current_checkpoint_id);
-    check_str_eq(turbo_runtime_json_value_as_string(
+    check_equal(turbo_runtime_json_value_as_string(
                      json_object_get(resolved_current_checkpoint, "run_id")),
                  latest_run_id);
     resolved_current_checkpoint_json =
@@ -377,15 +377,15 @@ static void turbo_agent_test_check_thread_timeline_json_value(
     check_true(json_type(resolved_current_checkpoint) ==
                JSON_NULL);
   }
-  check_size_eq(turbo_runtime_json_value_size(runs), expected_run_count);
-  check_size_eq(turbo_runtime_json_value_size(current_run_checkpoints),
+  check_equal(turbo_runtime_json_value_size(runs), expected_run_count);
+  check_equal(turbo_runtime_json_value_size(current_run_checkpoints),
                 expected_checkpoint_count);
   check_true(turbo_runtime_json_value_size(history_events) >= minimum_history_event_count);
 
   if (pending_run_expected) {
     check_true(json_type(pending_run) ==
                JSON_OBJECT);
-    check_str_eq(
+    check_equal(
         turbo_runtime_json_value_as_string(
             json_object_get(pending_run, "id")),
         latest_run_id);
@@ -405,7 +405,7 @@ static void turbo_agent_test_check_lineage_string_field(const json_value_t *obje
   value = json_object_get(object, field);
   check_not_null(value);
   if (expected_value) {
-    check_str_eq(json_get_string(object, field), expected_value);
+    check_equal(json_get_string(object, field), expected_value);
   } else {
     check_true(json_type(value) == JSON_NULL);
   }
@@ -595,10 +595,10 @@ static void turbo_agent_test_check_supervisor_inspect(const json_value_t *inspec
   turbo_agent_test_check_lineage_string_field(supervisor, "active_agent", active_agent);
   turbo_agent_test_check_lineage_string_field(supervisor, "target_agent", target_agent);
   turbo_agent_test_check_lineage_string_field(supervisor, "handoff_reason", handoff_reason);
-  check_int_eq(json_get_int(supervisor, "inbox_count", -1), (int)inbox_count);
-  check_int_eq(json_get_int(supervisor, "handoff_count", -1), (int)handoff_count);
-  check_size_eq(json_array_size(inbox), inbox_count);
-  check_size_eq(json_array_size(history), handoff_count);
+  check_equal(json_get_int(supervisor, "inbox_count", -1), (int)inbox_count);
+  check_equal(json_get_int(supervisor, "handoff_count", -1), (int)handoff_count);
+  check_equal(json_array_size(inbox), inbox_count);
+  check_equal(json_array_size(history), handoff_count);
   check_not_null(json_object_get(control, "supervisor"));
   check_not_null(json_object_get(workflow, "supervisor"));
 }
@@ -611,8 +611,8 @@ static void turbo_agent_test_check_thread_lineage_json_value(const json_value_t 
   const json_value_t *branches;
 
   check_not_null(lineage);
-  check_str_eq(json_get_string(lineage, "thread_id"), thread_id);
-  check_str_eq(json_get_string(lineage, "latest_run_id"), latest_run_id);
+  check_equal(json_get_string(lineage, "thread_id"), thread_id);
+  check_equal(json_get_string(lineage, "latest_run_id"), latest_run_id);
   turbo_agent_test_check_lineage_string_field(lineage, "pending_run_id", pending_run_id);
   turbo_agent_test_check_lineage_string_field(lineage, "root_checkpoint_id", root_checkpoint_id);
   branches = json_object_get(lineage, "branches");
@@ -763,9 +763,9 @@ static void turbo_agent_test_check_branch_tree(const json_value_t *tree,
   const char *current_branch_source_checkpoint_id = NULL;
 
   check_not_null(tree);
-  check_str_eq(json_get_string(tree, "thread_id"), thread_id);
-  check_str_eq(json_get_string(tree, "current_run_id"), current_run_id);
-  check_str_eq(json_get_string(tree, "latest_run_id"), latest_run_id);
+  check_equal(json_get_string(tree, "thread_id"), thread_id);
+  check_equal(json_get_string(tree, "current_run_id"), current_run_id);
+  check_equal(json_get_string(tree, "latest_run_id"), latest_run_id);
   turbo_agent_test_check_lineage_string_field(tree, "pending_run_id", pending_run_id);
   turbo_agent_test_check_lineage_string_field(tree, "current_checkpoint_id",
                                               current_checkpoint_id);
@@ -962,7 +962,7 @@ static void turbo_agent_test_check_command_descriptor_example(
       actual_example_text = json_type(example_text_value) == JSON_NULL
                                 ? NULL
                                 : json_string(example_text_value);
-      check_str_eq(actual_example_text, example_text);
+      check_equal(actual_example_text, example_text);
     }
   } else {
     check_true(json_type(example_payload) == JSON_NULL);
@@ -1114,7 +1114,7 @@ static void turbo_agent_test_check_memory_record_array_fixture(const json_value_
   check_not_null(fixture);
   check_true(json_type(records) == JSON_ARRAY);
   check_true(json_type(fixture) == JSON_ARRAY);
-  check_size_eq(json_array_size(records), json_array_size(fixture));
+  check_equal(json_array_size(records), json_array_size(fixture));
   for (i = 0; i < json_array_size(fixture); ++i) {
     turbo_agent_test_check_memory_record_shape(json_array_get(records, i),
                                                json_array_get(fixture, i));

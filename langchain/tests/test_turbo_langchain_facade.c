@@ -44,20 +44,20 @@ spec("turbo langchain facade") {
     check_not_null(state);
     input = (json_value_t *)json_object_get(state, "input");
     check_not_null(input);
-    check_int_eq(turbo_runtime_json_object_set(
+    check_equal(turbo_runtime_json_object_set(
                      input, "task", json_create_string("ship")),
                  TURBO_RUNTIME_JSON_OK);
-    check_int_eq(turbo_langchain_chain_add_prompt(chain, "prompt", "user", "Please {{task}}."),
+    check_equal(turbo_langchain_chain_add_prompt(chain, "prompt", "user", "Please {{task}}."),
                  TURBO_CHAIN_OK);
 
     runnable = turbo_langchain_runnable_from_chain(chain);
     check_not_null(runnable);
-    check_int_eq(turbo_langchain_runnable_log(runnable, state, log, &out_state), 0);
+    check_equal(turbo_langchain_runnable_log(runnable, state, log, &out_state), 0);
     check_not_null(out_state);
-    check_size_eq(turbo_runtime_json_value_size(
+    check_equal(turbo_runtime_json_value_size(
                       json_object_get(out_state, "messages")),
                   1);
-    check_size_eq(turbo_runtime_json_value_size(turbo_event_log_events_json_value(log)), 2);
+    check_equal(turbo_runtime_json_value_size(turbo_event_log_events_json_value(log)), 2);
 
     turbo_runtime_json_destroy(out_state);
     turbo_runtime_json_destroy(state);
@@ -84,17 +84,17 @@ spec("turbo langchain facade") {
 
     agent = turbo_langchain_agent_create(&config);
     check_not_null(agent);
-    check_int_eq(turbo_langchain_agent_memory_put_context(
+    check_equal(turbo_langchain_agent_memory_put_context(
                      agent, "project/facade", "notes", "project", "/tmp/facade.md", "remember"),
                  0);
-    check_int_eq(turbo_langchain_agent_memory_query(
+    check_equal(turbo_langchain_agent_memory_query(
                      agent, "project", "context", "notes", "remember", &records),
                  0);
-    check_size_eq(json_array_size(records), 1);
+    check_equal(json_array_size(records), 1);
 
-    check_int_eq(turbo_langchain_agent_invoke_text(agent, "hello", NULL, &text, &summary), 0);
-    check_str_eq(text, "facade ok");
-    check_str_eq(json_get_string(summary, "status"), "completed");
+    check_equal(turbo_langchain_agent_invoke_text(agent, "hello", NULL, &text, &summary), 0);
+    check_equal(text, "facade ok");
+    check_equal(json_get_string(summary, "status"), "completed");
 
     free(text);
     json_free(records); records = NULL;

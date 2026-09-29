@@ -200,15 +200,15 @@ static turbo_graph_t *create_remote_client_graph(void) {
   static remote_client_bool_write_t end = {"visited_end", 1};
 
   check_not_null(graph);
-  check_int_eq(
+  check_equal(
       turbo_graph_add_json_value_node(graph, "start", remote_client_write_bool_json_value_node, &start),
       TURBO_GRAPH_EXEC_OK);
-  check_int_eq(
+  check_equal(
       turbo_graph_add_json_value_node(graph, "end", remote_client_write_bool_json_value_node, &end),
       TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
+  check_equal(turbo_graph_add_json_value_edge(graph, "start", "end", NULL, NULL),
                TURBO_GRAPH_EXEC_OK);
-  check_int_eq(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+  check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
   return graph;
 }
 
@@ -254,10 +254,10 @@ static json_value_t *create_remote_client_supervisor_state_json_value(void) {
   json_value_t *bound;
 
   check_not_null(state);
-  check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
-  check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
-  check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
-  check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
+  check_equal(turbo_agent_state_set_active_agent(state, "planner"), 0);
+  check_equal(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
+  check_equal(turbo_agent_state_request_review(state, "need approval"), 0);
+  check_equal(turbo_agent_state_set_review_approved(state, 0), 0);
   bound = json_clone(state);
   json_free(state); state = NULL;
   return bound;
@@ -268,11 +268,11 @@ static json_value_t *create_remote_client_committed_supervisor_state_json_value(
   json_value_t *bound;
 
   check_not_null(state);
-  check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
-  check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
-  check_int_eq(turbo_agent_state_commit_handoff(state), 0);
-  check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
-  check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
+  check_equal(turbo_agent_state_set_active_agent(state, "planner"), 0);
+  check_equal(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
+  check_equal(turbo_agent_state_commit_handoff(state), 0);
+  check_equal(turbo_agent_state_request_review(state, "need approval"), 0);
+  check_equal(turbo_agent_state_set_review_approved(state, 0), 0);
   bound = json_clone(state);
   json_free(state); state = NULL;
   return bound;
@@ -334,12 +334,12 @@ static json_value_t *create_remote_client_command_json_value(const char *kind,
   json_value_t *command = json_create_object();
 
   check_not_null(command);
-  check_int_eq(
+  check_equal(
       turbo_runtime_json_object_set(command, "kind",
                                          json_create_string(kind)),
       TURBO_RUNTIME_JSON_OK);
   if (text) {
-    check_int_eq(
+    check_equal(
         turbo_runtime_json_object_set(command, "text",
                                            json_create_string(text)),
         TURBO_RUNTIME_JSON_OK);
@@ -691,8 +691,8 @@ static void remote_runtime_remote_client_test_coro(void *arg) {
                   &error_json) == 0 &&
               memory_query_records_json && !error_json) {
             check_true(json_type(memory_query_records_json) == JSON_ARRAY);
-            check_size_eq(json_array_size(memory_query_records_json), 1);
-            check_str_eq(json_get_string(json_array_get(memory_query_records_json, 0),
+            check_equal(json_array_size(memory_query_records_json), 1);
+            check_equal(json_get_string(json_array_get(memory_query_records_json, 0),
                                                "key"),
                          "zeta");
             json_free(memory_query_records_json); memory_query_records_json = NULL;
@@ -710,7 +710,7 @@ static void remote_runtime_remote_client_test_coro(void *arg) {
                       state->client, "project", &memory_query_records_json, &error_json) == 0 &&
                   memory_query_records_json && !error_json) {
                 check_true(json_type(memory_query_records_json) == JSON_ARRAY);
-                check_size_eq(json_array_size(memory_query_records_json), 2);
+                check_equal(json_array_size(memory_query_records_json), 2);
                 json_free(memory_query_records_json); memory_query_records_json = NULL;
                 memory_query_records_json = NULL;
                 if (turbo_agent_runtime_remote_client_delete_memory_record(
@@ -963,22 +963,22 @@ static void remote_runtime_remote_client_test_coro(void *arg) {
 
       if (nested_supervisor_inspect && nested_orchestration_inspect &&
           nested_child_orchestration_inspect && nested_child_inspect) {
-        check_str_eq(
+        check_equal(
             json_get_string(nested_child_orchestration_inspect, "parent_agent_run_id"),
             "run_parent");
-        check_str_eq(
+        check_equal(
             json_get_string(nested_child_orchestration_inspect, "parent_tool_call_id"),
             "call_parent");
-        check_str_eq(json_get_string(nested_child_orchestration_inspect, "parent_tool_name"),
+        check_equal(json_get_string(nested_child_orchestration_inspect, "parent_tool_name"),
                      "delegate");
-        check_str_eq(
+        check_equal(
             json_get_string(nested_child_orchestration_inspect, "parent_graph_run_id"),
             "run_parent");
-        check_str_eq(json_get_string(nested_child_orchestration_inspect, "call_frame_id"),
+        check_equal(json_get_string(nested_child_orchestration_inspect, "call_frame_id"),
                      "call_parent");
-        check_str_eq(json_get_string(json_object_get(nested_child_inspect, "run"), "id"),
+        check_equal(json_get_string(json_object_get(nested_child_inspect, "run"), "id"),
                      supervisor_run_id);
-        check_str_eq(json_get_string(
+        check_equal(json_get_string(
                          json_object_get(nested_child_inspect, "latest_checkpoint"), "id"),
                      supervisor_checkpoint_id);
         state->child_multi_agent_inspect_ok = 1;

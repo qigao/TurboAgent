@@ -137,12 +137,12 @@ spec("turbo agent runtime remote CHTTP api") {
     check_not_null(remote);
 
     status = chttp_server_init(&server, &server_config);
-    check_int_eq(status, SALTS_OK);
-    check_int_eq(turbo_agent_runtime_remote_chttp_mount(
+    check_equal(status, SALTS_OK);
+    check_equal(turbo_agent_runtime_remote_chttp_mount(
                      remote, &server, "/v1/runtime/jsonrpc"),
                  SALTS_OK);
-    check_int_eq(chttp_server_start(&server), SALTS_OK);
-    check_int_eq(chttp_server_port(&server, &port), SALTS_OK);
+    check_equal(chttp_server_start(&server), SALTS_OK);
+    check_equal(chttp_server_port(&server, &port), SALTS_OK);
     check_true(port != 0u);
     check_true(snprintf(url, sizeof(url),
                         "http://127.0.0.1:%u/v1/runtime/jsonrpc",
@@ -157,15 +157,15 @@ spec("turbo agent runtime remote CHTTP api") {
     options.interrupt_before_nodes = interrupt_before;
     options.interrupt_before_count = 1u;
 
-    check_int_eq(turbo_agent_runtime_remote_client_start_json_value_graph(
+    check_equal(turbo_agent_runtime_remote_client_start_json_value_graph(
                      client, "remote-chttp", input, &options, "thr_remote_chttp",
                      &summary, &state, &error),
                  0);
     check_null(error);
     check_not_null(summary);
     check_not_null(state);
-    check_str_eq(json_get_string(summary, "status"), "interrupted");
-    check_str_eq(json_get_string(summary, "thread_id"), "thr_remote_chttp");
+    check_equal(json_get_string(summary, "status"), "interrupted");
+    check_equal(json_get_string(summary, "thread_id"), "thr_remote_chttp");
     check_true(json_get_bool(state, "visited_start", false));
     check_false(json_get_bool(state, "visited_end", false));
 
@@ -174,8 +174,8 @@ spec("turbo agent runtime remote CHTTP api") {
     json_free(summary);
     turbo_runtime_json_destroy(input);
     turbo_agent_runtime_remote_client_destroy(client);
-    check_int_eq(chttp_server_stop(&server, REMOTE_CHTTP_TIMEOUT_MS), SALTS_OK);
-    check_int_eq(chttp_server_destroy(&server), SALTS_OK);
+    check_equal(chttp_server_stop(&server, REMOTE_CHTTP_TIMEOUT_MS), SALTS_OK);
+    check_equal(chttp_server_destroy(&server), SALTS_OK);
     turbo_agent_runtime_remote_destroy(remote);
     turbo_agent_runtime_destroy(runtime);
     turbo_graph_destroy(graph);

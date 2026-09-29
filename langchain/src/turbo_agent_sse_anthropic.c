@@ -12,48 +12,48 @@ static int turbo_agent_sse_anthropic_apply_event(
     turbo_agent_sse_anthropic_stream_state_t *state, const json_value_t *event) {
   const char *type;
 
-  if (!state || !event || turbo_json_type(event) != TURBO_JSON_OBJECT) {
+  if (!state || !event || json_type(event) != JSON_OBJECT) {
     return -1;
   }
 
-  type = turbo_json_get_string(event, "type");
+  type = json_get_string(event, "type");
   if (!type) {
     return -1;
   }
 
   if (strcmp(type, "message_start") == 0) {
-    const json_value_t *message = turbo_json_object_get(event, "message");
-    if (!message || turbo_json_type(message) != TURBO_JSON_OBJECT) {
+    const json_value_t *message = json_object_get(event, "message");
+    if (!message || json_type(message) != JSON_OBJECT) {
       return -1;
     }
-    if (turbo_agent_sse_set_if_nonempty(&state->id, turbo_json_get_string(message, "id")) != 0 ||
-        turbo_agent_sse_set_if_nonempty(&state->role, turbo_json_get_string(message, "role")) !=
+    if (turbo_agent_sse_set_if_nonempty(&state->id, json_get_string(message, "id")) != 0 ||
+        turbo_agent_sse_set_if_nonempty(&state->role, json_get_string(message, "role")) !=
             0) {
       return -1;
     }
   } else if (strcmp(type, "content_block_start") == 0) {
-    const json_value_t *content_block = turbo_json_object_get(event, "content_block");
+    const json_value_t *content_block = json_object_get(event, "content_block");
     const char *block_type;
     int index;
 
-    if (!content_block || turbo_json_type(content_block) != TURBO_JSON_OBJECT) {
+    if (!content_block || json_type(content_block) != JSON_OBJECT) {
       return -1;
     }
 
-    block_type = turbo_json_get_string(content_block, "type");
-    index = turbo_json_get_int(event, "index", 0);
+    block_type = json_get_string(content_block, "type");
+    index = json_get_int(event, "index", 0);
     if (index < 0) {
       return -1;
     }
 
     if (block_type && strcmp(block_type, "text") == 0) {
-      const char *text = turbo_json_get_string(content_block, "text");
+      const char *text = json_get_string(content_block, "text");
       if (text && turbo_agent_sse_append_dynamic_text(&state->content, text) != 0) {
         return -1;
       }
     } else if (block_type && strcmp(block_type, "tool_use") == 0) {
       turbo_agent_sse_tool_call_t *tool_call;
-      json_value_t *input = turbo_json_object_get(content_block, "input");
+      json_value_t *input = json_object_get(content_block, "input");
       char *serialized_input = NULL;
 
       tool_call =
@@ -63,16 +63,16 @@ static int turbo_agent_sse_anthropic_apply_event(
       }
 
       if (turbo_agent_sse_set_if_nonempty(&tool_call->id,
-                                          turbo_json_get_string(content_block, "id")) != 0 ||
+                                          json_get_string(content_block, "id")) != 0 ||
           turbo_agent_sse_set_if_nonempty(&tool_call->type, "tool_use") != 0 ||
           turbo_agent_sse_set_if_nonempty(&tool_call->name,
-                                          turbo_json_get_string(content_block, "name")) != 0) {
+                                          json_get_string(content_block, "name")) != 0) {
         return -1;
       }
 
-      if (input && turbo_json_type(input) == TURBO_JSON_OBJECT && turbo_json_object_size(input) > 0) {
-        serialized_input = turbo_json_serialize(input, NULL);
-      } else if (input && turbo_json_type(input) != TURBO_JSON_OBJECT) {
+      if (input && json_type(input) == JSON_OBJECT && json_object_size(input) > 0) {
+        serialized_input = json_serialize(input, NULL);
+      } else if (input && json_type(input) != JSON_OBJECT) {
         serialized_input = turbo_agent_util_strdup("{}");
       }
 
@@ -85,27 +85,27 @@ static int turbo_agent_sse_anthropic_apply_event(
       }
     }
   } else if (strcmp(type, "content_block_delta") == 0) {
-    const json_value_t *delta = turbo_json_object_get(event, "delta");
+    const json_value_t *delta = json_object_get(event, "delta");
     const char *delta_type;
     int index;
 
-    if (!delta || turbo_json_type(delta) != TURBO_JSON_OBJECT) {
+    if (!delta || json_type(delta) != JSON_OBJECT) {
       return -1;
     }
 
-    delta_type = turbo_json_get_string(delta, "type");
-    index = turbo_json_get_int(event, "index", 0);
+    delta_type = json_get_string(delta, "type");
+    index = json_get_int(event, "index", 0);
     if (index < 0) {
       return -1;
     }
 
     if (delta_type && strcmp(delta_type, "text_delta") == 0) {
-      const char *text = turbo_json_get_string(delta, "text");
+      const char *text = json_get_string(delta, "text");
       if (text && turbo_agent_sse_append_dynamic_text(&state->content, text) != 0) {
         return -1;
       }
     } else if (delta_type && strcmp(delta_type, "input_json_delta") == 0) {
-      const char *partial_json = turbo_json_get_string(delta, "partial_json");
+      const char *partial_json = json_get_string(delta, "partial_json");
       turbo_agent_sse_tool_call_t *tool_call;
 
       tool_call =
@@ -124,12 +124,12 @@ static int turbo_agent_sse_anthropic_apply_event(
       }
     }
   } else if (strcmp(type, "message_delta") == 0) {
-    const json_value_t *delta = turbo_json_object_get(event, "delta");
-    if (!delta || turbo_json_type(delta) != TURBO_JSON_OBJECT) {
+    const json_value_t *delta = json_object_get(event, "delta");
+    if (!delta || json_type(delta) != JSON_OBJECT) {
       return -1;
     }
     if (turbo_agent_sse_set_if_nonempty(&state->stop_reason,
-                                        turbo_json_get_string(delta, "stop_reason")) != 0) {
+                                        json_get_string(delta, "stop_reason")) != 0) {
       return -1;
     }
   }
@@ -155,10 +155,10 @@ static char *turbo_agent_sse_build_anthropic_response_json(
   if (state->content && state->content[0] != '\0') {
     json_value_t *text_block = turbo_prompt_content_text_part_create(state->content);
     if (!text_block) {
-      turbo_free_json(&response);
+      json_free(response); response = NULL;
       return NULL;
     }
-    turbo_json_array_add(content, text_block);
+    json_array_add(content, text_block);
   }
 
   for (i = 0; i < state->tool_call_count; ++i) {
@@ -167,28 +167,28 @@ static char *turbo_agent_sse_build_anthropic_response_json(
     json_value_t *input;
 
     if (!tool_call->id || !tool_call->name) {
-      turbo_free_json(&response);
+      json_free(response); response = NULL;
       return NULL;
     }
 
     input = turbo_agent_sse_tool_call_input_object(tool_call);
     if (!input) {
-      turbo_free_json(&response);
+      json_free(response); response = NULL;
       return NULL;
     }
 
     tool_use = turbo_prompt_tool_use_part_create(tool_call->id, tool_call->name, input);
     if (!tool_use || !input) {
-      turbo_free_json(&tool_use);
-      turbo_free_json(&input);
-      turbo_free_json(&response);
+      json_free(tool_use); tool_use = NULL;
+      json_free(input); input = NULL;
+      json_free(response); response = NULL;
       return NULL;
     }
 
-    turbo_json_array_add(content, tool_use);
+    json_array_add(content, tool_use);
   }
 
-  turbo_json_object_set_string(response, "stop_reason",
+  json_object_set_string(response, "stop_reason",
                                state->stop_reason ? state->stop_reason : "end_turn");
   return turbo_agent_sse_serialize_json_and_free(response);
 }
@@ -245,10 +245,10 @@ int turbo_agent_anthropic_messages_sse_to_json(const char *sse_data, size_t sse_
         return -1;
       }
 
-      type = turbo_json_get_string(event, "type");
+      type = json_get_string(event, "type");
       if (type && strcmp(type, "ping") != 0 &&
           turbo_agent_sse_anthropic_apply_event(&state, event) != 0) {
-        turbo_free_json(&event);
+        json_free(event); event = NULL;
         tstr_free(data);
         free(normalized);
         turbo_agent_sse_free_anthropic_state(&state);
@@ -258,13 +258,13 @@ int turbo_agent_anthropic_messages_sse_to_json(const char *sse_data, size_t sse_
         saw_event = 1;
       }
       if (type && strcmp(type, "message_stop") == 0) {
-        turbo_free_json(&event);
+        json_free(event); event = NULL;
         tstr_free(data);
         break;
       }
     }
 
-    turbo_free_json(&event);
+    json_free(event); event = NULL;
     tstr_free(data);
     cursor = (*event_end == '\0') ? event_end : event_end + 2;
   }

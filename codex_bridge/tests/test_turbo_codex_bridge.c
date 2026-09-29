@@ -59,9 +59,11 @@ static int test_codex_write(const uint8_t *frame, size_t frame_size, void *user_
   char response[2048];
   int length;
   int rc = SALTS_OK;
-  if (!transport || !frame || !frame_size || frame[frame_size - 1] != '\n' ||
-      turbo_parse_json(frame, frame_size - 1, &message) != 0 || !message) {
-    turbo_free_json(&message);
+  if (frame && frame_size && frame[frame_size - 1] == '\n') {
+    message = json_parse((const char *)frame, frame_size - 1);
+  }
+  if (!transport || !frame || !frame_size || frame[frame_size - 1] != '\n' || !message) {
+    json_free(message);
     return SALTS_EPROTO;
   }
   method = json_get_string(message, "method");
@@ -132,7 +134,7 @@ static int test_codex_write(const uint8_t *frame, size_t frame_size, void *user_
   } else {
     rc = SALTS_EPROTO;
   }
-  turbo_free_json(&message);
+  json_free(message); message = NULL;
   return rc;
 }
 
@@ -228,7 +230,7 @@ spec("Codex App Server bridge") {
     check_str_eq(json_get_string(json_object_get(server_info, "serverInfo"), "name"),
                  "codex-app-server");
     check_int_eq(turbo_codex_client_initialize(client, NULL), SALTS_EALREADY);
-    turbo_free_json(&server_info);
+    json_free(server_info); server_info = NULL;
     turbo_codex_client_destroy(client);
     check_true(transport.closed);
     test_codex_transport_cleanup(&transport);
@@ -263,7 +265,7 @@ spec("Codex App Server bridge") {
     free(thread_id);
     free(turn_id);
     free(text);
-    turbo_free_json(&turn);
+    json_free(turn); turn = NULL;
     turbo_codex_client_destroy(client);
     test_codex_transport_cleanup(&transport);
   }
@@ -306,15 +308,15 @@ spec("Codex App Server bridge") {
                  TURBO_TOOL_OK);
     check_size_eq(capability_count, 1);
     check_str_eq(capabilities[0], "delegate");
-    check_int_eq(turbo_parse_json((const uint8_t *)"{\"task\":\"inspect build failure\"}",
-                                  strlen("{\"task\":\"inspect build failure\"}"), &arguments),
-                 0);
+    arguments = json_parse("{\"task\":\"inspect build failure\"}",
+                           strlen("{\"task\":\"inspect build failure\"}"));
+    check_not_null(arguments);
     check_int_eq(turbo_tool_registry_execute_json_value(registry, "codex.delegate", arguments,
                                                         &result),
                  TURBO_TOOL_OK);
     check_str_eq(json_get_string(result, "text"), "Codex completed the task");
-    turbo_free_json(&result);
-    turbo_free_json(&arguments);
+    json_free(result); result = NULL;
+    json_free(arguments); arguments = NULL;
     turbo_tool_registry_destroy(registry);
     turbo_codex_client_destroy(client);
     test_codex_transport_cleanup(&transport);

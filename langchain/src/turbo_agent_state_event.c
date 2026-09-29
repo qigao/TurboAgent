@@ -10,8 +10,8 @@
 static int turbo_agent_state_event_kind_is_local(const json_value_t *event, const char *kind);
 
 static const json_value_t *turbo_agent_array_last_const_local(const json_value_t *array) {
-  return array && turbo_json_type(array) == TURBO_JSON_ARRAY && turbo_json_array_size(array) > 0
-             ? turbo_json_array_get(array, turbo_json_array_size(array) - 1)
+  return array && json_type(array) == JSON_ARRAY && json_array_size(array) > 0
+             ? json_array_get(array, json_array_size(array) - 1)
              : NULL;
 }
 
@@ -19,14 +19,14 @@ static const json_value_t *turbo_agent_events_last_of_kind_local(const json_valu
                                                                  const char *kind) {
   size_t i;
 
-  if (!events || turbo_json_type(events) != TURBO_JSON_ARRAY || !kind) {
+  if (!events || json_type(events) != JSON_ARRAY || !kind) {
     return NULL;
   }
 
-  for (i = turbo_json_array_size(events); i > 0; --i) {
-    const json_value_t *event = turbo_json_array_get(events, i - 1);
+  for (i = json_array_size(events); i > 0; --i) {
+    const json_value_t *event = json_array_get(events, i - 1);
     const char *event_kind =
-        event && turbo_json_type(event) == TURBO_JSON_OBJECT ? turbo_json_get_string(event, "kind")
+        event && json_type(event) == JSON_OBJECT ? json_get_string(event, "kind")
                                                              : NULL;
     if (event_kind && strcmp(event_kind, kind) == 0) {
       return event;
@@ -54,7 +54,7 @@ turbo_agent_state_last_event_of_kind_local(const json_value_t *state, const char
   for (i = count; i > 0; --i) {
     const json_value_t *event = turbo_agent_state_event_at(state, i - 1);
     const char *event_kind =
-        event && turbo_json_type(event) == TURBO_JSON_OBJECT ? turbo_json_get_string(event, "kind")
+        event && json_type(event) == JSON_OBJECT ? json_get_string(event, "kind")
                                                              : NULL;
     if (event_kind && strcmp(event_kind, kind) == 0) {
       return event;
@@ -73,8 +73,8 @@ static const json_value_t *turbo_agent_state_last_event_local(const json_value_t
   const json_value_t *events;
 
   events = turbo_agent_state_get_array_const(state, "events");
-  return events && turbo_json_type(events) == TURBO_JSON_ARRAY && turbo_json_array_size(events) > 0
-             ? turbo_json_array_get(events, turbo_json_array_size(events) - 1)
+  return events && json_type(events) == JSON_ARRAY && json_array_size(events) > 0
+             ? json_array_get(events, json_array_size(events) - 1)
              : NULL;
 }
 
@@ -97,9 +97,9 @@ static const json_value_t *turbo_agent_state_last_tool_results_event_local(
   }
 
   events = turbo_agent_state_get_array_const(state, "events");
-  if (events && turbo_json_type(events) == TURBO_JSON_ARRAY) {
-    for (i = turbo_json_array_size(events); i > 0; --i) {
-      const json_value_t *event = turbo_json_array_get(events, i - 1);
+  if (events && json_type(events) == JSON_ARRAY) {
+    for (i = json_array_size(events); i > 0; --i) {
+      const json_value_t *event = json_array_get(events, i - 1);
       if (turbo_agent_state_event_kind_is_local(event, "tool_results")) {
         return event;
       }
@@ -107,9 +107,9 @@ static const json_value_t *turbo_agent_state_last_tool_results_event_local(
   }
 
   events = turbo_agent_state_get_current_array_version_const(state, "executor_event_versions");
-  if (events && turbo_json_type(events) == TURBO_JSON_ARRAY) {
-    for (i = turbo_json_array_size(events); i > 0; --i) {
-      const json_value_t *event = turbo_json_array_get(events, i - 1);
+  if (events && json_type(events) == JSON_ARRAY) {
+    for (i = json_array_size(events); i > 0; --i) {
+      const json_value_t *event = json_array_get(events, i - 1);
       if (turbo_agent_state_event_kind_is_local(event, "tool_results")) {
         return event;
       }
@@ -122,11 +122,11 @@ static const json_value_t *turbo_agent_state_last_tool_results_event_local(
 static int turbo_agent_state_event_kind_is_local(const json_value_t *event, const char *kind) {
   const char *event_kind;
 
-  if (!event || turbo_json_type(event) != TURBO_JSON_OBJECT || !kind) {
+  if (!event || json_type(event) != JSON_OBJECT || !kind) {
     return 0;
   }
 
-  event_kind = turbo_json_get_string(event, "kind");
+  event_kind = json_get_string(event, "kind");
   return event_kind && strcmp(event_kind, kind) == 0 ? 1 : 0;
 }
 
@@ -140,7 +140,7 @@ static const char *turbo_agent_handoff_event_field_local(const json_value_t *eve
     return NULL;
   }
 
-  return turbo_json_get_string(event, key);
+  return json_get_string(event, key);
 }
 
 CXX_C_API const char *turbo_agent_state_handoff_event_phase_impl(const json_value_t *event) {
@@ -167,8 +167,8 @@ CXX_C_API const char *turbo_agent_state_handoff_event_active_agent_impl(
 }
 
 CXX_C_API const char *turbo_agent_event_output_text(const json_value_t *event) {
-  return event && turbo_json_type(event) == TURBO_JSON_OBJECT
-             ? turbo_json_get_string(event, "output_text")
+  return event && json_type(event) == JSON_OBJECT
+             ? json_get_string(event, "output_text")
              : NULL;
 }
 
@@ -180,8 +180,8 @@ static const json_value_t *turbo_agent_state_model_event_tool_calls_local(
     return NULL;
   }
 
-  tool_calls = turbo_json_object_get(event, "tool_calls");
-  return tool_calls && turbo_json_type(tool_calls) == TURBO_JSON_ARRAY ? tool_calls : NULL;
+  tool_calls = json_object_get(event, "tool_calls");
+  return tool_calls && json_type(tool_calls) == JSON_ARRAY ? tool_calls : NULL;
 }
 
 CXX_C_API const json_value_t *turbo_agent_model_event_tool_calls(const json_value_t *event) {
@@ -201,14 +201,14 @@ CXX_C_API const json_value_t *turbo_agent_state_tool_results_outputs_impl(
     return NULL;
   }
 
-  outputs = turbo_json_object_get(event, "outputs");
-  return outputs && turbo_json_type(outputs) == TURBO_JSON_ARRAY ? outputs : NULL;
+  outputs = json_object_get(event, "outputs");
+  return outputs && json_type(outputs) == JSON_ARRAY ? outputs : NULL;
 }
 
 static const char *turbo_agent_tool_result_output_child_field_local(
     const json_value_t *output_item, const char *key) {
-  return output_item && turbo_json_type(output_item) == TURBO_JSON_OBJECT && key
-             ? turbo_json_get_string(output_item, key)
+  return output_item && json_type(output_item) == JSON_OBJECT && key
+             ? json_get_string(output_item, key)
              : NULL;
 }
 
@@ -264,12 +264,12 @@ CXX_C_API const char *turbo_agent_state_tool_result_call_frame_id_impl(
 
 CXX_C_API size_t turbo_agent_model_event_tool_call_count(const json_value_t *event) {
   const json_value_t *tool_calls = turbo_agent_state_model_event_tool_calls_local(event);
-  return tool_calls ? turbo_json_array_size(tool_calls) : 0;
+  return tool_calls ? json_array_size(tool_calls) : 0;
 }
 
 CXX_C_API const char *turbo_agent_model_event_response_id(const json_value_t *event) {
   return turbo_agent_state_event_kind_is_local(event, "model")
-             ? turbo_json_get_string(event, "response_id")
+             ? json_get_string(event, "response_id")
              : NULL;
 }
 
@@ -296,13 +296,13 @@ CXX_C_API int turbo_agent_tool_call_record_fields(const json_value_t *tool_call,
     *out_arguments = NULL;
   }
 
-  if (!tool_call || turbo_json_type(tool_call) != TURBO_JSON_OBJECT) {
+  if (!tool_call || json_type(tool_call) != JSON_OBJECT) {
     return 0;
   }
 
-  call_id_value = turbo_json_get_string(tool_call, "call_id");
-  name_value = turbo_json_get_string(tool_call, "name");
-  arguments_value = turbo_json_get_string(tool_call, "arguments");
+  call_id_value = json_get_string(tool_call, "call_id");
+  name_value = json_get_string(tool_call, "name");
+  arguments_value = json_get_string(tool_call, "arguments");
   if (!call_id_value || !name_value || !arguments_value) {
     return 0;
   }
@@ -325,7 +325,7 @@ CXX_C_API int turbo_agent_append_event(json_value_t *state, json_value_t *event)
     return -1;
   }
 
-  turbo_json_array_add(events, event);
+  json_array_add(events, event);
   return 0;
 }
 
@@ -334,16 +334,16 @@ static void turbo_agent_tool_result_output_item_set_child_ref_local(
     const char *primary_key) {
   const char *value = NULL;
 
-  if (!output_item || !output_json || turbo_json_type(output_item) != TURBO_JSON_OBJECT ||
-      turbo_json_type(output_json) != TURBO_JSON_OBJECT || !target_key) {
+  if (!output_item || !output_json || json_type(output_item) != JSON_OBJECT ||
+      json_type(output_json) != JSON_OBJECT || !target_key) {
     return;
   }
 
   if (primary_key) {
-    value = turbo_json_get_string(output_json, primary_key);
+    value = json_get_string(output_json, primary_key);
   }
   if (value && value[0] != '\0') {
-    turbo_json_object_set_string(output_item, target_key, value);
+    json_object_set_string(output_item, target_key, value);
   }
 }
 
@@ -355,9 +355,9 @@ static void turbo_agent_tool_result_output_item_try_attach_child_refs(
     return;
   }
 
-  if (turbo_parse_json((const uint8_t *)output, strlen(output), &output_json) != 0 ||
-      !output_json || turbo_json_type(output_json) != TURBO_JSON_OBJECT) {
-    turbo_free_json(&output_json);
+  output_json = json_parse(output, strlen(output));
+  if (!output_json || json_type(output_json) != JSON_OBJECT) {
+    json_free(output_json); output_json = NULL;
     return;
   }
 
@@ -386,7 +386,7 @@ static void turbo_agent_tool_result_output_item_try_attach_child_refs(
   turbo_agent_tool_result_output_item_set_child_ref_local(
       output_item, output_json, "handoff_reason", "handoff_reason");
 
-  turbo_free_json(&output_json);
+  json_free(output_json); output_json = NULL;
 }
 
 CXX_C_API json_value_t *turbo_agent_tool_result_output_item_create(const char *call_id,
@@ -397,14 +397,14 @@ CXX_C_API json_value_t *turbo_agent_tool_result_output_item_create(const char *c
     return NULL;
   }
 
-  output_item = turbo_json_create_object();
+  output_item = json_create_object();
   if (!output_item) {
     return NULL;
   }
 
-  turbo_json_object_set_string(output_item, "type", "function_call_output");
-  turbo_json_object_set_string(output_item, "call_id", call_id);
-  turbo_json_object_set_string(output_item, "output", output);
+  json_object_set_string(output_item, "type", "function_call_output");
+  json_object_set_string(output_item, "call_id", call_id);
+  json_object_set_string(output_item, "output", output);
   turbo_agent_tool_result_output_item_try_attach_child_refs(output_item, output);
   return output_item;
 }
@@ -416,11 +416,11 @@ CXX_C_API json_value_t *turbo_agent_event_create(const char *kind) {
     return NULL;
   }
 
-  event = turbo_json_create_object();
+  event = json_create_object();
   if (!event) {
     return NULL;
   }
 
-  turbo_json_object_set_string(event, "kind", kind);
+  json_object_set_string(event, "kind", kind);
   return event;
 }

@@ -9,6 +9,7 @@
 #include "../src/turbo_agent_tool_executor_internal.h"
 
 #include <salts/thread.h>
+#include <salts/clock.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,16 @@ typedef struct tool_executor_probe_s {
   int active;
   int max_active;
 } tool_executor_probe_t;
+
+typedef struct tool_executor_context_probe_s {
+  int calls;
+  const turbo_cancel_token_t *cancel_token;
+  uint64_t deadline_mono_ms;
+  const char *thread_id;
+  const char *run_id;
+  const char *turn_id;
+  const char *tool_call_id;
+} tool_executor_context_probe_t;
 
 typedef struct tool_executor_fault_store_s {
   turbo_agent_runtime_store_t inner;
@@ -88,6 +99,22 @@ static int tool_executor_probe_handler(const char *arguments_json, char **out_ou
   --probe->active;
   salts_mutex_unlock(&probe->mutex);
   return *out_output ? 0 : -1;
+}
+
+static turbo_tool_status_t tool_executor_context_handler(
+    const char *arguments_json, const turbo_tool_execution_context_t *context,
+    char **out_output, void *user_data) {
+  tool_executor_context_probe_t *probe = (tool_executor_context_probe_t *)user_data;
+  if (!probe || !context || !out_output) return TURBO_TOOL_INVALID_ARGUMENT;
+  ++probe->calls;
+  probe->cancel_token = context->cancel_token;
+  probe->deadline_mono_ms = context->deadline_mono_ms;
+  probe->thread_id = context->thread_id;
+  probe->run_id = context->run_id;
+  probe->turn_id = context->turn_id;
+  probe->tool_call_id = context->tool_call_id;
+  *out_output = tool_executor_strdup(arguments_json ? arguments_json : "{}");
+  return *out_output ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
 }
 
 static json_value_t *tool_executor_state(const char *const *call_ids, const char *const *names,
@@ -338,6 +365,65 @@ spec("turbo agent tool executor") {
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);
     salts_mutex_destroy(&probe.mutex);
+  }
+
+  it("should propagate execution context into a context-aware callback") {
+    tool_executor_context_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_v4_t definition = {0};
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    turbo_cancel_source_config_t cancel_config = {0};
+    turbo_cancel_source_t *source = NULL;
+    turbo_cancel_token_t *token = NULL;
+    turbo_agent_tool_execution_t call = {
+        "context-call",
+        "context_probe",
+        "{\"value\":1}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    uint64_t deadline = salts_monotonic_ms() + 5000u;
+    call.turn_key = "turn-42";
+
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+    definition.definition.name = "context_probe";
+    definition.definition.description = "Observe execution context.";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.strict = 1;
+    definition.definition.user_data = &probe;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    definition.context_handler = tool_executor_context_handler;
+
+    cancel_config.struct_size = sizeof(cancel_config);
+    cancel_config.abi_version = TURBO_RUNTIME_CONTROL_ABI_VERSION;
+    cancel_config.deadline_mono_ms = deadline;
+
+    check_not_null(registry);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add_v4(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    check_equal(turbo_cancel_source_create(&cancel_config, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, token, "thread-7", "run-8",
+                                                   registry, NULL, &call, 1),
+                SALTS_OK);
+    check_equal(call.status, TURBO_TOOL_OK);
+    check_equal(probe.calls, 1);
+    check_true(probe.cancel_token == token);
+    check_equal((long long)probe.deadline_mono_ms, (long long)deadline);
+    check_equal(probe.thread_id, "thread-7");
+    check_equal(probe.run_id, "run-8");
+    check_equal(probe.turn_id, "turn-42");
+    check_equal(probe.tool_call_id, "context-call");
+
+    free(call.output);
+    turbo_cancel_token_release(token);
+    turbo_cancel_source_destroy(source);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
   }
 
   it("should observe cancellation before invoking a synchronous callback") {

@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 
 #include "turbo_agent_execution.h"
 #include "turbo_agent_state.h"
@@ -17,7 +18,7 @@ typedef struct execution_gate_s {
 
 static int execution_write_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   const char *key = (const char *)user_data;
-  json_value_t *value = turbo_json_create_bool(1);
+  json_value_t *value = json_create_bool(1);
 
   if (!value) {
     return -1;
@@ -93,8 +94,8 @@ spec("turbo agent execution") {
     check_int_eq(turbo_agent_execution_result_code(execution, &operation_rc), SALTS_OK);
     check_int_eq(operation_rc, 0);
     check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), SALTS_OK);
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
-    check_true(turbo_runtime_json_value_as_bool(turbo_json_object_get(state, "visited_end"), 0));
+    check_str_eq(json_get_string(summary, "status"), "completed");
+    check_true(turbo_runtime_json_value_as_bool(json_object_get(state, "visited_end"), 0));
     check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), SALTS_EALREADY);
 
     turbo_runtime_json_destroy(summary);
@@ -142,10 +143,10 @@ spec("turbo agent execution") {
     check_int_eq(status, TURBO_AGENT_EXECUTION_CANCELLED);
     check_int_eq(turbo_agent_execution_cancel(execution, TURBO_CANCEL_SHUTDOWN), SALTS_EALREADY);
     check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), SALTS_OK);
-    check_str_eq(turbo_json_get_string(summary, "status"), "cancelled");
-    check_not_null(turbo_json_get_string(summary, "checkpoint_id"));
-    check_true(turbo_runtime_json_value_as_bool(turbo_json_object_get(state, "visited_start"), 0));
-    check_false(turbo_runtime_json_value_as_bool(turbo_json_object_get(state, "visited_end"), 0));
+    check_str_eq(json_get_string(summary, "status"), "cancelled");
+    check_not_null(json_get_string(summary, "checkpoint_id"));
+    check_true(turbo_runtime_json_value_as_bool(json_object_get(state, "visited_start"), 0));
+    check_false(turbo_runtime_json_value_as_bool(json_object_get(state, "visited_end"), 0));
 
     turbo_runtime_json_destroy(summary);
     turbo_runtime_json_destroy(state);
@@ -179,8 +180,8 @@ spec("turbo agent execution") {
     check_int_eq(turbo_agent_execution_get_status(execution, &status), SALTS_OK);
     check_int_eq(status, TURBO_AGENT_EXECUTION_TIMED_OUT);
     check_int_eq(turbo_agent_execution_take_result(execution, &summary, &state), SALTS_OK);
-    check_str_eq(turbo_json_get_string(summary, "status"), "timed_out");
-    check_false(turbo_runtime_json_value_as_bool(turbo_json_object_get(state, "visited_start"), 0));
+    check_str_eq(json_get_string(summary, "status"), "timed_out");
+    check_false(turbo_runtime_json_value_as_bool(json_object_get(state, "visited_start"), 0));
 
     turbo_runtime_json_destroy(summary);
     turbo_runtime_json_destroy(state);

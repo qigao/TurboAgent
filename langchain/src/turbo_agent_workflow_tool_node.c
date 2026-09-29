@@ -55,6 +55,7 @@ static void turbo_agent_tool_executions_destroy(turbo_agent_tool_execution_t *ca
   for (index = 0; index < count; ++index) {
     if (calls[index].arguments_owned) tstr_free((char *)calls[index].arguments_json);
     free(calls[index].output);
+    turbo_runtime_json_destroy(calls[index].detail);
   }
   free(calls);
 }
@@ -223,10 +224,11 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   }
   turbo_agent_execution_context_set(&saved_context);
 
-  rc = turbo_agent_tool_executor_execute(agent->tool_executor, saved_context.runtime,
-                                         saved_context.cancel_token, saved_context.thread_id,
-                                         saved_context.run_id, agent->tool_registry,
-                                         &agent->tool_policy, calls, count);
+  rc = turbo_agent_tool_executor_execute(
+      agent->tool_executor, saved_context.runtime,
+      saved_context.cancel_token, saved_context.thread_id,
+      saved_context.run_id, ctx->event_sink, ctx->event_sink_user_data,
+      agent->tool_registry, &agent->tool_policy, calls, count);
   if (rc != SALTS_OK) {
     turbo_agent_state_set_model_error(ctx->state, "tool_executor",
                                       "tool batch planning or dispatch failed");

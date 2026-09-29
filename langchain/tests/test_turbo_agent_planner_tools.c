@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent_app.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_tool_registry.h"
@@ -207,7 +208,7 @@ spec("turbo agent planner tools") {
     check_int_eq(invoke_result, 0);
     text = turbo_agent_app_result_text(result_state);
     check_str_eq(text, "step done");
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
+    check_str_eq(json_get_string(summary, "status"), "completed");
 
     free(text);
     turbo_runtime_json_destroy(summary);
@@ -251,7 +252,7 @@ spec("turbo agent planner tools") {
     check_int_eq(turbo_agent_app_invoke_text(app, "recover after failure", NULL, &text, &summary),
                  0);
     check_str_eq(text, "recovered");
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
+    check_str_eq(json_get_string(summary, "status"), "completed");
     check_size_eq(state.transport_calls, 5);
     check_size_eq(state.tool_calls, 1);
     check_true(state.saw_tool_schema);
@@ -298,7 +299,7 @@ spec("turbo agent planner tools") {
     check_int_eq(
         turbo_agent_app_invoke_text(app, "use a tool while executing", NULL, &text, &summary), 0);
     check_str_eq(text, "executor tool done");
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
+    check_str_eq(json_get_string(summary, "status"), "completed");
     check_size_eq(state.transport_calls, 3);
     check_size_eq(state.tool_calls, 1);
     check_true(state.saw_tool_schema);

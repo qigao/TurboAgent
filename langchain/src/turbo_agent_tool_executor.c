@@ -158,27 +158,27 @@ static int turbo_agent_tool_journal_write(turbo_agent_runtime_t *runtime, const 
       turbo_agent_runtime_make_timestamp(timestamp, sizeof(timestamp)) != 0)
     return SALTS_EINVAL;
   arguments_hash = turbo_agent_tool_sha256_parts(call->tool_name, call->arguments_json);
-  record = turbo_json_create_object();
+  record = json_create_object();
   if (!arguments_hash || !record) {
     free(arguments_hash);
     turbo_runtime_json_destroy(record);
     return SALTS_ENOMEM;
   }
-  turbo_json_object_set_number(record, "schema_version", TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION);
-  turbo_json_object_set_string(record, "journal_id", journal_id);
-  turbo_json_object_set_string(record, "thread_id", thread_id);
-  turbo_json_object_set_string(record, "run_id", run_id);
-  turbo_json_object_set_string(record, "call_id", call->call_id);
-  turbo_json_object_set_string(record, "turn_key", call->turn_key);
-  turbo_json_object_set_string(record, "tool_name", call->tool_name);
-  turbo_json_object_set_string(record, "arguments_hash", arguments_hash);
-  turbo_json_object_set_number(record, "execution_mode", (double)call->policy.mode);
-  turbo_json_object_set_number(record, "idempotency", (double)call->policy.idempotency);
-  turbo_json_object_set_string(record, "phase", phase);
-  turbo_json_object_set_string(record, "updated_at", timestamp);
-  turbo_json_object_set_number(record, "status", (double)call->status);
+  json_object_set_number(record, "schema_version", TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION);
+  json_object_set_string(record, "journal_id", journal_id);
+  json_object_set_string(record, "thread_id", thread_id);
+  json_object_set_string(record, "run_id", run_id);
+  json_object_set_string(record, "call_id", call->call_id);
+  json_object_set_string(record, "turn_key", call->turn_key);
+  json_object_set_string(record, "tool_name", call->tool_name);
+  json_object_set_string(record, "arguments_hash", arguments_hash);
+  json_object_set_number(record, "execution_mode", (double)call->policy.mode);
+  json_object_set_number(record, "idempotency", (double)call->policy.idempotency);
+  json_object_set_string(record, "phase", phase);
+  json_object_set_string(record, "updated_at", timestamp);
+  json_object_set_number(record, "status", (double)call->status);
   if (strcmp(phase, "committed") == 0 && call->output)
-    turbo_json_object_set_string(record, "output", call->output);
+    json_object_set_string(record, "output", call->output);
   rc = turbo_agent_runtime_store_put_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION, journal_id,
                                           record);
   free(arguments_hash);
@@ -204,37 +204,37 @@ static int turbo_agent_tool_journal_load(turbo_agent_runtime_t *runtime, const c
   if (turbo_agent_runtime_store_list_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
                                           "journal_id", journal_id, &records) != 0)
     return SALTS_EIO;
-  if (turbo_json_array_size(records) == 0) {
+  if (json_array_size(records) == 0) {
     turbo_runtime_json_destroy(records);
     return SALTS_ENOENT;
   }
-  if (turbo_json_array_size(records) != 1) {
+  if (json_array_size(records) != 1) {
     turbo_runtime_json_destroy(records);
     return SALTS_EPROTO;
   }
-  record = turbo_json_array_get(records, 0);
-  stored_thread = turbo_json_get_string(record, "thread_id");
-  stored_run = turbo_json_get_string(record, "run_id");
-  stored_call = turbo_json_get_string(record, "call_id");
-  stored_turn = turbo_json_get_string(record, "turn_key");
-  stored_tool = turbo_json_get_string(record, "tool_name");
-  stored_arguments_hash = turbo_json_get_string(record, "arguments_hash");
+  record = json_array_get(records, 0);
+  stored_thread = json_get_string(record, "thread_id");
+  stored_run = json_get_string(record, "run_id");
+  stored_call = json_get_string(record, "call_id");
+  stored_turn = json_get_string(record, "turn_key");
+  stored_tool = json_get_string(record, "tool_name");
+  stored_arguments_hash = json_get_string(record, "arguments_hash");
   arguments_hash = turbo_agent_tool_sha256_parts(call->tool_name, call->arguments_json);
-  if (turbo_json_get_double(record, "schema_version", -1.0) !=
+  if (json_get_double(record, "schema_version", -1.0) !=
           (double)TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION ||
       !stored_thread || strcmp(stored_thread, thread_id) != 0 || !stored_run ||
       strcmp(stored_run, run_id) != 0 || !stored_call || strcmp(stored_call, call->call_id) != 0 ||
       !stored_turn || strcmp(stored_turn, call->turn_key) != 0 || !stored_tool ||
       strcmp(stored_tool, call->tool_name) != 0 || !stored_arguments_hash || !arguments_hash ||
       strcmp(stored_arguments_hash, arguments_hash) != 0 ||
-      turbo_json_get_double(record, "execution_mode", -1.0) != (double)call->policy.mode ||
-      turbo_json_get_double(record, "idempotency", -1.0) != (double)call->policy.idempotency) {
+      json_get_double(record, "execution_mode", -1.0) != (double)call->policy.mode ||
+      json_get_double(record, "idempotency", -1.0) != (double)call->policy.idempotency) {
     free(arguments_hash);
     turbo_runtime_json_destroy(records);
     return SALTS_EPROTO;
   }
   free(arguments_hash);
-  *out_record = turbo_json_clone(record);
+  *out_record = json_clone(record);
   turbo_runtime_json_destroy(records);
   return *out_record ? SALTS_OK : SALTS_ENOMEM;
 }
@@ -270,7 +270,7 @@ static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executo
   }
   free(journal_id);
   if (rc != SALTS_OK) return rc;
-  phase = turbo_json_get_string(record, "phase");
+  phase = json_get_string(record, "phase");
   if (!phase) {
     turbo_runtime_json_destroy(record);
     return SALTS_EPROTO;
@@ -280,8 +280,8 @@ static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executo
     call->replayed = 1;
   } else if (strcmp(phase, "committed") == 0) {
     call->status =
-        (turbo_tool_status_t)(int)turbo_json_get_double(record, "status", TURBO_TOOL_ERROR);
-    output = turbo_json_get_string(record, "output");
+        (turbo_tool_status_t)(int)json_get_double(record, "status", TURBO_TOOL_ERROR);
+    output = json_get_string(record, "output");
     if (output) call->output = turbo_agent_tool_strdup(output);
     if (output && !call->output) rc = SALTS_ENOMEM;
     call->replayed = 1;

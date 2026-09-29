@@ -10,6 +10,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(PRAKTOR_CAPABILITY_WORKFLOW_PLAN)
+#define TURBO_PRAKTOR_HAS_WORKFLOW_PLAN 1
+#else
+#define TURBO_PRAKTOR_HAS_WORKFLOW_PLAN 0
+#endif
+
+#if defined(PRAKTOR_CAPABILITY_EXECUTION_EVENTS)
+#define TURBO_PRAKTOR_HAS_EXECUTION_EVENTS 1
+#else
+#define TURBO_PRAKTOR_HAS_EXECUTION_EVENTS 0
+#endif
+
 enum {
   TURBO_PRAKTOR_DEFAULT_MAX_WORKFLOWS = 64,
   TURBO_PRAKTOR_DEFAULT_MAX_RESULT_BYTES = 1024 * 1024,
@@ -25,6 +37,9 @@ typedef struct turbo_praktor_binding_s {
   const praktor_api *api;
   tstr workflow_path;
   size_t max_result_bytes;
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  praktor_workflow_plan *plan;
+#endif
 } turbo_praktor_binding_t;
 
 struct turbo_praktor_tool_pack_s {
@@ -100,9 +115,195 @@ static int turbo_praktor_schema_valid(const char *parameters_json) {
   return valid;
 }
 
+static int turbo_praktor_workflow_config_valid(
+    const turbo_praktor_workflow_config_t *config) {
+  if (!config) return 0;
+  if (config->abi_version == TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V1) {
+    return config->struct_size >= TURBO_PRAKTOR_WORKFLOW_CONFIG_V1_SIZE;
+  }
+  return config->abi_version == TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+         config->struct_size >= sizeof(*config);
+}
+
+static int turbo_praktor_require_harness_safe(
+    const turbo_praktor_workflow_config_t *config) {
+  return config &&
+         config->abi_version >= TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+         config->struct_size >= sizeof(*config) &&
+         config->require_harness_safe != 0;
+}
+
+typedef struct turbo_praktor_capability_list_s {
+  const char **items;
+  size_t count;
+  size_t capacity;
+} turbo_praktor_capability_list_t;
+
+static void turbo_praktor_capability_list_destroy(
+    turbo_praktor_capability_list_t *list) {
+  if (!list) return;
+  free(list->items);
+  memset(list, 0, sizeof(*list));
+}
+
+static turbo_tool_status_t turbo_praktor_capability_add(
+    turbo_praktor_capability_list_t *list, const char *capability) {
+  size_t index;
+  const char **resized;
+  size_t next_capacity;
+  if (!list || !capability || !capability[0]) return TURBO_TOOL_INVALID_ARGUMENT;
+  for (index = 0; index < list->count; ++index) {
+    if (strcmp(list->items[index], capability) == 0) return TURBO_TOOL_OK;
+  }
+  if (list->count == list->capacity) {
+    next_capacity = list->capacity ? list->capacity * 2 : 8;
+    resized = (const char **)realloc(
+        list->items, next_capacity * sizeof(*resized));
+    if (!resized) return TURBO_TOOL_OUT_OF_MEMORY;
+    list->items = resized;
+    list->capacity = next_capacity;
+  }
+  list->items[list->count++] = capability;
+  return TURBO_TOOL_OK;
+}
+
+static turbo_tool_status_t turbo_praktor_add_conservative_capabilities(
+    turbo_praktor_capability_list_t *list) {
+  static const char *const conservative[] = {
+      "network", "shell", "patch", "outside_workspace", "custom_tools"};
+  size_t index;
+  turbo_tool_status_t status;
+  for (index = 0; index < sizeof(conservative) / sizeof(conservative[0]); ++index) {
+    status = turbo_praktor_capability_add(list, conservative[index]);
+    if (status != TURBO_TOOL_OK) return status;
+  }
+  return TURBO_TOOL_OK;
+}
+
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+static turbo_tool_status_t turbo_praktor_capability_from_effect(
+    turbo_praktor_capability_list_t *list, const char *effect) {
+  if (!effect || !effect[0]) return TURBO_TOOL_INVALID_ARGUMENT;
+  if (strcmp(effect, "network") == 0) {
+    return turbo_praktor_capability_add(list, "network");
+  }
+  if (strcmp(effect, "process") == 0 ||
+      strcmp(effect, "system_control") == 0) {
+    return turbo_praktor_capability_add(list, "shell");
+  }
+  if (strcmp(effect, "filesystem_write") == 0) {
+    return turbo_praktor_capability_add(list, "patch");
+  }
+  if (strcmp(effect, "outside_workspace") == 0) {
+    return turbo_praktor_capability_add(list, "outside_workspace");
+  }
+  if (strcmp(effect, "plugin") == 0 ||
+      strcmp(effect, "native_extension") == 0 ||
+      strcmp(effect, "model_api") == 0) {
+    return turbo_praktor_capability_add(list, "custom_tools");
+  }
+  if (strcmp(effect, "filesystem_read") == 0) {
+    return TURBO_TOOL_OK;
+  }
+  return turbo_praktor_add_conservative_capabilities(list);
+}
+
+static int turbo_praktor_plan_metadata_valid(
+    const json_value_t *description, int require_harness_safe) {
+  const json_value_t *schema;
+  const json_value_t *profiles;
+  const json_value_t *profile;
+  if (!description || json_type(description) != JSON_OBJECT) return 0;
+  schema = json_object_get(description, "input_schema");
+  if (!schema || json_type(schema) != JSON_OBJECT) return 0;
+  if (!require_harness_safe) return 1;
+  profiles = json_object_get(description, "profiles");
+  profile = profiles && json_type(profiles) == JSON_OBJECT
+                ? json_object_get(profiles, "harness_safe")
+                : NULL;
+  return profile && json_type(profile) == JSON_OBJECT &&
+         json_get_bool(profile, "qualified", false);
+}
+
+static turbo_tool_status_t turbo_praktor_effect_capabilities(
+    const json_value_t *description,
+    turbo_praktor_capability_list_t *list) {
+  const json_value_t *manifest;
+  const json_value_t *effects;
+  size_t index;
+  turbo_tool_status_t status;
+  manifest = description ? json_object_get(description, "effect_manifest") : NULL;
+  if (!manifest || json_type(manifest) != JSON_OBJECT) {
+    return turbo_praktor_add_conservative_capabilities(list);
+  }
+  if (json_get_bool(manifest, "unknown_effects", false)) {
+    return turbo_praktor_add_conservative_capabilities(list);
+  }
+  effects = json_object_get(manifest, "effects");
+  if (!effects || json_type(effects) != JSON_ARRAY) {
+    return turbo_praktor_add_conservative_capabilities(list);
+  }
+  for (index = 0; index < json_array_size(effects); ++index) {
+    const json_value_t *value = json_array_get(effects, index);
+    const char *effect = value && json_type(value) == JSON_STRING
+                             ? json_string(value)
+                             : NULL;
+    if (!effect) return turbo_praktor_add_conservative_capabilities(list);
+    status = turbo_praktor_capability_from_effect(list, effect);
+    if (status != TURBO_TOOL_OK) return status;
+  }
+  return TURBO_TOOL_OK;
+}
+
+static turbo_tool_status_t turbo_praktor_compile_plan(
+    const praktor_api *api, const char *workflow_path,
+    praktor_workflow_plan **out_plan, json_value_t **out_description) {
+  praktor_compile_request request = PRAKTOR_COMPILE_REQUEST_INIT;
+  praktor_owned_json description = PRAKTOR_OWNED_JSON_INIT;
+  praktor_error error = PRAKTOR_ERROR_INIT;
+  praktor_result status;
+  if (!api || !workflow_path || !out_plan || !out_description ||
+      (api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) == 0 ||
+      !api->compile_workflow || !api->describe_workflow_plan ||
+      !api->release_workflow_plan) {
+    return TURBO_TOOL_NOT_FOUND;
+  }
+  *out_plan = NULL;
+  *out_description = NULL;
+  request.workflow_path = workflow_path;
+  status = (praktor_result)api->compile_workflow(&request, out_plan, &error);
+  if (status != PRAKTOR_RESULT_SUCCESS || !*out_plan) {
+    return TURBO_TOOL_ERROR;
+  }
+  status = (praktor_result)api->describe_workflow_plan(
+      *out_plan, &description, &error);
+  if (status != PRAKTOR_RESULT_SUCCESS || !description.data || !description.size) {
+    api->release_workflow_plan(*out_plan);
+    *out_plan = NULL;
+    api->release_json(&description);
+    return TURBO_TOOL_ERROR;
+  }
+  *out_description = json_parse(description.data, description.size);
+  api->release_json(&description);
+  if (!*out_description || json_type(*out_description) != JSON_OBJECT) {
+    turbo_runtime_json_destroy(*out_description);
+    *out_description = NULL;
+    api->release_workflow_plan(*out_plan);
+    *out_plan = NULL;
+    return TURBO_TOOL_ERROR;
+  }
+  return TURBO_TOOL_OK;
+}
+#endif
+
 static void turbo_praktor_binding_destroy(void *user_data) {
   turbo_praktor_binding_t *binding = (turbo_praktor_binding_t *)user_data;
   if (!binding) return;
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  if (binding->plan && binding->api && binding->api->release_workflow_plan) {
+    binding->api->release_workflow_plan(binding->plan);
+  }
+#endif
   tstr_free(binding->workflow_path);
   free(binding);
 }
@@ -117,6 +318,14 @@ static const char *turbo_praktor_error_phase_name(praktor_error_phase phase) {
       return "execution";
     case PRAKTOR_ERROR_PHASE_RESULT_JSON:
       return "result_json";
+#if PRAKTOR_ABI_MINOR >= 2
+    case PRAKTOR_ERROR_PHASE_PLAN:
+      return "plan";
+#endif
+#if PRAKTOR_ABI_MINOR >= 3
+    case PRAKTOR_ERROR_PHASE_INPUT_CONTRACT:
+      return "input_contract";
+#endif
     case PRAKTOR_ERROR_PHASE_NONE:
     default:
       return "none";

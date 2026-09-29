@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_event.h"
 #include "turbo_model_provider.h"
 
@@ -19,20 +20,20 @@ static void event_stream_capture_sink(const json_value_t *event,
 spec("turbo event runtime") {
   describe("canonical runtime events") {
     it("should build and validate TurboParser JSON-native model events") {
-      json_value_t *tool_calls = turbo_json_create_array();
-      json_value_t *call = turbo_json_create_object();
+      json_value_t *tool_calls = json_create_array();
+      json_value_t *call = json_create_object();
       json_value_t *event;
 
       check_not_null(tool_calls);
       check_not_null(call);
       check_int_eq(turbo_runtime_json_object_set(
-                       call, "call_id", turbo_json_create_string("call_1")),
+                       call, "call_id", json_create_string("call_1")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
-                       call, "name", turbo_json_create_string("sum")),
+                       call, "name", json_create_string("sum")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
-                       call, "arguments", turbo_json_create_string("{\"a\":1}")),
+                       call, "arguments", json_create_string("{\"a\":1}")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_array_append(tool_calls, call),
                    TURBO_RUNTIME_JSON_OK);
@@ -43,7 +44,7 @@ spec("turbo event runtime") {
       check_int_eq(turbo_event_validate_json_value(event), 0);
       check_int_eq(turbo_event_model_validate_json_value(event), 0);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "kind")),
+                       json_object_get(event, "kind")),
                    "model");
 
       turbo_runtime_json_destroy(event);
@@ -51,10 +52,10 @@ spec("turbo event runtime") {
     }
 
     it("should normalize provider responses into TurboParser JSON-native events") {
-      json_value_t *chat_response = turbo_json_create_object();
-      json_value_t *choices = turbo_json_create_array();
-      json_value_t *choice = turbo_json_create_object();
-      json_value_t *message = turbo_json_create_object();
+      json_value_t *chat_response = json_create_object();
+      json_value_t *choices = json_create_array();
+      json_value_t *choice = json_create_object();
+      json_value_t *message = json_create_object();
       json_value_t *event;
 
       check_not_null(chat_response);
@@ -62,11 +63,11 @@ spec("turbo event runtime") {
       check_not_null(choice);
       check_not_null(message);
 
-      turbo_json_object_set_string(chat_response, "id", "chat_1");
-      turbo_json_object_set_string(message, "content", "world");
-      turbo_json_object_add(choice, "message", message);
-      turbo_json_array_add(choices, choice);
-      turbo_json_object_add(chat_response, "choices", choices);
+      json_object_set_string(chat_response, "id", "chat_1");
+      json_object_set_string(message, "content", "world");
+      json_object_add(choice, "message", message);
+      json_array_add(choices, choice);
+      json_object_add(chat_response, "choices", choices);
 
       event = turbo_model_provider_response_to_event_json_value(
           turbo_model_provider_openai_chat_completions(), chat_response);
@@ -75,11 +76,11 @@ spec("turbo event runtime") {
       check_int_eq(turbo_event_validate_json_value(event), 0);
       check_int_eq(turbo_event_model_validate_json_value(event), 0);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "output_text")),
+                       json_object_get(event, "output_text")),
                    "world");
 
       turbo_runtime_json_destroy(event);
-      turbo_free_json(&chat_response);
+      json_free(chat_response); chat_response = NULL;
     }
 
     it("should build and validate TurboParser JSON-native trace events") {
@@ -90,14 +91,14 @@ spec("turbo event runtime") {
       check_int_eq(turbo_event_validate_json_value(event), 0);
       check_int_eq(turbo_event_trace_validate_json_value(event), 0);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "kind")),
+                       json_object_get(event, "kind")),
                    "trace");
       turbo_runtime_json_destroy(event);
     }
 
     it("should build and validate TurboParser JSON-native tool result events") {
       json_value_t *output_value =
-          turbo_json_create_string("structured");
+          json_create_string("structured");
       json_value_t *event = turbo_event_tool_result_create_json_value(
           "sum", "{\"a\":1,\"b\":2}", "3", output_value, 0);
 
@@ -107,16 +108,16 @@ spec("turbo event runtime") {
       check_int_eq(turbo_event_validate_json_value(event), 0);
       check_int_eq(turbo_event_tool_result_validate_json_value(event), 0);
       check_str_eq(
-          turbo_runtime_json_value_as_string(turbo_json_object_get(event, "name")),
+          turbo_runtime_json_value_as_string(json_object_get(event, "name")),
           "sum");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "arguments_json")),
+                       json_object_get(event, "arguments_json")),
                    "{\"a\":1,\"b\":2}");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "output")),
+                       json_object_get(event, "output")),
                    "3");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "output_value")),
+                       json_object_get(event, "output_value")),
                    "structured");
 
       turbo_runtime_json_destroy(event);
@@ -125,29 +126,29 @@ spec("turbo event runtime") {
 
     it("should carry child lineage in canonical TurboParser JSON-native tool result events") {
       json_value_t *output_value =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *event;
 
       check_not_null(output_value);
       check_int_eq(
           turbo_runtime_json_object_set(
               output_value, "child_thread_id",
-              turbo_json_create_string("thr_child")),
+              json_create_string("thr_child")),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(
           turbo_runtime_json_object_set(output_value, "child_run_id",
-                                             turbo_json_create_string(
+                                             json_create_string(
                                                  "run_child")),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(
           turbo_runtime_json_object_set(
               output_value, "child_checkpoint_id",
-              turbo_json_create_null()),
+              json_create_null()),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(
           turbo_runtime_json_object_set(
               output_value, "child_status",
-              turbo_json_create_string("completed")),
+              json_create_string("completed")),
           TURBO_RUNTIME_JSON_OK);
 
       event = turbo_event_tool_result_create_json_value(
@@ -161,16 +162,16 @@ spec("turbo event runtime") {
       check_int_eq(turbo_event_validate_json_value(event), 0);
       check_int_eq(turbo_event_tool_result_validate_json_value(event), 0);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "child_thread_id")),
+                       json_object_get(event, "child_thread_id")),
                    "thr_child");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "child_run_id")),
+                       json_object_get(event, "child_run_id")),
                    "run_child");
-      check_int_eq(turbo_json_type(
-                       turbo_json_object_get(event, "child_checkpoint_id")),
-                   TURBO_JSON_NULL);
+      check_int_eq(json_type(
+                       json_object_get(event, "child_checkpoint_id")),
+                   JSON_NULL);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "child_status")),
+                       json_object_get(event, "child_status")),
                    "completed");
 
       turbo_runtime_json_destroy(event);
@@ -179,33 +180,33 @@ spec("turbo event runtime") {
 
     it("should carry parent lineage in canonical TurboParser JSON-native tool result events") {
       json_value_t *output_value =
-          turbo_json_create_object();
+          json_create_object();
       json_value_t *event;
 
       check_not_null(output_value);
       check_int_eq(
           turbo_runtime_json_object_set(
               output_value, "parent_agent_run_id",
-              turbo_json_create_string("run_parent")),
+              json_create_string("run_parent")),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(
           turbo_runtime_json_object_set(
               output_value, "parent_tool_call_id",
-              turbo_json_create_string("call_parent")),
+              json_create_string("call_parent")),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(
           turbo_runtime_json_object_set(
               output_value, "parent_tool_name",
-              turbo_json_create_string("delegate")),
+              json_create_string("delegate")),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(
           turbo_runtime_json_object_set(
               output_value, "parent_graph_run_id",
-              turbo_json_create_string("run_graph_parent")),
+              json_create_string("run_graph_parent")),
           TURBO_RUNTIME_JSON_OK);
       check_int_eq(
           turbo_runtime_json_object_set(output_value, "call_frame_id",
-                                             turbo_json_create_string(
+                                             json_create_string(
                                                  "frame_parent")),
           TURBO_RUNTIME_JSON_OK);
 
@@ -223,19 +224,19 @@ spec("turbo event runtime") {
       check_int_eq(turbo_event_validate_json_value(event), 0);
       check_int_eq(turbo_event_tool_result_validate_json_value(event), 0);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "parent_agent_run_id")),
+                       json_object_get(event, "parent_agent_run_id")),
                    "run_parent");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "parent_tool_call_id")),
+                       json_object_get(event, "parent_tool_call_id")),
                    "call_parent");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "parent_tool_name")),
+                       json_object_get(event, "parent_tool_name")),
                    "delegate");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "parent_graph_run_id")),
+                       json_object_get(event, "parent_graph_run_id")),
                    "run_graph_parent");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "call_frame_id")),
+                       json_object_get(event, "call_frame_id")),
                    "frame_parent");
 
       turbo_runtime_json_destroy(event);
@@ -250,35 +251,35 @@ spec("turbo event runtime") {
           "requested", "planner", "executor", "delegate execution", "planner", 0);
 
       check_not_null(schema);
-      properties = turbo_json_object_get(schema, "properties");
-      required = turbo_json_object_get(schema, "required");
+      properties = json_object_get(schema, "properties");
+      required = json_object_get(schema, "required");
       check_not_null(properties);
       check_not_null(required);
-      check_not_null(turbo_json_object_get(properties, "phase"));
-      check_not_null(turbo_json_object_get(properties, "from_agent"));
-      check_not_null(turbo_json_object_get(properties, "target_agent"));
-      check_not_null(turbo_json_object_get(properties, "reason"));
-      check_not_null(turbo_json_object_get(properties, "active_agent"));
-      check_not_null(turbo_json_object_get(properties, "status"));
+      check_not_null(json_object_get(properties, "phase"));
+      check_not_null(json_object_get(properties, "from_agent"));
+      check_not_null(json_object_get(properties, "target_agent"));
+      check_not_null(json_object_get(properties, "reason"));
+      check_not_null(json_object_get(properties, "active_agent"));
+      check_not_null(json_object_get(properties, "status"));
 
       check_not_null(event);
       check_str_eq(turbo_event_kind_json_value(event), "handoff");
       check_int_eq(turbo_event_validate_json_value(event), 0);
       check_int_eq(turbo_event_handoff_validate_json_value(event), 0);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "phase")),
+                       json_object_get(event, "phase")),
                    "requested");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "from_agent")),
+                       json_object_get(event, "from_agent")),
                    "planner");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "target_agent")),
+                       json_object_get(event, "target_agent")),
                    "executor");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "reason")),
+                       json_object_get(event, "reason")),
                    "delegate execution");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "active_agent")),
+                       json_object_get(event, "active_agent")),
                    "planner");
 
       turbo_runtime_json_destroy(event);
@@ -293,43 +294,43 @@ spec("turbo event runtime") {
       check_int_eq(turbo_event_validate_json_value(event), 0);
       check_int_eq(turbo_event_handoff_validate_json_value(event), 0);
       check_int_eq(
-          turbo_json_type(turbo_json_object_get(event, "target_agent")),
-          TURBO_JSON_NULL);
+          json_type(json_object_get(event, "target_agent")),
+          JSON_NULL);
       check_int_eq(
-          turbo_json_type(turbo_json_object_get(event, "reason")),
-          TURBO_JSON_NULL);
+          json_type(json_object_get(event, "reason")),
+          JSON_NULL);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(event, "active_agent")),
+                       json_object_get(event, "active_agent")),
                    "executor");
 
       turbo_runtime_json_destroy(event);
     }
 
     it("should reject malformed canonical TurboParser JSON-native handoff events") {
-      json_value_t *event = turbo_json_create_object();
+      json_value_t *event = json_create_object();
 
       check_not_null(event);
       check_int_eq(turbo_runtime_json_object_set(
-                       event, "kind", turbo_json_create_string("handoff")),
+                       event, "kind", json_create_string("handoff")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
-                       event, "phase", turbo_json_create_string("requested")),
+                       event, "phase", json_create_string("requested")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
-                       event, "from_agent", turbo_json_create_string("planner")),
+                       event, "from_agent", json_create_string("planner")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
                        event, "target_agent",
-                       turbo_json_create_string("executor")),
+                       json_create_string("executor")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
-                       event, "reason", turbo_json_create_string("delegate")),
+                       event, "reason", json_create_string("delegate")),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
-                       event, "active_agent", turbo_json_create_array()),
+                       event, "active_agent", json_create_array()),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_runtime_json_object_set(
-                       event, "status", turbo_json_create_int64(0)),
+                       event, "status", json_create_int64(0)),
                    TURBO_RUNTIME_JSON_OK);
       check_int_eq(turbo_event_validate_json_value(event), -1);
       check_int_eq(turbo_event_handoff_validate_json_value(event), -1);
@@ -338,7 +339,7 @@ spec("turbo event runtime") {
     }
 
     it("should classify canonical events by stream mode") {
-      json_value_t *tool_calls = turbo_json_create_array();
+      json_value_t *tool_calls = json_create_array();
       json_value_t *model =
           turbo_event_model_create_json_value("resp_1", "hello", tool_calls);
       json_value_t *trace =
@@ -378,7 +379,7 @@ spec("turbo event runtime") {
     }
 
     it("should filter stream sink events by mode") {
-      json_value_t *tool_calls = turbo_json_create_array();
+      json_value_t *tool_calls = json_create_array();
       json_value_t *model =
           turbo_event_model_create_json_value("resp_1", "hello", tool_calls);
       json_value_t *trace =

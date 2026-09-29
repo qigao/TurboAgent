@@ -130,6 +130,15 @@ static int test_mcp_post(void *user_data, const char *endpoint, const char *cons
   return 0;
 }
 
+static turbo_tool_status_t test_refresh(turbo_mcp_tool_pack_t *pack) {
+  turbo_tool_status_t status = turbo_mcp_tool_pack_refresh(pack);
+  if (status != TURBO_TOOL_OK) {
+    fprintf(stderr, "MCP refresh failed: status=%d error=%s\n", (int)status,
+            turbo_mcp_tool_pack_last_error(pack));
+  }
+  return status;
+}
+
 static turbo_mcp_tool_pack_t *test_pack_create(test_mcp_transport_t *transport) {
   turbo_mcp_tool_pack_config_t config;
   turbo_mcp_tool_pack_config_init(&config);
@@ -168,7 +177,7 @@ spec("MCP tool pack") {
     size_t required_capability_count = 0;
 
     check_not_null(pack);
-    check_equal(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
+    check_equal(test_refresh(pack), TURBO_TOOL_OK);
     check_equal(turbo_mcp_tool_pack_tool_count(pack), 1);
     check_equal(turbo_mcp_tool_pack_rejected_tool_count(pack), 1);
     check_equal(turbo_tool_registry_get_required_capabilities(
@@ -202,7 +211,7 @@ spec("MCP tool pack") {
     test_mcp_transport_t transport = {.mode = TEST_MCP_SSE};
     turbo_mcp_tool_pack_t *pack = test_pack_create(&transport);
     check_not_null(pack);
-    check_equal(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
+    check_equal(test_refresh(pack), TURBO_TOOL_OK);
     check_equal(turbo_mcp_tool_pack_tool_count(pack), 1);
     check_equal(transport.page, 2);
     turbo_mcp_tool_pack_destroy(pack);
@@ -213,10 +222,10 @@ spec("MCP tool pack") {
     turbo_mcp_tool_pack_t *pack = test_pack_create(&transport);
     turbo_tool_registry_t *registry;
     check_not_null(pack);
-    check_equal(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_OK);
+    check_equal(test_refresh(pack), TURBO_TOOL_OK);
     registry = turbo_mcp_tool_pack_registry(pack);
     transport.mode = TEST_MCP_FAIL;
-    check_equal(turbo_mcp_tool_pack_refresh(pack), TURBO_TOOL_ERROR);
+    check_equal(test_refresh(pack), TURBO_TOOL_ERROR);
     check_true((turbo_mcp_tool_pack_registry(pack)) == (registry));
     check_equal(turbo_mcp_tool_pack_tool_count(pack), 1);
     check_true(strlen(turbo_mcp_tool_pack_last_error(pack)) > 0);

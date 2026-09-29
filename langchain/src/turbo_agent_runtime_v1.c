@@ -1167,8 +1167,8 @@ int turbo_agent_runtime_parse_json_string(const char *json_text, json_value_t **
   }
 
   *out_json = NULL;
-  if (turbo_parse_json((const uint8_t *)json_text, strlen(json_text), &json_root) != 0 ||
-      !json_root) {
+  json_root = json_parse(json_text, strlen(json_text));
+  if (!json_root) {
     turbo_agent_runtime_v1_json_free(&json_root);
     return -1;
   }

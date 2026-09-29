@@ -478,8 +478,8 @@ spec("turbo agent subagent api") {
                                              &output),
                  TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(
-        turbo_parse_json((const uint8_t *)output, strlen(output), &result_json), 0);
+    result_json = json_parse(output, strlen(output));
+    check_not_null(result_json);
     check_true(json_get_bool(result_json, "ok", false));
     check_str_eq(json_get_string(result_json, "status"), "completed");
     check_int_eq(json_get_int(json_object_get(result_json, "output_json"), "value", 0),
@@ -562,8 +562,8 @@ spec("turbo agent subagent api") {
                                     &output),
         TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(
-        turbo_parse_json((const uint8_t *)output, strlen(output), &result_json), 0);
+    result_json = json_parse(output, strlen(output));
+    check_not_null(result_json);
     check_not_null(result_json);
     summary = json_object_get(result_json, "summary");
     check_not_null(summary);
@@ -626,8 +626,8 @@ spec("turbo agent subagent api") {
                                     "{\"input\":\"hello\"}", &output),
         TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(
-        turbo_parse_json((const uint8_t *)output, strlen(output), &result_json), 0);
+    result_json = json_parse(output, strlen(output));
+    check_not_null(result_json);
     check_not_null(result_json);
     summary = json_object_get(result_json, "summary");
     check_not_null(summary);
@@ -701,8 +701,8 @@ spec("turbo agent subagent api") {
                                     &output),
         TURBO_TOOL_OK);
     check_not_null(output);
-    check_int_eq(
-        turbo_parse_json((const uint8_t *)output, strlen(output), &result_json), 0);
+    result_json = json_parse(output, strlen(output));
+    check_not_null(result_json);
     check_not_null(result_json);
     summary = json_object_get(result_json, "summary");
     check_not_null(summary);

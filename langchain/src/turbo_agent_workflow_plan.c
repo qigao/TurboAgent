@@ -1,4 +1,5 @@
 #include "turbo_agent_graph.h"
+#include <json_parser.h>
 #include "turbo_agent_workflow_graph_internal.h"
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
 #include "turbo_agent_state_flow_domain_internal.h"
@@ -47,10 +48,10 @@ static json_value_t *turbo_agent_planner_loop_build_step_input(const json_value_
     context_message = turbo_prompt_message_create("user", completed_steps_message);
     if (!context_message) {
       tstr_free(completed_steps_message);
-      turbo_free_json(&step_input);
+      json_free(step_input); step_input = NULL;
       return NULL;
     }
-    turbo_json_array_add(step_input, context_message);
+    json_array_add(step_input, context_message);
     tstr_free(completed_steps_message);
   }
 
@@ -58,13 +59,13 @@ static json_value_t *turbo_agent_planner_loop_build_step_input(const json_value_
                     "Execute plan step %lu of %lu: %s\nReturn only the result for this step.",
                     (unsigned long)(step_index + 1), (unsigned long)step_count, step_text);
   if (needed < 0) {
-    turbo_free_json(&step_input);
+    json_free(step_input); step_input = NULL;
     return NULL;
   }
 
   prompt = (char *)malloc((size_t)needed + 1);
   if (!prompt) {
-    turbo_free_json(&step_input);
+    json_free(step_input); step_input = NULL;
     return NULL;
   }
 
@@ -74,10 +75,10 @@ static json_value_t *turbo_agent_planner_loop_build_step_input(const json_value_
   message = turbo_prompt_message_create("user", prompt);
   free(prompt);
   if (!message) {
-    turbo_free_json(&step_input);
+    json_free(step_input); step_input = NULL;
     return NULL;
   }
-  turbo_json_array_add(step_input, message);
+  json_array_add(step_input, message);
   return step_input;
 }
 
@@ -93,20 +94,20 @@ int turbo_agent_plan_step_prepare_node(turbo_graph_exec_ctx_t *ctx, void *user_d
   }
 
   step_input = turbo_agent_planner_loop_build_step_input(ctx->state);
-  step_events = turbo_json_create_array();
-  step_history = turbo_json_create_array();
+  step_events = json_create_array();
+  step_history = json_create_array();
   if (!step_input || !step_events || !step_history) {
-    turbo_free_json(&step_input);
-    turbo_free_json(&step_events);
-    turbo_free_json(&step_history);
+    json_free(step_input); step_input = NULL;
+    json_free(step_events); step_events = NULL;
+    json_free(step_history); step_history = NULL;
     return -1;
   }
 
   if (turbo_agent_state_append_array_version(ctx->state, "executor_event_versions", step_history) !=
       0) {
-    turbo_free_json(&step_input);
-    turbo_free_json(&step_events);
-    turbo_free_json(&step_history);
+    json_free(step_input); step_input = NULL;
+    json_free(step_events); step_events = NULL;
+    json_free(step_history); step_history = NULL;
     return -1;
   }
 
@@ -114,8 +115,8 @@ int turbo_agent_plan_step_prepare_node(turbo_graph_exec_ctx_t *ctx, void *user_d
   if (!executor_state ||
       turbo_agent_state_append_object_version(ctx->state, "executor_state_versions",
                                               executor_state) != 0) {
-    turbo_free_json(&step_input);
-    turbo_free_json(&step_events);
+    json_free(step_input); step_input = NULL;
+    json_free(step_events); step_events = NULL;
     return -1;
   }
 

@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent_graph.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_tool_executor.h"
@@ -93,25 +94,25 @@ static json_value_t *tool_executor_state(const char *const *call_ids, const char
                                          const char *const *arguments, size_t count,
                                          int malformed_last) {
   json_value_t *state = turbo_agent_state_create();
-  json_value_t *events = turbo_json_object_get(state, "events");
-  json_value_t *event = turbo_json_create_object();
-  json_value_t *calls = turbo_json_create_array();
+  json_value_t *events = json_object_get(state, "events");
+  json_value_t *event = json_create_object();
+  json_value_t *calls = json_create_array();
   size_t index;
   if (!state || !events || !event || !calls) goto fail;
-  turbo_json_object_set_string(event, "kind", "model");
-  turbo_json_object_set_string(event, "output_text", "");
+  json_object_set_string(event, "kind", "model");
+  json_object_set_string(event, "output_text", "");
   for (index = 0; index < count; ++index) {
-    json_value_t *call = turbo_json_create_object();
+    json_value_t *call = json_create_object();
     if (!call) goto fail;
-    turbo_json_object_set_string(call, "call_id", call_ids[index]);
+    json_object_set_string(call, "call_id", call_ids[index]);
     if (!(malformed_last && index + 1 == count)) {
-      turbo_json_object_set_string(call, "name", names[index]);
-      turbo_json_object_set_string(call, "arguments", arguments[index]);
+      json_object_set_string(call, "name", names[index]);
+      json_object_set_string(call, "arguments", arguments[index]);
     }
-    turbo_json_array_add(calls, call);
+    json_array_add(calls, call);
   }
-  turbo_json_object_add(event, "tool_calls", calls);
-  turbo_json_array_add(events, event);
+  json_object_add(event, "tool_calls", calls);
+  json_array_add(events, event);
   return state;
 fail:
   turbo_runtime_json_destroy(calls);
@@ -196,13 +197,13 @@ spec("turbo agent tool executor") {
     check_int_eq(turbo_agent_tool_node(&ctx, agent), 0);
     check_int_eq(probe.calls, 3);
     check_true(probe.max_active >= 2);
-    events = turbo_json_object_get(state, "events");
-    results = turbo_json_array_get(events, turbo_json_array_size(events) - 1);
-    outputs = turbo_json_object_get(results, "outputs");
-    check_size_eq(turbo_json_array_size(outputs), 3);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(outputs, 0), "call_id"), "one");
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(outputs, 1), "call_id"), "two");
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(outputs, 2), "call_id"), "three");
+    events = json_object_get(state, "events");
+    results = json_array_get(events, json_array_size(events) - 1);
+    outputs = json_object_get(results, "outputs");
+    check_size_eq(json_array_size(outputs), 3);
+    check_str_eq(json_get_string(json_array_get(outputs, 0), "call_id"), "one");
+    check_str_eq(json_get_string(json_array_get(outputs, 1), "call_id"), "two");
+    check_str_eq(json_get_string(json_array_get(outputs, 2), "call_id"), "three");
 
     turbo_runtime_json_destroy(state);
     turbo_agent_destroy(agent);
@@ -237,10 +238,10 @@ spec("turbo agent tool executor") {
     state = tool_executor_state(ids, names, args, 1, 0);
     ctx.state = state;
     check_int_eq(turbo_agent_tool_node(&ctx, agent), 0);
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     result =
-        turbo_json_array_get(turbo_json_object_get(turbo_json_array_get(events, 1), "outputs"), 0);
-    output = turbo_json_get_string(result, "output");
+        json_array_get(json_object_get(json_array_get(events, 1), "outputs"), 0);
+    output = json_get_string(result, "output");
     check_not_null(output);
     check_not_null(strstr(output, "tool_output_limit_exceeded"));
 
@@ -287,10 +288,10 @@ spec("turbo agent tool executor") {
     check_int_eq(probe.calls, 0);
     check_str_eq(turbo_agent_state_guardrail_rejection_phase(state), "tool_policy");
     check_str_eq(turbo_agent_state_guardrail_rejection_reason(state), "network_disabled");
-    events = turbo_json_object_get(state, "events");
+    events = json_object_get(state, "events");
     result =
-        turbo_json_array_get(turbo_json_object_get(turbo_json_array_get(events, 1), "outputs"), 0);
-    output = turbo_json_get_string(result, "output");
+        json_array_get(json_object_get(json_array_get(events, 1), "outputs"), 0);
+    output = json_get_string(result, "output");
     check_not_null(output);
     check_not_null(strstr(output, "network_disabled"));
 

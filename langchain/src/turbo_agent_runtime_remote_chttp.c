@@ -58,14 +58,14 @@ static int turbo_agent_runtime_remote_chttp_handler(
       remote, request_text, &response_text);
   free(request_text);
   if (rc != 0 || !response_text) {
-    turbo_json_serialize_free(response_text);
+    json_serialize_free(response_text);
     return turbo_agent_runtime_remote_chttp_reply(
         response, 500u, turbo_agent_runtime_remote_chttp_internal_error);
   }
 
   rc = chttp_server_reply(response, 200u, "application/json",
                           response_text, strlen(response_text));
-  turbo_json_serialize_free(response_text);
+  json_serialize_free(response_text);
   return rc;
 }
 

@@ -4,6 +4,7 @@
 #include <json_parser.h>
 #include <turbo_runtime_json.h>
 #include <salts_fs.h>
+#include <salts/clock.h>
 #include <tstr.h>
 
 #include <stdlib.h>
@@ -38,7 +39,8 @@ static int turbo_praktor_api_valid(const praktor_api *api) {
   return api && api->struct_size >= sizeof(*api) &&
          api->abi_major == PRAKTOR_ABI_MAJOR &&
          (api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0 &&
-         api->execute_workflow && api->release_json;
+         (api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0 &&
+         api->execute_workflow && api->execute_workflow_controlled && api->release_json;
 }
 
 static int turbo_praktor_execution_policy_valid(
@@ -149,51 +151,121 @@ static int turbo_praktor_copy_text(const char *data, size_t size,
   return 0;
 }
 
-static int turbo_praktor_execute_text(turbo_praktor_binding_t *binding,
-                                      const char *input_json, size_t input_size,
-                                      char **out_output) {
+static int32_t PRAKTOR_CALL turbo_praktor_cancel_probe(void *user_data) {
+  const turbo_cancel_token_t *token = (const turbo_cancel_token_t *)user_data;
+  return token && turbo_cancel_token_check(token) != 0 ? 1 : 0;
+}
+
+static turbo_tool_status_t turbo_praktor_context_status(
+    const turbo_tool_execution_context_t *context) {
+  int rc;
+  if (!context) return TURBO_TOOL_OK;
+  if (context->cancel_token) {
+    rc = turbo_cancel_token_check(context->cancel_token);
+    if (rc != 0) {
+      return turbo_cancel_token_reason(context->cancel_token) == TURBO_CANCEL_DEADLINE
+                 ? TURBO_TOOL_DEADLINE_EXCEEDED
+                 : TURBO_TOOL_CANCELLED;
+    }
+  }
+  if (context->deadline_mono_ms && salts_monotonic_ms() >= context->deadline_mono_ms) {
+    return TURBO_TOOL_DEADLINE_EXCEEDED;
+  }
+  return TURBO_TOOL_OK;
+}
+
+static void turbo_praktor_control_from_context(
+    const turbo_tool_execution_context_t *context,
+    praktor_execution_control *control) {
+  uint64_t now;
+  if (!context || !control) return;
+  if (context->cancel_token) {
+    control->is_cancelled = turbo_praktor_cancel_probe;
+    control->user_data = (void *)context->cancel_token;
+  }
+  if (!context->deadline_mono_ms) return;
+  now = salts_monotonic_ms();
+  control->timeout_ms =
+      context->deadline_mono_ms > now ? context->deadline_mono_ms - now : 1u;
+}
+
+static turbo_tool_status_t turbo_praktor_execute_text(
+    turbo_praktor_binding_t *binding, const char *input_json, size_t input_size,
+    const turbo_tool_execution_context_t *context, char **out_output) {
   praktor_execute_request request = PRAKTOR_EXECUTE_REQUEST_INIT;
+  praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
   praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
   praktor_error error = PRAKTOR_ERROR_INIT;
   praktor_result status;
+  turbo_tool_status_t tool_status;
   json_value_t *parsed = NULL;
   char *serialized = NULL;
   size_t serialized_size = 0;
-  int rc = -1;
 
   if (out_output) *out_output = NULL;
-  if (!binding || !binding->api || !input_json || !input_size || !out_output) return -1;
+  if (!binding || !binding->api || !input_json || !input_size || !out_output) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+  tool_status = turbo_praktor_context_status(context);
+  if (tool_status != TURBO_TOOL_OK) return tool_status;
 
   request.workflow_path = binding->workflow_path;
   request.input_json = input_json;
   request.input_json_size = input_size;
-  status = (praktor_result)binding->api->execute_workflow(&request, &output, &error);
+  if (context) {
+    turbo_praktor_control_from_context(context, &control);
+    status = (praktor_result)binding->api->execute_workflow_controlled(
+        &request, &control, &output, &error);
+  } else {
+    status = (praktor_result)binding->api->execute_workflow(&request, &output, &error);
+  }
 
-  if (output.size > binding->max_result_bytes) goto cleanup;
+  if (status == PRAKTOR_RESULT_CANCELLED) {
+    tool_status = TURBO_TOOL_CANCELLED;
+    goto cleanup;
+  }
+  if (status == PRAKTOR_RESULT_TIMED_OUT) {
+    tool_status = TURBO_TOOL_DEADLINE_EXCEEDED;
+    goto cleanup;
+  }
+  if (output.size > binding->max_result_bytes) {
+    tool_status = TURBO_TOOL_ERROR;
+    goto cleanup;
+  }
 
   if (status == PRAKTOR_RESULT_SUCCESS ||
       status == PRAKTOR_RESULT_EXECUTION_FAILED) {
     if (!output.data || !output.size ||
         turbo_runtime_json_parse((const uint8_t *)output.data, output.size, &parsed) !=
             TURBO_RUNTIME_JSON_OK ||
-        !parsed || json_type(parsed) != JSON_OBJECT) {
+        !parsed || json_type(parsed) != JSON_OBJECT ||
+        turbo_praktor_copy_text(output.data, output.size, out_output) != 0) {
+      tool_status = TURBO_TOOL_ERROR;
       goto cleanup;
     }
-    rc = turbo_praktor_copy_text(output.data, output.size, out_output);
+    tool_status = TURBO_TOOL_OK;
     goto cleanup;
   }
 
   parsed = turbo_praktor_error_result(status, &error);
-  if (!parsed) goto cleanup;
+  if (!parsed) {
+    tool_status = TURBO_TOOL_ERROR;
+    goto cleanup;
+  }
   serialized = json_serialize(parsed, &serialized_size);
-  if (!serialized || serialized_size > binding->max_result_bytes) goto cleanup;
-  rc = turbo_praktor_copy_text(serialized, serialized_size, out_output);
+  if (!serialized || serialized_size > binding->max_result_bytes ||
+      turbo_praktor_copy_text(serialized, serialized_size, out_output) != 0) {
+    tool_status = TURBO_TOOL_ERROR;
+    goto cleanup;
+  }
+  tool_status = TURBO_TOOL_OK;
 
 cleanup:
   if (serialized) json_serialize_free(serialized);
   turbo_runtime_json_destroy(parsed);
   binding->api->release_json(&output);
-  return rc;
+  return tool_status;
 }
 
 static int turbo_praktor_execute_string(const char *arguments_json,
@@ -201,11 +273,24 @@ static int turbo_praktor_execute_string(const char *arguments_json,
   turbo_praktor_binding_t *binding = (turbo_praktor_binding_t *)user_data;
   const char *effective_arguments = arguments_json ? arguments_json : "{}";
   return turbo_praktor_execute_text(binding, effective_arguments,
-                                    strlen(effective_arguments), out_output);
+                                    strlen(effective_arguments), NULL, out_output) ==
+                 TURBO_TOOL_OK
+             ? 0
+             : -1;
 }
 
-static int turbo_praktor_execute(const json_value_t *arguments,
-                                 json_value_t **out_result, void *user_data) {
+static turbo_tool_status_t turbo_praktor_execute_string_with_context(
+    const char *arguments_json, const turbo_tool_execution_context_t *context,
+    char **out_output, void *user_data) {
+  turbo_praktor_binding_t *binding = (turbo_praktor_binding_t *)user_data;
+  const char *effective_arguments = arguments_json ? arguments_json : "{}";
+  return turbo_praktor_execute_text(binding, effective_arguments,
+                                    strlen(effective_arguments), context, out_output);
+}
+
+static turbo_tool_status_t turbo_praktor_execute_json_common(
+    const json_value_t *arguments, const turbo_tool_execution_context_t *context,
+    json_value_t **out_result, void *user_data) {
   turbo_praktor_binding_t *binding = (turbo_praktor_binding_t *)user_data;
   json_value_t *empty_arguments = NULL;
   const json_value_t *effective_arguments = arguments;
@@ -213,39 +298,54 @@ static int turbo_praktor_execute(const json_value_t *arguments,
   size_t input_size = 0;
   char *output_json = NULL;
   json_value_t *parsed = NULL;
-  int rc;
+  turbo_tool_status_t status;
 
   if (out_result) *out_result = NULL;
   if (!binding || !binding->api || !out_result ||
       (arguments && json_type(arguments) != JSON_OBJECT)) {
-    return -1;
+    return TURBO_TOOL_INVALID_ARGUMENT;
   }
 
   if (!effective_arguments) {
     empty_arguments = json_create_object();
-    if (!empty_arguments) return -1;
+    if (!empty_arguments) return TURBO_TOOL_OUT_OF_MEMORY;
     effective_arguments = empty_arguments;
   }
   input_json = json_serialize(effective_arguments, &input_size);
   turbo_runtime_json_destroy(empty_arguments);
-  if (!input_json) return -1;
+  if (!input_json) return TURBO_TOOL_OUT_OF_MEMORY;
 
-  rc = turbo_praktor_execute_text(binding, input_json, input_size, &output_json);
+  status = turbo_praktor_execute_text(binding, input_json, input_size, context, &output_json);
   json_serialize_free(input_json);
-  if (rc != 0 || !output_json) {
+  if (status != TURBO_TOOL_OK) {
     free(output_json);
-    return -1;
+    return status;
   }
-  if (turbo_runtime_json_parse((const uint8_t *)output_json, strlen(output_json), &parsed) !=
+  if (!output_json ||
+      turbo_runtime_json_parse((const uint8_t *)output_json, strlen(output_json), &parsed) !=
           TURBO_RUNTIME_JSON_OK ||
       !parsed || json_type(parsed) != JSON_OBJECT) {
     free(output_json);
     turbo_runtime_json_destroy(parsed);
-    return -1;
+    return TURBO_TOOL_ERROR;
   }
   free(output_json);
   *out_result = parsed;
-  return 0;
+  return TURBO_TOOL_OK;
+}
+
+static int turbo_praktor_execute(const json_value_t *arguments,
+                                 json_value_t **out_result, void *user_data) {
+  return turbo_praktor_execute_json_common(arguments, NULL, out_result, user_data) ==
+                 TURBO_TOOL_OK
+             ? 0
+             : -1;
+}
+
+static turbo_tool_status_t turbo_praktor_execute_with_context(
+    const json_value_t *arguments, const turbo_tool_execution_context_t *context,
+    json_value_t **out_result, void *user_data) {
+  return turbo_praktor_execute_json_common(arguments, context, out_result, user_data);
 }
 
 void turbo_praktor_tool_pack_config_init(
@@ -343,7 +443,7 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
     turbo_praktor_tool_pack_t *pack,
     const turbo_praktor_workflow_config_t *config) {
   turbo_praktor_binding_t *binding;
-  turbo_tool_definition_v3_t definition;
+  turbo_tool_definition_v4_t definition;
   salts_fs_stat_t metadata;
   const char **capabilities = NULL;
   size_t capability_count = 0;
@@ -386,7 +486,7 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
 
   memset(&definition, 0, sizeof(definition));
   definition.struct_size = sizeof(definition);
-  definition.abi_version = TURBO_TOOL_DEFINITION_V3_ABI_VERSION;
+  definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
   definition.definition.name = config->tool_name;
   definition.definition.description = config->description;
   definition.definition.parameters_json =
@@ -395,13 +495,15 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
   definition.definition.strict = config->strict;
   definition.definition.handler = turbo_praktor_execute_string;
   definition.definition.json_value_handler = turbo_praktor_execute;
+  definition.context_handler = turbo_praktor_execute_string_with_context;
+  definition.json_value_context_handler = turbo_praktor_execute_with_context;
   definition.definition.user_data = binding;
   definition.definition.user_data_free = turbo_praktor_binding_destroy;
   definition.execution_policy = config->execution_policy;
   definition.required_capabilities = capabilities;
   definition.required_capability_count = capability_count;
 
-  status = turbo_tool_registry_add_v3(pack->registry, &definition);
+  status = turbo_tool_registry_add_v4(pack->registry, &definition);
   free(capabilities);
   if (status != TURBO_TOOL_OK) {
     turbo_praktor_binding_destroy(binding);

@@ -9,7 +9,7 @@ endif()
 
 project(
   TurboAgent
-  VERSION 1.1.0
+  VERSION 1.1.1
   LANGUAGES C CXX)
 
 # Project configuration - output directories

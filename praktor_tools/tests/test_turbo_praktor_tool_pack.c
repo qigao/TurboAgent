@@ -2,7 +2,6 @@
 #include "turbo_praktor_tool_pack.h"
 #include "turbo_runtime_control.h"
 
-#include <praktor.h>
 #include <salts_fs.h>
 #include <json_parser.h>
 
@@ -90,7 +89,6 @@ static void praktor_test_legacy_workflow_config_init(
   config->require_harness_safe = 0;
 }
 
-#if defined(PRAKTOR_CAPABILITY_WORKFLOW_PLAN)
 static int praktor_test_write_harness_safe_workflow(
     const char *workspace, char *out_path, size_t out_size) {
   static const char yaml[] =
@@ -134,7 +132,6 @@ static void praktor_test_detail_sink(const json_value_t *detail, void *user_data
   ++capture->detail_count;
   capture->detail_has_tasks = json_object_get(detail, "tasks") != NULL;
 }
-#endif
 
 spec("Praktor workflow tool pack") {
   it("propagates generic cancellation into Praktor controlled execution") {
@@ -517,18 +514,18 @@ spec("Praktor workflow tool pack") {
                      turbo_praktor_tool_pack_registry(pack), "praktor_network",
                      &capabilities, &capability_count),
                  TURBO_TOOL_OK);
-#if defined(PRAKTOR_CAPABILITY_WORKFLOW_PLAN)
-    check_equal(capability_count, 2);
-    check_equal(capabilities[0], "runtime_tools");
-    check_equal(capabilities[1], "network");
-#else
-    check_equal(capability_count, 5);
-    check_equal(capabilities[0], "runtime_tools");
-    check_equal(capabilities[1], "network");
-    check_equal(capabilities[2], "shell");
-    check_equal(capabilities[3], "patch");
-    check_equal(capabilities[4], "outside_workspace");
-#endif
+    if (turbo_praktor_tool_pack_supports_workflow_plan(pack)) {
+      check_equal(capability_count, 2);
+      check_equal(capabilities[0], "runtime_tools");
+      check_equal(capabilities[1], "network");
+    } else {
+      check_equal(capability_count, 5);
+      check_equal(capabilities[0], "runtime_tools");
+      check_equal(capabilities[1], "network");
+      check_equal(capabilities[2], "shell");
+      check_equal(capabilities[3], "patch");
+      check_equal(capabilities[4], "outside_workspace");
+    }
 
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
@@ -565,7 +562,6 @@ spec("Praktor workflow tool pack") {
     free(workspace);
   }
 
-#if defined(PRAKTOR_CAPABILITY_WORKFLOW_PLAN)
   it("uses WorkflowPlan contracts for harness-native registration and execution") {
     char *workspace = praktor_test_workspace();
     char workflow_path[SALTS_FS_MAX_PATH] = {0};
@@ -589,8 +585,9 @@ spec("Praktor workflow tool pack") {
     turbo_praktor_tool_pack_config_init(&pack_config);
     pack = turbo_praktor_tool_pack_create(&pack_config);
     check_not_null(pack);
-    turbo_praktor_workflow_config_init(&workflow_config);
-    workflow_config.tool_name = "praktor_harness_safe";
+    if (turbo_praktor_tool_pack_supports_workflow_plan(pack)) {
+      turbo_praktor_workflow_config_init(&workflow_config);
+      workflow_config.tool_name = "praktor_harness_safe";
     workflow_config.description = "Harness-safe plan-backed workflow.";
     workflow_config.workflow_path = workflow_path;
     workflow_config.strict = 1;
@@ -636,9 +633,9 @@ spec("Praktor workflow tool pack") {
     check_equal((int)json_get_double(json_object_get(result, "outputs"), "count", -1.0), 7);
     check_equal(observation.detail_count, 1);
     check_true(observation.detail_has_tasks);
-#if defined(PRAKTOR_CAPABILITY_EXECUTION_EVENTS)
-    check_true(observation.event_count >= 4);
-#endif
+    if (turbo_praktor_tool_pack_supports_execution_events(pack)) {
+      check_true(observation.event_count >= 4);
+    }
 
     turbo_runtime_json_destroy(result);
     result = NULL;
@@ -673,9 +670,12 @@ spec("Praktor workflow tool pack") {
     check_equal(json_get_string(result, "workflow_status"), "error");
     check_equal(json_get_string(result, "error_phase"), "plan");
 
-    turbo_runtime_json_destroy(schema);
-    turbo_runtime_json_destroy(arguments);
-    turbo_runtime_json_destroy(result);
+      turbo_runtime_json_destroy(schema);
+      turbo_runtime_json_destroy(arguments);
+      turbo_runtime_json_destroy(result);
+    } else {
+      check_true(1);
+    }
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
     free(workspace);
@@ -699,13 +699,19 @@ spec("Praktor workflow tool pack") {
     workflow_config.tool_name = "praktor_unsafe_default";
     workflow_config.description = "Missing strict contract and output.";
     workflow_config.workflow_path = workflow_path;
-    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
-                TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    {
+      turbo_tool_status_t add_status =
+          turbo_praktor_tool_pack_add_workflow(pack, &workflow_config);
+      if (turbo_praktor_tool_pack_supports_workflow_plan(pack)) {
+        check_equal(add_status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      } else {
+        check_equal(add_status, TURBO_TOOL_OK);
+      }
+    }
 
     turbo_praktor_tool_pack_destroy(pack);
     praktor_test_cleanup(workspace, workflow_path);
     free(workspace);
   }
-#endif
 
 }

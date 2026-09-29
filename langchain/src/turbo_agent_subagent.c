@@ -527,9 +527,11 @@ static int turbo_agent_subagent_handler(const char *arguments_json, char **out_o
 
   if (!arguments_json || arguments_json[0] == '\0') {
     arguments = json_create_object();
-  } else if (turbo_parse_json((const uint8_t *)arguments_json, strlen(arguments_json), &arguments) !=
-             0) {
-    return -1;
+  } else {
+    arguments = json_parse(arguments_json, strlen(arguments_json));
+    if (!arguments) {
+      return -1;
+    }
   }
   if (!arguments) {
     return -1;

@@ -11,6 +11,7 @@
 #include <salts/thread.h>
 #include <salts/clock.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,6 +30,8 @@ typedef struct tool_executor_context_probe_s {
   const char *run_id;
   const char *turn_id;
   const char *tool_call_id;
+  int has_event_sink;
+  int has_detail_sink;
 } tool_executor_context_probe_t;
 
 typedef struct tool_executor_fault_store_s {
@@ -113,7 +116,63 @@ static turbo_tool_status_t tool_executor_context_handler(
   probe->run_id = context->run_id;
   probe->turn_id = context->turn_id;
   probe->tool_call_id = context->tool_call_id;
+  probe->has_event_sink = context->event_sink != NULL;
+  probe->has_detail_sink = context->detail_sink != NULL;
   *out_output = tool_executor_strdup(arguments_json ? arguments_json : "{}");
+  return *out_output ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
+}
+
+typedef struct tool_executor_observation_capture_s {
+  int events;
+  char last_kind[32];
+} tool_executor_observation_capture_t;
+
+static void tool_executor_event_capture(const json_value_t *event, void *user_data) {
+  tool_executor_observation_capture_t *capture =
+      (tool_executor_observation_capture_t *)user_data;
+  if (!capture || !event) return;
+  {
+    const char *kind = json_get_string(event, "kind");
+    ++capture->events;
+    if (kind) {
+      snprintf(capture->last_kind, sizeof(capture->last_kind), "%s", kind);
+    } else {
+      capture->last_kind[0] = '\0';
+    }
+  }
+}
+
+static turbo_tool_status_t tool_executor_observation_handler(
+    const char *arguments_json, const turbo_tool_execution_context_t *context,
+    char **out_output, void *user_data) {
+  json_value_t *event;
+  json_value_t *detail;
+  (void)arguments_json;
+  (void)user_data;
+  if (!context || !out_output || !context->detail_sink) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+  event = json_create_object();
+  detail = json_create_object();
+  if (!event || !detail) {
+    turbo_runtime_json_destroy(event);
+    turbo_runtime_json_destroy(detail);
+    return TURBO_TOOL_OUT_OF_MEMORY;
+  }
+
+  json_object_set_string(event, "kind", "trace");
+  json_object_set_string(event, "name", "backend-progress");
+  if (context->event_sink) {
+    context->event_sink(event, context->event_sink_user_data);
+  }
+
+  json_object_set_string(detail, "secret", "full-detail");
+  context->detail_sink(detail, context->detail_sink_user_data);
+
+  turbo_runtime_json_destroy(event);
+  turbo_runtime_json_destroy(detail);
+  *out_output = tool_executor_strdup("{\"ok\":true}");
   return *out_output ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
 }
 
@@ -354,7 +413,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add_v3(registry, &definition), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     policy.allow_network = 0;
-    check_equal(turbo_agent_tool_executor_execute(executor, NULL, NULL, NULL, NULL, registry,
+    check_equal(turbo_agent_tool_executor_execute(executor, NULL, NULL, NULL, NULL, NULL, NULL, registry,
                                                    &policy, &call, 1),
                  SALTS_OK);
     check_equal(probe.calls, 0);
@@ -407,7 +466,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_cancel_source_create(&cancel_config, &source), SALTS_OK);
     check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, token, "thread-7", "run-8",
-                                                   registry, NULL, &call, 1),
+                                                   NULL, NULL, registry, NULL, &call, 1),
                 SALTS_OK);
     check_equal(call.status, TURBO_TOOL_OK);
     check_equal(probe.calls, 1);
@@ -417,10 +476,79 @@ spec("turbo agent tool executor") {
     check_equal(probe.run_id, "run-8");
     check_equal(probe.turn_id, "turn-42");
     check_equal(probe.tool_call_id, "context-call");
+    check_equal(probe.has_event_sink, 0);
+    check_equal(probe.has_detail_sink, 1);
 
     free(call.output);
     turbo_cancel_token_release(token);
     turbo_cancel_source_destroy(source);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
+  }
+
+  it("should forward backend events and replay journaled full detail") {
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_v4_t definition = {0};
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    turbo_agent_tool_execution_t first = {
+        "observe-call",
+        "observe",
+        "{}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    turbo_agent_tool_execution_t replay = {
+        "observe-call",
+        "observe",
+        "{}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    tool_executor_observation_capture_t capture = {0};
+
+    first.turn_key = "turn-observe";
+    replay.turn_key = "turn-observe";
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+    definition.definition.name = "observe";
+    definition.definition.description = "Observed tool";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.strict = 1;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    definition.context_handler = tool_executor_observation_handler;
+
+    check_not_null(registry);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add_v4(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+
+    check_equal(turbo_agent_tool_executor_execute(
+                    executor, runtime, NULL, "thread-observe", "run-observe",
+                    tool_executor_event_capture, &capture,
+                    registry, NULL, &first, 1),
+                SALTS_OK);
+    check_equal(first.status, TURBO_TOOL_OK);
+    check_equal(first.output, "{\"ok\":true}");
+    check_equal(capture.events, 1);
+    check_equal(capture.last_kind, "trace");
+    check_not_null(first.detail);
+    check_equal(json_get_string(first.detail, "secret"), "full-detail");
+
+    check_equal(turbo_agent_tool_executor_execute(
+                    executor, runtime, NULL, "thread-observe", "run-observe",
+                    tool_executor_event_capture, &capture,
+                    registry, NULL, &replay, 1),
+                SALTS_OK);
+    check_true(replay.replayed != 0);
+    check_equal(capture.events, 1);
+    check_equal(replay.output, "{\"ok\":true}");
+    check_not_null(replay.detail);
+    check_equal(json_get_string(replay.detail, "secret"), "full-detail");
+
+    free(first.output);
+    free(replay.output);
+    turbo_runtime_json_destroy(first.detail);
+    turbo_runtime_json_destroy(replay.detail);
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);
     turbo_agent_runtime_destroy(runtime);
@@ -448,7 +576,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
     check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
-    check_equal(turbo_agent_tool_executor_execute(executor, NULL, token, NULL, NULL, registry,
+    check_equal(turbo_agent_tool_executor_execute(executor, NULL, token, NULL, NULL, NULL, NULL, registry,
                                                    NULL, &call, 1),
                  SALTS_OK);
     check_equal(call.status, TURBO_TOOL_CANCELLED);
@@ -499,14 +627,14 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   registry, NULL, &first, 1),
+                                                   NULL, NULL, registry, NULL, &first, 1),
                  SALTS_OK);
     check_equal(fault->puts, 3);
     check_equal(fault->committed_seen, 1);
     check_equal(first.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_equal(probe.calls, 1);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   registry, NULL, &recovered, 1),
+                                                   NULL, NULL, registry, NULL, &recovered, 1),
                  SALTS_OK);
     check_equal(recovered.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_equal(probe.calls, 1);
@@ -558,21 +686,21 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   registry, NULL, &first, 1),
+                                                   NULL, NULL, registry, NULL, &first, 1),
                  SALTS_OK);
     check_equal(probe.calls, 1);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   registry, NULL, &replay, 1),
+                                                   NULL, NULL, registry, NULL, &replay, 1),
                  SALTS_OK);
     check_equal(probe.calls, 1);
     check_true(replay.replayed != 0);
     check_equal(replay.output, "{\"value\":1}");
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   registry, NULL, &next_turn, 1),
+                                                   NULL, NULL, registry, NULL, &next_turn, 1),
                  SALTS_OK);
     check_equal(probe.calls, 2);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   registry, NULL, &changed, 1),
+                                                   NULL, NULL, registry, NULL, &changed, 1),
                  SALTS_EPROTO);
     check_equal(probe.calls, 2);
 

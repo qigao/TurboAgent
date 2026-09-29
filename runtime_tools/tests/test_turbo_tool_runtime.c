@@ -115,6 +115,18 @@ spec("turbo tool runtime") {
     check_equal(probe.seen_turn_id, "turn-7");
 
     free(output);
+    output = NULL;
+    memset(&context, 0, sizeof(context));
+    context.struct_size = TURBO_TOOL_EXECUTION_CONTEXT_V1_SIZE;
+    context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION_V1;
+    context.turn_id = "legacy-turn";
+    check_equal(turbo_tool_registry_execute_with_context(
+                    composite, "context_echo", "{}", &context, &output),
+                TURBO_TOOL_OK);
+    check_equal(probe.calls, 2);
+    check_equal(probe.seen_turn_id, "legacy-turn");
+
+    free(output);
     turbo_tool_registry_destroy(composite);
     turbo_tool_registry_destroy(projection);
     turbo_tool_registry_destroy(source);

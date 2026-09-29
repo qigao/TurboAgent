@@ -24,6 +24,7 @@ struct turbo_agent_tool_executor_s {
   turbo_agent_tool_executor_config_t config;
   salts_threadpool_t *pool;
   salts_mutex_t batch_mutex;
+  salts_mutex_t observation_mutex;
 };
 
 typedef struct turbo_agent_tool_task_s {
@@ -33,6 +34,8 @@ typedef struct turbo_agent_tool_task_s {
   const turbo_tool_registry_t *registry;
   turbo_agent_tool_execution_t *call;
   turbo_agent_execution_context_t context;
+  turbo_event_sink_json_value_fn event_sink;
+  void *event_sink_user_data;
 } turbo_agent_tool_task_t;
 
 static char *turbo_agent_tool_strdup(const char *text) {
@@ -90,6 +93,7 @@ int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *c
     return SALTS_ENOMEM;
   }
   salts_mutex_init(&executor->batch_mutex);
+  salts_mutex_init(&executor->observation_mutex);
   *out_executor = executor;
   return SALTS_OK;
 }
@@ -97,6 +101,7 @@ int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *c
 void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *executor) {
   if (!executor) return;
   salts_threadpool_destroy(executor->pool);
+  salts_mutex_destroy(&executor->observation_mutex);
   salts_mutex_destroy(&executor->batch_mutex);
   free(executor);
 }
@@ -179,6 +184,15 @@ static int turbo_agent_tool_journal_write(turbo_agent_runtime_t *runtime, const 
   json_object_set_number(record, "status", (double)call->status);
   if (strcmp(phase, "committed") == 0 && call->output)
     json_object_set_string(record, "output", call->output);
+  if (strcmp(phase, "committed") == 0 && call->detail) {
+    json_value_t *detail = json_clone(call->detail);
+    if (!detail) {
+      free(arguments_hash);
+      turbo_runtime_json_destroy(record);
+      return SALTS_ENOMEM;
+    }
+    json_object_add(record, "detail", detail);
+  }
   rc = turbo_agent_runtime_store_put_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION, journal_id,
                                           record);
   free(arguments_hash);
@@ -279,17 +293,46 @@ static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executo
     call->status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
     call->replayed = 1;
   } else if (strcmp(phase, "committed") == 0) {
+    const json_value_t *detail;
     call->status =
         (turbo_tool_status_t)(int)json_get_double(record, "status", TURBO_TOOL_ERROR);
     output = json_get_string(record, "output");
     if (output) call->output = turbo_agent_tool_strdup(output);
     if (output && !call->output) rc = SALTS_ENOMEM;
+    detail = json_object_get(record, "detail");
+    if (rc == SALTS_OK && detail) {
+      call->detail = json_clone(detail);
+      if (!call->detail) rc = SALTS_ENOMEM;
+    }
     call->replayed = 1;
   } else if (strcmp(phase, "planned") != 0) {
     rc = SALTS_EPROTO;
   }
   turbo_runtime_json_destroy(record);
   return rc;
+}
+
+static void turbo_agent_tool_event_sink(const json_value_t *event, void *user_data) {
+  turbo_agent_tool_task_t *task = (turbo_agent_tool_task_t *)user_data;
+  if (!task || !event || !task->event_sink) return;
+  salts_mutex_lock(&task->executor->observation_mutex);
+  task->event_sink(event, task->event_sink_user_data);
+  salts_mutex_unlock(&task->executor->observation_mutex);
+}
+
+static void turbo_agent_tool_detail_sink(const json_value_t *detail, void *user_data) {
+  turbo_agent_tool_task_t *task = (turbo_agent_tool_task_t *)user_data;
+  json_value_t *copy;
+  if (!task || !detail || !task->call) return;
+  copy = json_clone(detail);
+  if (!copy) {
+    task->call->detail_capture_failed = 1;
+    return;
+  }
+  salts_mutex_lock(&task->executor->observation_mutex);
+  turbo_runtime_json_destroy(task->call->detail);
+  task->call->detail = copy;
+  salts_mutex_unlock(&task->executor->observation_mutex);
 }
 
 static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
@@ -326,9 +369,18 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
     tool_context.run_id = task->context.run_id;
     tool_context.turn_id = task->call->turn_key;
     tool_context.tool_call_id = task->call->call_id;
+    tool_context.event_sink = task->event_sink ? turbo_agent_tool_event_sink : NULL;
+    tool_context.event_sink_user_data = task->event_sink ? task : NULL;
+    tool_context.detail_sink = turbo_agent_tool_detail_sink;
+    tool_context.detail_sink_user_data = task;
     task->call->status = turbo_tool_registry_execute_with_context(
         task->registry, task->call->tool_name, task->call->arguments_json, &tool_context,
         &task->call->output);
+  }
+  if (task->call->detail_capture_failed) {
+    free(task->call->output);
+    task->call->output = NULL;
+    task->call->status = TURBO_TOOL_OUT_OF_MEMORY;
   }
   if (task->call->output && strlen(task->call->output) > task->executor->config.max_output_bytes) {
     free(task->call->output);
@@ -355,7 +407,8 @@ static int turbo_agent_tool_execute_parallel_group(
     turbo_agent_tool_executor_t *executor, turbo_agent_runtime_t *runtime,
     const turbo_cancel_token_t *cancel_token, const turbo_tool_registry_t *registry,
     turbo_agent_tool_execution_t *calls, size_t begin, size_t end,
-    const turbo_agent_execution_context_t *base_context) {
+    const turbo_agent_execution_context_t *base_context,
+    turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data) {
   size_t wave_begin;
   for (wave_begin = begin; wave_begin < end; wave_begin += executor->config.max_workers) {
     turbo_agent_tool_task_t *tasks;
@@ -372,6 +425,8 @@ static int turbo_agent_tool_execute_parallel_group(
       task->registry = registry;
       task->call = &calls[index];
       task->context = *base_context;
+      task->event_sink = event_sink;
+      task->event_sink_user_data = event_sink_user_data;
       task->context.tool_call_id = calls[index].call_id;
       task->context.tool_name = calls[index].tool_name;
       if (salts_threadpool_try_submit(executor->pool, turbo_agent_tool_worker, task) != 0) {
@@ -389,6 +444,8 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
                                       turbo_agent_runtime_t *runtime,
                                       const turbo_cancel_token_t *cancel_token,
                                       const char *thread_id, const char *run_id,
+                                      turbo_event_sink_json_value_fn event_sink,
+                                      void *event_sink_user_data,
                                       const turbo_tool_registry_t *registry,
                                       const turbo_agent_policy_t *policy,
                                       turbo_agent_tool_execution_t *calls, size_t call_count) {
@@ -443,13 +500,21 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
       size_t end = index + 1;
       while (end < call_count && calls[end].policy.mode == TURBO_TOOL_EXECUTION_PARALLEL_SAFE)
         ++end;
-      rc = turbo_agent_tool_execute_parallel_group(executor, runtime, cancel_token, registry, calls,
-                                                   index, end, &base_context);
+      rc = turbo_agent_tool_execute_parallel_group(
+          executor, runtime, cancel_token, registry, calls,
+          index, end, &base_context, event_sink, event_sink_user_data);
       if (rc != SALTS_OK) goto cleanup;
       index = end;
     } else {
-      turbo_agent_tool_task_t task = {executor, runtime,       cancel_token,
-                                      registry, &calls[index], base_context};
+      turbo_agent_tool_task_t task = {0};
+      task.executor = executor;
+      task.runtime = runtime;
+      task.cancel_token = cancel_token;
+      task.registry = registry;
+      task.call = &calls[index];
+      task.context = base_context;
+      task.event_sink = event_sink;
+      task.event_sink_user_data = event_sink_user_data;
       task.context.tool_call_id = calls[index].call_id;
       task.context.tool_name = calls[index].tool_name;
       turbo_agent_tool_execute_one(&task);

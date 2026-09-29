@@ -557,9 +557,12 @@ turbo_tool_status_t turbo_tool_registry_compose(const turbo_tool_registry_t *con
 
 static int turbo_tool_execution_context_valid(
     const turbo_tool_execution_context_t *context) {
-  return !context ||
-         (context->struct_size >= sizeof(*context) &&
-          context->abi_version == TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION);
+  if (!context) return 1;
+  if (context->abi_version == TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION_V1) {
+    return context->struct_size >= TURBO_TOOL_EXECUTION_CONTEXT_V1_SIZE;
+  }
+  return context->abi_version == TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION &&
+         context->struct_size >= sizeof(*context);
 }
 
 static void turbo_tool_registry_discard_output(char **out_output) {

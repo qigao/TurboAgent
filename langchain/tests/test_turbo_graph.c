@@ -903,7 +903,7 @@ spec("turbo graph runtime") {
       check_equal(turbo_graph_checkpoint_schema_version(), 3);
       json = turbo_graph_checkpoint_serialize(checkpoint, &len);
       check_not_null(json);
-      check_size_gt(len, 0);
+      check_greater(len, (size_t)0);
       check_true(strstr(json, "\"checkpoint_version\":3") != NULL);
       check_true(strstr(json, "\"topology_id\":\"\"") != NULL);
       check_equal(turbo_graph_checkpoint_deserialize(json, len, &parsed),

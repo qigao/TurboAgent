@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 
 #include "turbo_agent_harness.h"
 
@@ -134,12 +135,12 @@ spec("turbo agent harness") {
     check_not_null(pool);
     check_not_null(harness);
     check_int_eq(turbo_agent_harness_get_startup_diagnostics(harness, &diagnostics), SALTS_OK);
-    check_true(turbo_json_get_bool(diagnostics, "ok", false));
-    harness_capabilities = turbo_json_object_get(diagnostics, "harness");
+    check_true(json_get_bool(diagnostics, "ok", false));
+    harness_capabilities = json_object_get(diagnostics, "harness");
     check_not_null(harness_capabilities);
-    check_true(turbo_json_get_bool(harness_capabilities, "has_async_execution", false));
-    check_true(turbo_json_get_bool(harness_capabilities, "supports_cancel", false));
-    check_int_eq(turbo_json_get_int(harness_capabilities, "max_concurrent_executions", 0), 1);
+    check_true(json_get_bool(harness_capabilities, "has_async_execution", false));
+    check_true(json_get_bool(harness_capabilities, "supports_cancel", false));
+    check_int_eq(json_get_int(harness_capabilities, "max_concurrent_executions", 0), 1);
     check_int_eq(turbo_agent_harness_start_text(harness, "hello", &run_options, &execution),
                  SALTS_OK);
     check_not_null(execution);
@@ -149,8 +150,8 @@ spec("turbo agent harness") {
     check_int_eq(status, TURBO_AGENT_EXECUTION_COMPLETED);
     check_int_gt(atomic_load_explicit(&event_count, memory_order_relaxed), 0);
     check_int_eq(turbo_agent_harness_execution_take_result(execution, &summary, &state), SALTS_OK);
-    check_str_eq(turbo_json_get_string(summary, "status"), "completed");
-    run_id = turbo_json_get_string(summary, "run_id");
+    check_str_eq(json_get_string(summary, "status"), "completed");
+    run_id = json_get_string(summary, "run_id");
     check_not_null(run_id);
     check_str_eq(turbo_agent_app_last_run_id(turbo_agent_harness_app(harness)), run_id);
     text = turbo_agent_app_result_text(state);
@@ -198,7 +199,7 @@ spec("turbo agent harness") {
     check_int_eq(turbo_agent_harness_execution_get_status(execution, &status), SALTS_OK);
     check_int_eq(status, TURBO_AGENT_EXECUTION_CANCELLED);
     check_int_eq(turbo_agent_harness_execution_take_result(execution, &summary, &state), SALTS_OK);
-    check_str_eq(turbo_json_get_string(summary, "status"), "cancelled");
+    check_str_eq(json_get_string(summary, "status"), "cancelled");
 
     turbo_runtime_json_destroy(state);
     turbo_runtime_json_destroy(summary);
@@ -221,7 +222,7 @@ spec("turbo agent harness") {
     turbo_agent_session_exec_options_t session_options = {
         .scope = TURBO_SESSION_SCOPE_THREAD, .input_kind = TURBO_SESSION_INPUT_COMMAND};
     turbo_agent_harness_run_options_t options;
-    json_value_t *command = turbo_json_create_object();
+    json_value_t *command = json_create_object();
     json_value_t *start_summary = NULL;
     json_value_t *start_state = NULL;
     json_value_t *resume_summary = NULL;
@@ -236,7 +237,7 @@ spec("turbo agent harness") {
     check_not_null(harness);
     check_not_null(command);
     check_int_eq(
-        turbo_runtime_json_object_set(command, "kind", turbo_json_create_string("approve_review")),
+        turbo_runtime_json_object_set(command, "kind", json_create_string("approve_review")),
         TURBO_RUNTIME_JSON_OK);
     turbo_agent_harness_run_options_init(&options);
     options.graph_options = &graph_options;
@@ -251,8 +252,8 @@ spec("turbo agent harness") {
     check_int_eq(
         turbo_agent_harness_execution_take_result(start_execution, &start_summary, &start_state),
         SALTS_OK);
-    check_str_eq(turbo_json_get_string(start_summary, "status"), "interrupted");
-    checkpoint_id = turbo_json_get_string(start_summary, "checkpoint_id");
+    check_str_eq(json_get_string(start_summary, "status"), "interrupted");
+    checkpoint_id = json_get_string(start_summary, "checkpoint_id");
     check_not_null(checkpoint_id);
 
     options.graph_options = NULL;
@@ -263,7 +264,7 @@ spec("turbo agent harness") {
     check_int_eq(
         turbo_agent_harness_execution_take_result(resume_execution, &resume_summary, &resume_state),
         SALTS_OK);
-    check_str_eq(turbo_json_get_string(resume_summary, "status"), "completed");
+    check_str_eq(json_get_string(resume_summary, "status"), "completed");
 
     session_options.scope = TURBO_SESSION_SCOPE_CHECKPOINT;
     session_options.checkpoint_id = checkpoint_id;
@@ -272,7 +273,7 @@ spec("turbo agent harness") {
     check_int_eq(
         turbo_agent_harness_execution_take_result(fork_execution, &fork_summary, &fork_state),
         SALTS_OK);
-    check_str_eq(turbo_json_get_string(fork_summary, "status"), "completed");
+    check_str_eq(json_get_string(fork_summary, "status"), "completed");
 
     turbo_runtime_json_destroy(fork_state);
     turbo_runtime_json_destroy(fork_summary);
@@ -308,7 +309,7 @@ spec("turbo agent harness") {
     check_int_eq(turbo_agent_harness_execution_get_status(execution, &status), SALTS_OK);
     check_int_eq(status, TURBO_AGENT_EXECUTION_TIMED_OUT);
     check_int_eq(turbo_agent_harness_execution_take_result(execution, &summary, &state), SALTS_OK);
-    check_str_eq(turbo_json_get_string(summary, "status"), "timed_out");
+    check_str_eq(json_get_string(summary, "status"), "timed_out");
 
     turbo_runtime_json_destroy(state);
     turbo_runtime_json_destroy(summary);

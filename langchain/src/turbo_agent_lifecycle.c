@@ -10,6 +10,7 @@
 #include "turbo_tool_registry.h"
 
 #include <stdlib.h>
+#include <tstr.h>
 
 CXX_C_API void turbo_agent_clear_last_stream_sse(turbo_agent_t *agent) {
   if (!agent) {

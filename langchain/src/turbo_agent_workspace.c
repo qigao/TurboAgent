@@ -536,16 +536,16 @@ static int turbo_agent_workspace_frontmatter(const char *text, size_t len, size_
 
 static int turbo_agent_workspace_copy_string_array(const json_value_t *metadata, const char *key,
                                                    vec_t *out) {
-  json_value_t *value = turbo_json_object_get(metadata, key);
+  json_value_t *value = json_object_get(metadata, key);
   size_t index;
   if (!value) return 0;
-  if (turbo_json_type(value) == TURBO_JSON_STRING)
-    return turbo_agent_workspace_string_vec_push(out, turbo_json_string(value), 1);
-  if (turbo_json_type(value) != TURBO_JSON_ARRAY) return -1;
-  for (index = 0; index < turbo_json_array_size(value); ++index) {
-    json_value_t *item = turbo_json_array_get(value, index);
-    if (!item || turbo_json_type(item) != TURBO_JSON_STRING || !turbo_json_string(item)[0] ||
-        turbo_agent_workspace_string_vec_push(out, turbo_json_string(item), 1) != 0)
+  if (json_type(value) == JSON_STRING)
+    return turbo_agent_workspace_string_vec_push(out, json_string(value), 1);
+  if (json_type(value) != JSON_ARRAY) return -1;
+  for (index = 0; index < json_array_size(value); ++index) {
+    json_value_t *item = json_array_get(value, index);
+    if (!item || json_type(item) != JSON_STRING || !json_string(item)[0] ||
+        turbo_agent_workspace_string_vec_push(out, json_string(item), 1) != 0)
       return -1;
   }
   return 0;
@@ -596,21 +596,21 @@ turbo_agent_workspace_parse_skill(turbo_agent_workspace_t *workspace, const char
     }
     metadata = turbo_yaml_to_json(yaml);
     turbo_free_yaml(&yaml);
-    if (!metadata || turbo_json_type(metadata) != TURBO_JSON_OBJECT) {
-      turbo_free_json(&metadata);
+    if (!metadata || json_type(metadata) != JSON_OBJECT) {
+      json_free(metadata); metadata = NULL;
       turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,
                                       "skill frontmatter", path);
       status = TURBO_AGENT_WORKSPACE_PARSE_ERROR;
       goto cleanup;
     }
-    name = turbo_json_get_string(metadata, "name");
-    description = turbo_json_get_string(metadata, "description");
+    name = json_get_string(metadata, "name");
+    description = json_get_string(metadata, "description");
     if (!name || !name[0] || !description || !description[0] ||
         turbo_agent_workspace_copy_string_array(metadata, "triggers", &out_skill->triggers) != 0 ||
         turbo_agent_workspace_copy_string_array(metadata, "tools", &out_skill->tools) != 0 ||
         turbo_agent_workspace_copy_string_array(metadata, "capabilities",
                                                 &out_skill->capabilities) != 0) {
-      turbo_free_json(&metadata);
+      json_free(metadata); metadata = NULL;
       turbo_agent_workspace_set_error(workspace, TURBO_AGENT_WORKSPACE_PARSE_ERROR,
                                       "skill metadata", path);
       status = TURBO_AGENT_WORKSPACE_PARSE_ERROR;
@@ -619,7 +619,7 @@ turbo_agent_workspace_parse_skill(turbo_agent_workspace_t *workspace, const char
     tstr_free(out_skill->name);
     out_skill->name = tstr_dup(name);
     out_skill->description = tstr_dup(description);
-    turbo_free_json(&metadata);
+    json_free(metadata); metadata = NULL;
     if (!out_skill->name || !out_skill->description) {
       status = TURBO_AGENT_WORKSPACE_OUT_OF_MEMORY;
       goto cleanup;

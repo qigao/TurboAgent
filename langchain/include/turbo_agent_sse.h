@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_SSE_H
 #define TURBO_AGENT_SSE_H
 
+#include <stddef.h>
+
 #include <turbo_agent_api.h>
 
 #ifdef __cplusplus

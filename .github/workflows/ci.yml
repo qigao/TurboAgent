@@ -160,12 +160,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/checkout@v4
-        with:
-          repository: qigao/praktor
-          path: deps/praktor
-          persist-credentials: false
-
       - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
           mode: read
@@ -181,7 +175,7 @@ jobs:
           test -n "${VCPKG_ROOT:-}"
           test -f "${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
 
-      - name: Restore current foundation SDKs
+      - name: Restore current released SDK graph
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -217,35 +211,29 @@ jobs:
             echo "SALTS_UTILS_ROOT=$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
             echo "CHTTP_ROOT=$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake')"
             echo "TURBOSCRIPT_ROOT=$(restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript 'lib/cmake/TurboScript/TurboScriptConfig.cmake')"
+            echo "PRAKTOR_ROOT=$(restore_sdk qigao/praktor 'Praktor.Native.*.nupkg' praktor 'lib/cmake/Praktor/PraktorConfig.cmake')"
           } >> "$GITHUB_ENV"
 
-      - name: Build and install current Praktor
+      - name: Verify released Praktor package contract
         shell: bash
         run: |
           set -euxo pipefail
-          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
-          prefix="$RUNNER_TEMP/praktor-install"
-          cmake -S deps/praktor -B build/praktor-sdk -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux \
-            -DVCPKG_MANIFEST_MODE=ON \
-            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/praktor-sdk" \
-            -DCMAKE_PREFIX_PATH="$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
-            -DENABLE_SCRIPT_ENGINE=ON \
-            -DENABLE_TESTS=OFF \
-            -DCMAKE_INSTALL_PREFIX="$prefix"
-          cmake --build build/praktor-sdk --parallel 2
-          cmake --install build/praktor-sdk
-          test -f "$prefix/lib/cmake/Praktor/PraktorConfig.cmake"
-          if grep -E 'find_dependency\((Salts|SaltsUtils|Chttp|TurboScript) [0-9]' \
-              "$prefix/lib/cmake/Praktor/PraktorConfig.cmake"; then
-            echo "installed Praktor must not pin foundation dependency versions" >&2
+          config="$PRAKTOR_ROOT/lib/cmake/Praktor/PraktorConfig.cmake"
+          test -f "$config"
+          grep -F 'find_dependency(Salts CONFIG' "$config"
+          grep -F 'find_dependency(SaltsUtils CONFIG' "$config"
+          grep -F 'find_dependency(Chttp CONFIG' "$config"
+          grep -F 'find_dependency(TurboScript CONFIG' "$config"
+          if grep -E 'find_dependency\((Salts|SaltsUtils|Chttp|TurboScript) [0-9]' "$config"; then
+            echo "released Praktor must not pin foundation dependency versions" >&2
             exit 1
           fi
-          echo "PRAKTOR_ROOT=$prefix" >> "$GITHUB_ENV"
+          if grep -F ' EXACT ' "$config"; then
+            echo "released Praktor must not use EXACT foundation dependencies" >&2
+            exit 1
+          fi
 
-      - name: Build and run real Praktor tool-pack test
+      - name: Build and run released Praktor tool-pack test
         shell: bash
         run: |
           set -euxo pipefail
@@ -272,13 +260,10 @@ jobs:
             -DBUILD_BENCHMARKS=OFF \
             -DENABLE_ASAN=OFF
           cmake --build build/praktor-agent --target test_turbo_praktor_tool_pack --parallel 2
-          praktor_vcpkg_libs="$(find "$GITHUB_WORKSPACE/vcpkg_installed/praktor-sdk" -type d \
-            \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
           agent_vcpkg_libs="$(find "$GITHUB_WORKSPACE/vcpkg_installed/praktor-agent" -type d \
             \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
-          export LD_LIBRARY_PATH="$PRAKTOR_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$praktor_vcpkg_libs:$agent_vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$PRAKTOR_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$agent_vcpkg_libs:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/praktor-agent -R '^test_turbo_praktor_tool_pack$' --no-tests=error --output-on-failure
-
 
       - name: Install and verify PraktorTools consumer
         shell: bash

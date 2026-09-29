@@ -11,6 +11,8 @@ on:
       - "vcpkg.json"
       - "cmake/TurboAgentConfig.cmake.in"
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -58,6 +60,10 @@ jobs:
           test -n "$version"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             test "$GITHUB_REF_NAME" = "v$version"
+            package_version="$version"
+          elif [[ "${{ github.event_name }}" == "push" &&
+                  "$GITHUB_REF" == "refs/heads/main" &&
+                  "${{ startsWith(github.event.head_commit.message, 'release: bootstrap TurboAgent 1.1.1') }}" == "true" ]]; then
             package_version="$version"
           else
             package_version="$version-ci.$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
@@ -526,7 +532,10 @@ jobs:
 
   publish:
     name: Publish package and GitHub Release
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref_type == 'tag' ||
+       startsWith(github.event.head_commit.message, 'release: bootstrap TurboAgent 1.1.1'))
     needs: [metadata, pack]
     runs-on: ubuntu-24.04
     permissions:
@@ -541,6 +550,24 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - name: Create bootstrap tag when needed
+        if: github.ref_type != 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha)"
+            test "$existing" = "$GITHUB_SHA"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$tag" \
+              -f sha="$GITHUB_SHA"
+          fi
 
       - name: Publish to GitHub Packages
         shell: bash

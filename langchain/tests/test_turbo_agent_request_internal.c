@@ -291,7 +291,7 @@ spec("turbo agent request internals") {
     state = turbo_agent_state_create();
     check_not_null(state);
     check_equal(turbo_agent_state_add_user_message(state, "Ping"), 0);
-    check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
+    check_not_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_true((request_json) == (NULL));
 
     json_free(state); state = NULL;
@@ -315,7 +315,7 @@ spec("turbo agent request internals") {
     state = turbo_agent_state_create();
     check_not_null(state);
     check_equal(turbo_agent_state_add_user_message(state, "Ping"), 0);
-    check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
+    check_not_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_true((request_json) == (NULL));
 
     json_free(state); state = NULL;
@@ -522,7 +522,7 @@ spec("turbo agent request internals") {
     json_object_add(tool_results_event, "outputs", outputs);
     json_array_add(events, tool_results_event);
 
-    check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
+    check_not_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_true((request_json) == (NULL));
 
     json_free(state); state = NULL;
@@ -615,7 +615,7 @@ spec("turbo agent request internals") {
     json_object_set_string(tool_results_event, "outputs", "bad");
     json_array_add(events, tool_results_event);
 
-    check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
+    check_not_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_true((request_json) == (NULL));
 
     json_free(state); state = NULL;
@@ -658,7 +658,7 @@ spec("turbo agent request internals") {
     json_object_add(model_event, "tool_calls", tool_calls);
     json_array_add(events, model_event);
 
-    check_int_ne(turbo_agent_build_turn_request(agent, state, &request_json), 0);
+    check_not_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     check_true((request_json) == (NULL));
 
     json_free(state); state = NULL;

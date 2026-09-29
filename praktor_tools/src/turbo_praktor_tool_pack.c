@@ -153,7 +153,12 @@ static int turbo_praktor_copy_text(const char *data, size_t size,
 
 static int32_t PRAKTOR_CALL turbo_praktor_cancel_probe(void *user_data) {
   const turbo_cancel_token_t *token = (const turbo_cancel_token_t *)user_data;
-  return token && turbo_cancel_token_check(token) != 0 ? 1 : 0;
+  if (!token || turbo_cancel_token_check(token) == SALTS_OK) return 0;
+  /*
+   * Deadline expiry is represented separately by Praktor timeout_ms so the
+   * backend reports TIMED_OUT instead of collapsing it into CANCELLED.
+   */
+  return turbo_cancel_token_reason(token) == TURBO_CANCEL_DEADLINE ? 0 : 1;
 }
 
 static turbo_tool_status_t turbo_praktor_context_status(
@@ -178,15 +183,19 @@ static void turbo_praktor_control_from_context(
     const turbo_tool_execution_context_t *context,
     praktor_execution_control *control) {
   uint64_t now;
+  uint64_t deadline;
   if (!context || !control) return;
   if (context->cancel_token) {
     control->is_cancelled = turbo_praktor_cancel_probe;
     control->user_data = (void *)context->cancel_token;
   }
-  if (!context->deadline_mono_ms) return;
+  deadline = context->deadline_mono_ms;
+  if (!deadline && context->cancel_token) {
+    deadline = turbo_cancel_token_deadline_mono_ms(context->cancel_token);
+  }
+  if (!deadline) return;
   now = salts_monotonic_ms();
-  control->timeout_ms =
-      context->deadline_mono_ms > now ? context->deadline_mono_ms - now : 1u;
+  control->timeout_ms = deadline > now ? deadline - now : 1u;
 }
 
 static turbo_tool_status_t turbo_praktor_execute_text(

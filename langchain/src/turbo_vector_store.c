@@ -1,4 +1,5 @@
 #include "turbo_vector_store.h"
+#include <json_parser.h>
 
 #include "turbo_document_loader.h"
 #include "turbo_embedding.h"
@@ -274,16 +275,16 @@ static int turbo_vector_store_validate_embedding(const json_value_t *embedding,
   size_t count;
   size_t i;
 
-  if (!embedding || turbo_json_type(embedding) != TURBO_JSON_ARRAY) {
+  if (!embedding || json_type(embedding) != JSON_ARRAY) {
     return -1;
   }
-  count = turbo_json_array_size(embedding);
+  count = json_array_size(embedding);
   if (count == 0) {
     return -1;
   }
   for (i = 0; i < count; ++i) {
-    if (turbo_json_type(turbo_json_array_get(embedding, i)) !=
-        TURBO_JSON_NUMBER) {
+    if (json_type(json_array_get(embedding, i)) !=
+        JSON_NUMBER) {
       return -1;
     }
   }
@@ -302,8 +303,8 @@ static void turbo_vector_store_entry_clear(turbo_vector_store_entry_t *entry) {
   free(entry->kind);
   free(entry->title);
   free(entry->text);
-  turbo_free_json(&entry->metadata_json);
-  turbo_free_json(&entry->embedding_json);
+  json_free(entry->metadata_json); entry->metadata_json = NULL;
+  json_free(entry->embedding_json); entry->embedding_json = NULL;
   memset(entry, 0, sizeof(*entry));
 }
 
@@ -321,12 +322,12 @@ static int turbo_vector_store_entry_set(
   next.kind = turbo_vector_store_strdup(document->kind);
   next.title = turbo_vector_store_strdup(document->title);
   next.text = turbo_vector_store_strdup(document->text);
-  next.embedding_json = turbo_json_clone(embedding_json);
+  next.embedding_json = json_clone(embedding_json);
   if (!next.embedding_json) {
     goto fail;
   }
   if (document->metadata_json) {
-    next.metadata_json = turbo_json_clone(document->metadata_json);
+    next.metadata_json = json_clone(document->metadata_json);
     if (!next.metadata_json) {
       goto fail;
     }
@@ -389,12 +390,12 @@ static double turbo_vector_store_similarity(const json_value_t *left,
   double dot = 0.0;
   double left_norm = 0.0;
   double right_norm = 0.0;
-  size_t count = turbo_json_array_size(left);
+  size_t count = json_array_size(left);
   size_t i;
 
   for (i = 0; i < count; ++i) {
-    double a = turbo_json_number(turbo_json_array_get(left, i));
-    double b = turbo_json_number(turbo_json_array_get(right, i));
+    double a = json_number(json_array_get(left, i));
+    double b = json_number(json_array_get(right, i));
 
     dot += a * b;
     left_norm += a * a;
@@ -430,26 +431,26 @@ static int turbo_vector_store_compare_matches(const void *left,
 
 static int turbo_vector_store_add_result(json_value_t *results,
                                          const turbo_vector_store_match_t *match) {
-  json_value_t *item = turbo_json_create_object();
+  json_value_t *item = json_create_object();
 
   if (!item) {
     return -1;
   }
-  turbo_json_object_set_string(item, "document_id", match->entry->id);
+  json_object_set_string(item, "document_id", match->entry->id);
   if (match->entry->uri) {
-    turbo_json_object_set_string(item, "uri", match->entry->uri);
+    json_object_set_string(item, "uri", match->entry->uri);
   }
   if (match->entry->kind) {
-    turbo_json_object_set_string(item, "kind", match->entry->kind);
+    json_object_set_string(item, "kind", match->entry->kind);
   }
   if (match->entry->title) {
-    turbo_json_object_set_string(item, "title", match->entry->title);
+    json_object_set_string(item, "title", match->entry->title);
   }
   if (match->entry->text) {
-    turbo_json_object_set_string(item, "text", match->entry->text);
+    json_object_set_string(item, "text", match->entry->text);
   }
-  turbo_json_object_set_number(item, "score", match->score);
-  turbo_json_array_add(results, item);
+  json_object_set_number(item, "score", match->score);
+  json_array_add(results, item);
   return 0;
 }
 
@@ -463,7 +464,7 @@ static void turbo_vector_store_pending_chunks_clear(
   for (i = 0; i < count; ++i) {
     free(chunks[i].id);
     free(chunks[i].text);
-    turbo_free_json(&chunks[i].embedding_json);
+    json_free(chunks[i].embedding_json); chunks[i].embedding_json = NULL;
   }
   free(chunks);
 }
@@ -503,24 +504,24 @@ static int turbo_vector_store_id_is_indexed_chunk(const char *id,
 static json_value_t *turbo_vector_store_index_summary(
     const char *document_id, const char *stage, int ok, size_t chunk_count,
     size_t indexed_count) {
-  json_value_t *summary = turbo_json_create_object();
+  json_value_t *summary = json_create_object();
 
   if (!summary) {
     return NULL;
   }
-  turbo_json_object_set_bool(summary, "ok", ok ? true : false);
-  turbo_json_object_set_string(summary, "document_id",
+  json_object_set_bool(summary, "ok", ok ? true : false);
+  json_object_set_string(summary, "document_id",
                                document_id ? document_id : "");
-  turbo_json_object_set_string(summary, "stage", stage ? stage : "");
-  turbo_json_object_set_number(summary, "chunk_count", (double)chunk_count);
-  turbo_json_object_set_number(summary, "indexed", (double)indexed_count);
+  json_object_set_string(summary, "stage", stage ? stage : "");
+  json_object_set_number(summary, "chunk_count", (double)chunk_count);
+  json_object_set_number(summary, "indexed", (double)indexed_count);
   return summary;
 }
 
 static int turbo_vector_store_set_summary(json_value_t **out_summary_json,
                                           json_value_t *summary) {
   if (!out_summary_json) {
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return summary ? 0 : -1;
   }
   *out_summary_json = summary;
@@ -714,23 +715,22 @@ static char *turbo_vector_store_json_serialize(const json_value_t *json) {
   if (!json) {
     return NULL;
   }
-  clone = turbo_json_clone(json);
+  clone = json_clone(json);
   if (!clone) {
     return NULL;
   }
-  serialized = turbo_json_serialize(clone, NULL);
-  turbo_free_json(&clone);
+  serialized = json_serialize(clone, NULL);
+  json_free(clone); clone = NULL;
   return serialized;
 }
 
 static json_value_t *turbo_vector_store_json_parse(const char *text) {
   json_value_t *json = NULL;
 
-  if (!text || turbo_parse_json((const uint8_t *)text, strlen(text), &json) != 0) {
-    turbo_free_json(&json);
+  if (!text) {
     return NULL;
   }
-  return json;
+  return json_parse(text, strlen(text));
 }
 
 static int turbo_vector_store_sqlite_upsert(
@@ -766,7 +766,7 @@ static int turbo_vector_store_sqlite_upsert(
   if (document->metadata_json) {
     metadata_text = turbo_vector_store_json_serialize(document->metadata_json);
     if (!metadata_text) {
-      turbo_json_serialize_free(embedding_text);
+      json_serialize_free(embedding_text);
       return -1;
     }
   }
@@ -781,8 +781,8 @@ static int turbo_vector_store_sqlite_upsert(
           "embedding_json=excluded.embedding_json,"
           "dimensions=excluded.dimensions,updated_at=unixepoch();",
           &stmt) != 0) {
-    turbo_json_serialize_free(metadata_text);
-    turbo_json_serialize_free(embedding_text);
+    json_serialize_free(metadata_text);
+    json_serialize_free(embedding_text);
     return -1;
   }
   sqlite3_bind_text(stmt, 1, document->id, -1, SQLITE_TRANSIENT);
@@ -816,8 +816,8 @@ static int turbo_vector_store_sqlite_upsert(
   sqlite3_bind_int64(stmt, 9, (sqlite3_int64)order);
   ok = sqlite3_step(stmt) == SQLITE_DONE;
   sqlite3_finalize(stmt);
-  turbo_json_serialize_free(metadata_text);
-  turbo_json_serialize_free(embedding_text);
+  json_serialize_free(metadata_text);
+  json_serialize_free(embedding_text);
   return ok ? 0 : -1;
 }
 
@@ -906,12 +906,12 @@ static int turbo_vector_store_sqlite_query(
                                                 sizeof(*entries));
   matches = (turbo_vector_store_match_t *)calloc(candidate_count,
                                                 sizeof(*matches));
-  results = turbo_json_create_array();
+  results = json_create_array();
   if ((!entries && candidate_count > 0) || (!matches && candidate_count > 0) ||
       !results) {
     free(matches);
     free(entries);
-    turbo_free_json(&results);
+    json_free(results); results = NULL;
     return -1;
   }
 
@@ -924,7 +924,7 @@ static int turbo_vector_store_sqlite_query(
           &stmt) != 0) {
     free(matches);
     free(entries);
-    turbo_free_json(&results);
+    json_free(results); results = NULL;
     return -1;
   }
   if (effective_options.kind && effective_options.kind[0]) {
@@ -941,7 +941,7 @@ static int turbo_vector_store_sqlite_query(
       }
       free(matches);
       free(entries);
-      turbo_free_json(&results);
+      json_free(results); results = NULL;
       return -1;
     }
     if (!turbo_vector_store_uri_starts_with(entries[match_count].uri,
@@ -961,7 +961,7 @@ static int turbo_vector_store_sqlite_query(
     }
     free(matches);
     free(entries);
-    turbo_free_json(&results);
+    json_free(results); results = NULL;
     return -1;
   }
 
@@ -977,7 +977,7 @@ static int turbo_vector_store_sqlite_query(
       }
       free(matches);
       free(entries);
-      turbo_free_json(&results);
+      json_free(results); results = NULL;
       return -1;
     }
   }
@@ -1140,10 +1140,10 @@ int turbo_vector_store_query(
   limit = effective_options.limit == 0 ? 8 : effective_options.limit;
 
   matches = (turbo_vector_store_match_t *)calloc(store->count, sizeof(*matches));
-  results = turbo_json_create_array();
+  results = json_create_array();
   if ((!matches && store->count > 0) || !results) {
     free(matches);
-    turbo_free_json(&results);
+    json_free(results); results = NULL;
     return -1;
   }
 
@@ -1172,7 +1172,7 @@ int turbo_vector_store_query(
   for (i = 0; i < limit; ++i) {
     if (turbo_vector_store_add_result(results, &matches[i]) != 0) {
       free(matches);
-      turbo_free_json(&results);
+      json_free(results); results = NULL;
       return -1;
     }
   }
@@ -1319,21 +1319,21 @@ int turbo_vector_store_index_text(
                                      &chunks_json) != 0) {
     return -1;
   }
-  chunk_count = turbo_json_array_size(chunks_json);
+  chunk_count = json_array_size(chunks_json);
   pending_chunks = (turbo_vector_store_pending_chunk_t *)calloc(
       chunk_count, sizeof(*pending_chunks));
   if (!pending_chunks && chunk_count > 0) {
-    turbo_free_json(&chunks_json);
+    json_free(chunks_json); chunks_json = NULL;
     return -1;
   }
 
   for (i = 0; i < chunk_count; ++i) {
-    const json_value_t *chunk = turbo_json_array_get(chunks_json, i);
-    const char *chunk_text = turbo_json_get_string(chunk, "text");
+    const json_value_t *chunk = json_array_get(chunks_json, i);
+    const char *chunk_text = json_get_string(chunk, "text");
 
     if (!chunk_text) {
       turbo_vector_store_pending_chunks_clear(pending_chunks, chunk_count);
-      turbo_free_json(&chunks_json);
+      json_free(chunks_json); chunks_json = NULL;
       turbo_vector_store_set_summary(
           out_summary_json,
           turbo_vector_store_index_summary(document->id, "split", 0,
@@ -1342,14 +1342,14 @@ int turbo_vector_store_index_text(
     }
     pending_chunks[i].id = turbo_vector_store_chunk_id(document->id, i);
     pending_chunks[i].text = turbo_vector_store_strdup(chunk_text);
-    pending_chunks[i].start = turbo_json_get_int(chunk, "start", 0);
-    pending_chunks[i].end = turbo_json_get_int(chunk, "end", 0);
+    pending_chunks[i].start = json_get_int(chunk, "start", 0);
+    pending_chunks[i].end = json_get_int(chunk, "end", 0);
     if (!pending_chunks[i].id || !pending_chunks[i].text ||
         turbo_embedding_model_embed_text(embedding_model, chunk_text,
                                          &pending_chunks[i].embedding_json) !=
             0) {
       turbo_vector_store_pending_chunks_clear(pending_chunks, chunk_count);
-      turbo_free_json(&chunks_json);
+      json_free(chunks_json); chunks_json = NULL;
       turbo_vector_store_set_summary(
           out_summary_json,
           turbo_vector_store_index_summary(document->id, "embed", 0,
@@ -1363,7 +1363,7 @@ int turbo_vector_store_index_text(
 
     if (turbo_vector_sqlite_exec(store->db, "BEGIN IMMEDIATE;") != 0) {
       turbo_vector_store_pending_chunks_clear(pending_chunks, chunk_count);
-      turbo_free_json(&chunks_json);
+      json_free(chunks_json); chunks_json = NULL;
       turbo_vector_store_set_summary(
           out_summary_json,
           turbo_vector_store_index_summary(document->id, "upsert", 0,
@@ -1407,7 +1407,7 @@ sqlite_fail:
       turbo_vector_sqlite_exec(store->db, "ROLLBACK;");
     }
     turbo_vector_store_pending_chunks_clear(pending_chunks, chunk_count);
-    turbo_free_json(&chunks_json);
+    json_free(chunks_json); chunks_json = NULL;
     turbo_vector_store_set_summary(
         out_summary_json,
         turbo_vector_store_index_summary(document->id, "upsert", 0,
@@ -1418,7 +1418,7 @@ sqlite_fail:
   if (turbo_vector_store_memory_replace_indexed_chunks(
           store, document, pending_chunks, chunk_count, &indexed_count) != 0) {
     turbo_vector_store_pending_chunks_clear(pending_chunks, chunk_count);
-    turbo_free_json(&chunks_json);
+    json_free(chunks_json); chunks_json = NULL;
     turbo_vector_store_set_summary(
         out_summary_json,
         turbo_vector_store_index_summary(document->id, "upsert", 0,
@@ -1428,7 +1428,7 @@ sqlite_fail:
 
 complete:
   turbo_vector_store_pending_chunks_clear(pending_chunks, chunk_count);
-  turbo_free_json(&chunks_json);
+  json_free(chunks_json); chunks_json = NULL;
   return turbo_vector_store_set_summary(
       out_summary_json,
       turbo_vector_store_index_summary(document->id, "complete", 1,
@@ -1457,14 +1457,14 @@ int turbo_vector_store_index_text_file(
     return -1;
   }
 
-  document.id = turbo_json_get_string(document_json, "id");
-  document.uri = turbo_json_get_string(document_json, "uri");
-  document.kind = turbo_json_get_string(document_json, "kind");
-  document.title = turbo_json_get_string(document_json, "title");
-  document.text = turbo_json_get_string(document_json, "text");
+  document.id = json_get_string(document_json, "id");
+  document.uri = json_get_string(document_json, "uri");
+  document.kind = json_get_string(document_json, "kind");
+  document.title = json_get_string(document_json, "title");
+  document.text = json_get_string(document_json, "text");
   rc = turbo_vector_store_index_text(store, embedding_model, &document,
                                      splitter_options, out_summary_json);
-  turbo_free_json(&document_json);
+  json_free(document_json); document_json = NULL;
   return rc;
 }
 
@@ -1478,36 +1478,36 @@ static int turbo_vector_store_make_directory_summary(
     return 0;
   }
   *out_summary_json = NULL;
-  summary = turbo_json_create_object();
+  summary = json_create_object();
   if (!summary) {
     return -1;
   }
-  turbo_json_object_set_string(summary, "root_dir", root_dir ? root_dir : "");
-  turbo_json_object_set_string(summary, "kind", kind ? kind : "file");
-  turbo_json_object_set_string(
+  json_object_set_string(summary, "root_dir", root_dir ? root_dir : "");
+  json_object_set_string(summary, "kind", kind ? kind : "file");
+  json_object_set_string(
       summary, "include_extensions",
       state->include_extensions ? state->include_extensions : "");
-  turbo_json_object_set_number(summary, "chunk_size",
+  json_object_set_number(summary, "chunk_size",
                                (double)state->splitter_options.chunk_size);
-  turbo_json_object_set_number(summary, "chunk_overlap",
+  json_object_set_number(summary, "chunk_overlap",
                                (double)state->splitter_options.chunk_overlap);
-  turbo_json_object_set_bool(summary, "recursive", state->recursive ? 1 : 0);
-  turbo_json_object_set_number(summary, "max_files", (double)state->max_files);
-  turbo_json_object_set_number(summary, "max_file_bytes",
+  json_object_set_bool(summary, "recursive", state->recursive ? 1 : 0);
+  json_object_set_number(summary, "max_files", (double)state->max_files);
+  json_object_set_number(summary, "max_file_bytes",
                                (double)state->max_file_bytes);
-  turbo_json_object_set_number(summary, "visited", (double)state->visited);
-  turbo_json_object_set_number(summary, "indexed", (double)state->indexed);
-  turbo_json_object_set_number(summary, "indexed_chunks",
+  json_object_set_number(summary, "visited", (double)state->visited);
+  json_object_set_number(summary, "indexed", (double)state->indexed);
+  json_object_set_number(summary, "indexed_chunks",
                                (double)state->indexed_chunks);
-  turbo_json_object_set_number(summary, "skipped", (double)state->skipped);
-  turbo_json_object_set_number(summary, "skipped_by_extension",
+  json_object_set_number(summary, "skipped", (double)state->skipped);
+  json_object_set_number(summary, "skipped_by_extension",
                                (double)state->skipped_by_extension);
-  turbo_json_object_set_number(summary, "skipped_too_large",
+  json_object_set_number(summary, "skipped_too_large",
                                (double)state->skipped_too_large);
-  turbo_json_object_set_number(summary, "skipped_index_error",
+  json_object_set_number(summary, "skipped_index_error",
                                (double)state->skipped_index_error);
-  turbo_json_object_set_number(summary, "failed", (double)state->failed);
-  turbo_json_object_set_bool(summary, "truncated", state->truncated ? 1 : 0);
+  json_object_set_number(summary, "failed", (double)state->failed);
+  json_object_set_bool(summary, "truncated", state->truncated ? 1 : 0);
   *out_summary_json = summary;
   return 0;
 }
@@ -1540,12 +1540,12 @@ static int turbo_vector_store_index_directory_file(
           state->kind ? state->kind : "file", state->splitter_options_ptr,
           &summary) == 0) {
     state->indexed++;
-    state->indexed_chunks += (size_t)turbo_json_get_int(summary, "indexed", 0);
-    turbo_free_json(&summary);
+    state->indexed_chunks += (size_t)json_get_int(summary, "indexed", 0);
+    json_free(summary); summary = NULL;
     return 0;
   }
 
-  turbo_free_json(&summary);
+  json_free(summary); summary = NULL;
   state->skipped++;
   state->skipped_index_error++;
   return 0;
@@ -1759,30 +1759,30 @@ static int turbo_vector_tool_graph_add_node(json_value_t *nodes,
                                             const char *name,
                                             const char *kind,
                                             const char *description) {
-  json_value_t *node = turbo_json_create_object();
+  json_value_t *node = json_create_object();
 
   if (!node) {
     return -1;
   }
-  turbo_json_object_set_string(node, "name", name);
-  turbo_json_object_set_string(node, "kind", kind);
-  turbo_json_object_set_string(node, "description", description);
-  turbo_json_array_add(nodes, node);
+  json_object_set_string(node, "name", name);
+  json_object_set_string(node, "kind", kind);
+  json_object_set_string(node, "description", description);
+  json_array_add(nodes, node);
   return 0;
 }
 
 static int turbo_vector_tool_graph_add_edge(json_value_t *edges,
                                             const char *from, const char *to,
                                             const char *reason) {
-  json_value_t *edge = turbo_json_create_object();
+  json_value_t *edge = json_create_object();
 
   if (!edge) {
     return -1;
   }
-  turbo_json_object_set_string(edge, "from", from);
-  turbo_json_object_set_string(edge, "to", to);
-  turbo_json_object_set_string(edge, "reason", reason);
-  turbo_json_array_add(edges, edge);
+  json_object_set_string(edge, "from", from);
+  json_object_set_string(edge, "to", to);
+  json_object_set_string(edge, "reason", reason);
+  json_array_add(edges, edge);
   return 0;
 }
 
@@ -1795,13 +1795,13 @@ int turbo_vector_store_tool_graph(json_value_t **out_graph_json) {
     return -1;
   }
   *out_graph_json = NULL;
-  graph = turbo_json_create_object();
-  nodes = turbo_json_create_array();
-  edges = turbo_json_create_array();
+  graph = json_create_object();
+  nodes = json_create_array();
+  edges = json_create_array();
   if (!graph || !nodes || !edges) {
-    turbo_free_json(&graph);
-    turbo_free_json(&nodes);
-    turbo_free_json(&edges);
+    json_free(graph); graph = NULL;
+    json_free(nodes); nodes = NULL;
+    json_free(edges); edges = NULL;
     return -1;
   }
   if (turbo_vector_tool_graph_add_node(
@@ -1822,13 +1822,13 @@ int turbo_vector_store_tool_graph(json_value_t **out_graph_json) {
       turbo_vector_tool_graph_add_edge(
           edges, "agent.vector.search", "agent.vector.build_context",
           "Build context from search results before planner/executor use.") != 0) {
-    turbo_free_json(&graph);
-    turbo_free_json(&nodes);
-    turbo_free_json(&edges);
+    json_free(graph); graph = NULL;
+    json_free(nodes); nodes = NULL;
+    json_free(edges); edges = NULL;
     return -1;
   }
-  turbo_json_object_add(graph, "nodes", nodes);
-  turbo_json_object_add(graph, "edges", edges);
+  json_object_add(graph, "nodes", nodes);
+  json_object_add(graph, "edges", edges);
   *out_graph_json = graph;
   return 0;
 }
@@ -1836,7 +1836,7 @@ int turbo_vector_store_tool_graph(json_value_t **out_graph_json) {
 static int turbo_vector_json_value_set_string(json_value_t *object,
                                         const char *key, const char *value) {
   json_value_t *field =
-      turbo_json_create_string(value ? value : "");
+      json_create_string(value ? value : "");
 
   if (!field) {
     return -1;
@@ -1852,7 +1852,7 @@ static int turbo_vector_json_value_set_string(json_value_t *object,
 static int turbo_vector_json_value_set_bool(json_value_t *object,
                                       const char *key, int value) {
   json_value_t *field =
-      turbo_json_create_bool(value ? 1 : 0);
+      json_create_bool(value ? 1 : 0);
 
   if (!field) {
     return -1;
@@ -1929,11 +1929,11 @@ static int turbo_vector_stats_json(turbo_vector_store_tool_binding_t *binding,
     return -1;
   }
   *out_stats_json = NULL;
-  stats = turbo_json_create_object();
+  stats = json_create_object();
   if (!stats) {
     return -1;
   }
-  turbo_json_object_set_number(stats, "document_count",
+  json_object_set_number(stats, "document_count",
                                (double)turbo_vector_store_count(binding->store));
   *out_stats_json = stats;
   return 0;
@@ -1957,13 +1957,13 @@ static int turbo_vector_search_tool_json_value(
   }
   *out_result = NULL;
   query = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(arguments, "query"));
+      json_object_get(arguments, "query"));
   kind = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(arguments, "kind"));
+      json_object_get(arguments, "kind"));
   uri_prefix = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(arguments, "uri_prefix"));
+      json_object_get(arguments, "uri_prefix"));
   limit = turbo_runtime_json_value_as_int64(
-      turbo_json_object_get(arguments, "limit"), 8);
+      json_object_get(arguments, "limit"), 8);
   if (!query || !query[0] || limit < 0) {
     return -1;
   }
@@ -1971,9 +1971,9 @@ static int turbo_vector_search_tool_json_value(
                                &results_json) != 0) {
     return -1;
   }
-  results_json_value = turbo_json_clone(results_json);
-  turbo_free_json(&results_json);
-  result = turbo_json_create_object();
+  results_json_value = json_clone(results_json);
+  json_free(results_json); results_json = NULL;
+  result = json_create_object();
   if (!result || !results_json_value ||
       turbo_vector_json_value_set_bool(result, "ok", 1) != 0 ||
       turbo_vector_json_value_set_string(result, "summary",
@@ -2006,13 +2006,13 @@ static int turbo_vector_build_context_tool_json_value(
   }
   *out_result = NULL;
   query = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(arguments, "query"));
+      json_object_get(arguments, "query"));
   kind = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(arguments, "kind"));
+      json_object_get(arguments, "kind"));
   uri_prefix = turbo_runtime_json_value_as_string(
-      turbo_json_object_get(arguments, "uri_prefix"));
+      json_object_get(arguments, "uri_prefix"));
   limit = turbo_runtime_json_value_as_int64(
-      turbo_json_object_get(arguments, "limit"), 8);
+      json_object_get(arguments, "limit"), 8);
   if (!query || !query[0] || limit < 0) {
     return -1;
   }
@@ -2020,9 +2020,9 @@ static int turbo_vector_build_context_tool_json_value(
                                       (size_t)limit, &context_json) != 0) {
     return -1;
   }
-  context_json_value = turbo_json_clone(context_json);
-  turbo_free_json(&context_json);
-  result = turbo_json_create_object();
+  context_json_value = json_clone(context_json);
+  json_free(context_json); context_json = NULL;
+  result = json_create_object();
   if (!result || !context_json_value ||
       turbo_vector_json_value_set_bool(result, "ok", 1) != 0 ||
       turbo_vector_json_value_set_string(result, "summary",
@@ -2054,9 +2054,9 @@ static int turbo_vector_stats_tool_json_value(
   if (turbo_vector_stats_json(binding, &stats_json) != 0) {
     return -1;
   }
-  stats_json_value = turbo_json_clone(stats_json);
-  turbo_free_json(&stats_json);
-  result = turbo_json_create_object();
+  stats_json_value = json_clone(stats_json);
+  json_free(stats_json); stats_json = NULL;
+  result = json_create_object();
   if (!result || !stats_json_value ||
       turbo_vector_json_value_set_bool(result, "ok", 1) != 0 ||
       turbo_vector_json_value_set_string(result, "summary",
@@ -2087,9 +2087,9 @@ static int turbo_vector_tool_graph_tool_json_value(
   if (turbo_vector_store_tool_graph(&graph_json) != 0) {
     return -1;
   }
-  graph_json_value = turbo_json_clone(graph_json);
-  turbo_free_json(&graph_json);
-  result = turbo_json_create_object();
+  graph_json_value = json_clone(graph_json);
+  json_free(graph_json); graph_json = NULL;
+  result = json_create_object();
   if (!result || !graph_json_value ||
       turbo_vector_json_value_set_bool(result, "ok", 1) != 0 ||
       turbo_vector_json_value_set_string(result, "summary",
@@ -2120,14 +2120,13 @@ static int turbo_vector_tool_json_handler(
     return -1;
   }
   *out_output = NULL;
-  if (turbo_parse_json((const uint8_t *)(arguments_json ? arguments_json : "{}"),
-                       strlen(arguments_json ? arguments_json : "{}"),
-                       &args_json) != 0 ||
-      !args_json) {
+  args_json = json_parse(arguments_json ? arguments_json : "{}",
+                         strlen(arguments_json ? arguments_json : "{}"));
+  if (!args_json) {
     return -1;
   }
-  args = turbo_json_clone(args_json);
-  turbo_free_json(&args_json);
+  args = json_clone(args_json);
+  json_free(args_json); args_json = NULL;
   if (!args) {
     return -1;
   }
@@ -2137,13 +2136,13 @@ static int turbo_vector_tool_json_handler(
     turbo_runtime_json_destroy(result);
     return -1;
   }
-  result_json = turbo_json_clone(result);
+  result_json = json_clone(result);
   turbo_runtime_json_destroy(result);
   if (!result_json) {
     return -1;
   }
-  serialized = turbo_json_serialize(result_json, NULL);
-  turbo_free_json(&result_json);
+  serialized = json_serialize(result_json, NULL);
+  json_free(result_json); result_json = NULL;
   if (!serialized) {
     return -1;
   }
@@ -2194,14 +2193,14 @@ static int turbo_vector_search_action_handler(const json_value_t *args,
   json_value_t *result = NULL;
 
   if (!binding || !args || !out_result ||
-      turbo_json_type(args) != TURBO_JSON_OBJECT) {
+      json_type(args) != JSON_OBJECT) {
     return -1;
   }
   *out_result = NULL;
-  query = turbo_json_get_string(args, "query");
-  kind = turbo_json_get_string(args, "kind");
-  uri_prefix = turbo_json_get_string(args, "uri_prefix");
-  limit = turbo_json_get_int(args, "limit", 8);
+  query = json_get_string(args, "query");
+  kind = json_get_string(args, "kind");
+  uri_prefix = json_get_string(args, "uri_prefix");
+  limit = json_get_int(args, "limit", 8);
   if (!query || !query[0] || limit < 0) {
     return -1;
   }
@@ -2211,10 +2210,10 @@ static int turbo_vector_search_action_handler(const json_value_t *args,
   }
   result = turbo_action_result_create(1, "vector search completed");
   if (!result) {
-    turbo_free_json(&results);
+    json_free(results); results = NULL;
     return -1;
   }
-  turbo_json_object_add(result, "results", results);
+  json_object_add(result, "results", results);
   *out_result = result;
   return 0;
 }
@@ -2232,14 +2231,14 @@ static int turbo_vector_build_context_action_handler(const json_value_t *args,
   json_value_t *result = NULL;
 
   if (!binding || !args || !out_result ||
-      turbo_json_type(args) != TURBO_JSON_OBJECT) {
+      json_type(args) != JSON_OBJECT) {
     return -1;
   }
   *out_result = NULL;
-  query = turbo_json_get_string(args, "query");
-  kind = turbo_json_get_string(args, "kind");
-  uri_prefix = turbo_json_get_string(args, "uri_prefix");
-  limit = turbo_json_get_int(args, "limit", 8);
+  query = json_get_string(args, "query");
+  kind = json_get_string(args, "kind");
+  uri_prefix = json_get_string(args, "uri_prefix");
+  limit = json_get_int(args, "limit", 8);
   if (!query || !query[0] || limit < 0) {
     return -1;
   }
@@ -2249,10 +2248,10 @@ static int turbo_vector_build_context_action_handler(const json_value_t *args,
   }
   result = turbo_action_result_create(1, "vector context built");
   if (!result) {
-    turbo_free_json(&context);
+    json_free(context); context = NULL;
     return -1;
   }
-  turbo_json_object_add(result, "context", context);
+  json_object_add(result, "context", context);
   *out_result = result;
   return 0;
 }
@@ -2275,10 +2274,10 @@ static int turbo_vector_stats_action_handler(const json_value_t *args,
   }
   result = turbo_action_result_create(1, "vector stats loaded");
   if (!result) {
-    turbo_free_json(&stats);
+    json_free(stats); stats = NULL;
     return -1;
   }
-  turbo_json_object_add(result, "stats", stats);
+  json_object_add(result, "stats", stats);
   *out_result = result;
   return 0;
 }
@@ -2300,10 +2299,10 @@ static int turbo_vector_tool_graph_action_handler(const json_value_t *args,
   }
   result = turbo_action_result_create(1, "vector tool graph loaded");
   if (!result) {
-    turbo_free_json(&graph);
+    json_free(graph); graph = NULL;
     return -1;
   }
-  turbo_json_object_add(result, "graph", graph);
+  json_object_add(result, "graph", graph);
   *out_result = result;
   return 0;
 }
@@ -2326,17 +2325,17 @@ static int turbo_vector_upsert_text_action_handler(const json_value_t *args,
   int chunk_overlap;
 
   if (!binding || !binding->store || !binding->embedding_model || !args ||
-      !out_result || turbo_json_type(args) != TURBO_JSON_OBJECT) {
+      !out_result || json_type(args) != JSON_OBJECT) {
     return -1;
   }
   *out_result = NULL;
-  id = turbo_json_get_string(args, "id");
-  uri = turbo_json_get_string(args, "uri");
-  kind = turbo_json_get_string(args, "kind");
-  title = turbo_json_get_string(args, "title");
-  text = turbo_json_get_string(args, "text");
-  chunk_size = turbo_json_get_int(args, "chunk_size", 0);
-  chunk_overlap = turbo_json_get_int(args, "chunk_overlap", 0);
+  id = json_get_string(args, "id");
+  uri = json_get_string(args, "uri");
+  kind = json_get_string(args, "kind");
+  title = json_get_string(args, "title");
+  text = json_get_string(args, "text");
+  chunk_size = json_get_int(args, "chunk_size", 0);
+  chunk_overlap = json_get_int(args, "chunk_overlap", 0);
   if (!id || !id[0] || !text || chunk_size < 0 || chunk_overlap < 0) {
     return -1;
   }
@@ -2350,18 +2349,18 @@ static int turbo_vector_upsert_text_action_handler(const json_value_t *args,
   if (turbo_vector_store_index_text(binding->store, binding->embedding_model,
                                     &document, &splitter_options,
                                     &summary) != 0) {
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return -1;
   }
   result = turbo_action_result_create(1, "vector text indexed");
   if (!result) {
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return -1;
   }
-  turbo_json_object_set_string(result, "document_id", document.id);
-  turbo_json_object_set_string(result, "uri", document.uri);
-  turbo_json_object_set_string(result, "kind", document.kind);
-  turbo_json_object_add(result, "index", summary);
+  json_object_set_string(result, "document_id", document.id);
+  json_object_set_string(result, "uri", document.uri);
+  json_object_set_string(result, "kind", document.kind);
+  json_object_add(result, "index", summary);
   *out_result = result;
   return 0;
 }
@@ -2380,14 +2379,14 @@ static int turbo_vector_index_file_action_handler(const json_value_t *args,
   json_value_t *result = NULL;
 
   if (!binding || !binding->store || !binding->embedding_model || !args ||
-      !out_result || turbo_json_type(args) != TURBO_JSON_OBJECT) {
+      !out_result || json_type(args) != JSON_OBJECT) {
     return -1;
   }
   *out_result = NULL;
-  path = turbo_json_get_string(args, "path");
-  kind = turbo_json_get_string(args, "kind");
-  chunk_size = turbo_json_get_int(args, "chunk_size", 0);
-  chunk_overlap = turbo_json_get_int(args, "chunk_overlap", 0);
+  path = json_get_string(args, "path");
+  kind = json_get_string(args, "kind");
+  chunk_size = json_get_int(args, "chunk_size", 0);
+  chunk_overlap = json_get_int(args, "chunk_overlap", 0);
   if (!path || !path[0] || chunk_size < 0 || chunk_overlap < 0) {
     return -1;
   }
@@ -2397,16 +2396,16 @@ static int turbo_vector_index_file_action_handler(const json_value_t *args,
                                          binding->embedding_model, path,
                                          kind ? kind : "file",
                                          &splitter_options, &summary) != 0) {
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return -1;
   }
   result = turbo_action_result_create(1, "vector file indexed");
   if (!result) {
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return -1;
   }
-  turbo_json_object_set_string(result, "uri", path);
-  turbo_json_object_add(result, "index", summary);
+  json_object_set_string(result, "uri", path);
+  json_object_add(result, "index", summary);
   *out_result = result;
   return 0;
 }
@@ -2425,40 +2424,40 @@ static int turbo_vector_index_directory_action_handler(
   json_value_t *result = NULL;
 
   if (!binding || !binding->store || !binding->embedding_model || !args ||
-      !out_result || turbo_json_type(args) != TURBO_JSON_OBJECT) {
+      !out_result || json_type(args) != JSON_OBJECT) {
     return -1;
   }
   *out_result = NULL;
-  root_dir = turbo_json_get_string(args, "root_dir");
-  chunk_size = turbo_json_get_int(args, "chunk_size", 0);
-  chunk_overlap = turbo_json_get_int(args, "chunk_overlap", 0);
-  max_files = turbo_json_get_int(args, "max_files", 0);
-  max_file_bytes = turbo_json_get_int(args, "max_file_bytes", 0);
+  root_dir = json_get_string(args, "root_dir");
+  chunk_size = json_get_int(args, "chunk_size", 0);
+  chunk_overlap = json_get_int(args, "chunk_overlap", 0);
+  max_files = json_get_int(args, "max_files", 0);
+  max_file_bytes = json_get_int(args, "max_file_bytes", 0);
   if (!root_dir || !root_dir[0] || chunk_size < 0 || chunk_overlap < 0 ||
       max_files < 0 || max_file_bytes < 0) {
     return -1;
   }
-  options.kind = turbo_json_get_string(args, "kind");
+  options.kind = json_get_string(args, "kind");
   options.splitter_options.chunk_size = (size_t)chunk_size;
   options.splitter_options.chunk_overlap = (size_t)chunk_overlap;
-  options.recursive = turbo_json_get_bool(args, "recursive", 1) ? 1 : 0;
+  options.recursive = json_get_bool(args, "recursive", 1) ? 1 : 0;
   options.max_files = (size_t)max_files;
   options.max_file_bytes = (size_t)max_file_bytes;
-  options.include_extensions = turbo_json_get_string(args, "include_extensions");
+  options.include_extensions = json_get_string(args, "include_extensions");
   if (turbo_vector_store_index_directory_ex(binding->store,
                                             binding->embedding_model,
                                             root_dir, &options,
                                             &summary) != 0) {
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return -1;
   }
   result = turbo_action_result_create(1, "vector directory indexed");
   if (!result) {
-    turbo_free_json(&summary);
+    json_free(summary); summary = NULL;
     return -1;
   }
-  turbo_json_object_set_string(result, "root_dir", root_dir);
-  turbo_json_object_add(result, "index", summary);
+  json_object_set_string(result, "root_dir", root_dir);
+  json_object_add(result, "index", summary);
   *out_result = result;
   return 0;
 }
@@ -2472,11 +2471,11 @@ static int turbo_vector_delete_document_action_handler(const json_value_t *args,
   json_value_t *result;
 
   if (!binding || !binding->store || !args || !out_result ||
-      turbo_json_type(args) != TURBO_JSON_OBJECT) {
+      json_type(args) != JSON_OBJECT) {
     return -1;
   }
   *out_result = NULL;
-  document_id = turbo_json_get_string(args, "document_id");
+  document_id = json_get_string(args, "document_id");
   if (!document_id || !document_id[0]) {
     return -1;
   }
@@ -2487,7 +2486,7 @@ static int turbo_vector_delete_document_action_handler(const json_value_t *args,
   if (!result) {
     return -1;
   }
-  turbo_json_object_set_string(result, "document_id", document_id);
+  json_object_set_string(result, "document_id", document_id);
   *out_result = result;
   return 0;
 }

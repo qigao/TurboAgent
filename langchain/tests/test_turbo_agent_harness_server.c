@@ -89,9 +89,8 @@ static json_value_t *harness_server_parse_frame(const harness_server_frame_captu
                                                 size_t index) {
   json_value_t *value = NULL;
   check_true(capture && index < capture->frame_count);
-  check_int_eq(turbo_parse_json((const uint8_t *)capture->frames[index],
-                                strlen(capture->frames[index]), &value),
-               SALTS_OK);
+  value = json_parse(capture->frames[index], strlen(capture->frames[index]));
+    check_not_null(value);
   return value;
 }
 

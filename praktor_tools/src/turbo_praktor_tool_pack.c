@@ -183,6 +183,7 @@ static turbo_tool_status_t turbo_praktor_add_conservative_capabilities(
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
 static turbo_tool_status_t turbo_praktor_capability_from_effect(
     turbo_praktor_capability_list_t *list, const char *effect) {
+  turbo_tool_status_t status;
   if (!effect || !effect[0]) return TURBO_TOOL_INVALID_ARGUMENT;
   if (strcmp(effect, "network") == 0) {
     return turbo_praktor_capability_add(list, "network");

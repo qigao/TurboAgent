@@ -125,7 +125,7 @@ spec("turbo agent graph api") {
     json_array_add(events, model_event);
 
     ctx.state = state;
-    check_int_ne(turbo_agent_tool_node(&ctx, agent), 0);
+    check_not_equal(turbo_agent_tool_node(&ctx, agent), 0);
     check_equal(turbo_agent_state_model_error_phase(state), "tool");
     check_equal(turbo_agent_state_model_error_detail(state), "malformed pending tool call record");
 

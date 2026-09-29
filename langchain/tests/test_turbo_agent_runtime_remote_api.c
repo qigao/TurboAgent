@@ -125,7 +125,8 @@ static json_value_t *parse_remote_json_text(const char *json_text) {
   json_value_t *json = NULL;
 
   check_not_null(json_text);
-  check_int_eq(turbo_parse_json((const uint8_t *)json_text, strlen(json_text), &json), 0);
+  json = json_parse(json_text, strlen(json_text));
+    check_not_null(json);
   return json;
 }
 

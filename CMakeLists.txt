@@ -84,7 +84,6 @@ find_package(Threads REQUIRED)
 # Additional components
 add_subdirectory(tools)
 include(FindTools)
-add_subdirectory(vendor)
 add_subdirectory(runtime_core)
 add_subdirectory(runtime_data)
 add_subdirectory(runtime_tools)

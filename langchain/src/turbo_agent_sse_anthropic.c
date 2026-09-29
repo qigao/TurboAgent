@@ -238,7 +238,8 @@ int turbo_agent_anthropic_messages_sse_to_json(const char *sse_data, size_t sse_
     }
 
     if (data[0] != '\0') {
-      if (turbo_parse_json((const uint8_t *)data, strlen(data), &event) != 0) {
+      event = json_parse(data, strlen(data));
+      if (!event) {
         tstr_free(data);
         free(normalized);
         turbo_agent_sse_free_anthropic_state(&state);

@@ -116,7 +116,7 @@ static chttp_server_config remote_session_test_server_config(void) {
   config.max_response_header_count = 32u;
   config.max_response_header_bytes = 8192u;
   config.max_response_body_bytes = REMOTE_SESSION_TEST_SEND_BYTES;
-  config.max_buffered_response_body_bytes = REMOTE_SESSION_TEST_SEND_BYTES;
+  config.max_buffered_response_body_bytes = 0u;
   config.buffer_capacity_bytes = REMOTE_SESSION_TEST_BUFFER_BYTES;
   config.poll_slice_ms = 1u;
   return config;

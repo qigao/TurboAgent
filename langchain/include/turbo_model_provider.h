@@ -1,6 +1,8 @@
 #ifndef TURBO_MODEL_PROVIDER_H
 #define TURBO_MODEL_PROVIDER_H
 
+#include <stddef.h>
+
 #include <turbo_agent_api.h>
 #include <http_client/http.h>
 

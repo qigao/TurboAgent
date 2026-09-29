@@ -68,7 +68,7 @@ static int harness_server_capture_frame(const uint8_t *frame, size_t frame_size,
       memchr(frame, '\n', frame_size - 1)) {
     return SALTS_EPROTO;
   }
-  if (capture->frame_count >= HARNESS_SERVER_CAPTURE_MAX_FRAMES) return TURBO_ENOBUFS;
+  if (capture->frame_count >= HARNESS_SERVER_CAPTURE_MAX_FRAMES) return SALTS_ENOBUFS;
   copy = (char *)malloc(frame_size);
   if (!copy) return SALTS_ENOMEM;
   memcpy(copy, frame, frame_size - 1);

@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_event_log.h"
 #include "turbo_model_provider.h"
 #include "turbo_prompt.h"
@@ -45,18 +46,18 @@ static void capture_model_provider_event(const json_value_t *event,
   free(capture->output_text);
   free(capture->first_tool_arguments);
   capture->kind = test_strdup_local(
-      turbo_runtime_json_value_as_string(turbo_json_object_get(event, "kind")));
+      turbo_runtime_json_value_as_string(json_object_get(event, "kind")));
   capture->response_id = test_strdup_local(turbo_runtime_json_value_as_string(
-      turbo_json_object_get(event, "response_id")));
+      json_object_get(event, "response_id")));
   capture->output_text = test_strdup_local(turbo_runtime_json_value_as_string(
-      turbo_json_object_get(event, "output_text")));
+      json_object_get(event, "output_text")));
   capture->tool_call_count =
-      turbo_runtime_json_value_size(turbo_json_object_get(event, "tool_calls"));
+      turbo_runtime_json_value_size(json_object_get(event, "tool_calls"));
   if (capture->tool_call_count > 0) {
-    const json_value_t *tool_call = turbo_json_array_get(
-        turbo_json_object_get(event, "tool_calls"), 0);
+    const json_value_t *tool_call = json_array_get(
+        json_object_get(event, "tool_calls"), 0);
     capture->first_tool_arguments = test_strdup_local(turbo_runtime_json_value_as_string(
-        turbo_json_object_get(tool_call, "arguments")));
+        json_object_get(tool_call, "arguments")));
   } else {
     capture->first_tool_arguments = NULL;
   }
@@ -141,51 +142,51 @@ spec("turbo model provider helpers") {
       chat_messages = turbo_model_provider_messages_to_wire_json(
           turbo_model_provider_openai_chat_completions(), messages, NULL);
       check_not_null(chat_messages);
-      check_size_eq(turbo_json_array_size(chat_messages), 2);
-      check_str_eq(turbo_json_get_string(turbo_json_array_get(chat_messages, 0), "role"),
+      check_size_eq(json_array_size(chat_messages), 2);
+      check_str_eq(json_get_string(json_array_get(chat_messages, 0), "role"),
                    "system");
 
       responses_messages = turbo_model_provider_messages_to_wire_json(
           turbo_model_provider_openai_responses(), messages, NULL);
       check_not_null(responses_messages);
-      check_size_eq(turbo_json_array_size(responses_messages), 2);
-      check_str_eq(turbo_json_get_string(turbo_json_array_get(responses_messages, 1), "content"),
+      check_size_eq(json_array_size(responses_messages), 2);
+      check_str_eq(json_get_string(json_array_get(responses_messages, 1), "content"),
                    "Ping");
 
       anthropic_messages = turbo_model_provider_messages_to_wire_json(
           turbo_model_provider_anthropic_messages(), messages, &system_text);
       check_not_null(anthropic_messages);
       check_str_eq(system_text, "Rules");
-      check_size_eq(turbo_json_array_size(anthropic_messages), 1);
-      check_str_eq(turbo_json_get_string(turbo_json_array_get(anthropic_messages, 0), "role"),
+      check_size_eq(json_array_size(anthropic_messages), 1);
+      check_str_eq(json_get_string(json_array_get(anthropic_messages, 0), "role"),
                    "user");
 
       free(system_text);
-      turbo_free_json(&anthropic_messages);
-      turbo_free_json(&responses_messages);
-      turbo_free_json(&chat_messages);
+      json_free(anthropic_messages); anthropic_messages = NULL;
+      json_free(responses_messages); responses_messages = NULL;
+      json_free(chat_messages); chat_messages = NULL;
       turbo_runtime_json_destroy(messages);
     }
 
     it("should normalize provider responses into canonical model events") {
-      json_value_t *responses_response = turbo_json_create_object();
-      json_value_t *responses_output = turbo_json_create_array();
-      json_value_t *responses_text_item = turbo_json_create_object();
-      json_value_t *responses_content = turbo_json_create_array();
-      json_value_t *responses_text_part = turbo_json_create_object();
-      json_value_t *responses_tool_call = turbo_json_create_object();
-      json_value_t *chat_response = turbo_json_create_object();
-      json_value_t *chat_choices = turbo_json_create_array();
-      json_value_t *chat_choice = turbo_json_create_object();
-      json_value_t *chat_message = turbo_json_create_object();
-      json_value_t *chat_tool_calls = turbo_json_create_array();
-      json_value_t *chat_tool_call = turbo_json_create_object();
-      json_value_t *chat_function = turbo_json_create_object();
-      json_value_t *anthropic_response = turbo_json_create_object();
-      json_value_t *anthropic_content = turbo_json_create_array();
-      json_value_t *anthropic_text = turbo_json_create_object();
-      json_value_t *anthropic_tool_use = turbo_json_create_object();
-      json_value_t *anthropic_input = turbo_json_create_object();
+      json_value_t *responses_response = json_create_object();
+      json_value_t *responses_output = json_create_array();
+      json_value_t *responses_text_item = json_create_object();
+      json_value_t *responses_content = json_create_array();
+      json_value_t *responses_text_part = json_create_object();
+      json_value_t *responses_tool_call = json_create_object();
+      json_value_t *chat_response = json_create_object();
+      json_value_t *chat_choices = json_create_array();
+      json_value_t *chat_choice = json_create_object();
+      json_value_t *chat_message = json_create_object();
+      json_value_t *chat_tool_calls = json_create_array();
+      json_value_t *chat_tool_call = json_create_object();
+      json_value_t *chat_function = json_create_object();
+      json_value_t *anthropic_response = json_create_object();
+      json_value_t *anthropic_content = json_create_array();
+      json_value_t *anthropic_text = json_create_object();
+      json_value_t *anthropic_tool_use = json_create_object();
+      json_value_t *anthropic_input = json_create_object();
       json_value_t *responses_event;
       json_value_t *chat_event;
       json_value_t *anthropic_event;
@@ -209,45 +210,45 @@ spec("turbo model provider helpers") {
       check_not_null(anthropic_tool_use);
       check_not_null(anthropic_input);
 
-      turbo_json_object_set_string(responses_response, "id", "resp_1");
-      turbo_json_object_set_string(responses_text_part, "type", "output_text");
-      turbo_json_object_set_string(responses_text_part, "text", "hello");
-      turbo_json_array_add(responses_content, responses_text_part);
-      turbo_json_object_set_string(responses_text_item, "type", "message");
-      turbo_json_object_add(responses_text_item, "content", responses_content);
-      turbo_json_array_add(responses_output, responses_text_item);
-      turbo_json_object_set_string(responses_tool_call, "type", "function_call");
-      turbo_json_object_set_string(responses_tool_call, "call_id", "call_1");
-      turbo_json_object_set_string(responses_tool_call, "name", "sum");
-      turbo_json_object_set_string(responses_tool_call, "arguments", "{\"a\":1}");
-      turbo_json_array_add(responses_output, responses_tool_call);
-      turbo_json_object_add(responses_response, "output", responses_output);
+      json_object_set_string(responses_response, "id", "resp_1");
+      json_object_set_string(responses_text_part, "type", "output_text");
+      json_object_set_string(responses_text_part, "text", "hello");
+      json_array_add(responses_content, responses_text_part);
+      json_object_set_string(responses_text_item, "type", "message");
+      json_object_add(responses_text_item, "content", responses_content);
+      json_array_add(responses_output, responses_text_item);
+      json_object_set_string(responses_tool_call, "type", "function_call");
+      json_object_set_string(responses_tool_call, "call_id", "call_1");
+      json_object_set_string(responses_tool_call, "name", "sum");
+      json_object_set_string(responses_tool_call, "arguments", "{\"a\":1}");
+      json_array_add(responses_output, responses_tool_call);
+      json_object_add(responses_response, "output", responses_output);
 
-      turbo_json_object_set_string(chat_response, "id", "chat_1");
-      turbo_json_object_set_string(chat_message, "role", "assistant");
-      turbo_json_object_set_string(chat_message, "content", "world");
-      turbo_json_object_set_string(chat_tool_call, "id", "call_2");
-      turbo_json_object_set_string(chat_tool_call, "type", "function");
-      turbo_json_object_set_string(chat_function, "name", "echo");
-      turbo_json_object_set_string(chat_function, "arguments", "{\"x\":2}");
-      turbo_json_object_add(chat_tool_call, "function", chat_function);
-      turbo_json_array_add(chat_tool_calls, chat_tool_call);
-      turbo_json_object_add(chat_message, "tool_calls", chat_tool_calls);
-      turbo_json_object_add(chat_choice, "message", chat_message);
-      turbo_json_array_add(chat_choices, chat_choice);
-      turbo_json_object_add(chat_response, "choices", chat_choices);
+      json_object_set_string(chat_response, "id", "chat_1");
+      json_object_set_string(chat_message, "role", "assistant");
+      json_object_set_string(chat_message, "content", "world");
+      json_object_set_string(chat_tool_call, "id", "call_2");
+      json_object_set_string(chat_tool_call, "type", "function");
+      json_object_set_string(chat_function, "name", "echo");
+      json_object_set_string(chat_function, "arguments", "{\"x\":2}");
+      json_object_add(chat_tool_call, "function", chat_function);
+      json_array_add(chat_tool_calls, chat_tool_call);
+      json_object_add(chat_message, "tool_calls", chat_tool_calls);
+      json_object_add(chat_choice, "message", chat_message);
+      json_array_add(chat_choices, chat_choice);
+      json_object_add(chat_response, "choices", chat_choices);
 
-      turbo_json_object_set_string(anthropic_response, "id", "anth_1");
-      turbo_json_object_set_string(anthropic_text, "type", "text");
-      turbo_json_object_set_string(anthropic_text, "text", "anth");
-      turbo_json_array_add(anthropic_content, anthropic_text);
-      turbo_json_object_set_string(anthropic_tool_use, "type", "tool_use");
-      turbo_json_object_set_string(anthropic_tool_use, "id", "call_3");
-      turbo_json_object_set_string(anthropic_tool_use, "name", "grep");
-      turbo_json_object_set_string(anthropic_input, "pattern", "x");
-      turbo_json_object_add(anthropic_tool_use, "input", anthropic_input);
-      turbo_json_array_add(anthropic_content, anthropic_tool_use);
-      turbo_json_object_add(anthropic_response, "content", anthropic_content);
+      json_object_set_string(anthropic_response, "id", "anth_1");
+      json_object_set_string(anthropic_text, "type", "text");
+      json_object_set_string(anthropic_text, "text", "anth");
+      json_array_add(anthropic_content, anthropic_text);
+      json_object_set_string(anthropic_tool_use, "type", "tool_use");
+      json_object_set_string(anthropic_tool_use, "id", "call_3");
+      json_object_set_string(anthropic_tool_use, "name", "grep");
+      json_object_set_string(anthropic_input, "pattern", "x");
+      json_object_add(anthropic_tool_use, "input", anthropic_input);
+      json_array_add(anthropic_content, anthropic_tool_use);
+      json_object_add(anthropic_response, "content", anthropic_content);
 
       responses_event = turbo_model_provider_response_to_event_json(
           turbo_model_provider_openai_responses(), responses_response);
@@ -259,20 +260,20 @@ spec("turbo model provider helpers") {
       check_not_null(responses_event);
       check_not_null(chat_event);
       check_not_null(anthropic_event);
-      check_str_eq(turbo_json_get_string(responses_event, "kind"), "model");
-      check_str_eq(turbo_json_get_string(responses_event, "output_text"), "hello");
-      check_size_eq(turbo_json_array_size(turbo_json_object_get(responses_event, "tool_calls")), 1);
-      check_str_eq(turbo_json_get_string(chat_event, "output_text"), "world");
-      check_size_eq(turbo_json_array_size(turbo_json_object_get(chat_event, "tool_calls")), 1);
-      check_str_eq(turbo_json_get_string(anthropic_event, "output_text"), "anth");
-      check_size_eq(turbo_json_array_size(turbo_json_object_get(anthropic_event, "tool_calls")), 1);
+      check_str_eq(json_get_string(responses_event, "kind"), "model");
+      check_str_eq(json_get_string(responses_event, "output_text"), "hello");
+      check_size_eq(json_array_size(json_object_get(responses_event, "tool_calls")), 1);
+      check_str_eq(json_get_string(chat_event, "output_text"), "world");
+      check_size_eq(json_array_size(json_object_get(chat_event, "tool_calls")), 1);
+      check_str_eq(json_get_string(anthropic_event, "output_text"), "anth");
+      check_size_eq(json_array_size(json_object_get(anthropic_event, "tool_calls")), 1);
 
-      turbo_free_json(&anthropic_event);
-      turbo_free_json(&chat_event);
-      turbo_free_json(&responses_event);
-      turbo_free_json(&anthropic_response);
-      turbo_free_json(&chat_response);
-      turbo_free_json(&responses_response);
+      json_free(anthropic_event); anthropic_event = NULL;
+      json_free(chat_event); chat_event = NULL;
+      json_free(responses_event); responses_event = NULL;
+      json_free(anthropic_response); anthropic_response = NULL;
+      json_free(chat_response); chat_response = NULL;
+      json_free(responses_response); responses_response = NULL;
     }
 
     it("should normalize provider sse payloads into canonical model events") {
@@ -299,13 +300,13 @@ spec("turbo model provider helpers") {
       check_not_null(chat_event);
       check_not_null(responses_event);
       check_not_null(anthropic_event);
-      check_str_eq(turbo_json_get_string(chat_event, "output_text"), "hi");
-      check_str_eq(turbo_json_get_string(responses_event, "output_text"), "yo");
-      check_str_eq(turbo_json_get_string(anthropic_event, "output_text"), "anth");
+      check_str_eq(json_get_string(chat_event, "output_text"), "hi");
+      check_str_eq(json_get_string(responses_event, "output_text"), "yo");
+      check_str_eq(json_get_string(anthropic_event, "output_text"), "anth");
 
-      turbo_free_json(&anthropic_event);
-      turbo_free_json(&responses_event);
-      turbo_free_json(&chat_event);
+      json_free(anthropic_event); anthropic_event = NULL;
+      json_free(responses_event); responses_event = NULL;
+      json_free(chat_event); chat_event = NULL;
     }
 
     it("should emit TurboParser JSON-native events from provider sse payloads") {
@@ -350,10 +351,10 @@ spec("turbo model provider helpers") {
       check_not_null(last_event);
       check_str_eq(turbo_event_kind_json_value(last_event), "model");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(last_event, "response_id")),
+                       json_object_get(last_event, "response_id")),
                    "resp_log");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(last_event, "output_text")),
+                       json_object_get(last_event, "output_text")),
                    "42");
 
       turbo_event_log_destroy(log);
@@ -452,17 +453,17 @@ spec("turbo model provider helpers") {
     }
 
     it("should emit TurboParser JSON-native events from provider responses") {
-      json_value_t *chat_response = turbo_json_create_object();
-      json_value_t *choices = turbo_json_create_array();
-      json_value_t *choice = turbo_json_create_object();
-      json_value_t *message = turbo_json_create_object();
+      json_value_t *chat_response = json_create_object();
+      json_value_t *choices = json_create_array();
+      json_value_t *choice = json_create_object();
+      json_value_t *message = json_create_object();
       model_provider_event_capture_t capture = {0};
 
-      turbo_json_object_set_string(chat_response, "id", "chat_1");
-      turbo_json_object_set_string(message, "content", "world");
-      turbo_json_object_add(choice, "message", message);
-      turbo_json_array_add(choices, choice);
-      turbo_json_object_add(chat_response, "choices", choices);
+      json_object_set_string(chat_response, "id", "chat_1");
+      json_object_set_string(message, "content", "world");
+      json_object_add(choice, "message", message);
+      json_array_add(choices, choice);
+      json_object_add(chat_response, "choices", choices);
 
       check_int_eq(turbo_model_provider_response_emit_json_value(
                        turbo_model_provider_openai_chat_completions(), chat_response,
@@ -475,16 +476,16 @@ spec("turbo model provider helpers") {
       free(capture.response_id);
       free(capture.first_tool_arguments);
       free(capture.kind);
-      turbo_free_json(&chat_response);
+      json_free(chat_response); chat_response = NULL;
     }
 
     it("should normalize provider responses directly into TurboParser JSON-native model events") {
-      json_value_t *responses_response = turbo_json_create_object();
-      json_value_t *responses_output = turbo_json_create_array();
-      json_value_t *responses_text_item = turbo_json_create_object();
-      json_value_t *responses_content = turbo_json_create_array();
-      json_value_t *responses_text_part = turbo_json_create_object();
-      json_value_t *responses_tool_call = turbo_json_create_object();
+      json_value_t *responses_response = json_create_object();
+      json_value_t *responses_output = json_create_array();
+      json_value_t *responses_text_item = json_create_object();
+      json_value_t *responses_content = json_create_array();
+      json_value_t *responses_text_part = json_create_object();
+      json_value_t *responses_tool_call = json_create_object();
       json_value_t *event = NULL;
       const json_value_t *tool_calls;
       const json_value_t *first_call;
@@ -496,19 +497,19 @@ spec("turbo model provider helpers") {
       check_not_null(responses_text_part);
       check_not_null(responses_tool_call);
 
-      turbo_json_object_set_string(responses_response, "id", "resp_json_value");
-      turbo_json_object_set_string(responses_text_part, "type", "output_text");
-      turbo_json_object_set_string(responses_text_part, "text", "hello");
-      turbo_json_array_add(responses_content, responses_text_part);
-      turbo_json_object_set_string(responses_text_item, "type", "message");
-      turbo_json_object_add(responses_text_item, "content", responses_content);
-      turbo_json_array_add(responses_output, responses_text_item);
-      turbo_json_object_set_string(responses_tool_call, "type", "function_call");
-      turbo_json_object_set_string(responses_tool_call, "call_id", "call_json_value");
-      turbo_json_object_set_string(responses_tool_call, "name", "sum");
-      turbo_json_object_set_string(responses_tool_call, "arguments", "{\"a\":1}");
-      turbo_json_array_add(responses_output, responses_tool_call);
-      turbo_json_object_add(responses_response, "output", responses_output);
+      json_object_set_string(responses_response, "id", "resp_json_value");
+      json_object_set_string(responses_text_part, "type", "output_text");
+      json_object_set_string(responses_text_part, "text", "hello");
+      json_array_add(responses_content, responses_text_part);
+      json_object_set_string(responses_text_item, "type", "message");
+      json_object_add(responses_text_item, "content", responses_content);
+      json_array_add(responses_output, responses_text_item);
+      json_object_set_string(responses_tool_call, "type", "function_call");
+      json_object_set_string(responses_tool_call, "call_id", "call_json_value");
+      json_object_set_string(responses_tool_call, "name", "sum");
+      json_object_set_string(responses_tool_call, "arguments", "{\"a\":1}");
+      json_array_add(responses_output, responses_tool_call);
+      json_object_add(responses_response, "output", responses_output);
 
       event = turbo_model_provider_response_to_event_json_value(
           turbo_model_provider_openai_responses(), responses_response);
@@ -516,24 +517,24 @@ spec("turbo model provider helpers") {
       check_str_eq(turbo_event_kind_json_value(event), "model");
       check_str_eq(
           turbo_runtime_json_value_as_string(
-              turbo_json_object_get(event, "response_id")),
+              json_object_get(event, "response_id")),
           "resp_json_value");
       check_str_eq(
           turbo_runtime_json_value_as_string(
-              turbo_json_object_get(event, "output_text")),
+              json_object_get(event, "output_text")),
           "hello");
 
-      tool_calls = turbo_json_object_get(event, "tool_calls");
+      tool_calls = json_object_get(event, "tool_calls");
       check_not_null(tool_calls);
       check_size_eq(turbo_runtime_json_value_size(tool_calls), 1);
-      first_call = turbo_json_array_get(tool_calls, 0);
+      first_call = json_array_get(tool_calls, 0);
       check_str_eq(
           turbo_runtime_json_value_as_string(
-              turbo_json_object_get(first_call, "name")),
+              json_object_get(first_call, "name")),
           "sum");
 
       turbo_runtime_json_destroy(event);
-      turbo_free_json(&responses_response);
+      json_free(responses_response); responses_response = NULL;
     }
   }
 }

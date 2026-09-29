@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_graph_run_log.h"
 
 #include <stdio.h>
@@ -13,7 +14,7 @@ static int write_phase_json_value_node(turbo_graph_exec_ctx_t *ctx, void *user_d
   json_value_t *value;
 
   snprintf(key, sizeof(key), "visited_%s", payload->value);
-  value = turbo_json_create_bool(1);
+  value = json_create_bool(1);
   check_not_null(value);
   return turbo_runtime_json_object_set(ctx->json_value_state, key, value) ==
                  TURBO_RUNTIME_JSON_OK
@@ -28,7 +29,7 @@ spec("turbo graph run log runtime") {
     it("should capture one interrupted TurboParser JSON-native run segment") {
       turbo_graph_t *graph = turbo_graph_create("graph-run-log");
       turbo_graph_run_log_t *log = turbo_graph_run_log_create();
-      json_value_t *state = turbo_json_create_object();
+      json_value_t *state = json_create_object();
       json_value_t *result_state = NULL;
       turbo_graph_run_options_t options = {0};
       turbo_graph_run_result_t result = {0};
@@ -77,7 +78,7 @@ spec("turbo graph run log runtime") {
     it("should resume one checkpointed TurboParser JSON-native segment into a fresh run log") {
       turbo_graph_t *graph = turbo_graph_create("graph-run-log-resume");
       turbo_graph_run_log_t *log = turbo_graph_run_log_create();
-      json_value_t *state = turbo_json_create_object();
+      json_value_t *state = json_create_object();
       json_value_t *result_state = NULL;
       turbo_graph_run_options_t options = {0};
       turbo_graph_run_result_t result = {0};
@@ -120,7 +121,7 @@ spec("turbo graph run log runtime") {
       check_not_null(result_state);
       check_int_eq(resumed.status, TURBO_GRAPH_EXEC_OK);
       check_true(turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(result_state, "visited_end"), 0));
+          json_object_get(result_state, "visited_end"), 0));
       check_null(turbo_graph_run_log_checkpoint(log));
       check_int_eq((int)turbo_event_log_size(turbo_graph_run_log_events(log)), 3);
 
@@ -128,10 +129,10 @@ spec("turbo graph run log runtime") {
                                        turbo_event_log_size(turbo_graph_run_log_events(log)) - 1);
       check_not_null(last_event);
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(last_event, "name")),
+                       json_object_get(last_event, "name")),
                    "graph.route");
       check_str_eq(turbo_runtime_json_value_as_string(
-                       turbo_json_object_get(last_event, "detail")),
+                       json_object_get(last_event, "detail")),
                    "complete");
 
       turbo_runtime_json_destroy(result_state);

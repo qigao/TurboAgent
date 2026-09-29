@@ -315,8 +315,21 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
       goto cleanup;
     }
   }
-  task->call->status = turbo_tool_registry_execute(task->registry, task->call->tool_name,
-                                                   task->call->arguments_json, &task->call->output);
+  {
+    turbo_tool_execution_context_t tool_context = {0};
+    tool_context.struct_size = sizeof(tool_context);
+    tool_context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    tool_context.cancel_token = task->cancel_token;
+    tool_context.deadline_mono_ms =
+        task->cancel_token ? turbo_cancel_token_deadline_mono_ms(task->cancel_token) : 0;
+    tool_context.thread_id = task->context.thread_id;
+    tool_context.run_id = task->context.run_id;
+    tool_context.turn_id = task->call->turn_key;
+    tool_context.tool_call_id = task->call->call_id;
+    task->call->status = turbo_tool_registry_execute_with_context(
+        task->registry, task->call->tool_name, task->call->arguments_json, &tool_context,
+        &task->call->output);
+  }
   if (task->call->output && strlen(task->call->output) > task->executor->config.max_output_bytes) {
     free(task->call->output);
     task->call->output = NULL;

@@ -2,10 +2,12 @@
 #define TURBO_TOOL_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <platform.h>
 
 #include "turbo_runtime_json.h"
+#include "turbo_runtime_control.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,10 +46,38 @@ typedef struct turbo_tool_execution_policy_s {
   turbo_tool_idempotency_t idempotency;
 } turbo_tool_execution_policy_t;
 
+#define TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION 1u
+
+/**
+ * Borrowed execution context for one tool invocation.
+ *
+ * The cancellation token and identity strings remain owned by the caller and
+ * are valid only for the duration of the synchronous callback. A zero
+ * deadline disables deadline control. Backends may cooperatively check the
+ * token and may translate the absolute monotonic deadline into their native
+ * timeout representation.
+ */
+typedef struct turbo_tool_execution_context_s {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  const turbo_cancel_token_t *cancel_token;
+  uint64_t deadline_mono_ms;
+  const char *thread_id;
+  const char *run_id;
+  const char *turn_id;
+  const char *tool_call_id;
+} turbo_tool_execution_context_t;
+
 typedef int (*turbo_tool_handler_fn)(const char *arguments_json, char **out_output,
                                      void *user_data);
 typedef int (*turbo_tool_json_value_handler_fn)(const json_value_t *arguments,
                                                 json_value_t **out_result, void *user_data);
+typedef turbo_tool_status_t (*turbo_tool_context_handler_fn)(
+    const char *arguments_json, const turbo_tool_execution_context_t *context,
+    char **out_output, void *user_data);
+typedef turbo_tool_status_t (*turbo_tool_json_value_context_handler_fn)(
+    const json_value_t *arguments, const turbo_tool_execution_context_t *context,
+    json_value_t **out_result, void *user_data);
 typedef void (*turbo_tool_user_data_free_fn)(void *user_data);
 
 typedef struct turbo_tool_definition_s {
@@ -93,6 +123,26 @@ typedef struct turbo_tool_definition_v3_s {
   const char *const *required_capabilities;
   size_t required_capability_count;
 } turbo_tool_definition_v3_t;
+
+#define TURBO_TOOL_DEFINITION_V4_ABI_VERSION 4u
+
+/**
+ * Versioned tool definition with context-aware callbacks.
+ *
+ * The legacy callbacks remain available for direct callers that do not carry
+ * execution context. Context-aware execution prefers the v4 callbacks and
+ * falls back to the legacy callbacks when they are absent.
+ */
+typedef struct turbo_tool_definition_v4_s {
+  size_t struct_size;
+  unsigned int abi_version;
+  turbo_tool_definition_t definition;
+  turbo_tool_execution_policy_t execution_policy;
+  const char *const *required_capabilities;
+  size_t required_capability_count;
+  turbo_tool_context_handler_fn context_handler;
+  turbo_tool_json_value_context_handler_fn json_value_context_handler;
+} turbo_tool_definition_v4_t;
 
 #ifdef __cplusplus
 }

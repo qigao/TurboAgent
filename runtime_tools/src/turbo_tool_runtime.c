@@ -26,6 +26,7 @@ static char *turbo_tool_runtime_strdup(const char *src) {
 struct turbo_tool_runtime_s {
   size_t ref_count;
   const turbo_tool_runtime_vtable_t *vtable;
+  const turbo_tool_runtime_vtable_v2_t *vtable_v2;
   void *impl;
 };
 
@@ -63,6 +64,28 @@ static int turbo_tool_runtime_bridge_json_value_handler(const json_value_t *argu
 
   status = turbo_tool_runtime_invoke_json_value(entry->runtime, entry->name, arguments, out_result);
   return status == TURBO_TOOL_OK ? 0 : -1;
+}
+
+static turbo_tool_status_t turbo_tool_runtime_bridge_context_handler(
+    const char *arguments_json, const turbo_tool_execution_context_t *context,
+    char **out_output, void *user_data) {
+  turbo_tool_runtime_bridge_entry_t *entry = (turbo_tool_runtime_bridge_entry_t *)user_data;
+  if (!entry || !entry->runtime || !entry->name || !out_output) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  return turbo_tool_runtime_invoke_with_context(entry->runtime, entry->name, arguments_json,
+                                                context, out_output);
+}
+
+static turbo_tool_status_t turbo_tool_runtime_bridge_json_value_context_handler(
+    const json_value_t *arguments, const turbo_tool_execution_context_t *context,
+    json_value_t **out_result, void *user_data) {
+  turbo_tool_runtime_bridge_entry_t *entry = (turbo_tool_runtime_bridge_entry_t *)user_data;
+  if (!entry || !entry->runtime || !entry->name || !out_result) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  return turbo_tool_runtime_invoke_json_value_with_context(entry->runtime, entry->name, arguments,
+                                                           context, out_result);
 }
 
 static void turbo_tool_runtime_bridge_entry_destroy(void *user_data) {
@@ -149,10 +172,34 @@ static turbo_tool_status_t turbo_tool_runtime_native_invoke_json_value(
   return turbo_tool_registry_execute_json_value(native_impl->registry, name, arguments, out_result);
 }
 
-static const turbo_tool_runtime_vtable_t turbo_tool_runtime_native_vtable = {
-    turbo_tool_runtime_native_destroy_impl, turbo_tool_runtime_native_tool_count,
-    turbo_tool_runtime_native_get_tool, turbo_tool_runtime_native_invoke,
-    turbo_tool_runtime_native_invoke_json_value};
+static turbo_tool_status_t turbo_tool_runtime_native_invoke_with_context(
+    void *impl, const char *name, const char *arguments_json,
+    const turbo_tool_execution_context_t *context, char **out_output) {
+  const turbo_tool_runtime_native_impl_t *native_impl =
+      (const turbo_tool_runtime_native_impl_t *)impl;
+  if (!native_impl) return TURBO_TOOL_INVALID_ARGUMENT;
+  return turbo_tool_registry_execute_with_context(native_impl->registry, name, arguments_json,
+                                                  context, out_output);
+}
+
+static turbo_tool_status_t turbo_tool_runtime_native_invoke_json_value_with_context(
+    void *impl, const char *name, const json_value_t *arguments,
+    const turbo_tool_execution_context_t *context, json_value_t **out_result) {
+  const turbo_tool_runtime_native_impl_t *native_impl =
+      (const turbo_tool_runtime_native_impl_t *)impl;
+  if (!native_impl) return TURBO_TOOL_INVALID_ARGUMENT;
+  return turbo_tool_registry_execute_json_value_with_context(native_impl->registry, name, arguments,
+                                                             context, out_result);
+}
+
+static const turbo_tool_runtime_vtable_v2_t turbo_tool_runtime_native_vtable = {
+    sizeof(turbo_tool_runtime_vtable_v2_t),
+    TURBO_TOOL_RUNTIME_VTABLE_V2_ABI_VERSION,
+    {turbo_tool_runtime_native_destroy_impl, turbo_tool_runtime_native_tool_count,
+     turbo_tool_runtime_native_get_tool, turbo_tool_runtime_native_invoke,
+     turbo_tool_runtime_native_invoke_json_value},
+    turbo_tool_runtime_native_invoke_with_context,
+    turbo_tool_runtime_native_invoke_json_value_with_context};
 
 turbo_tool_runtime_t *turbo_tool_runtime_create(const turbo_tool_runtime_vtable_t *vtable,
                                                 void *impl) {
@@ -173,6 +220,29 @@ turbo_tool_runtime_t *turbo_tool_runtime_create(const turbo_tool_runtime_vtable_
 
   runtime->ref_count = 1;
   runtime->vtable = vtable;
+  runtime->vtable_v2 = NULL;
+  runtime->impl = impl;
+  return runtime;
+}
+
+turbo_tool_runtime_t *turbo_tool_runtime_create_v2(const turbo_tool_runtime_vtable_v2_t *vtable,
+                                                   void *impl) {
+  turbo_tool_runtime_t *runtime;
+  if (!vtable || vtable->struct_size < sizeof(*vtable) ||
+      vtable->abi_version != TURBO_TOOL_RUNTIME_VTABLE_V2_ABI_VERSION ||
+      !vtable->base.destroy || !vtable->base.tool_count || !vtable->base.get_tool ||
+      !vtable->base.invoke || !vtable->base.invoke_json_value || !vtable->invoke_with_context ||
+      !vtable->invoke_json_value_with_context) {
+    return NULL;
+  }
+  runtime = (turbo_tool_runtime_t *)calloc(1, sizeof(*runtime));
+  if (!runtime) {
+    if (impl) vtable->base.destroy(impl);
+    return NULL;
+  }
+  runtime->ref_count = 1;
+  runtime->vtable = &vtable->base;
+  runtime->vtable_v2 = vtable;
   runtime->impl = impl;
   return runtime;
 }
@@ -228,6 +298,19 @@ turbo_tool_status_t turbo_tool_runtime_invoke(turbo_tool_runtime_t *runtime, con
                                  out_output);
 }
 
+turbo_tool_status_t turbo_tool_runtime_invoke_with_context(
+    turbo_tool_runtime_t *runtime, const char *name, const char *arguments_json,
+    const turbo_tool_execution_context_t *context, char **out_output) {
+  if (!runtime || !name || !out_output) return TURBO_TOOL_INVALID_ARGUMENT;
+  *out_output = NULL;
+  if (runtime->vtable_v2) {
+    return runtime->vtable_v2->invoke_with_context(
+        runtime->impl, name, arguments_json ? arguments_json : "{}", context, out_output);
+  }
+  return runtime->vtable->invoke(runtime->impl, name, arguments_json ? arguments_json : "{}",
+                                 out_output);
+}
+
 turbo_tool_status_t turbo_tool_runtime_invoke_json_value(turbo_tool_runtime_t *runtime,
                                                          const char *name,
                                                          const json_value_t *arguments,
@@ -237,6 +320,18 @@ turbo_tool_status_t turbo_tool_runtime_invoke_json_value(turbo_tool_runtime_t *r
   }
 
   *out_result = NULL;
+  return runtime->vtable->invoke_json_value(runtime->impl, name, arguments, out_result);
+}
+
+turbo_tool_status_t turbo_tool_runtime_invoke_json_value_with_context(
+    turbo_tool_runtime_t *runtime, const char *name, const json_value_t *arguments,
+    const turbo_tool_execution_context_t *context, json_value_t **out_result) {
+  if (!runtime || !name || !out_result) return TURBO_TOOL_INVALID_ARGUMENT;
+  *out_result = NULL;
+  if (runtime->vtable_v2) {
+    return runtime->vtable_v2->invoke_json_value_with_context(runtime->impl, name, arguments,
+                                                             context, out_result);
+  }
   return runtime->vtable->invoke_json_value(runtime->impl, name, arguments, out_result);
 }
 
@@ -293,7 +388,7 @@ turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_reg
   for (index = 0; index < tool_count; ++index) {
     turbo_tool_runtime_tool_t tool = {0};
     turbo_tool_runtime_bridge_entry_t *entry;
-    turbo_tool_definition_v3_t definition = {0};
+    turbo_tool_definition_v4_t definition = {0};
     turbo_tool_status_t status = turbo_tool_runtime_get_tool(runtime, index, &tool);
     if (status != TURBO_TOOL_OK) {
       turbo_tool_runtime_rollback_registry(runtime, registry, index);
@@ -314,7 +409,7 @@ turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_reg
     }
 
     definition.struct_size = sizeof(definition);
-    definition.abi_version = TURBO_TOOL_DEFINITION_V3_ABI_VERSION;
+    definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
     definition.definition.name = tool.name;
     definition.definition.description = tool.description;
     definition.definition.parameters_json = tool.parameters_json;
@@ -324,12 +419,14 @@ turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_reg
     definition.definition.json_value_handler = turbo_tool_runtime_bridge_json_value_handler;
     definition.definition.user_data = entry;
     definition.definition.user_data_free = turbo_tool_runtime_bridge_entry_destroy;
+    definition.context_handler = turbo_tool_runtime_bridge_context_handler;
+    definition.json_value_context_handler = turbo_tool_runtime_bridge_json_value_context_handler;
     definition.execution_policy = *execution_policy;
     definition.required_capabilities = turbo_tool_runtime_required_capabilities;
     definition.required_capability_count = sizeof(turbo_tool_runtime_required_capabilities) /
                                            sizeof(turbo_tool_runtime_required_capabilities[0]);
 
-    status = turbo_tool_registry_add_v3(registry, &definition);
+    status = turbo_tool_registry_add_v4(registry, &definition);
     if (status != TURBO_TOOL_OK) {
       turbo_tool_runtime_bridge_entry_destroy(entry);
       turbo_tool_runtime_rollback_registry(runtime, registry, index);
@@ -374,14 +471,14 @@ turbo_tool_runtime_t *turbo_tool_runtime_native_create(void) {
     return NULL;
   }
 
-  return turbo_tool_runtime_create(&turbo_tool_runtime_native_vtable, impl);
+  return turbo_tool_runtime_create_v2(&turbo_tool_runtime_native_vtable, impl);
 }
 
 turbo_tool_status_t turbo_tool_runtime_native_add_tool(turbo_tool_runtime_t *runtime,
                                                        const turbo_tool_definition_t *definition) {
   turbo_tool_runtime_native_impl_t *impl;
 
-  if (!runtime || !definition || runtime->vtable != &turbo_tool_runtime_native_vtable) {
+  if (!runtime || !definition || runtime->vtable_v2 != &turbo_tool_runtime_native_vtable) {
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
 

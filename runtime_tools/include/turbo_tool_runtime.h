@@ -34,6 +34,26 @@ typedef struct turbo_tool_runtime_vtable_s {
                                            json_value_t **out_result);
 } turbo_tool_runtime_vtable_t;
 
+#define TURBO_TOOL_RUNTIME_VTABLE_V2_ABI_VERSION 2u
+
+/**
+ * Additive runtime vtable for context-aware invocation.
+ *
+ * The embedded v1 vtable preserves every existing runtime. Registry bridges
+ * prefer these callbacks when a caller supplies execution context.
+ */
+typedef struct turbo_tool_runtime_vtable_v2_s {
+  size_t struct_size;
+  uint32_t abi_version;
+  turbo_tool_runtime_vtable_t base;
+  turbo_tool_status_t (*invoke_with_context)(
+      void *impl, const char *name, const char *arguments_json,
+      const turbo_tool_execution_context_t *context, char **out_output);
+  turbo_tool_status_t (*invoke_json_value_with_context)(
+      void *impl, const char *name, const json_value_t *arguments,
+      const turbo_tool_execution_context_t *context, json_value_t **out_result);
+} turbo_tool_runtime_vtable_v2_t;
+
 /**
  * @brief Create a generic tool runtime backed by a caller-provided vtable.
  * @param vtable Backend vtable. All entries must be non-NULL.
@@ -42,6 +62,10 @@ typedef struct turbo_tool_runtime_vtable_s {
  */
 CXX_C_API turbo_tool_runtime_t *turbo_tool_runtime_create(const turbo_tool_runtime_vtable_t *vtable,
                                                           void *impl);
+
+/** Create a runtime that can receive borrowed invocation context. */
+CXX_C_API turbo_tool_runtime_t *
+turbo_tool_runtime_create_v2(const turbo_tool_runtime_vtable_v2_t *vtable, void *impl);
 
 /**
  * @brief Retain a runtime handle for shared ownership.
@@ -87,6 +111,11 @@ CXX_C_API turbo_tool_status_t turbo_tool_runtime_invoke(turbo_tool_runtime_t *ru
                                                         const char *arguments_json,
                                                         char **out_output);
 
+/** Invoke with generic execution context; v1 runtimes fall back to invoke(). */
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_invoke_with_context(
+    turbo_tool_runtime_t *runtime, const char *name, const char *arguments_json,
+    const turbo_tool_execution_context_t *context, char **out_output);
+
 /**
  * @brief Invoke one runtime tool by name through the TurboParser JSON-native boundary.
  * @param runtime Runtime handle.
@@ -99,6 +128,11 @@ CXX_C_API turbo_tool_status_t turbo_tool_runtime_invoke_json_value(turbo_tool_ru
                                                                    const char *name,
                                                                    const json_value_t *arguments,
                                                                    json_value_t **out_result);
+
+/** JSON-native context-aware invoke; v1 runtimes fall back compatibly. */
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_invoke_json_value_with_context(
+    turbo_tool_runtime_t *runtime, const char *name, const json_value_t *arguments,
+    const turbo_tool_execution_context_t *context, json_value_t **out_result);
 
 /**
  * @brief Build a `turbo_tool_registry_t` bridge over a runtime.

@@ -52,6 +52,8 @@ typedef struct {
   int strict;
   turbo_tool_handler_fn handler;
   turbo_tool_json_value_handler_fn json_value_handler;
+  turbo_tool_context_handler_fn context_handler;
+  turbo_tool_json_value_context_handler_fn json_value_context_handler;
   void *user_data;
   turbo_tool_user_data_free_fn user_data_free;
   turbo_tool_execution_policy_t execution_policy;
@@ -203,14 +205,16 @@ static int turbo_tool_execution_policy_valid(const turbo_tool_execution_policy_t
 static turbo_tool_status_t turbo_tool_registry_add_with_policy(
     turbo_tool_registry_t *registry, const turbo_tool_definition_t *definition,
     const turbo_tool_execution_policy_t *execution_policy, const char *const *required_capabilities,
-    size_t required_capability_count) {
+    size_t required_capability_count, turbo_tool_context_handler_fn context_handler,
+    turbo_tool_json_value_context_handler_fn json_value_context_handler) {
   turbo_tool_status_t status;
   turbo_tool_entry_t *entry;
   size_t capability_index;
 
   if (!registry || !definition || !definition->name || !definition->description ||
       (!definition->parameters_json && !definition->parameters_schema) ||
-      (!definition->handler && !definition->json_value_handler) ||
+      (!definition->handler && !definition->json_value_handler && !context_handler &&
+       !json_value_context_handler) ||
       !turbo_tool_execution_policy_valid(execution_policy) ||
       (required_capability_count > 0 && !required_capabilities)) {
     return TURBO_TOOL_INVALID_ARGUMENT;
@@ -275,6 +279,8 @@ static turbo_tool_status_t turbo_tool_registry_add_with_policy(
   entry->strict = definition->strict;
   entry->handler = definition->handler;
   entry->json_value_handler = definition->json_value_handler;
+  entry->context_handler = context_handler;
+  entry->json_value_context_handler = json_value_context_handler;
   entry->user_data = definition->user_data;
   entry->user_data_free = definition->user_data_free;
   entry->execution_policy = *execution_policy;
@@ -286,7 +292,8 @@ turbo_tool_status_t turbo_tool_registry_add(turbo_tool_registry_t *registry,
                                             const turbo_tool_definition_t *definition) {
   const turbo_tool_execution_policy_t legacy_policy = {TURBO_TOOL_EXECUTION_SEQUENTIAL,
                                                        TURBO_TOOL_IDEMPOTENCY_NONE};
-  return turbo_tool_registry_add_with_policy(registry, definition, &legacy_policy, NULL, 0);
+  return turbo_tool_registry_add_with_policy(registry, definition, &legacy_policy, NULL, 0,
+                                             NULL, NULL);
 }
 
 turbo_tool_status_t turbo_tool_registry_add_v2(turbo_tool_registry_t *registry,
@@ -296,7 +303,7 @@ turbo_tool_status_t turbo_tool_registry_add_v2(turbo_tool_registry_t *registry,
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
   return turbo_tool_registry_add_with_policy(registry, &definition->definition,
-                                             &definition->execution_policy, NULL, 0);
+                                             &definition->execution_policy, NULL, 0, NULL, NULL);
 }
 
 turbo_tool_status_t turbo_tool_registry_add_v3(turbo_tool_registry_t *registry,
@@ -307,7 +314,19 @@ turbo_tool_status_t turbo_tool_registry_add_v3(turbo_tool_registry_t *registry,
   }
   return turbo_tool_registry_add_with_policy(
       registry, &definition->definition, &definition->execution_policy,
-      definition->required_capabilities, definition->required_capability_count);
+      definition->required_capabilities, definition->required_capability_count, NULL, NULL);
+}
+
+turbo_tool_status_t turbo_tool_registry_add_v4(turbo_tool_registry_t *registry,
+                                               const turbo_tool_definition_v4_t *definition) {
+  if (!definition || definition->struct_size < sizeof(*definition) ||
+      definition->abi_version != TURBO_TOOL_DEFINITION_V4_ABI_VERSION) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  return turbo_tool_registry_add_with_policy(
+      registry, &definition->definition, &definition->execution_policy,
+      definition->required_capabilities, definition->required_capability_count,
+      definition->context_handler, definition->json_value_context_handler);
 }
 
 turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *registry, const char *name) {
@@ -431,7 +450,7 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
 
   for (name_index = 0; name_index < name_count; ++name_index) {
     const turbo_tool_entry_t *entry;
-    turbo_tool_definition_v3_t definition;
+    turbo_tool_definition_v4_t definition;
     turbo_tool_status_t status;
     size_t previous;
 
@@ -460,7 +479,7 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
 
     memset(&definition, 0, sizeof(definition));
     definition.struct_size = sizeof(definition);
-    definition.abi_version = TURBO_TOOL_DEFINITION_V3_ABI_VERSION;
+    definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
     definition.definition.name = entry->name;
     definition.definition.description = entry->description;
     definition.definition.parameters_json = entry->parameters_json;
@@ -468,13 +487,15 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
     definition.definition.strict = entry->strict;
     definition.definition.handler = entry->handler;
     definition.definition.json_value_handler = entry->json_value_handler;
+    definition.context_handler = entry->context_handler;
+    definition.json_value_context_handler = entry->json_value_context_handler;
     definition.definition.user_data = entry->user_data;
     definition.definition.user_data_free = NULL;
     definition.execution_policy = entry->execution_policy;
     definition.required_capabilities = (const char *const *)entry->required_capabilities;
     definition.required_capability_count = entry->required_capability_count;
 
-    status = turbo_tool_registry_add_v3(projection, &definition);
+    status = turbo_tool_registry_add_v4(projection, &definition);
     if (status != TURBO_TOOL_OK) {
       turbo_tool_registry_destroy(projection);
       return status;
@@ -502,27 +523,28 @@ turbo_tool_status_t turbo_tool_registry_compose(const turbo_tool_registry_t *con
       turbo_tool_registry_destroy(composite);
       return TURBO_TOOL_INVALID_ARGUMENT;
     }
-    for (tool_index = 0; tool_index < turbo_tool_registry_count(sources[source_index]);
-         ++tool_index) {
-      turbo_tool_definition_v3_t definition;
+    for (tool_index = 0; tool_index < sources[source_index]->count; ++tool_index) {
+      const turbo_tool_entry_t *entry = &sources[source_index]->entries[tool_index];
+      turbo_tool_definition_v4_t definition;
       turbo_tool_status_t status;
       memset(&definition, 0, sizeof(definition));
       definition.struct_size = sizeof(definition);
-      definition.abi_version = TURBO_TOOL_DEFINITION_V3_ABI_VERSION;
-      status = turbo_tool_registry_get_definition(sources[source_index], tool_index,
-                                                  &definition.definition);
-      if (status != TURBO_TOOL_OK) {
-        turbo_tool_registry_destroy(composite);
-        return status;
-      }
+      definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+      definition.definition.name = entry->name;
+      definition.definition.description = entry->description;
+      definition.definition.parameters_json = entry->parameters_json;
+      definition.definition.parameters_schema = entry->parameters_schema;
+      definition.definition.strict = entry->strict;
+      definition.definition.handler = entry->handler;
+      definition.definition.json_value_handler = entry->json_value_handler;
+      definition.definition.user_data = entry->user_data;
       definition.definition.user_data_free = NULL;
-      status = turbo_tool_registry_get_execution_policy(
-          sources[source_index], definition.definition.name, &definition.execution_policy);
-      if (status == TURBO_TOOL_OK)
-        status = turbo_tool_registry_get_required_capabilities(
-            sources[source_index], definition.definition.name, &definition.required_capabilities,
-            &definition.required_capability_count);
-      if (status == TURBO_TOOL_OK) status = turbo_tool_registry_add_v3(composite, &definition);
+      definition.execution_policy = entry->execution_policy;
+      definition.required_capabilities = (const char *const *)entry->required_capabilities;
+      definition.required_capability_count = entry->required_capability_count;
+      definition.context_handler = entry->context_handler;
+      definition.json_value_context_handler = entry->json_value_context_handler;
+      status = turbo_tool_registry_add_v4(composite, &definition);
       if (status != TURBO_TOOL_OK) {
         turbo_tool_registry_destroy(composite);
         return status;
@@ -533,31 +555,80 @@ turbo_tool_status_t turbo_tool_registry_compose(const turbo_tool_registry_t *con
   return TURBO_TOOL_OK;
 }
 
+static int turbo_tool_execution_context_valid(
+    const turbo_tool_execution_context_t *context) {
+  return !context ||
+         (context->struct_size >= sizeof(*context) &&
+          context->abi_version == TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION);
+}
+
+static void turbo_tool_registry_discard_output(char **out_output) {
+  if (out_output && *out_output) {
+    free(*out_output);
+    *out_output = NULL;
+  }
+}
+
+static void turbo_tool_registry_discard_json_result(json_value_t **out_result) {
+  if (out_result && *out_result) {
+    turbo_runtime_json_destroy(*out_result);
+    *out_result = NULL;
+  }
+}
+
 turbo_tool_status_t turbo_tool_registry_execute(const turbo_tool_registry_t *registry,
                                                 const char *name, const char *arguments_json,
                                                 char **out_output) {
   const turbo_tool_entry_t *entry;
   int rc;
 
-  if (!registry || !name || !out_output) {
-    return TURBO_TOOL_INVALID_ARGUMENT;
-  }
-
+  if (!registry || !name || !out_output) return TURBO_TOOL_INVALID_ARGUMENT;
   *out_output = NULL;
   entry = turbo_tool_registry_find(registry, name);
-  if (!entry) {
-    return TURBO_TOOL_NOT_FOUND;
-  }
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
 
-  rc = entry->handler(arguments_json ? arguments_json : "{}", out_output, entry->user_data);
-  if (rc != 0) {
-    if (*out_output) {
-      free(*out_output);
-      *out_output = NULL;
-    }
+  if (entry->handler) {
+    rc = entry->handler(arguments_json ? arguments_json : "{}", out_output, entry->user_data);
+    if (rc == 0) return TURBO_TOOL_OK;
+    turbo_tool_registry_discard_output(out_output);
     return TURBO_TOOL_ERROR;
   }
+  if (entry->context_handler) {
+    turbo_tool_status_t status =
+        entry->context_handler(arguments_json ? arguments_json : "{}", NULL, out_output,
+                               entry->user_data);
+    if (status != TURBO_TOOL_OK) turbo_tool_registry_discard_output(out_output);
+    return status;
+  }
+  return TURBO_TOOL_ERROR;
+}
 
+turbo_tool_status_t turbo_tool_registry_execute_with_context(
+    const turbo_tool_registry_t *registry, const char *name, const char *arguments_json,
+    const turbo_tool_execution_context_t *context, char **out_output) {
+  const turbo_tool_entry_t *entry;
+  int rc;
+
+  if (!registry || !name || !out_output || !turbo_tool_execution_context_valid(context)) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  *out_output = NULL;
+  entry = turbo_tool_registry_find(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+
+  if (entry->context_handler) {
+    turbo_tool_status_t status =
+        entry->context_handler(arguments_json ? arguments_json : "{}", context, out_output,
+                               entry->user_data);
+    if (status != TURBO_TOOL_OK) turbo_tool_registry_discard_output(out_output);
+    return status;
+  }
+  if (!entry->handler) return TURBO_TOOL_ERROR;
+  rc = entry->handler(arguments_json ? arguments_json : "{}", out_output, entry->user_data);
+  if (rc != 0) {
+    turbo_tool_registry_discard_output(out_output);
+    return TURBO_TOOL_ERROR;
+  }
   return TURBO_TOOL_OK;
 }
 
@@ -568,28 +639,51 @@ turbo_tool_status_t turbo_tool_registry_execute_json_value(const turbo_tool_regi
   const turbo_tool_entry_t *entry;
   int rc;
 
-  if (!registry || !name || !out_result) {
-    return TURBO_TOOL_INVALID_ARGUMENT;
-  }
-
+  if (!registry || !name || !out_result) return TURBO_TOOL_INVALID_ARGUMENT;
   *out_result = NULL;
   entry = turbo_tool_registry_find(registry, name);
-  if (!entry) {
-    return TURBO_TOOL_NOT_FOUND;
-  }
-  if (!entry->json_value_handler) {
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+
+  if (entry->json_value_handler) {
+    rc = entry->json_value_handler(arguments, out_result, entry->user_data);
+    if (rc == 0) return TURBO_TOOL_OK;
+    turbo_tool_registry_discard_json_result(out_result);
     return TURBO_TOOL_ERROR;
   }
+  if (entry->json_value_context_handler) {
+    turbo_tool_status_t status =
+        entry->json_value_context_handler(arguments, NULL, out_result, entry->user_data);
+    if (status != TURBO_TOOL_OK) turbo_tool_registry_discard_json_result(out_result);
+    return status;
+  }
+  return TURBO_TOOL_ERROR;
+}
 
+turbo_tool_status_t turbo_tool_registry_execute_json_value_with_context(
+    const turbo_tool_registry_t *registry, const char *name, const json_value_t *arguments,
+    const turbo_tool_execution_context_t *context, json_value_t **out_result) {
+  const turbo_tool_entry_t *entry;
+  int rc;
+
+  if (!registry || !name || !out_result || !turbo_tool_execution_context_valid(context)) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  *out_result = NULL;
+  entry = turbo_tool_registry_find(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+
+  if (entry->json_value_context_handler) {
+    turbo_tool_status_t status =
+        entry->json_value_context_handler(arguments, context, out_result, entry->user_data);
+    if (status != TURBO_TOOL_OK) turbo_tool_registry_discard_json_result(out_result);
+    return status;
+  }
+  if (!entry->json_value_handler) return TURBO_TOOL_ERROR;
   rc = entry->json_value_handler(arguments, out_result, entry->user_data);
   if (rc != 0) {
-    if (*out_result) {
-      turbo_runtime_json_destroy(*out_result);
-      *out_result = NULL;
-    }
+    turbo_tool_registry_discard_json_result(out_result);
     return TURBO_TOOL_ERROR;
   }
-
   return TURBO_TOOL_OK;
 }
 

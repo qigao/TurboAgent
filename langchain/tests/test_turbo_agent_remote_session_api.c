@@ -299,14 +299,14 @@ static json_value_t *remote_session_make_memory_record_variant(const json_value_
   check_not_null(record_fixture);
   check_not_null(key);
   check_not_null(text);
-  record_namespace = turbo_json_get_string(record_fixture, "namespace");
+  record_namespace = json_get_string(record_fixture, "namespace");
   check_not_null(record_namespace);
-  record_json = turbo_json_clone(record_fixture);
+  record_json = json_clone(record_fixture);
   check_not_null(record_json);
   check_true(snprintf(record_id, sizeof(record_id), "%s::%s", record_namespace, key) > 0);
-  turbo_json_object_set_string(record_json, "id", record_id);
-  turbo_json_object_set_string(record_json, "key", key);
-  turbo_json_object_set_string(record_json, "text", text);
+  json_object_set_string(record_json, "id", record_id);
+  json_object_set_string(record_json, "key", key);
+  json_object_set_string(record_json, "text", text);
   return record_json;
 }
 
@@ -314,7 +314,7 @@ static int remote_session_write_bool_json_value_node(turbo_graph_exec_ctx_t *ctx
   remote_session_bool_write_t *write = (remote_session_bool_write_t *)user_data;
   json_value_t *value;
 
-  value = turbo_json_create_bool(write->value);
+  value = json_create_bool(write->value);
   if (!value) {
     return -1;
   }
@@ -330,7 +330,7 @@ static int remote_session_finalize_json_node(turbo_graph_exec_ctx_t *ctx, void *
   if (!ctx || !ctx->state || !output_text) {
     return -1;
   }
-  turbo_json_object_set_bool(ctx->state, "visited_end", true);
+  json_object_set_bool(ctx->state, "visited_end", true);
   return turbo_agent_state_set_final_answer(ctx->state, output_text);
 }
 
@@ -376,8 +376,8 @@ static json_value_t *create_remote_session_supervisor_state_json_value(void) {
   check_int_eq(turbo_agent_state_request_handoff(state, "executor", "delegate execution"), 0);
   check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
   check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
-  bound = turbo_json_clone(state);
-  turbo_free_json(&state);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
   return bound;
 }
 
@@ -391,8 +391,8 @@ static json_value_t *create_remote_session_committed_supervisor_state_json_value
   check_int_eq(turbo_agent_state_commit_handoff(state), 0);
   check_int_eq(turbo_agent_state_request_review(state, "need approval"), 0);
   check_int_eq(turbo_agent_state_set_review_approved(state, 0), 0);
-  bound = turbo_json_clone(state);
-  turbo_free_json(&state);
+  bound = json_clone(state);
+  json_free(state); state = NULL;
   return bound;
 }
 
@@ -410,14 +410,14 @@ static int remote_session_check_latest_handoff_event(const json_value_t *inspect
   const char *actual_reason;
   const char *actual_active_agent;
 
-  if (!inspect_json || turbo_json_type(inspect_json) != TURBO_JSON_OBJECT) {
+  if (!inspect_json || json_type(inspect_json) != JSON_OBJECT) {
     return 0;
   }
-  handoff_event = turbo_json_object_get(inspect_json, "latest_handoff_event");
-  if (!handoff_event || turbo_json_type(handoff_event) != TURBO_JSON_OBJECT) {
+  handoff_event = json_object_get(inspect_json, "latest_handoff_event");
+  if (!handoff_event || json_type(handoff_event) != JSON_OBJECT) {
     return 0;
   }
-  actual_kind = turbo_json_get_string(handoff_event, "kind");
+  actual_kind = json_get_string(handoff_event, "kind");
   if (!actual_kind || strcmp(actual_kind, "handoff") != 0) {
     return 0;
   }
@@ -439,25 +439,25 @@ static int remote_session_check_orchestration_latest_handoff_event(
     const char *target_agent, const char *reason, const char *active_agent) {
   const json_value_t *supervisor_inspect;
 
-  if (!inspect_json || turbo_json_type(inspect_json) != TURBO_JSON_OBJECT) {
+  if (!inspect_json || json_type(inspect_json) != JSON_OBJECT) {
     return 0;
   }
-  supervisor_inspect = turbo_json_object_get(inspect_json, "supervisor_inspect");
+  supervisor_inspect = json_object_get(inspect_json, "supervisor_inspect");
   return remote_session_check_latest_handoff_event(supervisor_inspect, phase, from_agent,
                                                    target_agent, reason, active_agent);
 }
 
 static json_value_t *create_remote_session_command_json_value(const char *text) {
-  json_value_t *command = turbo_json_create_object();
+  json_value_t *command = json_create_object();
 
   check_not_null(command);
   check_int_eq(
       turbo_runtime_json_object_set(
-          command, "kind", turbo_json_create_string("append_user_message")),
+          command, "kind", json_create_string("append_user_message")),
       TURBO_RUNTIME_JSON_OK);
   check_int_eq(
       turbo_runtime_json_object_set(command, "text",
-                                         turbo_json_create_string(text)),
+                                         json_create_string(text)),
       TURBO_RUNTIME_JSON_OK);
   return command;
 }
@@ -572,9 +572,9 @@ static void remote_session_test_coro(void *arg) {
                                                   &interrupt_options, &summary_json,
                                                   &result_state) == 0 &&
       summary_json && result_state) {
-    thread_id = turbo_json_get_string(summary_json, "thread_id");
-    run_id = turbo_json_get_string(summary_json, "run_id");
-    checkpoint_id = turbo_json_get_string(summary_json, "checkpoint_id");
+    thread_id = json_get_string(summary_json, "thread_id");
+    run_id = json_get_string(summary_json, "run_id");
+    checkpoint_id = json_get_string(summary_json, "checkpoint_id");
     if (thread_id && run_id && checkpoint_id &&
         strcmp(thread_id, turbo_agent_remote_session_thread_id(state->session)) == 0 &&
         strcmp(run_id, turbo_agent_remote_session_last_run_id(state->session)) == 0 &&
@@ -592,8 +592,8 @@ static void remote_session_test_coro(void *arg) {
   if (state->accessors_ok &&
       turbo_agent_remote_session_get_thread_state_json_value(state->session, &thread_state) == 0 &&
       thread_state &&
-      turbo_json_type(thread_state) == TURBO_JSON_OBJECT &&
-      ((visited_end_value = turbo_json_object_get(thread_state, "visited_end")) == NULL ||
+      json_type(thread_state) == JSON_OBJECT &&
+      ((visited_end_value = json_object_get(thread_state, "visited_end")) == NULL ||
        !turbo_runtime_json_value_as_bool(visited_end_value, 0))) {
     state->thread_state_ok = 1;
   }
@@ -610,15 +610,15 @@ static void remote_session_test_coro(void *arg) {
   if (state->observability_ok &&
       turbo_agent_remote_session_get_thread_timeline_json_value(state->session, &timeline) == 0 &&
       timeline &&
-      turbo_json_type(timeline) == TURBO_JSON_OBJECT) {
+      json_type(timeline) == JSON_OBJECT) {
     state->timeline_ok = 1;
   }
   if (state->timeline_ok &&
       turbo_agent_remote_session_load_thread_history_events_json_value(state->session,
                                                                  &history_events) == 0 &&
       history_events &&
-      turbo_json_type(history_events) == TURBO_JSON_ARRAY &&
-      turbo_json_array_get(history_events, 0) != NULL) {
+      json_type(history_events) == JSON_ARRAY &&
+      json_array_get(history_events, 0) != NULL) {
     state->thread_history_ok = 1;
   }
   if (state->thread_history_ok &&
@@ -638,13 +638,13 @@ static void remote_session_test_coro(void *arg) {
   if (state->thread_observer_ok &&
       turbo_agent_remote_session_get_thread_trace_events_json_value(state->session, &trace_events) == 0 &&
       trace_events &&
-      turbo_json_type(trace_events) == TURBO_JSON_ARRAY) {
+      json_type(trace_events) == JSON_ARRAY) {
     state->thread_trace_ok = 1;
   }
   if (state->thread_trace_ok &&
       turbo_agent_remote_session_get_branch_tree(state->session, &branch_tree_json) == 0 &&
       branch_tree_json &&
-      turbo_json_object_get(branch_tree_json, "current_checkpoint_summary")) {
+      json_object_get(branch_tree_json, "current_checkpoint_summary")) {
     state->branch_tree_ok = 1;
   }
   if (state->branch_tree_ok &&
@@ -656,19 +656,19 @@ static void remote_session_test_coro(void *arg) {
   }
   if (state->lineage_ok &&
       turbo_agent_remote_session_get_supervisor_inbox(state->session, &inbox_json) == 0 &&
-      inbox_json && turbo_json_type(inbox_json) == TURBO_JSON_ARRAY &&
-      turbo_json_array_size(inbox_json) == 0) {
+      inbox_json && json_type(inbox_json) == JSON_ARRAY &&
+      json_array_size(inbox_json) == 0) {
     state->supervisor_inbox_ok = 1;
   }
   history_entry = NULL;
   if (state->supervisor_inbox_ok &&
       turbo_agent_remote_session_get_supervisor_handoff_history(state->session, &history_json) == 0 &&
-      history_json && turbo_json_type(history_json) == TURBO_JSON_ARRAY &&
-      turbo_json_array_size(history_json) == 1 &&
-      (history_entry = turbo_json_array_get(history_json, 0)) != NULL &&
-      strcmp(turbo_json_get_string(history_entry, "from_agent"), "planner") == 0 &&
-      strcmp(turbo_json_get_string(history_entry, "target_agent"), "executor") == 0 &&
-      strcmp(turbo_json_get_string(history_entry, "reason"), "delegate execution") == 0) {
+      history_json && json_type(history_json) == JSON_ARRAY &&
+      json_array_size(history_json) == 1 &&
+      (history_entry = json_array_get(history_json, 0)) != NULL &&
+      strcmp(json_get_string(history_entry, "from_agent"), "planner") == 0 &&
+      strcmp(json_get_string(history_entry, "target_agent"), "executor") == 0 &&
+      strcmp(json_get_string(history_entry, "reason"), "delegate execution") == 0) {
     state->supervisor_history_ok = 1;
   }
   if (state->supervisor_history_ok &&
@@ -684,8 +684,8 @@ static void remote_session_test_coro(void *arg) {
   }
   if (state->supervisor_inspect_ok &&
       turbo_agent_remote_session_list_child_runs(state->session, NULL, &child_runs_json) == 0 &&
-      child_runs_json && turbo_json_type(child_runs_json) == TURBO_JSON_ARRAY &&
-      turbo_json_array_size(child_runs_json) == 0) {
+      child_runs_json && json_type(child_runs_json) == JSON_ARRAY &&
+      json_array_size(child_runs_json) == 0) {
     state->child_runs_ok = 1;
   }
   if (state->child_runs_ok &&
@@ -699,19 +699,19 @@ static void remote_session_test_coro(void *arg) {
         orchestration_inspect_json, "requested", "planner", "executor", "delegate execution",
         "planner");
   }
-  output_item = turbo_json_create_object();
+  output_item = json_create_object();
   check_not_null(output_item);
-  turbo_json_object_set_string(output_item, "child_run_id",
+  json_object_set_string(output_item, "child_run_id",
                                turbo_agent_remote_session_last_run_id(state->session));
-  turbo_json_object_set_string(output_item, "child_checkpoint_id",
+  json_object_set_string(output_item, "child_checkpoint_id",
                                turbo_agent_remote_session_last_checkpoint_id(state->session));
-  turbo_json_object_set_string(output_item, "child_thread_id",
+  json_object_set_string(output_item, "child_thread_id",
                                turbo_agent_remote_session_thread_id(state->session));
-  turbo_json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
-  turbo_json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
-  turbo_json_object_set_string(output_item, "parent_tool_name", "delegate");
-  turbo_json_object_set_string(output_item, "parent_graph_run_id", "run_parent");
-  turbo_json_object_set_string(output_item, "call_frame_id", "call_parent");
+  json_object_set_string(output_item, "parent_agent_run_id", "run_parent");
+  json_object_set_string(output_item, "parent_tool_call_id", "call_parent");
+  json_object_set_string(output_item, "parent_tool_name", "delegate");
+  json_object_set_string(output_item, "parent_graph_run_id", "run_parent");
+  json_object_set_string(output_item, "call_frame_id", "call_parent");
 
   check_int_eq(turbo_agent_remote_session_get_child_run(state->session, output_item,
                                                         &child_run_json),
@@ -748,12 +748,12 @@ static void remote_session_test_coro(void *arg) {
   check_int_eq(turbo_agent_remote_session_get_child_multi_agent_inspect(
                    state->session, output_item, &child_multi_agent_inspect_json),
                0);
-  check_str_eq(turbo_json_get_string(child_run_json, "id"),
+  check_str_eq(json_get_string(child_run_json, "id"),
                turbo_agent_remote_session_last_run_id(state->session));
-  check_str_eq(turbo_json_get_string(child_checkpoint_json, "id"),
+  check_str_eq(json_get_string(child_checkpoint_json, "id"),
                turbo_agent_remote_session_last_checkpoint_id(state->session));
-  check_size_eq(turbo_json_array_size(child_checkpoints_json), 1);
-  check_str_eq(turbo_json_get_string(turbo_json_array_get(child_checkpoints_json, 0), "id"),
+  check_size_eq(json_array_size(child_checkpoints_json), 1);
+  check_str_eq(json_get_string(json_array_get(child_checkpoints_json, 0), "id"),
                turbo_agent_remote_session_last_checkpoint_id(state->session));
   turbo_agent_test_check_checkpoint_context(
       child_checkpoint_context_json, turbo_agent_remote_session_thread_id(state->session),
@@ -770,12 +770,12 @@ static void remote_session_test_coro(void *arg) {
       turbo_agent_remote_session_last_run_id(state->session),
       turbo_agent_remote_session_last_checkpoint_id(state->session), 1, 0);
   check_not_null(child_history_events);
-  check_true(turbo_json_type(child_history_events) ==
-             TURBO_JSON_ARRAY);
-  check_true(turbo_json_array_get(child_history_events, 0) != NULL);
+  check_true(json_type(child_history_events) ==
+             JSON_ARRAY);
+  check_true(json_array_get(child_history_events, 0) != NULL);
   check_not_null(child_trace_events);
-  check_true(turbo_json_type(child_trace_events) ==
-             TURBO_JSON_ARRAY);
+  check_true(json_type(child_trace_events) ==
+             JSON_ARRAY);
   turbo_agent_test_check_child_inspect(child_inspect_json,
                                        turbo_agent_remote_session_thread_id(state->session),
                                        turbo_agent_remote_session_last_run_id(state->session),
@@ -800,28 +800,28 @@ static void remote_session_test_coro(void *arg) {
   history_events = NULL;
   turbo_runtime_json_destroy(trace_events);
   trace_events = NULL;
-  turbo_free_json(&context_json);
-  turbo_free_json(&index_json);
-  turbo_free_json(&branch_tree_json);
-  turbo_free_json(&lineage_json);
-  turbo_free_json(&inbox_json);
-  turbo_free_json(&history_json);
-  turbo_free_json(&supervisor_inspect_json);
-  turbo_free_json(&child_runs_json);
-  turbo_free_json(&orchestration_inspect_json);
-  turbo_free_json(&child_inspect_json);
-  turbo_free_json(&child_orchestration_inspect_json);
-  turbo_free_json(&child_multi_agent_inspect_json);
-  turbo_free_json(&child_branch_tree_json);
-  turbo_free_json(&child_checkpoints_json);
-  turbo_free_json(&child_checkpoint_json);
-  turbo_free_json(&child_checkpoint_context_json);
-  turbo_free_json(&child_run_json);
-  turbo_free_json(&output_item);
+  json_free(context_json); context_json = NULL;
+  json_free(index_json); index_json = NULL;
+  json_free(branch_tree_json); branch_tree_json = NULL;
+  json_free(lineage_json); lineage_json = NULL;
+  json_free(inbox_json); inbox_json = NULL;
+  json_free(history_json); history_json = NULL;
+  json_free(supervisor_inspect_json); supervisor_inspect_json = NULL;
+  json_free(child_runs_json); child_runs_json = NULL;
+  json_free(orchestration_inspect_json); orchestration_inspect_json = NULL;
+  json_free(child_inspect_json); child_inspect_json = NULL;
+  json_free(child_orchestration_inspect_json); child_orchestration_inspect_json = NULL;
+  json_free(child_multi_agent_inspect_json); child_multi_agent_inspect_json = NULL;
+  json_free(child_branch_tree_json); child_branch_tree_json = NULL;
+  json_free(child_checkpoints_json); child_checkpoints_json = NULL;
+  json_free(child_checkpoint_json); child_checkpoint_json = NULL;
+  json_free(child_checkpoint_context_json); child_checkpoint_context_json = NULL;
+  json_free(child_run_json); child_run_json = NULL;
+  json_free(output_item); output_item = NULL;
   turbo_runtime_json_destroy(child_timeline);
   turbo_runtime_json_destroy(child_history_events);
   turbo_runtime_json_destroy(child_trace_events);
-  turbo_free_json(&summary_json);
+  json_free(summary_json); summary_json = NULL;
 
   command = create_remote_session_command_json_value("resume from remote session");
   if (state->branch_tree_ok &&
@@ -829,37 +829,37 @@ static void remote_session_test_coro(void *arg) {
                                                             command, NULL, &resume_summary_json,
                                                             &result_state) == 0 &&
       resume_summary_json && result_state &&
-      turbo_json_type(result_state) == TURBO_JSON_OBJECT &&
-      (resume_status = turbo_json_get_string(resume_summary_json, "status")) &&
+      json_type(result_state) == JSON_OBJECT &&
+      (resume_status = json_get_string(resume_summary_json, "status")) &&
       strcmp(resume_status, "completed") == 0 &&
       turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(result_state, "visited_end"), 0)) {
+          json_object_get(result_state, "visited_end"), 0)) {
     state->resume_ok = 1;
   }
   turbo_runtime_json_destroy(command);
   command = NULL;
   turbo_runtime_json_destroy(result_state);
   result_state = NULL;
-  turbo_free_json(&resume_summary_json);
+  json_free(resume_summary_json); resume_summary_json = NULL;
 
   input_state = create_remote_session_state_json_value();
   if (turbo_agent_remote_session_start_json_value_graph(state->session, "remote-session", input_state,
                                                   &interrupt_options, &summary_json,
                                                   &result_state) == 0 &&
       summary_json && result_state) {
-    fork_run_id = turbo_json_get_string(summary_json, "run_id");
+    fork_run_id = json_get_string(summary_json, "run_id");
     command = create_remote_session_command_json_value("fork from remote session");
     if (fork_run_id &&
         turbo_agent_remote_session_fork_thread_command_json_value(state->session, "remote-session",
                                                             command, NULL, &fork_summary_json,
                                                             &thread_state) == 0 &&
         fork_summary_json && thread_state &&
-        turbo_json_type(thread_state) == TURBO_JSON_OBJECT &&
-        (fork_status = turbo_json_get_string(fork_summary_json, "status")) &&
+        json_type(thread_state) == JSON_OBJECT &&
+        (fork_status = json_get_string(fork_summary_json, "status")) &&
         strcmp(fork_status, "completed") == 0 &&
-        strcmp(turbo_json_get_string(fork_summary_json, "run_id"), fork_run_id) != 0 &&
+        strcmp(json_get_string(fork_summary_json, "run_id"), fork_run_id) != 0 &&
         turbo_runtime_json_value_as_bool(
-            turbo_json_object_get(thread_state, "visited_end"), 0)) {
+            json_object_get(thread_state, "visited_end"), 0)) {
       state->fork_ok = 1;
     }
   }
@@ -872,8 +872,8 @@ static void remote_session_test_coro(void *arg) {
   input_state = NULL;
   result_state = NULL;
   thread_state = NULL;
-  turbo_free_json(&summary_json);
-  turbo_free_json(&fork_summary_json);
+  json_free(summary_json); summary_json = NULL;
+  json_free(fork_summary_json); fork_summary_json = NULL;
 
   remote_session_test_server_cleanup(&state->server, &state->server_initialized,
                                      &state->server_started);
@@ -942,9 +942,9 @@ static void remote_session_committed_handoff_coro(void *arg) {
       goto cleanup;
     }
 
-    committed_thread_id = turbo_json_get_string(summary_json, "thread_id");
-    committed_run_id = turbo_json_get_string(summary_json, "run_id");
-    committed_checkpoint_id = turbo_json_get_string(summary_json, "checkpoint_id");
+    committed_thread_id = json_get_string(summary_json, "thread_id");
+    committed_run_id = json_get_string(summary_json, "run_id");
+    committed_checkpoint_id = json_get_string(summary_json, "checkpoint_id");
     if (!committed_thread_id || !committed_run_id || !committed_checkpoint_id) {
       goto cleanup;
     }
@@ -975,9 +975,9 @@ static void remote_session_committed_handoff_coro(void *arg) {
 cleanup:
   turbo_runtime_json_destroy(input_state);
   turbo_runtime_json_destroy(result_state);
-  turbo_free_json(&summary_json);
-  turbo_free_json(&supervisor_inspect_json);
-  turbo_free_json(&orchestration_inspect_json);
+  json_free(summary_json); summary_json = NULL;
+  json_free(supervisor_inspect_json); supervisor_inspect_json = NULL;
+  json_free(orchestration_inspect_json); orchestration_inspect_json = NULL;
 
   remote_session_test_server_cleanup(&state->server, &state->server_initialized,
                                      &state->server_started);
@@ -1046,30 +1046,30 @@ static void remote_session_read_helpers_coro(void *arg) {
                                                   &interrupt_options, &summary_json,
                                                   &result_state) == 0 &&
       summary_json && result_state) {
-    thread_id = turbo_json_get_string(summary_json, "thread_id");
-    run_id = turbo_json_get_string(summary_json, "run_id");
+    thread_id = json_get_string(summary_json, "thread_id");
+    run_id = json_get_string(summary_json, "run_id");
 
     if (thread_id && turbo_agent_remote_session_get_thread(state->session, &thread_json) == 0 &&
         thread_json &&
-        (loaded_thread_id = turbo_json_get_string(thread_json, "id")) != NULL &&
+        (loaded_thread_id = json_get_string(thread_json, "id")) != NULL &&
         strcmp(loaded_thread_id, thread_id) == 0) {
       state->read_thread_ok = 1;
     }
     if (run_id &&
         turbo_agent_remote_session_get_latest_run(state->session, &latest_run_json) == 0 &&
         latest_run_json &&
-        (latest_run_id = turbo_json_get_string(latest_run_json, "id")) != NULL &&
+        (latest_run_id = json_get_string(latest_run_json, "id")) != NULL &&
         strcmp(latest_run_id, run_id) == 0 &&
-        (latest_run_status = turbo_json_get_string(latest_run_json, "status")) != NULL &&
+        (latest_run_status = json_get_string(latest_run_json, "status")) != NULL &&
         strcmp(latest_run_status, "interrupted") == 0) {
       state->read_latest_run_ok = 1;
     }
     if (run_id &&
         turbo_agent_remote_session_get_pending_run(state->session, &pending_run_json) == 0 &&
         pending_run_json &&
-        (pending_run_id = turbo_json_get_string(pending_run_json, "id")) != NULL &&
+        (pending_run_id = json_get_string(pending_run_json, "id")) != NULL &&
         strcmp(pending_run_id, run_id) == 0 &&
-        (pending_run_status = turbo_json_get_string(pending_run_json, "status")) != NULL &&
+        (pending_run_status = json_get_string(pending_run_json, "status")) != NULL &&
         strcmp(pending_run_status, "interrupted") == 0) {
       state->read_pending_run_ok = 1;
     }
@@ -1077,10 +1077,10 @@ static void remote_session_read_helpers_coro(void *arg) {
 
   turbo_runtime_json_destroy(input_state);
   turbo_runtime_json_destroy(result_state);
-  turbo_free_json(&summary_json);
-  turbo_free_json(&thread_json);
-  turbo_free_json(&latest_run_json);
-  turbo_free_json(&pending_run_json);
+  json_free(summary_json); summary_json = NULL;
+  json_free(thread_json); thread_json = NULL;
+  json_free(latest_run_json); latest_run_json = NULL;
+  json_free(pending_run_json); pending_run_json = NULL;
 
   remote_session_test_server_cleanup(&state->server, &state->server_initialized,
                                      &state->server_started);
@@ -1135,27 +1135,27 @@ static void remote_session_high_level_helpers_coro(void *arg) {
                                             "hello remote session", NULL, &summary_json,
                                             &result_state) == 0 &&
       summary_json && result_state &&
-      strcmp(turbo_json_get_string(summary_json, "status"), "completed") == 0 &&
+      strcmp(json_get_string(summary_json, "status"), "completed") == 0 &&
       turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(result_state, "visited_end"), 0)) {
+          json_object_get(result_state, "visited_end"), 0)) {
     state->start_text_ok = 1;
   }
   turbo_runtime_json_destroy(result_state);
   result_state = NULL;
-  turbo_free_json(&summary_json);
+  json_free(summary_json); summary_json = NULL;
 
   messages = create_remote_session_messages_json_value();
   if (turbo_agent_remote_session_start_messages(state->session, "remote-session", messages, NULL,
                                                 &summary_json, &result_state) == 0 &&
       summary_json && result_state &&
-      strcmp(turbo_json_get_string(summary_json, "status"), "completed") == 0 &&
+      strcmp(json_get_string(summary_json, "status"), "completed") == 0 &&
       turbo_runtime_json_value_as_bool(
-          turbo_json_object_get(result_state, "visited_end"), 0)) {
+          json_object_get(result_state, "visited_end"), 0)) {
     state->start_messages_ok = 1;
   }
   turbo_runtime_json_destroy(result_state);
   result_state = NULL;
-  turbo_free_json(&summary_json);
+  json_free(summary_json); summary_json = NULL;
   turbo_runtime_json_destroy(messages);
   messages = NULL;
 
@@ -1163,50 +1163,50 @@ static void remote_session_high_level_helpers_coro(void *arg) {
                                              "hello remote session", NULL, &text,
                                              &summary_json) == 0 &&
       text && strcmp(text, REMOTE_SESSION_FINAL_OUTPUT_JSON) == 0 && summary_json &&
-      strcmp(turbo_json_get_string(summary_json, "status"), "completed") == 0) {
+      strcmp(json_get_string(summary_json, "status"), "completed") == 0) {
     state->invoke_text_ok = 1;
   }
   free(text);
   text = NULL;
-  turbo_free_json(&summary_json);
+  json_free(summary_json); summary_json = NULL;
 
   messages = create_remote_session_messages_json_value();
   if (turbo_agent_remote_session_invoke_messages_text(state->session, "remote-session", messages,
                                                       NULL, &text, &summary_json) == 0 &&
       text && strcmp(text, REMOTE_SESSION_FINAL_OUTPUT_JSON) == 0 && summary_json &&
-      strcmp(turbo_json_get_string(summary_json, "status"), "completed") == 0) {
+      strcmp(json_get_string(summary_json, "status"), "completed") == 0) {
     state->invoke_messages_text_ok = 1;
   }
   free(text);
   text = NULL;
-  turbo_free_json(&summary_json);
+  json_free(summary_json); summary_json = NULL;
   turbo_runtime_json_destroy(messages);
   messages = NULL;
 
   if (turbo_agent_remote_session_invoke_json(state->session, "remote-session",
                                              "hello remote session", NULL, &result_json,
                                              &summary_json) == 0 &&
-      result_json && turbo_json_get_bool(result_json, "ok", false) &&
-      turbo_json_get_int(result_json, "value", 0) == 42 && summary_json &&
-      strcmp(turbo_json_get_string(summary_json, "status"), "completed") == 0) {
+      result_json && json_get_bool(result_json, "ok", false) &&
+      json_get_int(result_json, "value", 0) == 42 && summary_json &&
+      strcmp(json_get_string(summary_json, "status"), "completed") == 0) {
     state->invoke_json_ok = 1;
   }
-  turbo_free_json(&result_json);
+  json_free(result_json); result_json = NULL;
   result_json = NULL;
-  turbo_free_json(&summary_json);
+  json_free(summary_json); summary_json = NULL;
 
   messages = create_remote_session_messages_json_value();
   if (turbo_agent_remote_session_invoke_messages_json(state->session, "remote-session", messages,
                                                       NULL, &result_json, &summary_json) == 0 &&
-      result_json && turbo_json_get_bool(result_json, "ok", false) &&
-      turbo_json_get_int(result_json, "value", 0) == 42 && summary_json &&
-      strcmp(turbo_json_get_string(summary_json, "status"), "completed") == 0) {
+      result_json && json_get_bool(result_json, "ok", false) &&
+      json_get_int(result_json, "value", 0) == 42 && summary_json &&
+      strcmp(json_get_string(summary_json, "status"), "completed") == 0) {
     state->invoke_messages_json_ok = 1;
   }
 
   turbo_runtime_json_destroy(messages);
-  turbo_free_json(&result_json);
-  turbo_free_json(&summary_json);
+  json_free(result_json); result_json = NULL;
+  json_free(summary_json); summary_json = NULL;
 
   remote_session_test_server_cleanup(&state->server, &state->server_initialized,
                                      &state->server_started);
@@ -1306,17 +1306,17 @@ static void remote_session_memory_test_coro(void *arg) {
     return;
   }
 
-  invalid_record = turbo_json_create_object();
+  invalid_record = json_create_object();
   if (!invalid_record) {
     return;
   }
-  turbo_json_object_set_string(invalid_record, "id", "project/demo::broken");
-  turbo_json_object_set_string(invalid_record, "namespace", "project/demo");
-  turbo_json_object_set_string(invalid_record, "kind", "context");
-  turbo_json_object_set_string(invalid_record, "key", "broken");
-  turbo_json_object_set_string(invalid_record, "text", "missing value json");
-  turbo_json_object_set_null(invalid_record, "metadata");
-  turbo_json_object_set_null(invalid_record, "created_at");
+  json_object_set_string(invalid_record, "id", "project/demo::broken");
+  json_object_set_string(invalid_record, "namespace", "project/demo");
+  json_object_set_string(invalid_record, "kind", "context");
+  json_object_set_string(invalid_record, "key", "broken");
+  json_object_set_string(invalid_record, "text", "missing value json");
+  json_object_set_null(invalid_record, "metadata");
+  json_object_set_null(invalid_record, "created_at");
 
   if (turbo_agent_remote_session_memory_validate_record(state->session, record, &record_valid) ==
           0 &&
@@ -1330,14 +1330,14 @@ static void remote_session_memory_test_coro(void *arg) {
       loaded_record &&
       turbo_agent_remote_session_memory_list_records(state->session, "project", &listed_records) ==
           0 &&
-      listed_records && turbo_json_array_size(listed_records) == 1 &&
+      listed_records && json_array_size(listed_records) == 1 &&
       turbo_agent_remote_session_memory_query_records(state->session, "project", "context", "con",
                                                       "remember", &queried_records) == 0 &&
-      queried_records && turbo_json_array_size(queried_records) == 1) {
+      queried_records && json_array_size(queried_records) == 1) {
     record_variant =
         remote_session_make_memory_record_variant(record, "zeta", "remember this too");
     if (record_variant) {
-      turbo_json_object_set_string(record_variant, "created_at", "2026-02-15T12:00:00Z");
+      json_object_set_string(record_variant, "created_at", "2026-02-15T12:00:00Z");
     }
     if (record_variant &&
         turbo_agent_remote_session_memory_put_record(state->session, record_variant) == 0) {
@@ -1347,7 +1347,7 @@ static void remote_session_memory_test_coro(void *arg) {
       options.text_substring = "remember";
       if (turbo_agent_remote_session_memory_query_records_ex(state->session, &options,
                                                              &queried_records_ex) == 0 &&
-          queried_records_ex && turbo_json_array_size(queried_records_ex) == 1) {
+          queried_records_ex && json_array_size(queried_records_ex) == 1) {
         remote_session_check_memory_record_fixture(loaded_record,
                                                    "memory_context_record.golden.json", NULL);
         remote_session_check_memory_record_array_fixture(listed_records,
@@ -1359,7 +1359,7 @@ static void remote_session_memory_test_coro(void *arg) {
         remote_session_check_memory_record_array_fixture(queried_records_ex,
                                                          "memory_query_results.golden.json",
                                                          "context_query");
-        turbo_free_json(&queried_records_ex);
+        json_free(queried_records_ex); queried_records_ex = NULL;
         queried_records_ex = NULL;
 
         options.key_prefix = NULL;
@@ -1373,15 +1373,15 @@ static void remote_session_memory_test_coro(void *arg) {
         options.limit = 1;
         if (turbo_agent_remote_session_memory_query_records_ex(state->session, &options,
                                                                &queried_records_ex) == 0 &&
-            queried_records_ex && turbo_json_array_size(queried_records_ex) == 1 &&
-            strcmp(turbo_json_get_string(turbo_json_array_get(queried_records_ex, 0), "key"),
+            queried_records_ex && json_array_size(queried_records_ex) == 1 &&
+            strcmp(json_get_string(json_array_get(queried_records_ex, 0), "key"),
                    "zeta") == 0 &&
             turbo_agent_remote_session_memory_delete_record(state->session, "project/demo",
                                                             "zeta") == 0 &&
             turbo_agent_remote_session_memory_list_records(state->session, "project",
                                                            &listed_records_after_delete) == 0 &&
             listed_records_after_delete &&
-            turbo_json_array_size(listed_records_after_delete) == 1 &&
+            json_array_size(listed_records_after_delete) == 1 &&
             turbo_agent_remote_session_memory_get_record(state->session, "project/demo", "zeta",
                                                          &deleted_record) != 0 &&
             !deleted_record) {
@@ -1391,15 +1391,15 @@ static void remote_session_memory_test_coro(void *arg) {
     }
   }
 
-  turbo_free_json(&record_variant);
-  turbo_free_json(&queried_records_ex);
-  turbo_free_json(&queried_records);
-  turbo_free_json(&listed_records_after_delete);
-  turbo_free_json(&listed_records);
-  turbo_free_json(&deleted_record);
-  turbo_free_json(&loaded_record);
-  turbo_free_json(&invalid_record);
-  turbo_free_json(&record);
+  json_free(record_variant); record_variant = NULL;
+  json_free(queried_records_ex); queried_records_ex = NULL;
+  json_free(queried_records); queried_records = NULL;
+  json_free(listed_records_after_delete); listed_records_after_delete = NULL;
+  json_free(listed_records); listed_records = NULL;
+  json_free(deleted_record); deleted_record = NULL;
+  json_free(loaded_record); loaded_record = NULL;
+  json_free(invalid_record); invalid_record = NULL;
+  json_free(record); record = NULL;
 
   remote_session_test_server_cleanup(&state->server, &state->server_initialized,
                                      &state->server_started);

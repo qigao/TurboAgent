@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_workflow.h"
@@ -29,7 +30,7 @@ static int supervisor_planner_handoff_node(turbo_graph_exec_ctx_t *ctx, void *us
 
   check_not_null(ctx);
   check_not_null(ctx->state);
-  turbo_json_object_set_bool(ctx->state, "planner_visited", true);
+  json_object_set_bool(ctx->state, "planner_visited", true);
   check_int_eq(turbo_agent_state_request_handoff(ctx->state, "executor", "delegate execution"), 0);
   return turbo_graph_ctx_set_next(ctx, "handoff");
 }
@@ -39,7 +40,7 @@ static int supervisor_executor_node(turbo_graph_exec_ctx_t *ctx, void *user_data
 
   check_not_null(ctx);
   check_not_null(ctx->state);
-  turbo_json_object_set_bool(ctx->state, "executor_visited", true);
+  json_object_set_bool(ctx->state, "executor_visited", true);
   return turbo_graph_ctx_set_next(ctx, "end");
 }
 
@@ -151,8 +152,8 @@ spec("turbo agent workflow graph") {
         TURBO_GRAPH_EXEC_OK);
     check_int_eq(turbo_agent_state_set_active_agent(state, "planner"), 0);
 
-    input = turbo_json_clone(state);
-    turbo_free_json(&state);
+    input = json_clone(state);
+    json_free(state); state = NULL;
     check_not_null(input);
 
     check_int_eq(turbo_graph_run_json_value(graph, input, NULL, &result, &result_state),
@@ -161,23 +162,23 @@ spec("turbo agent workflow graph") {
     check_str_eq(result.last_node, "end");
     check_not_null(result_state);
 
-    result_json = turbo_json_clone(result_state);
+    result_json = json_clone(result_state);
     check_not_null(result_json);
-    check_true(turbo_json_get_bool(result_json, "planner_visited", false));
-    check_true(turbo_json_get_bool(result_json, "executor_visited", false));
+    check_true(json_get_bool(result_json, "planner_visited", false));
+    check_true(json_get_bool(result_json, "executor_visited", false));
     check_str_eq(turbo_agent_state_active_agent(result_json), "executor");
     check_null(turbo_agent_state_handoff_target_agent(result_json));
     check_null(turbo_agent_state_handoff_reason(result_json));
     handoff_history = turbo_agent_state_supervisor_handoff_history(result_json);
     check_not_null(handoff_history);
-    check_size_eq(turbo_json_array_size(handoff_history), 1);
-    handoff_entry = turbo_json_array_get(handoff_history, 0);
+    check_size_eq(json_array_size(handoff_history), 1);
+    handoff_entry = json_array_get(handoff_history, 0);
     check_not_null(handoff_entry);
-    check_str_eq(turbo_json_get_string(handoff_entry, "from_agent"), "planner");
-    check_str_eq(turbo_json_get_string(handoff_entry, "target_agent"), "executor");
-    check_str_eq(turbo_json_get_string(handoff_entry, "reason"), "delegate execution");
+    check_str_eq(json_get_string(handoff_entry, "from_agent"), "planner");
+    check_str_eq(json_get_string(handoff_entry, "target_agent"), "executor");
+    check_str_eq(json_get_string(handoff_entry, "reason"), "delegate execution");
 
-    turbo_free_json(&result_json);
+    json_free(result_json); result_json = NULL;
     turbo_runtime_json_destroy(result_state);
     turbo_runtime_json_destroy(input);
     turbo_graph_destroy(graph);

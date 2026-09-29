@@ -4,6 +4,8 @@
 #ifndef TURBO_AGENT_RUNTIME_V1_INTERNAL_H
 #define TURBO_AGENT_RUNTIME_V1_INTERNAL_H
 
+#include <stddef.h>
+
 #include "turbo_agent_runtime.h"
 
 #include "turbo_agent_state.h"

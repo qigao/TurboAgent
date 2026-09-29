@@ -46,7 +46,8 @@ typedef struct turbo_tool_execution_policy_s {
   turbo_tool_idempotency_t idempotency;
 } turbo_tool_execution_policy_t;
 
-#define TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION 1u
+#define TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION_V1 1u
+#define TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION 2u
 
 /**
  * Borrowed execution context for one tool invocation.
@@ -57,6 +58,9 @@ typedef struct turbo_tool_execution_policy_s {
  * token and may translate the absolute monotonic deadline into their native
  * timeout representation.
  */
+typedef void (*turbo_tool_observation_sink_json_value_fn)(
+    const json_value_t *value, void *user_data);
+
 typedef struct turbo_tool_execution_context_s {
   uint32_t struct_size;
   uint32_t abi_version;
@@ -66,7 +70,30 @@ typedef struct turbo_tool_execution_context_s {
   const char *run_id;
   const char *turn_id;
   const char *tool_call_id;
+
+  /**
+   * Optional canonical Turbo event sink.
+   *
+   * Backends may emit progress/trace events while the synchronous tool callback
+   * is active. The value is borrowed for the callback duration and the sink
+   * must clone it if retention is required.
+   */
+  turbo_tool_observation_sink_json_value_fn event_sink;
+  void *event_sink_user_data;
+
+  /**
+   * Optional full-detail sink.
+   *
+   * A backend that returns a compact model-facing result may publish one
+   * structured full-detail object here. Agent execution journals the latest
+   * detail independently from the model-facing tool output.
+   */
+  turbo_tool_observation_sink_json_value_fn detail_sink;
+  void *detail_sink_user_data;
 } turbo_tool_execution_context_t;
+
+#define TURBO_TOOL_EXECUTION_CONTEXT_V1_SIZE \
+  offsetof(turbo_tool_execution_context_t, event_sink)
 
 typedef int (*turbo_tool_handler_fn)(const char *arguments_json, char **out_output,
                                      void *user_data);

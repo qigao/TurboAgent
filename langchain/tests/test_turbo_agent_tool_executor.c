@@ -152,7 +152,7 @@ spec("turbo agent tool executor") {
     state = tool_executor_state(ids, names, args, 2, 1);
     check_not_null(state);
     ctx.state = state;
-    check_int_ne(turbo_agent_tool_node(&ctx, agent), 0);
+    check_not_equal(turbo_agent_tool_node(&ctx, agent), 0);
     check_equal(probe.calls, 0);
     check_equal(turbo_agent_state_model_error_phase(state), "tool");
 

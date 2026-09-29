@@ -59,7 +59,8 @@ int turbo_agent_responses_sse_to_json(const char *sse_data, size_t sse_len,
     }
 
     if (data[0] != '\0') {
-      if (turbo_parse_json((const uint8_t *)data, strlen(data), &event) != 0) {
+      event = json_parse(data, strlen(data));
+      if (!event) {
         tstr_free(data);
         free(normalized);
         json_free(output_items); output_items = NULL;

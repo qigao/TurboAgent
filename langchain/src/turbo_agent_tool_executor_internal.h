@@ -1,6 +1,8 @@
 #ifndef TURBO_AGENT_TOOL_EXECUTOR_INTERNAL_H
 #define TURBO_AGENT_TOOL_EXECUTOR_INTERNAL_H
 
+#include <stddef.h>
+
 #include "turbo_agent_policy.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_tool_executor.h"

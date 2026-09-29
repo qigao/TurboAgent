@@ -9,13 +9,13 @@ static json_value_t *turbo_agent_state_to_json_object_local(
     return NULL;
   }
 
-  json_state = turbo_json_clone(state);
+  json_state = json_clone(state);
   if (!json_state) {
     return NULL;
   }
 
-  if (turbo_json_type(json_state) != TURBO_JSON_OBJECT) {
-    turbo_free_json(&json_state);
+  if (json_type(json_state) != JSON_OBJECT) {
+    json_free(json_state); json_state = NULL;
     return NULL;
   }
 
@@ -31,20 +31,20 @@ turbo_agent_state_array_version_json_value_local(const json_value_t *state,
   json_value_t *bound = NULL;
 
   if (!json_state || !field_name) {
-    turbo_free_json(&json_state);
+    json_free(json_state); json_state = NULL;
     return NULL;
   }
 
-  versions = turbo_json_object_get(json_state, field_name);
-  if (versions && turbo_json_type(versions) == TURBO_JSON_ARRAY &&
-      index < turbo_json_array_size(versions)) {
-    version = turbo_json_array_get(versions, index);
-    if (version && turbo_json_type(version) == TURBO_JSON_ARRAY) {
-      bound = turbo_json_clone(version);
+  versions = json_object_get(json_state, field_name);
+  if (versions && json_type(versions) == JSON_ARRAY &&
+      index < json_array_size(versions)) {
+    version = json_array_get(versions, index);
+    if (version && json_type(version) == JSON_ARRAY) {
+      bound = json_clone(version);
     }
   }
 
-  turbo_free_json(&json_state);
+  json_free(json_state); json_state = NULL;
   return bound;
 }
 
@@ -56,15 +56,15 @@ turbo_agent_state_latest_array_version_json_value_local(const json_value_t *stat
   size_t count = 0;
 
   if (!json_state || !field_name) {
-    turbo_free_json(&json_state);
+    json_free(json_state); json_state = NULL;
     return NULL;
   }
 
-  versions = turbo_json_object_get(json_state, field_name);
-  if (versions && turbo_json_type(versions) == TURBO_JSON_ARRAY) {
-    count = turbo_json_array_size(versions);
+  versions = json_object_get(json_state, field_name);
+  if (versions && json_type(versions) == JSON_ARRAY) {
+    count = json_array_size(versions);
   }
-  turbo_free_json(&json_state);
+  json_free(json_state); json_state = NULL;
 
   if (count == 0) {
     return NULL;
@@ -81,16 +81,16 @@ turbo_agent_state_array_field_json_value_local(const json_value_t *state,
   json_value_t *bound = NULL;
 
   if (!json_state || !field_name) {
-    turbo_free_json(&json_state);
+    json_free(json_state); json_state = NULL;
     return NULL;
   }
 
-  field = turbo_json_object_get(json_state, field_name);
-  if (field && turbo_json_type(field) == TURBO_JSON_ARRAY) {
-    bound = turbo_json_clone(field);
+  field = json_object_get(json_state, field_name);
+  if (field && json_type(field) == JSON_ARRAY) {
+    bound = json_clone(field);
   }
 
-  turbo_free_json(&json_state);
+  json_free(json_state); json_state = NULL;
   return bound;
 }
 
@@ -103,20 +103,20 @@ turbo_agent_state_array_item_field_json_value_local(const json_value_t *state,
   json_value_t *bound = NULL;
 
   if (!json_state || !field_name) {
-    turbo_free_json(&json_state);
+    json_free(json_state); json_state = NULL;
     return NULL;
   }
 
-  field = turbo_json_object_get(json_state, field_name);
-  if (field && turbo_json_type(field) == TURBO_JSON_ARRAY &&
-      index < turbo_json_array_size(field)) {
-    item = turbo_json_array_get(field, index);
-    if (item && turbo_json_type(item) == TURBO_JSON_OBJECT) {
-      bound = turbo_json_clone(item);
+  field = json_object_get(json_state, field_name);
+  if (field && json_type(field) == JSON_ARRAY &&
+      index < json_array_size(field)) {
+    item = json_array_get(field, index);
+    if (item && json_type(item) == JSON_OBJECT) {
+      bound = json_clone(item);
     }
   }
 
-  turbo_free_json(&json_state);
+  json_free(json_state); json_state = NULL;
   return bound;
 }
 
@@ -128,15 +128,15 @@ turbo_agent_state_latest_array_item_field_json_value_local(
   size_t count = 0;
 
   if (!json_state || !field_name) {
-    turbo_free_json(&json_state);
+    json_free(json_state); json_state = NULL;
     return NULL;
   }
 
-  field = turbo_json_object_get(json_state, field_name);
-  if (field && turbo_json_type(field) == TURBO_JSON_ARRAY) {
-    count = turbo_json_array_size(field);
+  field = json_object_get(json_state, field_name);
+  if (field && json_type(field) == JSON_ARRAY) {
+    count = json_array_size(field);
   }
-  turbo_free_json(&json_state);
+  json_free(json_state); json_state = NULL;
 
   if (count == 0) {
     return NULL;

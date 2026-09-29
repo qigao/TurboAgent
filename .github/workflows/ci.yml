@@ -213,11 +213,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "native SDK restore failed" }
 
           function Resolve-SdkRoot([string]$cmakePackage, [string]$configName) {
+            $suffix = "/sdk/windows-x64/lib/cmake/$cmakePackage/$configName"
             $configFile = Get-ChildItem -Path $packages -Recurse -File -Filter $configName |
-              Where-Object { $_.FullName -like "*\sdk\windows-x64\lib\cmake\$cmakePackage\$configName" } |
+              Where-Object {
+                $normalized = $_.FullName.Replace('\\', '/')
+                $normalized.EndsWith($suffix, [System.StringComparison]::OrdinalIgnoreCase)
+              } |
               Select-Object -First 1
             if (-not $configFile) { throw "missing $configName for windows-x64" }
-            return $configFile.Directory.Parent.Parent.Parent.FullName
+            return $configFile.Directory.Parent.Parent.Parent.Parent.FullName
           }
 
           $saltsRoot = Resolve-SdkRoot "Salts" "SaltsConfig.cmake"

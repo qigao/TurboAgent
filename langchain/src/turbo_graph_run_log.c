@@ -1,4 +1,5 @@
 #include "turbo_graph_run_log.h"
+#include <json_parser.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +34,7 @@ turbo_graph_run_log_clone_checkpoint(const turbo_graph_checkpoint_t *checkpoint,
   }
 
   status = turbo_graph_checkpoint_deserialize(serialized, len, out_checkpoint);
-  turbo_json_serialize_free(serialized);
+  json_serialize_free(serialized);
   return status;
 }
 

@@ -3,13 +3,7 @@
   "version-semver": "1.0.0",
   "dependencies": [
     {
-      "name": "stb"
-    },
-    {
       "name": "boringssl"
-    },
-    {
-      "name": "zstd"
     },
     {
       "name": "sqlite3",

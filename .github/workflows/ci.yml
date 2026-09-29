@@ -65,6 +65,8 @@ jobs:
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
             <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="*" />
+              <PackageReference Include="SaltsUtils.Native" Version="*" />
               <PackageReference Include="CHttp.Native" Version="*" />
             </ItemGroup>
           </Project>
@@ -79,8 +81,11 @@ jobs:
             local config_file
             config_file="$(find "$packages" -type f \
               -path "*/sdk/$rid/lib/cmake/$cmake_package/$config_name" -print -quit)"
-            test -n "$config_file"
-            dirname "$(dirname "$(dirname "$(dirname "$config_file")")")"
+            if [[ -z "$config_file" ]]; then
+              echo "missing $config_name for $rid" >&2
+              return 1
+            fi
+            printf '%s\n' "${config_file%/lib/cmake/$cmake_package/$config_name}"
           }
 
           salts_root="$(resolve_root linux-x64 Salts SaltsConfig.cmake)"
@@ -205,6 +210,8 @@ jobs:
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
             <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="*" />
+              <PackageReference Include="SaltsUtils.Native" Version="*" />
               <PackageReference Include="CHttp.Native" Version="*" />
             </ItemGroup>
           </Project>
@@ -221,7 +228,7 @@ jobs:
               } |
               Select-Object -First 1
             if (-not $configFile) { throw "missing $configName for windows-x64" }
-            return $configFile.Directory.Parent.Parent.Parent.Parent.FullName
+            return $configFile.Directory.Parent.Parent.Parent.FullName
           }
 
           $saltsRoot = Resolve-SdkRoot "Salts" "SaltsConfig.cmake"
@@ -312,6 +319,8 @@ jobs:
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
             <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="*" />
+              <PackageReference Include="SaltsUtils.Native" Version="*" />
               <PackageReference Include="CHttp.Native" Version="*" />
             </ItemGroup>
           </Project>
@@ -325,8 +334,11 @@ jobs:
             local config_file
             config_file="$(find "$packages" -type f \
               -path "*/sdk/android-arm64-v8a/lib/cmake/$cmake_package/$config_name" -print -quit)"
-            test -n "$config_file"
-            dirname "$(dirname "$(dirname "$(dirname "$config_file")")")"
+            if [[ -z "$config_file" ]]; then
+              echo "missing $config_name for android-arm64-v8a" >&2
+              return 1
+            fi
+            printf '%s\n' "${config_file%/lib/cmake/$cmake_package/$config_name}"
           }
 
           {

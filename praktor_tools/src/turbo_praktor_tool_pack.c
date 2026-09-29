@@ -561,7 +561,7 @@ static turbo_tool_status_t turbo_praktor_execute_text(
     goto cleanup;
   }
   if (output.size > binding->max_result_bytes) {
-    tool_status = TURBO_TOOL_OUTPUT_LIMIT;
+    tool_status = TURBO_TOOL_ERROR;
     goto cleanup;
   }
 

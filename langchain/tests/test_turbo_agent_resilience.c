@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_agent_graph.h"
 #include "turbo_agent_resilience.h"
 #include "turbo_agent_state.h"
@@ -102,18 +103,18 @@ spec("turbo agent resilience") {
     ctx.state = state;
     check_int_eq(turbo_agent_model_node(&ctx, agent), 0);
     check_int_eq(transport.calls, 3);
-    attempts = turbo_json_object_get(state, "provider_attempts");
-    check_size_eq(turbo_json_array_size(attempts), 3);
-    check_str_eq(turbo_json_get_string(turbo_json_array_get(attempts, 0), "outcome"),
+    attempts = json_object_get(state, "provider_attempts");
+    check_size_eq(json_array_size(attempts), 3);
+    check_str_eq(json_get_string(json_array_get(attempts, 0), "outcome"),
                  "retry_scheduled");
-    usage_records = turbo_json_object_get(state, "usage_records");
-    check_size_eq(turbo_json_array_size(usage_records), 1);
-    usage = turbo_json_array_get(usage_records, 0);
-    check_int_eq((int)turbo_json_get_double(usage, "input_tokens", -1), 10);
-    check_int_eq((int)turbo_json_get_double(usage, "output_tokens", -1), 2);
-    check_int_eq((int)turbo_json_get_double(usage, "total_tokens", -1), 12);
-    cost = turbo_json_object_get(usage, "cost");
-    check_str_eq(turbo_json_get_string(cost, "status"), "unknown");
+    usage_records = json_object_get(state, "usage_records");
+    check_size_eq(json_array_size(usage_records), 1);
+    usage = json_array_get(usage_records, 0);
+    check_int_eq((int)json_get_double(usage, "input_tokens", -1), 10);
+    check_int_eq((int)json_get_double(usage, "output_tokens", -1), 2);
+    check_int_eq((int)json_get_double(usage, "total_tokens", -1), 12);
+    cost = json_object_get(usage, "cost");
+    check_str_eq(json_get_string(cost, "status"), "unknown");
 
     turbo_runtime_json_destroy(state);
     turbo_agent_destroy(agent);

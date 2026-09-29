@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <json_parser.h>
 #include "turbo_langchain.h"
 
 spec("turbo langchain public api") {
@@ -7,7 +8,7 @@ spec("turbo langchain public api") {
     turbo_graph_t *graph = turbo_graph_create("public-api");
     turbo_chain_t *chain = turbo_chain_create("public-api");
     json_value_t *runtime_value =
-        turbo_json_create_object();
+        json_create_object();
     json_value_t *chain_state = turbo_chain_state_create_json_value();
     void *chain_run_json_value_stream = (void *)turbo_chain_run_json_value_stream;
     void *graph_run_json_value_stream = (void *)turbo_graph_run_json_value_stream;
@@ -2112,8 +2113,8 @@ spec("turbo langchain public api") {
     turbo_graph_checkpoint_destroy(checkpoint);
     turbo_runtime_json_destroy(chain_state);
     turbo_runtime_json_destroy(runtime_value);
-    turbo_free_json(&agent_state);
-    turbo_free_json(&messages);
+    json_free(agent_state); agent_state = NULL;
+    json_free(messages); messages = NULL;
     turbo_action_tool_registry_destroy(action_registry);
     turbo_tool_runtime_destroy(tool_runtime);
     turbo_tool_registry_destroy(tool_registry);

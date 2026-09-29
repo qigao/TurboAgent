@@ -512,10 +512,11 @@ jobs:
             grep -Fx "sdk/$rid/include/turbo_tool.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
           done
           unzip -p "$nupkg" '*.nuspec' > "$RUNNER_TEMP/turboagent.nuspec"
-          grep -F "Salts.Native" "$RUNNER_TEMP/turboagent.nuspec"
-          grep -F "SaltsUtils.Native" "$RUNNER_TEMP/turboagent.nuspec"
-          grep -F "CHttp.Native" "$RUNNER_TEMP/turboagent.nuspec"
-          grep -F "Praktor.Native" "$RUNNER_TEMP/turboagent.nuspec"
+          if grep -q '<dependencies' "$RUNNER_TEMP/turboagent.nuspec"; then
+            echo "TurboAgent.Native must not publish dependency metadata" >&2
+            cat "$RUNNER_TEMP/turboagent.nuspec" >&2
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

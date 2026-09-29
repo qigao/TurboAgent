@@ -277,7 +277,12 @@ jobs:
           agent_vcpkg_libs="$(find "$GITHUB_WORKSPACE/vcpkg_installed/praktor-agent" -type d \
             \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
           export LD_LIBRARY_PATH="$PRAKTOR_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$praktor_vcpkg_libs:$agent_vcpkg_libs:${LD_LIBRARY_PATH:-}"
-          ctest --test-dir build/praktor-agent -R '^test_turbo_praktor_tool_pack    steps:
+          ctest --test-dir build/praktor-agent -R '^test_turbo_praktor_tool_pack$' --no-tests=error --output-on-failure
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2025
+    steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

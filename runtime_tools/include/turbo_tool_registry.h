@@ -66,6 +66,18 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *
 CXX_C_API size_t turbo_tool_registry_count(const turbo_tool_registry_t *registry);
 
 /**
+ * Resolve an exact or uniquely OpenAI-compatible external name to the canonical
+ * registry identity.
+ *
+ * The returned name is borrowed from the registry and remains valid until that
+ * tool is removed or the registry is destroyed. Ambiguous sanitized names fail
+ * with TURBO_TOOL_NOT_FOUND.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_resolve_name(
+    const turbo_tool_registry_t *registry, const char *name,
+    const char **out_canonical_name);
+
+/**
  * @brief Read a stored tool definition by index.
  * @param registry Registry handle.
  * @param index Zero-based tool index.

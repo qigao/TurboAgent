@@ -1,9 +1,13 @@
 #include "turbo_tool_runtime_wasm.h"
 
 #include "turbo_runtime_json.h"
-#include <tstr.h>
 #include "turbo_tool_schema.h"
 
+#include <salts/clock.h>
+#include <salts_fs.h>
+#include <tstr.h>
+
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,8 +16,14 @@ enum {
   TURBO_TOOL_WASM_DEFAULT_MAX_TOOLS = 64,
   TURBO_TOOL_WASM_DEFAULT_METADATA_BYTES = 64 * 1024,
   TURBO_TOOL_WASM_DEFAULT_INPUT_BYTES = 1024 * 1024,
-  TURBO_TOOL_WASM_DEFAULT_OUTPUT_BYTES = 4 * 1024 * 1024
+  TURBO_TOOL_WASM_DEFAULT_OUTPUT_BYTES = 4 * 1024 * 1024,
+  TURBO_TOOL_WASM_DEFAULT_MODULE_BYTES = 16 * 1024 * 1024,
+  TURBO_TOOL_WASM_DEFAULT_ALLOCATION_BYTES = 64 * 1024 * 1024,
+  TURBO_TOOL_WASM_DEFAULT_LINEAR_MEMORY_BYTES = 64 * 1024 * 1024,
+  TURBO_TOOL_WASM_DEFAULT_TABLE_ELEMENTS = 65536
 };
+
+#define TURBO_TOOL_WASM_DEFAULT_FUEL UINT64_C(10000000)
 
 typedef struct turbo_tool_runtime_wasm_tool_s {
   char *name;
@@ -23,32 +33,61 @@ typedef struct turbo_tool_runtime_wasm_tool_s {
   int strict;
 } turbo_tool_runtime_wasm_tool_t;
 
-typedef struct turbo_tool_runtime_wasm_output_s {
-  char *data;
-  size_t size;
-  size_t limit;
-  int overflow;
-} turbo_tool_runtime_wasm_output_t;
-
-typedef struct turbo_tool_runtime_wasm_sink_s {
-  uint64_t size;
-  uint64_t limit;
-  int overflow;
-} turbo_tool_runtime_wasm_sink_t;
-
 typedef struct turbo_tool_runtime_wasm_io_s {
-  turbo_tool_runtime_wasm_output_t output;
-  turbo_tool_runtime_wasm_sink_t error_output;
+  const uint8_t *input;
+  size_t input_size;
+  char *output;
+  size_t output_size;
+  size_t output_limit;
+  int output_overflow;
 } turbo_tool_runtime_wasm_io_t;
 
+typedef enum turbo_tool_runtime_wasm_interrupt_reason_e {
+  TURBO_TOOL_WASM_INTERRUPT_NONE = 0,
+  TURBO_TOOL_WASM_INTERRUPT_CANCELLED,
+  TURBO_TOOL_WASM_INTERRUPT_DEADLINE
+} turbo_tool_runtime_wasm_interrupt_reason_t;
+
+typedef struct turbo_tool_runtime_wasm_control_s {
+  const turbo_tool_execution_context_t *context;
+  turbo_tool_runtime_wasm_interrupt_reason_t reason;
+} turbo_tool_runtime_wasm_control_t;
+
 typedef struct turbo_tool_runtime_wasm_impl_s {
-  turbo_wasm_vm_t *vm;
+  salts_fs_buf_t module_bytes;
+  turbowasm_module module;
+  turbowasm_instance instance;
+
+  uint32_t export_tool_count;
+  uint32_t export_tool_describe;
+  uint32_t export_tool_invoke;
+
   turbo_tool_runtime_wasm_tool_t *tools;
   size_t tool_count;
+
   size_t max_metadata_bytes;
   size_t max_input_bytes;
   size_t max_output_bytes;
+  uint64_t fuel_per_call;
+
+  turbo_tool_runtime_wasm_io_t *active_io;
 } turbo_tool_runtime_wasm_impl_t;
+
+static turbowasm_name turbo_tool_runtime_wasm_name(const char *text) {
+  turbowasm_name name = {0};
+  if (!text) return name;
+  name.bytes = (const uint8_t *)text;
+  name.size = (uint32_t)strlen(text);
+  return name;
+}
+
+static int turbo_tool_runtime_wasm_name_equal(turbowasm_name name, const char *text) {
+  size_t length;
+  if (!text) return 0;
+  length = strlen(text);
+  return length == name.size &&
+         (length == 0 || memcmp(name.bytes, text, length) == 0);
+}
 
 static void turbo_tool_runtime_wasm_tool_clear(turbo_tool_runtime_wasm_tool_t *tool) {
   if (!tool) return;
@@ -60,102 +99,343 @@ static void turbo_tool_runtime_wasm_tool_clear(turbo_tool_runtime_wasm_tool_t *t
 }
 
 static void turbo_tool_runtime_wasm_destroy_impl(void *impl) {
-  turbo_tool_runtime_wasm_impl_t *wasm_impl = (turbo_tool_runtime_wasm_impl_t *)impl;
+  turbo_tool_runtime_wasm_impl_t *wasm_impl =
+      (turbo_tool_runtime_wasm_impl_t *)impl;
   size_t i;
 
   if (!wasm_impl) return;
   for (i = 0; i < wasm_impl->tool_count; ++i)
     turbo_tool_runtime_wasm_tool_clear(&wasm_impl->tools[i]);
   free(wasm_impl->tools);
-  turbo_wasm_vm_destroy(wasm_impl->vm);
+  turbowasm_instance_destroy(&wasm_impl->instance);
+  turbowasm_module_destroy(&wasm_impl->module);
+  salts_fs_buf_free(&wasm_impl->module_bytes);
   free(wasm_impl);
 }
 
-static int turbo_tool_runtime_wasm_collect(const uint8_t *data, size_t size, void *user_data) {
-  turbo_tool_runtime_wasm_io_t *io = (turbo_tool_runtime_wasm_io_t *)user_data;
-  turbo_tool_runtime_wasm_output_t *output = io ? &io->output : NULL;
+static int turbo_tool_runtime_wasm_host_result_i32(
+    turbowasm_value *results,
+    size_t result_capacity,
+    size_t *result_count,
+    turbowasm_trap *trap,
+    int32_t value) {
+  if (!results || result_capacity < 1u || !result_count || !trap) return 0;
+  results[0].kind = TURBOWASM_VALUE_I32;
+  results[0].as.i32 = value;
+  *result_count = 1u;
+  *trap = TURBOWASM_TRAP_NONE;
+  return 1;
+}
 
-  if (!output || (size && !data) || size > output->limit - output->size) {
-    if (output) output->overflow = 1;
-    return -1;
+static turbowasm_status turbo_tool_runtime_wasm_host_input_size(
+    void *context,
+    turbowasm_host_call *call,
+    const turbowasm_value *arguments,
+    size_t argument_count,
+    turbowasm_value *results,
+    size_t result_capacity,
+    size_t *result_count,
+    turbowasm_trap *trap) {
+  turbo_tool_runtime_wasm_impl_t *impl =
+      (turbo_tool_runtime_wasm_impl_t *)context;
+  turbo_tool_runtime_wasm_io_t *io = impl ? impl->active_io : NULL;
+  (void)call;
+  (void)arguments;
+
+  if (!io || argument_count != 0u || io->input_size > INT32_MAX ||
+      !turbo_tool_runtime_wasm_host_result_i32(
+          results, result_capacity, result_count, trap,
+          (int32_t)io->input_size))
+    return TURBOWASM_INVALID_ARGUMENT;
+  return TURBOWASM_OK;
+}
+
+static turbowasm_status turbo_tool_runtime_wasm_host_input_read(
+    void *context,
+    turbowasm_host_call *call,
+    const turbowasm_value *arguments,
+    size_t argument_count,
+    turbowasm_value *results,
+    size_t result_capacity,
+    size_t *result_count,
+    turbowasm_trap *trap) {
+  turbo_tool_runtime_wasm_impl_t *impl =
+      (turbo_tool_runtime_wasm_impl_t *)context;
+  turbo_tool_runtime_wasm_io_t *io = impl ? impl->active_io : NULL;
+  turbowasm_host_memory_span span = {0};
+  uint32_t destination;
+  size_t offset;
+  size_t capacity;
+  size_t remaining;
+  size_t to_copy;
+  turbowasm_status status;
+
+  if (!io || !call || !arguments || argument_count != 3u ||
+      arguments[0].kind != TURBOWASM_VALUE_I32 ||
+      arguments[1].kind != TURBOWASM_VALUE_I32 ||
+      arguments[2].kind != TURBOWASM_VALUE_I32 ||
+      arguments[0].as.i32 < 0 || arguments[2].as.i32 < 0)
+    return TURBOWASM_INVALID_ARGUMENT;
+
+  offset = (size_t)(uint32_t)arguments[0].as.i32;
+  destination = (uint32_t)arguments[1].as.i32;
+  capacity = (size_t)(uint32_t)arguments[2].as.i32;
+  if (offset > io->input_size) {
+    if (!turbo_tool_runtime_wasm_host_result_i32(
+            results, result_capacity, result_count, trap, -1))
+      return TURBOWASM_INVALID_ARGUMENT;
+    return TURBOWASM_OK;
   }
-  if (size) memcpy(output->data + output->size, data, size);
-  output->size += size;
-  output->data[output->size] = '\0';
+
+  remaining = io->input_size - offset;
+  to_copy = capacity < remaining ? capacity : remaining;
+  if (to_copy != 0u) {
+    status = turbowasm_host_call_memory_span(
+        call, 0u, destination, to_copy, &span, trap);
+    if (status != TURBOWASM_OK) return status;
+    memcpy(span.data, io->input + offset, to_copy);
+  }
+  if (to_copy > INT32_MAX ||
+      !turbo_tool_runtime_wasm_host_result_i32(
+          results, result_capacity, result_count, trap, (int32_t)to_copy))
+    return TURBOWASM_INVALID_ARGUMENT;
+  return TURBOWASM_OK;
+}
+
+static turbowasm_status turbo_tool_runtime_wasm_host_output_write(
+    void *context,
+    turbowasm_host_call *call,
+    const turbowasm_value *arguments,
+    size_t argument_count,
+    turbowasm_value *results,
+    size_t result_capacity,
+    size_t *result_count,
+    turbowasm_trap *trap) {
+  turbo_tool_runtime_wasm_impl_t *impl =
+      (turbo_tool_runtime_wasm_impl_t *)context;
+  turbo_tool_runtime_wasm_io_t *io = impl ? impl->active_io : NULL;
+  turbowasm_host_memory_span span = {0};
+  uint32_t source;
+  size_t length;
+  turbowasm_status status;
+
+  if (!io || !call || !arguments || argument_count != 2u ||
+      arguments[0].kind != TURBOWASM_VALUE_I32 ||
+      arguments[1].kind != TURBOWASM_VALUE_I32 ||
+      arguments[1].as.i32 < 0)
+    return TURBOWASM_INVALID_ARGUMENT;
+
+  source = (uint32_t)arguments[0].as.i32;
+  length = (size_t)(uint32_t)arguments[1].as.i32;
+  if (length > io->output_limit - io->output_size) {
+    io->output_overflow = 1;
+    if (!turbo_tool_runtime_wasm_host_result_i32(
+            results, result_capacity, result_count, trap, -1))
+      return TURBOWASM_INVALID_ARGUMENT;
+    return TURBOWASM_OK;
+  }
+
+  if (length != 0u) {
+    status = turbowasm_host_call_memory_span(
+        call, 0u, source, length, &span, trap);
+    if (status != TURBOWASM_OK) return status;
+    memcpy(io->output + io->output_size, span.data, length);
+    io->output_size += length;
+  }
+  io->output[io->output_size] = '\0';
+
+  if (!turbo_tool_runtime_wasm_host_result_i32(
+          results, result_capacity, result_count, trap, 0))
+    return TURBOWASM_INVALID_ARGUMENT;
+  return TURBOWASM_OK;
+}
+
+static int turbo_tool_runtime_wasm_find_export(
+    const turbowasm_module *module,
+    const char *name,
+    uint32_t expected_param_count,
+    uint32_t expected_result_count,
+    uint32_t *out_function_index) {
+  const cmeta_type_desc *i32_type =
+      turbowasm_value_type_descriptor(TURBOWASM_VALUE_I32);
+  size_t i;
+
+  if (!module || !name || !out_function_index || !i32_type) return 0;
+  for (i = 0; i < turbowasm_module_export_count(module); ++i) {
+    const turbowasm_export_desc *export_desc =
+        turbowasm_module_export_at(module, i);
+    turbowasm_function_signature signature = {0};
+    uint32_t p;
+    uint32_t r;
+    if (!export_desc || export_desc->kind != TURBOWASM_EXTERN_FUNCTION ||
+        !turbo_tool_runtime_wasm_name_equal(export_desc->name, name))
+      continue;
+    if (!turbowasm_module_function_signature_get(
+            module, export_desc->item_index, &signature) ||
+        signature.param_count != expected_param_count ||
+        signature.result_count != expected_result_count)
+      return 0;
+    for (p = 0; p < signature.param_count; ++p)
+      if (!cmeta_type_equal(
+              turbowasm_module_function_param_type(
+                  module, export_desc->item_index, p),
+              i32_type))
+        return 0;
+    for (r = 0; r < signature.result_count; ++r)
+      if (!cmeta_type_equal(
+              turbowasm_module_function_result_type(
+                  module, export_desc->item_index, r),
+              i32_type))
+        return 0;
+    *out_function_index = export_desc->item_index;
+    return 1;
+  }
   return 0;
 }
 
-static int turbo_tool_runtime_wasm_discard(const uint8_t *data, size_t size, void *user_data) {
-  turbo_tool_runtime_wasm_io_t *io = (turbo_tool_runtime_wasm_io_t *)user_data;
-  turbo_tool_runtime_wasm_sink_t *sink = io ? &io->error_output : NULL;
-  (void)data;
-  if (!sink || size > sink->limit - sink->size) {
-    if (sink) sink->overflow = 1;
-    return -1;
+static int turbo_tool_runtime_wasm_link_tool_io(
+    turbowasm_linker *linker,
+    turbo_tool_runtime_wasm_impl_t *impl) {
+  static const turbowasm_value_kind input_read_params[] = {
+      TURBOWASM_VALUE_I32, TURBOWASM_VALUE_I32, TURBOWASM_VALUE_I32};
+  static const turbowasm_value_kind output_write_params[] = {
+      TURBOWASM_VALUE_I32, TURBOWASM_VALUE_I32};
+  static const turbowasm_value_kind i32_result[] = {TURBOWASM_VALUE_I32};
+  const turbowasm_host_function_type input_size_type = {
+      NULL, 0u, i32_result, 1u};
+  const turbowasm_host_function_type input_read_type = {
+      input_read_params, 3u, i32_result, 1u};
+  const turbowasm_host_function_type output_write_type = {
+      output_write_params, 2u, i32_result, 1u};
+  turbowasm_name module_name = turbo_tool_runtime_wasm_name("turbo_agent");
+
+  return turbowasm_linker_define_host_function(
+             linker, module_name,
+             turbo_tool_runtime_wasm_name("tool_input_size"),
+             &input_size_type, turbo_tool_runtime_wasm_host_input_size,
+             impl) == TURBOWASM_OK &&
+         turbowasm_linker_define_host_function(
+             linker, module_name,
+             turbo_tool_runtime_wasm_name("tool_input_read"),
+             &input_read_type, turbo_tool_runtime_wasm_host_input_read,
+             impl) == TURBOWASM_OK &&
+         turbowasm_linker_define_host_function(
+             linker, module_name,
+             turbo_tool_runtime_wasm_name("tool_output_write"),
+             &output_write_type, turbo_tool_runtime_wasm_host_output_write,
+             impl) == TURBOWASM_OK;
+}
+
+static int turbo_tool_runtime_wasm_should_interrupt(void *user_data) {
+  turbo_tool_runtime_wasm_control_t *control =
+      (turbo_tool_runtime_wasm_control_t *)user_data;
+  const turbo_tool_execution_context_t *context;
+  if (!control || !(context = control->context)) return 0;
+
+  if (context->cancel_token && turbo_cancel_token_check(context->cancel_token) != 0) {
+    control->reason =
+        turbo_cancel_token_reason(context->cancel_token) == TURBO_CANCEL_DEADLINE
+            ? TURBO_TOOL_WASM_INTERRUPT_DEADLINE
+            : TURBO_TOOL_WASM_INTERRUPT_CANCELLED;
+    return 1;
   }
-  sink->size += size;
+  if (context->deadline_mono_ms &&
+      salts_monotonic_ms() >= context->deadline_mono_ms) {
+    control->reason = TURBO_TOOL_WASM_INTERRUPT_DEADLINE;
+    return 1;
+  }
   return 0;
 }
 
-static int turbo_tool_runtime_wasm_call(turbo_tool_runtime_wasm_impl_t *impl,
-                                        const char *export_name, int32_t index, int has_index,
-                                        const char *input, size_t output_limit, char **out_output,
-                                        int32_t *out_guest_status) {
-  turbo_wasm_app_io_t app_io = {0};
+static turbo_tool_status_t turbo_tool_runtime_wasm_map_status(
+    turbowasm_status status,
+    const turbo_tool_runtime_wasm_control_t *control,
+    int output_overflow) {
+  if (output_overflow) return TURBO_TOOL_OUTPUT_LIMIT;
+  if (status == TURBOWASM_OK) return TURBO_TOOL_OK;
+  if (status == TURBOWASM_INTERRUPTED && control) {
+    if (control->reason == TURBO_TOOL_WASM_INTERRUPT_DEADLINE)
+      return TURBO_TOOL_DEADLINE_EXCEEDED;
+    if (control->reason == TURBO_TOOL_WASM_INTERRUPT_CANCELLED)
+      return TURBO_TOOL_CANCELLED;
+  }
+  if (status == TURBOWASM_OUT_OF_MEMORY) return TURBO_TOOL_OUT_OF_MEMORY;
+  return TURBO_TOOL_ERROR;
+}
+
+static turbo_tool_status_t turbo_tool_runtime_wasm_call(
+    turbo_tool_runtime_wasm_impl_t *impl,
+    uint32_t function_index,
+    int32_t index,
+    int has_index,
+    const char *input,
+    size_t output_limit,
+    const turbo_tool_execution_context_t *context,
+    char **out_output,
+    int32_t *out_guest_status) {
   turbo_tool_runtime_wasm_io_t io = {0};
-  turbo_wasm_value_t arg = {0};
-  turbo_wasm_value_t result = {0};
-  size_t input_size = input ? strlen(input) : 0;
-  int rc;
+  turbo_tool_runtime_wasm_control_t control = {0};
+  turbowasm_execution_options options = {0};
+  turbowasm_value argument = {0};
+  turbowasm_value result = {0};
+  turbowasm_trap trap = TURBOWASM_TRAP_NONE;
+  size_t result_count = 0u;
+  size_t input_size = input ? strlen(input) : 0u;
+  turbowasm_status wasm_status;
+  turbo_tool_status_t status;
 
-  if (!impl || !export_name || !out_output || !out_guest_status || output_limit == 0 ||
-      output_limit == SIZE_MAX)
-    return -1;
+  if (!impl || !out_output || !out_guest_status || output_limit == 0u ||
+      output_limit == SIZE_MAX || input_size > INT32_MAX)
+    return TURBO_TOOL_INVALID_ARGUMENT;
+
   *out_output = NULL;
   *out_guest_status = -1;
-  io.output.data = (char *)malloc(output_limit + 1);
-  if (!io.output.data) return -1;
-  io.output.limit = output_limit;
-  io.output.data[0] = '\0';
-  io.error_output.limit = output_limit;
+  io.input = (const uint8_t *)input;
+  io.input_size = input_size;
+  io.output = (char *)malloc(output_limit + 1u);
+  io.output_limit = output_limit;
+  if (!io.output) return TURBO_TOOL_OUT_OF_MEMORY;
+  io.output[0] = '\0';
 
-  app_io.struct_size = sizeof(app_io);
-  app_io.input = (const uint8_t *)input;
-  app_io.input_size = input_size;
-  app_io.stdout_bytes = output_limit;
-  app_io.stderr_bytes = output_limit;
-  app_io.write_stdout = turbo_tool_runtime_wasm_collect;
-  app_io.write_stderr = turbo_tool_runtime_wasm_discard;
-  app_io.user_data = &io;
-  rc = turbo_wasm_vm_set_app_io(impl->vm, &app_io);
-  if (rc != TURBO_WASM_OK) goto fail;
+  control.context = context;
+  options.fuel = impl->fuel_per_call;
+  options.has_fuel_limit = impl->fuel_per_call != 0u;
+  options.should_interrupt =
+      context ? turbo_tool_runtime_wasm_should_interrupt : NULL;
+  options.interrupt_context = context ? &control : NULL;
 
-  arg.type = TURBO_WASM_VALUE_I32;
-  arg.value.i32 = (uint32_t)index;
-  result.type = TURBO_WASM_VALUE_I32;
-  rc = turbo_wasm_vm_call(impl->vm, export_name, has_index ? &arg : NULL, has_index ? 1u : 0u,
-                          &result, 1u);
-  (void)turbo_wasm_vm_clear_app_io(impl->vm);
-  if (rc != TURBO_WASM_OK || io.output.overflow || io.error_output.overflow) goto fail;
+  argument.kind = TURBOWASM_VALUE_I32;
+  argument.as.i32 = index;
+  impl->active_io = &io;
+  wasm_status = turbowasm_instance_invoke_with_options(
+      &impl->instance, function_index,
+      has_index ? &argument : NULL, has_index ? 1u : 0u,
+      &result, 1u, &result_count, &trap, &options);
+  impl->active_io = NULL;
 
-  *out_guest_status = (int32_t)result.value.i32;
-  *out_output = io.output.data;
-  return 0;
+  status = turbo_tool_runtime_wasm_map_status(
+      wasm_status, &control, io.output_overflow);
+  if (status != TURBO_TOOL_OK || trap != TURBOWASM_TRAP_NONE ||
+      result_count != 1u || result.kind != TURBOWASM_VALUE_I32) {
+    free(io.output);
+    return status == TURBO_TOOL_OK ? TURBO_TOOL_ERROR : status;
+  }
 
-fail:
-  (void)turbo_wasm_vm_clear_app_io(impl->vm);
-  free(io.output.data);
-  return -1;
+  *out_guest_status = result.as.i32;
+  *out_output = io.output;
+  return TURBO_TOOL_OK;
 }
 
 static size_t turbo_tool_runtime_wasm_tool_count(const void *impl) {
-  const turbo_tool_runtime_wasm_impl_t *wasm_impl = (const turbo_tool_runtime_wasm_impl_t *)impl;
-  return wasm_impl ? wasm_impl->tool_count : 0;
+  const turbo_tool_runtime_wasm_impl_t *wasm_impl =
+      (const turbo_tool_runtime_wasm_impl_t *)impl;
+  return wasm_impl ? wasm_impl->tool_count : 0u;
 }
 
-static turbo_tool_status_t turbo_tool_runtime_wasm_get_tool(const void *impl, size_t index,
-                                                            turbo_tool_runtime_tool_t *out_tool) {
-  const turbo_tool_runtime_wasm_impl_t *wasm_impl = (const turbo_tool_runtime_wasm_impl_t *)impl;
+static turbo_tool_status_t turbo_tool_runtime_wasm_get_tool(
+    const void *impl, size_t index, turbo_tool_runtime_tool_t *out_tool) {
+  const turbo_tool_runtime_wasm_impl_t *wasm_impl =
+      (const turbo_tool_runtime_wasm_impl_t *)impl;
   const turbo_tool_runtime_wasm_tool_t *tool;
 
   if (!wasm_impl || !out_tool) return TURBO_TOOL_INVALID_ARGUMENT;
@@ -170,12 +450,17 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_get_tool(const void *impl, si
   return TURBO_TOOL_OK;
 }
 
-static turbo_tool_status_t turbo_tool_runtime_wasm_invoke(void *impl, const char *name,
-                                                          const char *arguments_json,
-                                                          char **out_output) {
-  turbo_tool_runtime_wasm_impl_t *wasm_impl = (turbo_tool_runtime_wasm_impl_t *)impl;
+static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_with_context(
+    void *impl,
+    const char *name,
+    const char *arguments_json,
+    const turbo_tool_execution_context_t *context,
+    char **out_output) {
+  turbo_tool_runtime_wasm_impl_t *wasm_impl =
+      (turbo_tool_runtime_wasm_impl_t *)impl;
   const char *input = arguments_json ? arguments_json : "{}";
   int32_t guest_status;
+  turbo_tool_status_t status;
   size_t i;
 
   if (!wasm_impl || !name || !out_output) return TURBO_TOOL_INVALID_ARGUMENT;
@@ -184,19 +469,30 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_invoke(void *impl, const char
   for (i = 0; i < wasm_impl->tool_count; ++i)
     if (strcmp(wasm_impl->tools[i].name, name) == 0) break;
   if (i == wasm_impl->tool_count) return TURBO_TOOL_NOT_FOUND;
-  if (turbo_tool_runtime_wasm_call(wasm_impl, "turbo_tool_invoke", (int32_t)i, 1, input,
-                                   wasm_impl->max_output_bytes, out_output, &guest_status) != 0 ||
-      guest_status != 0) {
+
+  status = turbo_tool_runtime_wasm_call(
+      wasm_impl, wasm_impl->export_tool_invoke, (int32_t)i, 1, input,
+      wasm_impl->max_output_bytes, context, out_output, &guest_status);
+  if (status != TURBO_TOOL_OK || guest_status != 0) {
     free(*out_output);
     *out_output = NULL;
-    return TURBO_TOOL_ERROR;
+    return status == TURBO_TOOL_OK ? TURBO_TOOL_ERROR : status;
   }
   return TURBO_TOOL_OK;
 }
 
-static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_json_value(void *impl, const char *name,
-                                                                     const json_value_t *arguments,
-                                                                     json_value_t **out_result) {
+static turbo_tool_status_t turbo_tool_runtime_wasm_invoke(
+    void *impl, const char *name, const char *arguments_json, char **out_output) {
+  return turbo_tool_runtime_wasm_invoke_with_context(
+      impl, name, arguments_json, NULL, out_output);
+}
+
+static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_json_value_with_context(
+    void *impl,
+    const char *name,
+    const json_value_t *arguments,
+    const turbo_tool_execution_context_t *context,
+    json_value_t **out_result) {
   char *arguments_json = NULL;
   char *output_json = NULL;
   json_value_t *parsed = NULL;
@@ -208,24 +504,43 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_json_value(void *impl,
     arguments_json = turbo_json_serialize(arguments, NULL);
     if (!arguments_json) return TURBO_TOOL_ERROR;
   }
-  status = turbo_tool_runtime_wasm_invoke(impl, name, arguments_json, &output_json);
+  status = turbo_tool_runtime_wasm_invoke_with_context(
+      impl, name, arguments_json, context, &output_json);
   turbo_json_serialize_free(arguments_json);
   if (status != TURBO_TOOL_OK) return status;
-  if (turbo_parse_json((const uint8_t *)output_json, strlen(output_json), &parsed) != 0) {
-    free(output_json);
-    return TURBO_TOOL_ERROR;
-  }
+
+  parsed = json_parse(output_json, strlen(output_json));
   free(output_json);
+  if (!parsed) return TURBO_TOOL_ERROR;
   *out_result = parsed;
   return TURBO_TOOL_OK;
 }
 
-static const turbo_tool_runtime_vtable_t turbo_tool_runtime_wasm_vtable = {
-    turbo_tool_runtime_wasm_destroy_impl, turbo_tool_runtime_wasm_tool_count,
-    turbo_tool_runtime_wasm_get_tool, turbo_tool_runtime_wasm_invoke,
-    turbo_tool_runtime_wasm_invoke_json_value};
+static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_json_value(
+    void *impl,
+    const char *name,
+    const json_value_t *arguments,
+    json_value_t **out_result) {
+  return turbo_tool_runtime_wasm_invoke_json_value_with_context(
+      impl, name, arguments, NULL, out_result);
+}
 
-static int turbo_tool_runtime_wasm_load_tool(turbo_tool_runtime_wasm_impl_t *impl, size_t index) {
+static const turbo_tool_runtime_vtable_v2_t turbo_tool_runtime_wasm_vtable = {
+    sizeof(turbo_tool_runtime_vtable_v2_t),
+    TURBO_TOOL_RUNTIME_VTABLE_V2_ABI_VERSION,
+    {
+        turbo_tool_runtime_wasm_destroy_impl,
+        turbo_tool_runtime_wasm_tool_count,
+        turbo_tool_runtime_wasm_get_tool,
+        turbo_tool_runtime_wasm_invoke,
+        turbo_tool_runtime_wasm_invoke_json_value,
+    },
+    turbo_tool_runtime_wasm_invoke_with_context,
+    turbo_tool_runtime_wasm_invoke_json_value_with_context,
+};
+
+static int turbo_tool_runtime_wasm_load_tool(
+    turbo_tool_runtime_wasm_impl_t *impl, size_t index) {
   turbo_tool_runtime_wasm_tool_t *tool = &impl->tools[index];
   json_value_t *metadata = NULL;
   json_value_t *parameters;
@@ -238,32 +553,38 @@ static int turbo_tool_runtime_wasm_load_tool(turbo_tool_runtime_wasm_impl_t *imp
   size_t prior_index;
   int rc = -1;
 
-  if (turbo_tool_runtime_wasm_call(impl, "turbo_tool_describe", (int32_t)index, 1, NULL,
-                                   impl->max_metadata_bytes, &metadata_json, &guest_status) != 0 ||
+  if (turbo_tool_runtime_wasm_call(
+          impl, impl->export_tool_describe, (int32_t)index, 1, NULL,
+          impl->max_metadata_bytes, NULL, &metadata_json,
+          &guest_status) != TURBO_TOOL_OK ||
       guest_status != 0 || !metadata_json[0])
     goto cleanup;
-  if (turbo_parse_json((const uint8_t *)metadata_json, strlen(metadata_json), &metadata) != 0 ||
-      turbo_json_type(metadata) != TURBO_JSON_OBJECT)
-    goto cleanup;
-  name = turbo_json_get_string(metadata, "name");
-  description = turbo_json_get_string(metadata, "description");
-  parameters = turbo_json_object_get(metadata, "parameters");
-  strict = turbo_json_object_get(metadata, "strict");
+
+  metadata = json_parse(metadata_json, strlen(metadata_json));
+  if (!metadata || json_type(metadata) != JSON_OBJECT) goto cleanup;
+  name = json_get_string(metadata, "name");
+  description = json_get_string(metadata, "description");
+  parameters = json_object_get(metadata, "parameters");
+  strict = json_object_get(metadata, "strict");
   if (!name || !name[0] || !description || !parameters ||
-      turbo_json_type(parameters) != TURBO_JSON_OBJECT || !strict ||
-      turbo_json_type(strict) != TURBO_JSON_BOOL)
+      json_type(parameters) != JSON_OBJECT || !strict ||
+      json_type(strict) != JSON_BOOL)
     goto cleanup;
+
   parameters_json = turbo_json_serialize(parameters, NULL);
   if (!parameters_json) goto cleanup;
   tool->name = (char *)tstr_dup(name);
   tool->description = (char *)tstr_dup(description);
   tool->parameters_json = (char *)tstr_dup(parameters_json);
-  tool->parameters_schema = turbo_tool_schema_parse_parameters_json_value(parameters_json, 0);
-  tool->strict = turbo_json_bool(strict) ? 1 : 0;
-  if (!tool->name || !tool->description || !tool->parameters_json || !tool->parameters_schema)
+  tool->parameters_schema =
+      turbo_tool_schema_parse_parameters_json_value(parameters_json, 0);
+  tool->strict = json_bool(strict) ? 1 : 0;
+  if (!tool->name || !tool->description || !tool->parameters_json ||
+      !tool->parameters_schema)
     goto cleanup;
   for (prior_index = 0; prior_index < index; ++prior_index)
-    if (strcmp(impl->tools[prior_index].name, tool->name) == 0) goto cleanup;
+    if (strcmp(impl->tools[prior_index].name, tool->name) == 0)
+      goto cleanup;
   rc = 0;
 
 cleanup:
@@ -283,52 +604,116 @@ void turbo_tool_runtime_wasm_config_init(turbo_tool_runtime_wasm_config_t *confi
   config->max_metadata_bytes = TURBO_TOOL_WASM_DEFAULT_METADATA_BYTES;
   config->max_input_bytes = TURBO_TOOL_WASM_DEFAULT_INPUT_BYTES;
   config->max_output_bytes = TURBO_TOOL_WASM_DEFAULT_OUTPUT_BYTES;
+  config->max_module_bytes = TURBO_TOOL_WASM_DEFAULT_MODULE_BYTES;
+  config->max_allocation_bytes = TURBO_TOOL_WASM_DEFAULT_ALLOCATION_BYTES;
+  config->max_linear_memory_bytes =
+      TURBO_TOOL_WASM_DEFAULT_LINEAR_MEMORY_BYTES;
+  config->max_table_elements = TURBO_TOOL_WASM_DEFAULT_TABLE_ELEMENTS;
+  config->fuel_per_call = TURBO_TOOL_WASM_DEFAULT_FUEL;
 }
 
 turbo_tool_runtime_t *
 turbo_tool_runtime_wasm_create(const turbo_tool_runtime_wasm_config_t *config) {
-  static const turbo_wasm_value_type_t i32_result[] = {TURBO_WASM_VALUE_I32};
-  static const turbo_wasm_value_type_t i32_arg[] = {TURBO_WASM_VALUE_I32};
+  turbowasm_runtime_config runtime_config;
+  turbowasm_linker linker = {0};
   turbo_tool_runtime_wasm_impl_t *impl = NULL;
-  turbo_wasm_value_t count_result = {0};
+  salts_fs_stat_t metadata = {0};
+  turbowasm_value count_result = {0};
+  turbowasm_trap trap = TURBOWASM_TRAP_NONE;
+  size_t result_count = 0u;
   int32_t count;
   size_t i;
+  int linker_initialized = 0;
 
   if (!config || config->struct_size != sizeof(*config) ||
-      config->abi_version != TURBO_TOOL_RUNTIME_WASM_ABI_VERSION || !config->module_path ||
-      !config->module_path[0] || !config->policy || !config->max_tools ||
-      !config->max_metadata_bytes || !config->max_input_bytes || !config->max_output_bytes ||
-      config->max_tools > INT32_MAX)
+      config->abi_version != TURBO_TOOL_RUNTIME_WASM_ABI_VERSION ||
+      !config->module_path || !config->module_path[0] || !config->max_tools ||
+      !config->max_metadata_bytes || !config->max_input_bytes ||
+      !config->max_output_bytes || !config->max_module_bytes ||
+      !config->max_allocation_bytes || !config->max_linear_memory_bytes ||
+      !config->max_table_elements || config->max_tools > INT32_MAX ||
+      config->max_input_bytes > INT32_MAX ||
+      config->max_output_bytes > INT32_MAX)
     return NULL;
+
+  if (salts_fs_stat(config->module_path, &metadata) != 0 ||
+      metadata.size > config->max_module_bytes)
+    return NULL;
+
   impl = (turbo_tool_runtime_wasm_impl_t *)calloc(1, sizeof(*impl));
   if (!impl) return NULL;
   impl->max_metadata_bytes = config->max_metadata_bytes;
   impl->max_input_bytes = config->max_input_bytes;
   impl->max_output_bytes = config->max_output_bytes;
-  impl->vm = turbo_wasm_vm_create(config->policy, NULL);
-  if (!impl->vm || turbo_wasm_vm_load_file(impl->vm, config->module_path) != TURBO_WASM_OK ||
-      turbo_wasm_vm_check_export(impl->vm, "turbo_tool_count", NULL, 0, i32_result, 1) !=
-          TURBO_WASM_OK ||
-      turbo_wasm_vm_check_export(impl->vm, "turbo_tool_describe", i32_arg, 1, i32_result, 1) !=
-          TURBO_WASM_OK ||
-      turbo_wasm_vm_check_export(impl->vm, "turbo_tool_invoke", i32_arg, 1, i32_result, 1) !=
-          TURBO_WASM_OK)
+  impl->fuel_per_call = config->fuel_per_call;
+
+  if (salts_fs_read_file(config->module_path, &impl->module_bytes) != 0 ||
+      impl->module_bytes.len != metadata.size)
     goto fail;
-  count_result.type = TURBO_WASM_VALUE_I32;
-  if (turbo_wasm_vm_call(impl->vm, "turbo_tool_count", NULL, 0, &count_result, 1) != TURBO_WASM_OK)
+
+  turbowasm_runtime_config_init(&runtime_config);
+  runtime_config.limits.max_module_bytes = config->max_module_bytes;
+  runtime_config.limits.max_allocation_bytes = config->max_allocation_bytes;
+  runtime_config.limits.max_linear_memory_bytes = config->max_linear_memory_bytes;
+  runtime_config.limits.max_table_elements = config->max_table_elements;
+
+  if (turbowasm_module_load_borrowed_with_config(
+          &impl->module, impl->module_bytes.base, impl->module_bytes.len,
+          &runtime_config) != TURBOWASM_OK)
     goto fail;
-  count = (int32_t)count_result.value.i32;
+
+  if (!turbo_tool_runtime_wasm_find_export(
+          &impl->module, "turbo_tool_count", 0u, 1u,
+          &impl->export_tool_count) ||
+      !turbo_tool_runtime_wasm_find_export(
+          &impl->module, "turbo_tool_describe", 1u, 1u,
+          &impl->export_tool_describe) ||
+      !turbo_tool_runtime_wasm_find_export(
+          &impl->module, "turbo_tool_invoke", 1u, 1u,
+          &impl->export_tool_invoke))
+    goto fail;
+
+  if (turbowasm_linker_init_with_config(&linker, &runtime_config) !=
+          TURBOWASM_OK ||
+      !turbo_tool_runtime_wasm_link_tool_io(&linker, impl))
+    goto fail;
+  linker_initialized = 1;
+
+  if (turbowasm_instance_create_linked(
+          &impl->instance, &impl->module, &linker) != TURBOWASM_OK)
+    goto fail;
+  turbowasm_linker_destroy(&linker);
+  linker_initialized = 0;
+
+  count_result.kind = TURBOWASM_VALUE_I32;
+  {
+    turbowasm_execution_options options = {0};
+    options.fuel = impl->fuel_per_call;
+    options.has_fuel_limit = impl->fuel_per_call != 0u;
+    if (turbowasm_instance_invoke_with_options(
+            &impl->instance, impl->export_tool_count,
+            NULL, 0u, &count_result, 1u, &result_count, &trap,
+            &options) != TURBOWASM_OK ||
+        trap != TURBOWASM_TRAP_NONE || result_count != 1u ||
+        count_result.kind != TURBOWASM_VALUE_I32)
+      goto fail;
+  }
+
+  count = count_result.as.i32;
   if (count < 0 || (size_t)count > config->max_tools) goto fail;
   impl->tool_count = (size_t)count;
   if (impl->tool_count) {
-    impl->tools = (turbo_tool_runtime_wasm_tool_t *)calloc(impl->tool_count, sizeof(*impl->tools));
+    impl->tools = (turbo_tool_runtime_wasm_tool_t *)calloc(
+        impl->tool_count, sizeof(*impl->tools));
     if (!impl->tools) goto fail;
     for (i = 0; i < impl->tool_count; ++i)
       if (turbo_tool_runtime_wasm_load_tool(impl, i) != 0) goto fail;
   }
-  return turbo_tool_runtime_create(&turbo_tool_runtime_wasm_vtable, impl);
+
+  return turbo_tool_runtime_create_v2(&turbo_tool_runtime_wasm_vtable, impl);
 
 fail:
+  if (linker_initialized) turbowasm_linker_destroy(&linker);
   turbo_tool_runtime_wasm_destroy_impl(impl);
   return NULL;
 }

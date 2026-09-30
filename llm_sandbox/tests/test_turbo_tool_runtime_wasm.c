@@ -31,6 +31,9 @@
 #ifndef LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH
   #error "LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH must be defined"
 #endif
+#ifndef LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH
+  #error "LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH must be defined"
+#endif
 #ifndef LLM_SANDBOX_WASM_CONTROL_WASM_PATH
   #error "LLM_SANDBOX_WASM_CONTROL_WASM_PATH must be defined"
 #endif
@@ -83,6 +86,16 @@ spec("TurboWasm tool sandbox") {
     turbo_runtime_json_destroy(arguments);
     free(output);
     turbo_tool_runtime_destroy(runtime);
+  }
+
+  it("rejects guest imports outside the TurboAgent tool I/O capability surface") {
+    turbo_tool_runtime_wasm_config_t config;
+    turbo_tool_runtime_t *runtime;
+
+    turbo_tool_runtime_wasm_config_init(&config);
+    config.module_path = LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH;
+    runtime = turbo_tool_runtime_wasm_create(&config);
+    check_null(runtime);
   }
 
   it("rejects missing modules and required exports") {

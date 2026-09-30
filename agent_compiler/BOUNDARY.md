@@ -14,8 +14,10 @@ flowchart TD
     M[Model structured output] --> D[DataBind]
     D --> T[TypedAgentPlan]
     T --> C[AgentCompiler admission]
-    C -->|reject| Z[0 tool calls]
-    C -->|admit| P[Frozen ExecutablePlan]
+    C --> S[Tool symbol + parameter schema]
+    S --> P0[Capability + template + resource limits]
+    P0 -->|reject| Z[0 tool calls]
+    P0 -->|admit| P[Frozen ExecutablePlan]
     P --> E[turbo_agent_execute_compiled_plan]
     E --> R[plan-owned RuntimeTools projection]
 
@@ -62,6 +64,23 @@ compile fails
 Failure to compile is terminal for that plan version. The Harness may request a
 new model/replan turn, but that creates a **new source plan and new compilation**.
 
+## Resource admission
+
+Phase 1 compiler configuration bounds model/source complexity before publication:
+
+- source document bytes;
+- aggregate argument string/key/number bytes;
+- argument JSON node count;
+- argument object/array depth.
+
+These are compiler admission limits, not TurboWasm/backend fallbacks. Exceeding a
+limit returns `TURBO_AGENT_COMPILE_PLAN_LIMIT` with zero tool invocation.
+
+Tool parameter schemas are also validated before publication through the
+RuntimeTools-owned deterministic tool-schema validator. Unsupported semantic
+schema keywords fail closed; the compiler does not defer malformed model
+arguments to the tool callback.
+
 ## Freeze/lifetime rule
 
 `ExecutablePlan` owns/copies every mutable source semantic fact:
@@ -87,10 +106,13 @@ The dedicated AgentCompiler tests must keep these properties true:
 | malformed JSON | source invalid | 0 |
 | structurally wrong JSON | source invalid | 0 |
 | unknown tool | unresolved | 0 |
+| tool arguments violate published parameter schema | arguments invalid | 0 |
+| tool publishes unsupported parameter-schema semantics | schema invalid/unsupported | 0 |
 | unlisted/unknown capability | denied | 0 |
 | known but host-denied capability | denied | 0 |
 | legacy tool with no capability metadata and no `custom_tools` admission | denied | 0 |
 | Inspect + non-read-only tool | template violation | 0 |
+| source/arguments exceed compiler byte/node/depth budgets | plan limit | 0 |
 | source mutated after successful compile | compiled semantics unchanged | exactly admitted call |
 | valid Inspect plan | success | exactly 1 |
 

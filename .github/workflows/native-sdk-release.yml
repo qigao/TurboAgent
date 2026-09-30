@@ -264,6 +264,31 @@ jobs:
           $hostTriplet = $env:QIGAO_VCPKG_WINDOWS_HOST_TRIPLET
           if ([string]::IsNullOrWhiteSpace($triplet)) { throw "canonical Windows vcpkg triplet is unavailable" }
           if ([string]::IsNullOrWhiteSpace($hostTriplet)) { throw "canonical Windows vcpkg host triplet is unavailable" }
+
+          $manifestRoot = Join-Path $env:RUNNER_TEMP "turboagent-windows-contract-manifest"
+          if (Test-Path -LiteralPath $manifestRoot) {
+            Remove-Item -LiteralPath $manifestRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force -Path $manifestRoot | Out-Null
+          $projectManifest = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "vcpkg.json") -Raw | ConvertFrom-Json
+          $baseline = $projectManifest.'builtin-baseline'
+          if ([string]::IsNullOrWhiteSpace($baseline)) { throw "TurboAgent builtin-baseline is unavailable" }
+
+          @"
+          {
+            "name": "qigao-turboagent-windows-cache-contract",
+            "version-string": "1",
+            "dependencies": [
+              "boringssl",
+              {
+                "name": "sqlite3",
+                "features": ["fts5"]
+              }
+            ],
+            "builtin-baseline": "$baseline"
+          }
+          "@ | Set-Content -LiteralPath (Join-Path $manifestRoot "vcpkg.json")
+
           $installed = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed\release-windows"
           $log = Join-Path $env:RUNNER_TEMP "turboagent-windows-vcpkg-cache.log"
 
@@ -276,7 +301,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $env:VCPKG_BINARY_CACHE | Out-Null
 
           & "$env:VCPKG_ROOT\vcpkg.exe" install `
-            "--x-manifest-root=$env:GITHUB_WORKSPACE" `
+            "--x-manifest-root=$manifestRoot" `
             "--x-install-root=$installed" `
             "--triplet=$triplet" `
             "--host-triplet=$hostTriplet" `
@@ -334,7 +359,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^
             -DVCPKG_TARGET_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET% ^
             -DVCPKG_HOST_TRIPLET=%QIGAO_VCPKG_WINDOWS_HOST_TRIPLET% ^
-            -DVCPKG_MANIFEST_MODE=ON ^
+            -DVCPKG_MANIFEST_MODE=OFF ^
             -DVCPKG_INSTALLED_DIR="%INSTALLED%" ^
             -DCMAKE_PREFIX_PATH="%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
             -DSALTS_ROOT="%SALTS_ROOT%" ^

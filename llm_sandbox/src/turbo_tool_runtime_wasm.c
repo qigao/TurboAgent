@@ -521,6 +521,13 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_call(
    * same instance concurrently.
    */
   salts_mutex_lock(&impl->invoke_mutex);
+  if (context && turbo_tool_runtime_wasm_should_interrupt(&control)) {
+    salts_mutex_unlock(&impl->invoke_mutex);
+    status = turbo_tool_runtime_wasm_map_status(
+        TURBOWASM_INTERRUPTED, &control, 0);
+    free(io.output);
+    return status;
+  }
   impl->active_io = &io;
   wasm_status = turbowasm_instance_invoke_with_options(
       &impl->instance, function_index,

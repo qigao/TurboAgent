@@ -239,6 +239,37 @@ spec("agent compiler Phase 1 boundary") {
     turbo_tool_registry_destroy(registry);
   }
 
+  it("rejects undeclared model control fields through exact DataBind with zero calls") {
+    compiler_probe_t read_probe = {0};
+    compiler_probe_t mutation_probe = {0};
+    turbo_tool_registry_t *registry = make_registry(&read_probe, &mutation_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_executable_plan_t *plan = NULL;
+    const char *allowed[] = {"runtime_tools"};
+    static const char source_json[] =
+        "{"
+        "\"template_id\":\"inspect\","
+        "\"step_id\":\"inspect-json\","
+        "\"tool\":\"repo.inspect\","
+        "\"arguments_json\":\"{}\","
+        "\"backend\":\"wasm\""
+        "}";
+
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+
+    check_equal(turbo_agent_compile_plan_json(
+                    &config, registry, source_json, sizeof(source_json) - 1u,
+                    &plan, NULL),
+                TURBO_AGENT_COMPILE_SOURCE_INVALID);
+    check_null(plan);
+    check_equal(read_probe.calls, 0);
+    check_equal(mutation_probe.calls, 0);
+
+    turbo_tool_registry_destroy(registry);
+  }
+
   it("rejects argument trees that exceed compiler resource limits") {
     compiler_probe_t read_probe = {0};
     compiler_probe_t mutation_probe = {0};

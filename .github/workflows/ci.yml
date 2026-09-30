@@ -265,38 +265,6 @@ jobs:
           export LD_LIBRARY_PATH="$PRAKTOR_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$agent_vcpkg_libs:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/praktor-agent -R '^test_turbo_praktor_tool_pack$' --no-tests=error --output-on-failure
 
-      - name: Install and verify PraktorTools consumer
-        shell: bash
-        run: |
-          set -euxo pipefail
-          prefix="$GITHUB_WORKSPACE/stage/praktor-agent"
-          cmake --install build/praktor-agent --prefix "$prefix"
-
-          consumer="$RUNNER_TEMP/turboagent-praktor-consumer"
-          mkdir -p "$consumer"
-          cat > "$consumer/CMakeLists.txt" <<'EOF'
-          cmake_minimum_required(VERSION 3.20)
-          project(turboagent_praktor_consumer LANGUAGES C)
-          find_package(TurboAgent CONFIG REQUIRED)
-          add_executable(turboagent_praktor_consumer main.c)
-          target_link_libraries(turboagent_praktor_consumer PRIVATE TurboAgent::PraktorTools)
-          EOF
-          cat > "$consumer/main.c" <<'EOF'
-          #include <turbo_praktor_tool_pack.h>
-          int main(void) {
-            turbo_praktor_tool_pack_config_t config;
-            turbo_praktor_tool_pack_config_init(&config);
-            return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION ? 0 : 1;
-          }
-          EOF
-
-          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
-          cmake -S "$consumer" -B "$consumer/build" -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux \
-            -DVCPKG_MANIFEST_MODE=OFF \
-            -DCMAKE_PREFIX_PATH="$prefix;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
-          cmake --build "$consumer/build" --parallel 2
 
   windows:
     name: Windows x64

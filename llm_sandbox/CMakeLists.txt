@@ -1,23 +1,23 @@
 cmake_minimum_required(VERSION 3.20)
-project(llm_sandbox LANGUAGES C)
+project(wasm_tools LANGUAGES C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 include(CmakeUtils)
 
 cmake_add_source(SOURCES)
 
-add_library(llm_sandbox SHARED ${SOURCES})
-target_compile_definitions(llm_sandbox PRIVATE SHARED_CXX)
+add_library(wasm_tools SHARED ${SOURCES})
+target_compile_definitions(wasm_tools PRIVATE SHARED_CXX)
 target_include_directories(
-  llm_sandbox PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  wasm_tools PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                      $<INSTALL_INTERFACE:include>)
-target_link_libraries(llm_sandbox
+target_link_libraries(wasm_tools
   PUBLIC TurboAgent::RuntimeTools
          TurboWasm::Runtime
   PRIVATE Salts::Core)
 
-cmake_config_target(llm_sandbox FOLDER "LLM Sandbox" EXPORT_NAME LLMSandbox
-                    ALIAS TurboAgent::LLMSandbox)
+cmake_config_target(wasm_tools FOLDER "Wasm Tools" EXPORT_NAME WasmTools
+                    ALIAS TurboAgent::WasmTools)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 
@@ -41,7 +41,7 @@ if(BUILD_TESTS)
           -Wl,--initial-memory=131072 -Wl,--max-memory=${max_memory}
           -Wl,--allow-undefined -o "${output}" "${source}"
         DEPENDS "${source}"
-                ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
+                ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_wasm_tools_guest.h
         VERBATIM)
     endfunction()
 
@@ -98,19 +98,19 @@ if(BUILD_TESTS)
 
     cmake_add_test(
       SOURCES tests/test_turbo_tool_runtime_wasm.c
-      LIBS llm_sandbox Salts::TinyTest
-      FOLDER "LLM Sandbox/tests")
+      LIBS wasm_tools Salts::TinyTest
+      FOLDER "Wasm Tools/tests")
 
     cmake_add_test(
       SOURCES tests/test_turbo_wasm_tool_pack.c
-      LIBS llm_sandbox agent_compiler Salts::TinyTest
-      FOLDER "LLM Sandbox/tests")
+      LIBS wasm_tools agent_compiler Salts::TinyTest
+      FOLDER "Wasm Tools/tests")
 
     if(TARGET langchain)
       cmake_add_test(
         SOURCES tests/test_turbo_wasm_tool_pack_workspace.c
-        LIBS llm_sandbox langchain Salts::TinyTest
-        FOLDER "LLM Sandbox/tests")
+        LIBS wasm_tools langchain Salts::TinyTest
+        FOLDER "Wasm Tools/tests")
     endif()
 
     if(TARGET test_turbo_tool_runtime_wasm)
@@ -126,7 +126,7 @@ if(BUILD_TESTS)
                 ${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}
                 ${LLM_SANDBOX_WASM_CONTROL_WASM})
       set_target_properties(llm_sandbox_wasm_tool_guests
-                            PROPERTIES FOLDER "LLM Sandbox")
+                            PROPERTIES FOLDER "Wasm Tools")
       add_dependencies(test_turbo_tool_runtime_wasm llm_sandbox_wasm_tool_guests)
       target_compile_definitions(
         test_turbo_tool_runtime_wasm

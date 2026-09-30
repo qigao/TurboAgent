@@ -9,6 +9,7 @@
 
 #include <limits.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,6 +25,8 @@ enum {
 };
 
 #define TURBO_TOOL_WASM_DEFAULT_FUEL UINT64_C(10000000)
+#define TURBO_TOOL_WASM_FNV_OFFSET UINT64_C(14695981039346656037)
+#define TURBO_TOOL_WASM_FNV_PRIME UINT64_C(1099511628211)
 
 typedef struct turbo_tool_runtime_wasm_tool_s {
   char *name;
@@ -87,6 +90,98 @@ static int turbo_tool_runtime_wasm_name_equal(turbowasm_name name, const char *t
   length = strlen(text);
   return length == name.size &&
          (length == 0 || memcmp(name.bytes, text, length) == 0);
+}
+
+static uint64_t turbo_tool_runtime_wasm_module_hash(
+    const void *data, size_t size) {
+  const unsigned char *bytes = (const unsigned char *)data;
+  uint64_t hash = TURBO_TOOL_WASM_FNV_OFFSET;
+  size_t i;
+  for (i = 0; i < size; ++i) {
+    hash ^= (uint64_t)bytes[i];
+    hash *= TURBO_TOOL_WASM_FNV_PRIME;
+  }
+  return hash;
+}
+
+static int turbo_tool_runtime_wasm_set_u64_string(
+    json_value_t *object, const char *name, uint64_t value) {
+  char text[32];
+  json_value_t *field;
+  snprintf(text, sizeof(text), "%llu", (unsigned long long)value);
+  field = json_create_string(text);
+  if (!field) return 0;
+  if (turbo_runtime_json_object_set(object, name, field) !=
+      TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(field);
+    return 0;
+  }
+  return 1;
+}
+
+static json_value_t *turbo_tool_runtime_wasm_execution_metadata(
+    const turbo_tool_runtime_wasm_impl_t *impl,
+    const turbo_tool_runtime_wasm_config_t *config) {
+  json_value_t *root = NULL;
+  json_value_t *limits = NULL;
+  json_value_t *field = NULL;
+  char identity[32];
+  uint64_t hash;
+
+  if (!impl || !config || !impl->module_bytes.base) return NULL;
+  hash = turbo_tool_runtime_wasm_module_hash(
+      impl->module_bytes.base, impl->module_bytes.len);
+
+  root = json_create_object();
+  limits = json_create_object();
+  if (!root || !limits) goto fail;
+
+  field = json_create_string("turbowasm");
+  if (!field ||
+      turbo_runtime_json_object_set(root, "backend", field) !=
+          TURBO_RUNTIME_JSON_OK)
+    goto fail;
+  field = NULL;
+
+  snprintf(identity, sizeof(identity), "fnv1a64:%016llx",
+           (unsigned long long)hash);
+  field = json_create_string(identity);
+  if (!field ||
+      turbo_runtime_json_object_set(root, "module_identity", field) !=
+          TURBO_RUNTIME_JSON_OK)
+    goto fail;
+  field = NULL;
+
+  if (!turbo_tool_runtime_wasm_set_u64_string(
+          limits, "max_module_bytes", (uint64_t)config->max_module_bytes) ||
+      !turbo_tool_runtime_wasm_set_u64_string(
+          limits, "max_allocation_bytes",
+          (uint64_t)config->max_allocation_bytes) ||
+      !turbo_tool_runtime_wasm_set_u64_string(
+          limits, "max_linear_memory_bytes",
+          (uint64_t)config->max_linear_memory_bytes) ||
+      !turbo_tool_runtime_wasm_set_u64_string(
+          limits, "max_table_elements",
+          (uint64_t)config->max_table_elements) ||
+      !turbo_tool_runtime_wasm_set_u64_string(
+          limits, "max_input_bytes", (uint64_t)config->max_input_bytes) ||
+      !turbo_tool_runtime_wasm_set_u64_string(
+          limits, "max_output_bytes", (uint64_t)config->max_output_bytes) ||
+      !turbo_tool_runtime_wasm_set_u64_string(
+          limits, "fuel_per_call", config->fuel_per_call))
+    goto fail;
+
+  if (turbo_runtime_json_object_set(root, "limits", limits) !=
+      TURBO_RUNTIME_JSON_OK)
+    goto fail;
+  limits = NULL;
+  return root;
+
+fail:
+  turbo_runtime_json_destroy(field);
+  turbo_runtime_json_destroy(limits);
+  turbo_runtime_json_destroy(root);
+  return NULL;
 }
 
 static void turbo_tool_runtime_wasm_tool_clear(turbo_tool_runtime_wasm_tool_t *tool) {
@@ -615,7 +710,9 @@ void turbo_tool_runtime_wasm_config_init(turbo_tool_runtime_wasm_config_t *confi
 }
 
 turbo_tool_runtime_t *
-turbo_tool_runtime_wasm_create(const turbo_tool_runtime_wasm_config_t *config) {
+turbo_tool_runtime_wasm_create_with_metadata(
+    const turbo_tool_runtime_wasm_config_t *config,
+    json_value_t **out_execution_metadata) {
   turbowasm_runtime_config runtime_config;
   turbowasm_linker linker = {0};
   turbo_tool_runtime_wasm_impl_t *impl = NULL;
@@ -626,6 +723,10 @@ turbo_tool_runtime_wasm_create(const turbo_tool_runtime_wasm_config_t *config) {
   int32_t count;
   size_t i;
   int linker_initialized = 0;
+  turbo_tool_runtime_t *runtime = NULL;
+  json_value_t *execution_metadata = NULL;
+
+  if (out_execution_metadata) *out_execution_metadata = NULL;
 
   if (!config || config->struct_size != sizeof(*config) ||
       config->abi_version != TURBO_TOOL_RUNTIME_WASM_ABI_VERSION ||
@@ -712,10 +813,27 @@ turbo_tool_runtime_wasm_create(const turbo_tool_runtime_wasm_config_t *config) {
       if (turbo_tool_runtime_wasm_load_tool(impl, i) != 0) goto fail;
   }
 
-  return turbo_tool_runtime_create_v2(&turbo_tool_runtime_wasm_vtable, impl);
+  runtime = turbo_tool_runtime_create_v2(&turbo_tool_runtime_wasm_vtable, impl);
+  if (!runtime) return NULL;
+
+  if (out_execution_metadata) {
+    execution_metadata =
+        turbo_tool_runtime_wasm_execution_metadata(impl, config);
+    if (!execution_metadata) {
+      turbo_tool_runtime_destroy(runtime);
+      return NULL;
+    }
+    *out_execution_metadata = execution_metadata;
+  }
+  return runtime;
 
 fail:
   if (linker_initialized) turbowasm_linker_destroy(&linker);
   turbo_tool_runtime_wasm_destroy_impl(impl);
   return NULL;
+}
+
+turbo_tool_runtime_t *
+turbo_tool_runtime_wasm_create(const turbo_tool_runtime_wasm_config_t *config) {
+  return turbo_tool_runtime_wasm_create_with_metadata(config, NULL);
 }

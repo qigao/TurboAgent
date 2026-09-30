@@ -44,6 +44,7 @@ spec("TurboWasm tool pack") {
     turbo_tool_execution_policy_t observed = {0};
     const char *const *required_capabilities = NULL;
     size_t required_capability_count = 0;
+    const json_value_t *execution_metadata = NULL;
     char *output = NULL;
 
     turbo_wasm_tool_pack_config_init(&pack_config);
@@ -66,6 +67,15 @@ spec("TurboWasm tool pack") {
                 TURBO_TOOL_OK);
     check_equal(required_capability_count, 1);
     check_equal(required_capabilities[0], "runtime_tools");
+    check_equal(turbo_tool_registry_get_execution_metadata(
+                    turbo_wasm_tool_pack_registry(pack), "echo_json",
+                    &execution_metadata),
+                TURBO_TOOL_OK);
+    check_not_null(execution_metadata);
+    check_equal(json_get_string(execution_metadata, "backend"), "turbowasm");
+    check_true(strncmp(json_get_string(execution_metadata, "module_identity"),
+                       "fnv1a64:", 8) == 0);
+    check_not_null(json_object_get(execution_metadata, "limits"));
 
     check_equal(turbo_wasm_tool_pack_add_module(pack, &module_config),
                 TURBO_TOOL_DUPLICATE);

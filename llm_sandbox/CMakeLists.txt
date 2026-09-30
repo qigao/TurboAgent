@@ -14,7 +14,7 @@ target_include_directories(
 target_link_libraries(wasm_tools
   PUBLIC TurboAgent::RuntimeTools
          TurboWasm::Runtime
-  PRIVATE Salts::Core)
+  PRIVATE Salts::Core Salts::Platform)
 
 cmake_config_target(wasm_tools FOLDER "Wasm Tools" EXPORT_NAME WasmTools
                     ALIAS TurboAgent::WasmTools)

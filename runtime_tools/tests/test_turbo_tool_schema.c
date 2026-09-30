@@ -3,6 +3,8 @@
 #include "turbo_tool_registry.h"
 #include "turbo_tool_schema.h"
 
+#include <string.h>
+
 static int fake_tool_handler(const char *arguments_json, char **out_output, void *user_data) {
   (void)arguments_json;
   (void)out_output;

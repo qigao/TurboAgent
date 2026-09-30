@@ -211,7 +211,9 @@ static void turbo_tool_runtime_wasm_destroy_impl(void *impl) {
   free(wasm_impl->tools);
   turbowasm_instance_destroy(&wasm_impl->instance);
   turbowasm_module_destroy(&wasm_impl->module);
-  salts_fs_buf_free(&wasm_impl->module_bytes);
+  free(wasm_impl->module_bytes.base);
+  wasm_impl->module_bytes.base = NULL;
+  wasm_impl->module_bytes.len = 0u;
   salts_mutex_destroy(&wasm_impl->invoke_mutex);
   free(wasm_impl);
 }
@@ -723,6 +725,54 @@ cleanup:
   return rc;
 }
 
+static int turbo_tool_runtime_wasm_read_module_bounded(
+    const char *path, size_t limit, salts_fs_buf_t *out) {
+  salts_file_t file = SALTS_INVALID_FILE;
+  char *buffer = NULL;
+  size_t used = 0u;
+  int read_status;
+  char overflow_probe;
+
+  if (!path || !path[0] || !limit || !out) return -1;
+  out->base = NULL;
+  out->len = 0u;
+
+  file = salts_fs_open(path, SALTS_FS_O_RDONLY, 0);
+  if (file == SALTS_INVALID_FILE) return -1;
+
+  buffer = (char *)malloc(limit);
+  if (!buffer) goto fail;
+
+  while (used < limit) {
+    size_t remaining = limit - used;
+    size_t chunk = remaining > (size_t)INT_MAX ? (size_t)INT_MAX : remaining;
+    read_status = salts_fs_read(file, buffer + used, chunk);
+    if (read_status < 0) goto fail;
+    if (read_status == 0) break;
+    used += (size_t)read_status;
+  }
+
+  if (used == limit) {
+    read_status = salts_fs_read(file, &overflow_probe, 1u);
+    if (read_status != 0) goto fail;
+  }
+
+  if (salts_fs_close(file) != 0) {
+    file = SALTS_INVALID_FILE;
+    goto fail;
+  }
+  file = SALTS_INVALID_FILE;
+
+  out->base = buffer;
+  out->len = used;
+  return 0;
+
+fail:
+  if (file != SALTS_INVALID_FILE) (void)salts_fs_close(file);
+  free(buffer);
+  return -1;
+}
+
 void turbo_tool_runtime_wasm_config_init(turbo_tool_runtime_wasm_config_t *config) {
   if (!config) return;
   memset(config, 0, sizeof(*config));
@@ -747,7 +797,6 @@ turbo_tool_runtime_wasm_create_with_metadata(
   turbowasm_runtime_config runtime_config;
   turbowasm_linker linker = {0};
   turbo_tool_runtime_wasm_impl_t *impl = NULL;
-  salts_fs_stat_t metadata = {0};
   turbowasm_value count_result = {0};
   turbowasm_trap trap = TURBOWASM_TRAP_NONE;
   size_t result_count = 0u;
@@ -771,10 +820,6 @@ turbo_tool_runtime_wasm_create_with_metadata(
       config->max_output_bytes > INT32_MAX)
     return NULL;
 
-  if (salts_fs_stat(config->module_path, &metadata) != 0 ||
-      metadata.size > config->max_module_bytes)
-    return NULL;
-
   impl = (turbo_tool_runtime_wasm_impl_t *)calloc(1, sizeof(*impl));
   if (!impl) return NULL;
   salts_mutex_init(&impl->invoke_mutex);
@@ -787,8 +832,9 @@ turbo_tool_runtime_wasm_create_with_metadata(
   impl->max_output_bytes = config->max_output_bytes;
   impl->fuel_per_call = config->fuel_per_call;
 
-  if (salts_fs_read_file(config->module_path, &impl->module_bytes) != 0 ||
-      impl->module_bytes.len != metadata.size)
+  if (turbo_tool_runtime_wasm_read_module_bounded(
+          config->module_path, config->max_module_bytes,
+          &impl->module_bytes) != 0)
     goto fail;
 
   turbowasm_runtime_config_init(&runtime_config);

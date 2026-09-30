@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define TURBO_AGENT_PLAN_FNV_OFFSET_BASIS UINT64_C(14695981039346656037)
+#define TURBO_AGENT_PLAN_FNV_PRIME UINT64_C(1099511628211)
+
 enum {
   TURBO_AGENT_COMPILER_DEFAULT_MAX_SOURCE_BYTES = 1024 * 1024,
   TURBO_AGENT_COMPILER_DEFAULT_MAX_ARGUMENT_BYTES = 1024 * 1024,
@@ -103,9 +106,18 @@ static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size) {
   size_t i;
   for (i = 0; i < size; ++i) {
     hash ^= (uint64_t)bytes[i];
-    hash *= UINT64_C(1099511628211);
+    hash *= TURBO_AGENT_PLAN_FNV_PRIME;
   }
   return hash;
+}
+
+static uint64_t hash_u32_le(uint64_t hash, uint32_t value) {
+  const unsigned char bytes[4] = {
+      (unsigned char)(value & UINT32_C(0xff)),
+      (unsigned char)((value >> 8) & UINT32_C(0xff)),
+      (unsigned char)((value >> 16) & UINT32_C(0xff)),
+      (unsigned char)((value >> 24) & UINT32_C(0xff))};
+  return hash_bytes(hash, bytes, sizeof(bytes));
 }
 
 static uint64_t hash_cstring(uint64_t hash, const char *value) {
@@ -185,13 +197,12 @@ static uint64_t executable_plan_hash(
     const turbo_tool_execution_policy_t *policy,
     char *const *capabilities,
     size_t capability_count) {
-  uint64_t hash = UINT64_C(1469598103934665603);
+  uint64_t hash = TURBO_AGENT_PLAN_FNV_OFFSET_BASIS;
   size_t i;
 
   hash = hash_cstring(hash, "TurboAgent.ExecutablePlan.v1");
   hash = hash_cstring(hash, template_descriptor->name);
-  hash = hash_bytes(hash, &template_descriptor->version,
-                    sizeof(template_descriptor->version));
+  hash = hash_u32_le(hash, template_descriptor->version);
   hash = hash_cstring(hash, template_descriptor->input_contract);
   hash = hash_cstring(hash, step_id);
   hash = hash_cstring(hash, tool_name);
@@ -200,8 +211,8 @@ static uint64_t executable_plan_hash(
   {
     uint32_t execution_mode = (uint32_t)policy->mode;
     uint32_t idempotency = (uint32_t)policy->idempotency;
-    hash = hash_bytes(hash, &execution_mode, sizeof(execution_mode));
-    hash = hash_bytes(hash, &idempotency, sizeof(idempotency));
+    hash = hash_u32_le(hash, execution_mode);
+    hash = hash_u32_le(hash, idempotency);
   }
   for (i = 0; i < capability_count; ++i) {
     hash = hash_cstring(hash, capabilities[i]);
@@ -282,6 +293,19 @@ static int argument_tree_within_limits(
   }
 }
 
+static int compiler_config_valid(
+    const turbo_agent_compiler_config_t *config) {
+  return config &&
+         config->struct_size == sizeof(*config) &&
+         config->abi_version == TURBO_AGENT_COMPILER_CONFIG_ABI_VERSION &&
+         (config->allowed_capability_count == 0 ||
+          config->allowed_capabilities != NULL) &&
+         config->max_source_bytes != 0 &&
+         config->max_argument_bytes != 0 &&
+         config->max_argument_nodes != 0 &&
+         config->max_argument_depth != 0;
+}
+
 void turbo_agent_typed_plan_init(turbo_agent_typed_plan_t *plan) {
   if (!plan) return;
   memset(plan, 0, sizeof(*plan));
@@ -320,15 +344,12 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   if (out_plan) *out_plan = NULL;
   diagnostic_set(diagnostic, TURBO_AGENT_COMPILE_OK, "");
 
-  if (!config || config->struct_size != sizeof(*config) ||
-      config->abi_version != TURBO_AGENT_COMPILER_CONFIG_ABI_VERSION ||
+  if (!compiler_config_valid(config) ||
       !source_registry || !source || !out_plan ||
       source->struct_size != sizeof(*source) ||
       source->abi_version != TURBO_AGENT_TYPED_PLAN_ABI_VERSION ||
       !source->step_id || !source->step_id[0] ||
-      !source->tool_name || !source->tool_name[0] ||
-      !config->max_source_bytes || !config->max_argument_bytes ||
-      !config->max_argument_nodes || !config->max_argument_depth) {
+      !source->tool_name || !source->tool_name[0]) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
                         "invalid compiler or typed-plan arguments");
   }
@@ -547,8 +568,8 @@ turbo_agent_compile_status_t turbo_agent_compile_plan_json(
   turbo_agent_compile_status_t status;
 
   if (out_plan) *out_plan = NULL;
-  if (!config || !source_registry || !source_json || source_json_size == 0 ||
-      !out_plan) {
+  if (!compiler_config_valid(config) || !source_registry || !source_json ||
+      source_json_size == 0 || !out_plan) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
                         "invalid JSON compile arguments");
   }

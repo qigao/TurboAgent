@@ -149,8 +149,10 @@ turbo_tool_schema_check_keywords(const json_value_t *schema,
 }
 
 static int turbo_tool_schema_json_equal(const json_value_t *lhs,
-                                        const json_value_t *rhs) {
+                                        const json_value_t *rhs,
+                                        size_t depth) {
   size_t i;
+  if (depth > TURBO_TOOL_SCHEMA_MAX_DEPTH) return 0;
   if (lhs == rhs) return 1;
   if (!lhs || !rhs || json_type(lhs) != json_type(rhs)) return 0;
 
@@ -167,7 +169,8 @@ static int turbo_tool_schema_json_equal(const json_value_t *lhs,
       if (json_array_size(lhs) != json_array_size(rhs)) return 0;
       for (i = 0; i < json_array_size(lhs); ++i) {
         if (!turbo_tool_schema_json_equal(json_array_get(lhs, i),
-                                          json_array_get(rhs, i))) {
+                                          json_array_get(rhs, i),
+                                          depth + 1u)) {
           return 0;
         }
       }
@@ -180,7 +183,8 @@ static int turbo_tool_schema_json_equal(const json_value_t *lhs,
             key ? json_object_get(rhs, key) : NULL;
         if (!key || !right_value ||
             !turbo_tool_schema_json_equal(json_object_value(lhs, i),
-                                          right_value)) {
+                                          right_value,
+                                          depth + 1u)) {
           return 0;
         }
       }
@@ -332,7 +336,7 @@ turbo_tool_schema_validate_node(const json_value_t *value,
       return TURBO_TOOL_SCHEMA_INVALID_SCHEMA;
     }
     for (i = 0; i < json_array_size(enum_values); ++i) {
-      if (turbo_tool_schema_json_equal(value, json_array_get(enum_values, i))) {
+      if (turbo_tool_schema_json_equal(value, json_array_get(enum_values, i), 0u)) {
         matched = 1;
         break;
       }
@@ -345,7 +349,7 @@ turbo_tool_schema_validate_node(const json_value_t *value,
   }
 
   const_value = json_object_get(schema, "const");
-  if (const_value && !turbo_tool_schema_json_equal(value, const_value)) {
+  if (const_value && !turbo_tool_schema_json_equal(value, const_value, 0u)) {
     turbo_tool_schema_diagnostic(diagnostic, diagnostic_capacity,
                                  "parameter does not match const", NULL);
     return TURBO_TOOL_SCHEMA_VALUE_INVALID;

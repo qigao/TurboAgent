@@ -9,6 +9,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  TURBO_AGENT_COMPILER_DEFAULT_MAX_SOURCE_BYTES = 1024 * 1024,
+  TURBO_AGENT_COMPILER_DEFAULT_MAX_ARGUMENT_BYTES = 1024 * 1024,
+  TURBO_AGENT_COMPILER_DEFAULT_MAX_ARGUMENT_NODES = 16384,
+  TURBO_AGENT_COMPILER_DEFAULT_MAX_ARGUMENT_DEPTH = 64
+};
+
 struct turbo_agent_executable_plan_s {
   const turbo_agent_template_descriptor_t *template_descriptor;
   turbo_agent_template_kind_t template_kind;
@@ -214,6 +221,67 @@ static void executable_plan_clear(turbo_agent_executable_plan_t *plan) {
   memset(plan, 0, sizeof(*plan));
 }
 
+static int argument_budget_add(size_t amount, size_t limit, size_t *total) {
+  if (!total || *total > limit || amount > limit - *total) return 0;
+  *total += amount;
+  return 1;
+}
+
+static int argument_tree_within_limits(
+    const json_value_t *value,
+    size_t depth,
+    const turbo_agent_compiler_config_t *config,
+    size_t *node_count,
+    size_t *byte_count) {
+  size_t i;
+  if (!value || !config || !node_count || !byte_count ||
+      depth > config->max_argument_depth ||
+      *node_count >= config->max_argument_nodes) {
+    return 0;
+  }
+  ++*node_count;
+
+  switch (json_type(value)) {
+    case JSON_NULL:
+    case JSON_BOOL:
+      return 1;
+    case JSON_NUMBER: {
+      size_t number_size = 0;
+      const char *number = json_number_text(value, &number_size);
+      return number &&
+             argument_budget_add(number_size, config->max_argument_bytes,
+                                 byte_count);
+    }
+    case JSON_STRING:
+      return argument_budget_add(strlen(json_string(value)),
+                                 config->max_argument_bytes, byte_count);
+    case JSON_ARRAY:
+      for (i = 0; i < json_array_size(value); ++i) {
+        if (!argument_tree_within_limits(
+                json_array_get(value, i), depth + 1u, config,
+                node_count, byte_count)) {
+          return 0;
+        }
+      }
+      return 1;
+    case JSON_OBJECT:
+      for (i = 0; i < json_object_size(value); ++i) {
+        const char *key = json_object_key(value, i);
+        const json_value_t *field = json_object_value(value, i);
+        if (!key || !field ||
+            !argument_budget_add(strlen(key), config->max_argument_bytes,
+                                 byte_count) ||
+            !argument_tree_within_limits(field, depth + 1u, config,
+                                         node_count, byte_count)) {
+          return 0;
+        }
+      }
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 void turbo_agent_typed_plan_init(turbo_agent_typed_plan_t *plan) {
   if (!plan) return;
   memset(plan, 0, sizeof(*plan));
@@ -227,6 +295,10 @@ void turbo_agent_compiler_config_init(turbo_agent_compiler_config_t *config) {
   config->struct_size = sizeof(*config);
   config->abi_version = TURBO_AGENT_COMPILER_CONFIG_ABI_VERSION;
   config->deny_unlisted_capabilities = 1;
+  config->max_source_bytes = TURBO_AGENT_COMPILER_DEFAULT_MAX_SOURCE_BYTES;
+  config->max_argument_bytes = TURBO_AGENT_COMPILER_DEFAULT_MAX_ARGUMENT_BYTES;
+  config->max_argument_nodes = TURBO_AGENT_COMPILER_DEFAULT_MAX_ARGUMENT_NODES;
+  config->max_argument_depth = TURBO_AGENT_COMPILER_DEFAULT_MAX_ARGUMENT_DEPTH;
 }
 
 turbo_agent_compile_status_t turbo_agent_compile_plan(
@@ -254,7 +326,9 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
       source->struct_size != sizeof(*source) ||
       source->abi_version != TURBO_AGENT_TYPED_PLAN_ABI_VERSION ||
       !source->step_id || !source->step_id[0] ||
-      !source->tool_name || !source->tool_name[0]) {
+      !source->tool_name || !source->tool_name[0] ||
+      !config->max_source_bytes || !config->max_argument_bytes ||
+      !config->max_argument_nodes || !config->max_argument_depth) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
                         "invalid compiler or typed-plan arguments");
   }
@@ -267,6 +341,15 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   if (!source->arguments || json_type(source->arguments) != JSON_OBJECT) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
                         "Inspect arguments must be an explicit JSON object");
+  }
+  {
+    size_t argument_nodes = 0;
+    size_t argument_bytes = 0;
+    if (!argument_tree_within_limits(
+            source->arguments, 0u, config, &argument_nodes, &argument_bytes)) {
+      return compile_fail(diagnostic, TURBO_AGENT_COMPILE_PLAN_LIMIT,
+                          "tool arguments exceed compiler resource limits");
+    }
   }
   if (turbo_tool_registry_resolve_name(
           source_registry, source->tool_name, &canonical_tool_name) !=
@@ -468,6 +551,10 @@ turbo_agent_compile_status_t turbo_agent_compile_plan_json(
       !out_plan) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
                         "invalid JSON compile arguments");
+  }
+  if (!config->max_source_bytes || source_json_size > config->max_source_bytes) {
+    return compile_fail(diagnostic, TURBO_AGENT_COMPILE_PLAN_LIMIT,
+                        "model plan source exceeds compiler byte limit");
   }
 
   if (data_bind_create_from_text(schema, sizeof(schema) - 1u, &codec,

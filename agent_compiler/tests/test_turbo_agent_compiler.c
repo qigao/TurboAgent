@@ -49,6 +49,7 @@ static turbo_tool_registry_t *make_registry(compiler_probe_t *read_probe,
   turbo_tool_definition_v4_t read = {0};
   turbo_tool_definition_v4_t mutate = {0};
   turbo_tool_definition_v4_t network = {0};
+  turbo_tool_definition_v4_t compatible = {0};
   turbo_tool_definition_v4_t typed = {0};
   turbo_tool_definition_v4_t unsupported_schema = {0};
   turbo_tool_definition_v4_t unknown = {0};
@@ -82,6 +83,9 @@ static turbo_tool_registry_t *make_registry(compiler_probe_t *read_probe,
   network.required_capabilities = network_caps;
   network.required_capability_count = 2;
 
+  compatible = read;
+  compatible.definition.name = "repo.inspect.meta";
+
   typed = read;
   typed.definition.name = "repo.inspect_typed";
   typed.definition.parameters_json =
@@ -108,6 +112,7 @@ static turbo_tool_registry_t *make_registry(compiler_probe_t *read_probe,
   if (turbo_tool_registry_add_v4(registry, &read) != TURBO_TOOL_OK ||
       turbo_tool_registry_add_v4(registry, &mutate) != TURBO_TOOL_OK ||
       turbo_tool_registry_add_v4(registry, &network) != TURBO_TOOL_OK ||
+      turbo_tool_registry_add_v4(registry, &compatible) != TURBO_TOOL_OK ||
       turbo_tool_registry_add_v4(registry, &typed) != TURBO_TOOL_OK ||
       turbo_tool_registry_add_v4(registry, &unsupported_schema) != TURBO_TOOL_OK ||
       turbo_tool_registry_add_v4(registry, &unknown) != TURBO_TOOL_OK ||
@@ -231,6 +236,32 @@ spec("agent compiler Phase 1 boundary") {
     check_equal(read_probe.calls, 0);
     check_equal(mutation_probe.calls, 0);
 
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("resolves external compatible tool names and freezes canonical identity") {
+    compiler_probe_t read_probe = {0};
+    compiler_probe_t mutation_probe = {0};
+    turbo_tool_registry_t *registry = make_registry(&read_probe, &mutation_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_typed_plan_t source;
+    turbo_agent_executable_plan_t *plan = NULL;
+    json_value_t *arguments = json_create_object();
+    const char *allowed[] = {"runtime_tools"};
+
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+    init_source(&source, "inspect", "repo_inspect_meta", arguments);
+
+    check_equal(turbo_agent_compile_plan(&config, registry, &source, &plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_not_null(plan);
+    check_equal(turbo_agent_executable_plan_tool_name(plan),
+                "repo.inspect.meta");
+
+    turbo_agent_executable_plan_destroy(plan);
+    turbo_runtime_json_destroy(arguments);
     turbo_tool_registry_destroy(registry);
   }
 

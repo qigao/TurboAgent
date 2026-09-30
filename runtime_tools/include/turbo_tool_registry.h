@@ -114,6 +114,25 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_require_capability(
     turbo_tool_registry_t *registry, const char *name, const char *capability);
 
 /**
+ * Attach optional backend/execution facts to one registered tool.
+ *
+ * The registry clones an object value and owns the clone. Passing NULL clears
+ * existing metadata. This metadata is descriptive only; it never grants
+ * capabilities or changes dispatch semantics.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_set_execution_metadata(
+    turbo_tool_registry_t *registry, const char *name,
+    const json_value_t *metadata);
+
+/**
+ * Read borrowed backend/execution metadata. Existing tools with no metadata
+ * return TURBO_TOOL_OK with *out_metadata == NULL.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_get_execution_metadata(
+    const turbo_tool_registry_t *registry, const char *name,
+    const json_value_t **out_metadata);
+
+/**
  * @brief Build a non-owning projection containing only the named tools.
  *
  * Tool definitions and schemas are copied, while callback user data remains

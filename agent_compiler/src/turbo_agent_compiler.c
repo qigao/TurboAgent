@@ -183,7 +183,12 @@ static uint64_t executable_plan_hash(
   hash = hash_cstring(hash, tool_name);
   hash = hash_json_value(hash, arguments);
   if (!hash) return 0;
-  hash = hash_bytes(hash, policy, sizeof(*policy));
+  {
+    uint32_t execution_mode = (uint32_t)policy->mode;
+    uint32_t idempotency = (uint32_t)policy->idempotency;
+    hash = hash_bytes(hash, &execution_mode, sizeof(execution_mode));
+    hash = hash_bytes(hash, &idempotency, sizeof(idempotency));
+  }
   for (i = 0; i < capability_count; ++i) {
     hash = hash_cstring(hash, capabilities[i]);
   }
@@ -300,12 +305,27 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
 
   if (!plan->step_id || !plan->tool_name || !plan->arguments) goto oom;
 
-  if (required_count) {
-    plan->capabilities = (char **)calloc(required_count, sizeof(*plan->capabilities));
+  {
+    static const char *const implicit_custom_tools[] = {"custom_tools"};
+    const char *const *effective_required =
+        required_count ? required : implicit_custom_tools;
+    size_t effective_count = required_count ? required_count : 1u;
+
+    if (!required_count &&
+        !capability_allowed(config, implicit_custom_tools[0])) {
+      executable_plan_clear(plan);
+      free(plan);
+      return compile_fail(
+          diagnostic, TURBO_AGENT_COMPILE_CAPABILITY_DENIED,
+          "legacy tool requires implicit custom_tools capability");
+    }
+
+    plan->capabilities =
+        (char **)calloc(effective_count, sizeof(*plan->capabilities));
     if (!plan->capabilities) goto oom;
-    plan->capability_count = required_count;
-    for (i = 0; i < required_count; ++i) {
-      plan->capabilities[i] = agent_compiler_strdup(required[i]);
+    plan->capability_count = effective_count;
+    for (i = 0; i < effective_count; ++i) {
+      plan->capabilities[i] = agent_compiler_strdup(effective_required[i]);
       if (!plan->capabilities[i]) goto oom;
     }
     qsort(plan->capabilities, plan->capability_count,

@@ -99,7 +99,7 @@ jobs:
             -DSALTS_ROOT="$SALTS_ROOT" \
             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT" \
             -DCHTTP_ROOT="$CHTTP_ROOT" \
-            -DENABLE_LLM_SANDBOX=OFF \
+            -DENABLE_WASM_TOOLS=OFF \
             -DBUILD_EXAMPLES=OFF \
             -DBUILD_BENCHMARKS=OFF \
             -DENABLE_ASAN=OFF
@@ -217,7 +217,7 @@ jobs:
             -DENABLE_CODEX_BRIDGE=OFF \
             -DENABLE_CODING_TOOLS=OFF \
             -DENABLE_LANGCHAIN=OFF \
-            -DENABLE_LLM_SANDBOX=OFF \
+            -DENABLE_WASM_TOOLS=OFF \
             -DBUILD_TESTS=ON \
             -DBUILD_EXAMPLES=OFF \
             -DBUILD_BENCHMARKS=OFF \
@@ -413,7 +413,7 @@ jobs:
             -DSALTS_ROOT="%SALTS_ROOT%" ^
             -DSALTS_UTILS_ROOT="%SALTS_UTILS_ROOT%" ^
             -DCHTTP_ROOT="%CHTTP_ROOT%" ^
-            -DENABLE_LLM_SANDBOX=OFF ^
+            -DENABLE_WASM_TOOLS=OFF ^
             -DBUILD_EXAMPLES=OFF ^
             -DBUILD_BENCHMARKS=OFF ^
             -DENABLE_ASAN=OFF
@@ -511,7 +511,7 @@ jobs:
             -DSALTS_ROOT="$SALTS_ROOT" \
             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT" \
             -DCHTTP_ROOT="$CHTTP_ROOT" \
-            -DENABLE_LLM_SANDBOX=OFF \
+            -DENABLE_WASM_TOOLS=OFF \
             -DENABLE_CODEX_BRIDGE=OFF \
             -DENABLE_TESTS=OFF \
             -DBUILD_TESTS=OFF \

@@ -4,6 +4,7 @@
 #include "turbo_tool_schema.h"
 
 #include <salts/clock.h>
+#include <salts/thread.h>
 #include <salts_fs.h>
 #include <tstr.h>
 
@@ -57,6 +58,7 @@ typedef struct turbo_tool_runtime_wasm_control_s {
 } turbo_tool_runtime_wasm_control_t;
 
 typedef struct turbo_tool_runtime_wasm_impl_s {
+  salts_mutex_t invoke_mutex;
   salts_fs_buf_t module_bytes;
   turbowasm_module module;
   turbowasm_instance instance;
@@ -205,6 +207,7 @@ static void turbo_tool_runtime_wasm_destroy_impl(void *impl) {
   turbowasm_instance_destroy(&wasm_impl->instance);
   turbowasm_module_destroy(&wasm_impl->module);
   salts_fs_buf_free(&wasm_impl->module_bytes);
+  salts_mutex_destroy(&wasm_impl->invoke_mutex);
   free(wasm_impl);
 }
 
@@ -510,12 +513,21 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_call(
 
   argument.kind = TURBOWASM_VALUE_I32;
   argument.as.i32 = index;
+
+  /*
+   * TurboWasm instances are single-owner and RuntimeTools registry execution
+   * does not enforce execution_policy locks. Serialize at the backend boundary
+   * so direct compiled-plan/registry calls cannot race active_io or enter the
+   * same instance concurrently.
+   */
+  salts_mutex_lock(&impl->invoke_mutex);
   impl->active_io = &io;
   wasm_status = turbowasm_instance_invoke_with_options(
       &impl->instance, function_index,
       has_index ? &argument : NULL, has_index ? 1u : 0u,
       &result, 1u, &result_count, &trap, &options);
   impl->active_io = NULL;
+  salts_mutex_unlock(&impl->invoke_mutex);
 
   status = turbo_tool_runtime_wasm_map_status(
       wasm_status, &control, io.output_overflow);
@@ -752,6 +764,11 @@ turbo_tool_runtime_wasm_create_with_metadata(
 
   impl = (turbo_tool_runtime_wasm_impl_t *)calloc(1, sizeof(*impl));
   if (!impl) return NULL;
+  salts_mutex_init(&impl->invoke_mutex);
+  if (!impl->invoke_mutex) {
+    free(impl);
+    return NULL;
+  }
   impl->max_metadata_bytes = config->max_metadata_bytes;
   impl->max_input_bytes = config->max_input_bytes;
   impl->max_output_bytes = config->max_output_bytes;

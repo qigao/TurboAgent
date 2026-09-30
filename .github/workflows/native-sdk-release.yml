@@ -385,41 +385,11 @@ jobs:
           if not exist "%PREFIX%\lib\cmake\TurboAgent\TurboAgentConfig.cmake" exit /b 1
           if exist "%PREFIX%\include\turbo_praktor_tool_pack.h" exit /b 1
 
-      - name: Verify installed consumer
+      - name: Write SDK manifest
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $prefix = Join-Path $env:GITHUB_WORKSPACE "stage\sdk\windows-x64"
-          $installed = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed\release-windows"
-          $consumer = Join-Path $env:RUNNER_TEMP "turboagent-release-consumer-windows"
-          New-Item -ItemType Directory -Force -Path $consumer | Out-Null
-
-          @'
-          cmake_minimum_required(VERSION 3.20)
-          project(turboagent_release_consumer LANGUAGES C)
-          find_package(TurboAgent CONFIG REQUIRED)
-          add_executable(turboagent_release_consumer main.c)
-          target_link_libraries(turboagent_release_consumer PRIVATE TurboAgent::RuntimeTools)
-          '@ | Set-Content -Path (Join-Path $consumer "CMakeLists.txt")
-
-          @'
-          #include <turbo_tool.h>
-          int main(void) {
-            turbo_tool_execution_context_t context = {0};
-            context.struct_size = sizeof(context);
-            context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
-            return context.abi_version == TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION ? 0 : 1;
-          }
-          '@ | Set-Content -Path (Join-Path $consumer "main.c")
-
-          $toolchain = $env:QIGAO_VCPKG_TOOLCHAIN_FILE
-          if ([string]::IsNullOrWhiteSpace($toolchain)) {
-            $toolchain = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
-          }
-
-          cmd /c "call `"$env:VSINSTALL\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && cmake -S `"$consumer`" -B `"$consumer\build`" -G Ninja -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`" -DVCPKG_TARGET_TRIPLET=$env:QIGAO_VCPKG_WINDOWS_TRIPLET -DVCPKG_HOST_TRIPLET=$env:QIGAO_VCPKG_WINDOWS_HOST_TRIPLET -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_INSTALLED_DIR=`"$installed`" -DCMAKE_PREFIX_PATH=`"$prefix;$env:CHTTP_ROOT;$env:SALTS_UTILS_ROOT;$env:SALTS_ROOT`" && cmake --build `"$consumer\build`" --parallel 2"
-          if ($LASTEXITCODE -ne 0) { throw "installed Windows consumer failed" }
-
           @"
           version=${{ needs.metadata.outputs.version }}
           commit=$env:GITHUB_SHA

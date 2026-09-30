@@ -360,6 +360,8 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_map_status(
       return TURBO_TOOL_CANCELLED;
   }
   if (status == TURBOWASM_OUT_OF_MEMORY) return TURBO_TOOL_OUT_OF_MEMORY;
+  if (status == TURBOWASM_FUEL_EXHAUSTED) return TURBO_TOOL_FUEL_EXHAUSTED;
+  if (status == TURBOWASM_TRAPPED) return TURBO_TOOL_TRAPPED;
   return TURBO_TOOL_ERROR;
 }
 

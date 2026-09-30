@@ -310,6 +310,50 @@ jobs:
         with:
           mode: read
 
+      - name: Verify Windows shared vcpkg cache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $triplet = $env:QIGAO_VCPKG_WINDOWS_TRIPLET
+          $hostTriplet = $env:QIGAO_VCPKG_WINDOWS_HOST_TRIPLET
+          if ([string]::IsNullOrWhiteSpace($triplet)) { throw "canonical Windows vcpkg triplet is unavailable" }
+          if ([string]::IsNullOrWhiteSpace($hostTriplet)) { throw "canonical Windows vcpkg host triplet is unavailable" }
+          $installed = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed\windows"
+          $log = Join-Path $env:RUNNER_TEMP "turboagent-windows-vcpkg-cache.log"
+
+          if (Test-Path -LiteralPath $installed) {
+            Remove-Item -LiteralPath $installed -Recurse -Force
+          }
+          if (Test-Path -LiteralPath $env:VCPKG_BINARY_CACHE) {
+            Remove-Item -LiteralPath $env:VCPKG_BINARY_CACHE -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_BINARY_CACHE | Out-Null
+
+          & "$env:VCPKG_ROOT\vcpkg.exe" install `
+            "--x-manifest-root=$env:GITHUB_WORKSPACE" `
+            "--x-install-root=$installed" `
+            "--triplet=$triplet" `
+            "--host-triplet=$hostTriplet" `
+            --only-binarycaching 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows shared vcpkg cache-only restore failed"
+          }
+
+          $text = Get-Content -LiteralPath $log -Raw
+          if ($text -match ("(?m)^Building [^:]+:" + [regex]::Escape($triplet))) {
+            throw "Windows CI must not build vcpkg packages from source"
+          }
+          if ($text -notmatch "Restored [1-9][0-9]* package\(s\) from NuGet") {
+            throw "Windows CI did not restore packages from the shared NuGet cache"
+          }
+          if ($text -notmatch ("boringssl:" + [regex]::Escape($triplet))) {
+            throw "Windows cache restore did not cover boringssl"
+          }
+          if ($text -notmatch ("sqlite3(?:\[[^\]]+\])?:" + [regex]::Escape($triplet))) {
+            throw "Windows cache restore did not cover sqlite3"
+          }
+
+
       - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
       - name: Locate MSVC
@@ -371,49 +415,6 @@ jobs:
           "SALTS_ROOT=$saltsRoot" >> $env:GITHUB_ENV
           "SALTS_UTILS_ROOT=$utilsRoot" >> $env:GITHUB_ENV
           "CHTTP_ROOT=$chttpRoot" >> $env:GITHUB_ENV
-
-      - name: Verify Windows shared vcpkg cache
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $triplet = $env:QIGAO_VCPKG_WINDOWS_TRIPLET
-          $hostTriplet = $env:QIGAO_VCPKG_WINDOWS_HOST_TRIPLET
-          if ([string]::IsNullOrWhiteSpace($triplet)) { throw "canonical Windows vcpkg triplet is unavailable" }
-          if ([string]::IsNullOrWhiteSpace($hostTriplet)) { throw "canonical Windows vcpkg host triplet is unavailable" }
-          $installed = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed\windows"
-          $log = Join-Path $env:RUNNER_TEMP "turboagent-windows-vcpkg-cache.log"
-
-          if (Test-Path -LiteralPath $installed) {
-            Remove-Item -LiteralPath $installed -Recurse -Force
-          }
-          if (Test-Path -LiteralPath $env:VCPKG_BINARY_CACHE) {
-            Remove-Item -LiteralPath $env:VCPKG_BINARY_CACHE -Recurse -Force
-          }
-          New-Item -ItemType Directory -Force -Path $env:VCPKG_BINARY_CACHE | Out-Null
-
-          & "$env:VCPKG_ROOT\vcpkg.exe" install `
-            "--x-manifest-root=$env:GITHUB_WORKSPACE" `
-            "--x-install-root=$installed" `
-            "--triplet=$triplet" `
-            "--host-triplet=$hostTriplet" `
-            --only-binarycaching 2>&1 | Tee-Object -FilePath $log
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows shared vcpkg cache-only restore failed"
-          }
-
-          $text = Get-Content -LiteralPath $log -Raw
-          if ($text -match ("(?m)^Building [^:]+:" + [regex]::Escape($triplet))) {
-            throw "Windows CI must not build vcpkg packages from source"
-          }
-          if ($text -notmatch "Restored [1-9][0-9]* package\(s\) from NuGet") {
-            throw "Windows CI did not restore packages from the shared NuGet cache"
-          }
-          if ($text -notmatch ("boringssl:" + [regex]::Escape($triplet))) {
-            throw "Windows cache restore did not cover boringssl"
-          }
-          if ($text -notmatch ("sqlite3(?:\[[^\]]+\])?:" + [regex]::Escape($triplet))) {
-            throw "Windows cache restore did not cover sqlite3"
-          }
 
       - name: Configure, build, test and install
         shell: cmd

@@ -108,11 +108,13 @@ turbo_wasm_tool_pack_add_module(turbo_wasm_tool_pack_t *pack,
   module_tool_count = turbo_tool_runtime_count(runtime);
   current_tool_count = turbo_tool_registry_count(pack->registry);
   if (!module_tool_count) {
+    turbo_runtime_json_destroy(execution_metadata);
     turbo_tool_runtime_destroy(runtime);
     return TURBO_TOOL_ERROR;
   }
   if (current_tool_count > pack->max_tools ||
       module_tool_count > pack->max_tools - current_tool_count) {
+    turbo_runtime_json_destroy(execution_metadata);
     turbo_tool_runtime_destroy(runtime);
     return TURBO_TOOL_BACKPRESSURE;
   }

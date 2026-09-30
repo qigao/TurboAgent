@@ -323,6 +323,8 @@ jobs:
           if errorlevel 1 exit /b 1
           set "TOOLCHAIN=%QIGAO_VCPKG_TOOLCHAIN_FILE%"
           if not defined TOOLCHAIN set "TOOLCHAIN=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+          set "WIN_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET%"
+          if not defined WIN_TRIPLET exit /b 1
           set "PREFIX=%GITHUB_WORKSPACE%\stage\sdk\windows-x64"
           set "INSTALLED=%GITHUB_WORKSPACE%\vcpkg_installed\release-windows"
 

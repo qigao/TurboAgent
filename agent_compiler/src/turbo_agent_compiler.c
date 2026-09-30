@@ -556,6 +556,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan_json(
       "}";
   DataBind *codec = NULL;
   DataBindRecord *record = NULL;
+  DataBindJsonOptions bind_options = DATA_BIND_JSON_OPTIONS_INIT;
   DataBindError bind_error = DATA_BIND_ERROR_INIT;
   DataBindStringView template_id = DATA_BIND_STRING_VIEW_INIT;
   DataBindStringView step_id = DATA_BIND_STRING_VIEW_INIT;
@@ -586,9 +587,12 @@ turbo_agent_compile_status_t turbo_agent_compile_plan_json(
                                               : "could not create AgentPlan DataBind codec");
   }
 
-  if (data_bind_record_from_json(codec, "AgentInspectPlan", source_json,
-                                 source_json_size, &record,
-                                 &bind_error) != DATA_BIND_OK ||
+  bind_options.flags =
+      DATA_BIND_JSON_BIND_EXACT_SCALAR_TOKENS |
+      DATA_BIND_JSON_BIND_REJECT_UNKNOWN_FIELDS;
+  if (data_bind_record_from_json_ex(
+          codec, "AgentInspectPlan", source_json, source_json_size,
+          &bind_options, &record, &bind_error) != DATA_BIND_OK ||
       !record) {
     status = compile_fail(diagnostic, TURBO_AGENT_COMPILE_SOURCE_INVALID,
                           bind_error.message[0] ? bind_error.message

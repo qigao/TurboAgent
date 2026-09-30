@@ -74,7 +74,7 @@ spec("TurboWasm tool pack") {
                 TURBO_TOOL_OK);
     check_not_null(execution_metadata);
     check_equal(json_get_string(execution_metadata, "backend"), "turbowasm");
-    check_true(strncmp(json_get_string(execution_metadata, "module_identity"),
+    check_true(strncmp(json_get_string(execution_metadata, "module_fingerprint"),
                        "fnv1a64:", 8) == 0);
     check_not_null(json_object_get(execution_metadata, "limits"));
 
@@ -139,7 +139,7 @@ spec("TurboWasm tool pack") {
     execution_metadata = json_object_get(certificate, "execution_metadata");
     check_not_null(execution_metadata);
     check_equal(json_get_string(execution_metadata, "backend"), "turbowasm");
-    check_true(strncmp(json_get_string(execution_metadata, "module_identity"),
+    check_true(strncmp(json_get_string(execution_metadata, "module_fingerprint"),
                        "fnv1a64:", 8) == 0);
     limits = json_object_get(execution_metadata, "limits");
     check_not_null(limits);

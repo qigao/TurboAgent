@@ -147,9 +147,14 @@ static json_value_t *turbo_tool_runtime_wasm_execution_metadata(
 
   snprintf(identity, sizeof(identity), "fnv1a64:%016llx",
            (unsigned long long)hash);
+  /*
+   * Descriptive content fingerprint only. This is not a cryptographic module
+   * identity; TurboWasm does not currently expose its internal source SHA-256
+   * through the installed Runtime API.
+   */
   field = json_create_string(identity);
   if (!field ||
-      turbo_runtime_json_object_set(root, "module_identity", field) !=
+      turbo_runtime_json_object_set(root, "module_fingerprint", field) !=
           TURBO_RUNTIME_JSON_OK)
     goto fail;
   field = NULL;

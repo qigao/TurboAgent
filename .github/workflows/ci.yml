@@ -310,6 +310,10 @@ jobs:
         with:
           mode: read
 
+      - name: Prepare Windows build tools
+        shell: pwsh
+        run: choco install nasm ninja strawberryperl -y --no-progress
+
       - name: Verify Windows shared vcpkg cache
         shell: pwsh
         run: |

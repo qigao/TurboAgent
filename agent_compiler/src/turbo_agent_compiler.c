@@ -91,25 +91,6 @@ static int capability_allowed(const turbo_agent_compiler_config_t *config,
   return 0;
 }
 
-static int find_tool(const turbo_tool_registry_t *registry,
-                     const char *name,
-                     turbo_tool_definition_t *out_definition) {
-  size_t i;
-  if (!registry || !name || !out_definition) return 0;
-  for (i = 0; i < turbo_tool_registry_count(registry); ++i) {
-    turbo_tool_definition_t current = {0};
-    if (turbo_tool_registry_get_definition(registry, i, &current) !=
-        TURBO_TOOL_OK) {
-      return 0;
-    }
-    if (current.name && strcmp(current.name, name) == 0) {
-      *out_definition = current;
-      return 1;
-    }
-  }
-  return 0;
-}
-
 static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size) {
   const unsigned char *bytes = (const unsigned char *)data;
   size_t i;
@@ -256,6 +237,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
     turbo_agent_compile_diagnostic_t *diagnostic) {
   turbo_tool_definition_t definition = {0};
   turbo_tool_execution_policy_t policy = {0};
+  const char *canonical_tool_name = NULL;
   const char *const *required = NULL;
   size_t required_count = 0;
   size_t i;
@@ -286,9 +268,36 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
                         "Inspect arguments must be an explicit JSON object");
   }
-  if (!find_tool(source_registry, source->tool_name, &definition)) {
+  if (turbo_tool_registry_resolve_name(
+          source_registry, source->tool_name, &canonical_tool_name) !=
+          TURBO_TOOL_OK ||
+      !canonical_tool_name) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
                         "tool cannot be resolved during compilation");
+  }
+  {
+    size_t definition_index;
+    int definition_found = 0;
+    for (definition_index = 0;
+         definition_index < turbo_tool_registry_count(source_registry);
+         ++definition_index) {
+      turbo_tool_definition_t candidate = {0};
+      if (turbo_tool_registry_get_definition(
+              source_registry, definition_index, &candidate) != TURBO_TOOL_OK) {
+        return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
+                            "tool definition cannot be read during compilation");
+      }
+      if (candidate.name &&
+          strcmp(candidate.name, canonical_tool_name) == 0) {
+        definition = candidate;
+        definition_found = 1;
+        break;
+      }
+    }
+    if (!definition_found) {
+      return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
+                          "canonical tool definition is unavailable");
+    }
   }
   {
     char schema_diagnostic[256] = {0};
@@ -310,7 +319,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
     }
   }
   if (turbo_tool_registry_get_execution_policy(
-          source_registry, source->tool_name, &policy) != TURBO_TOOL_OK) {
+          source_registry, canonical_tool_name, &policy) != TURBO_TOOL_OK) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
                         "tool execution policy is unavailable");
   }
@@ -326,7 +335,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   }
 
   if (turbo_tool_registry_get_required_capabilities(
-          source_registry, source->tool_name, &required,
+          source_registry, canonical_tool_name, &required,
           &required_count) != TURBO_TOOL_OK) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
                         "tool capability metadata is unavailable");
@@ -347,7 +356,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   plan->template_descriptor = template_descriptor;
   plan->template_kind = source->template_kind;
   plan->step_id = agent_compiler_strdup(source->step_id);
-  plan->tool_name = agent_compiler_strdup(source->tool_name);
+  plan->tool_name = agent_compiler_strdup(canonical_tool_name);
   plan->arguments = source->arguments ? json_clone(source->arguments)
                                      : json_create_object();
   plan->execution_policy = policy;
@@ -381,7 +390,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
           sizeof(*plan->capabilities), capability_compare);
   }
 
-  projection_names[0] = source->tool_name;
+  projection_names[0] = canonical_tool_name;
   if (turbo_tool_registry_project(source_registry, projection_names, 1,
                                   &plan->projection) != TURBO_TOOL_OK ||
       !plan->projection) {

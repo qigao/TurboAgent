@@ -766,6 +766,7 @@ turbo_tool_runtime_wasm_create_with_metadata(
       !config->max_output_bytes || !config->max_module_bytes ||
       !config->max_allocation_bytes || !config->max_linear_memory_bytes ||
       !config->max_table_elements || config->max_tools > INT32_MAX ||
+      config->max_metadata_bytes > INT32_MAX ||
       config->max_input_bytes > INT32_MAX ||
       config->max_output_bytes > INT32_MAX)
     return NULL;
@@ -850,7 +851,7 @@ turbo_tool_runtime_wasm_create_with_metadata(
   }
 
   runtime = turbo_tool_runtime_create_v2(&turbo_tool_runtime_wasm_vtable, impl);
-  if (!runtime) return NULL;
+  if (!runtime) goto fail;
 
   if (out_execution_metadata) {
     execution_metadata =

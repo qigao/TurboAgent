@@ -2,6 +2,8 @@
 
 #include "turbo_runtime_json.h"
 
+#include <data_bind.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -383,6 +385,131 @@ oom:
   free(plan);
   return compile_fail(diagnostic, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
                       "could not freeze executable-plan semantics");
+}
+
+
+static int databind_view_equals(const DataBindStringView *view,
+                                const char *literal) {
+  size_t literal_size;
+  if (!view || !literal || !view->data) return 0;
+  literal_size = strlen(literal);
+  return view->length == literal_size &&
+         memcmp(view->data, literal, literal_size) == 0;
+}
+
+static char *databind_view_copy(const DataBindStringView *view) {
+  char *copy;
+  if (!view || (!view->data && view->length != 0)) return NULL;
+  copy = (char *)malloc(view->length + 1u);
+  if (!copy) return NULL;
+  if (view->length) memcpy(copy, view->data, view->length);
+  copy[view->length] = '\0';
+  return copy;
+}
+
+turbo_agent_compile_status_t turbo_agent_compile_plan_json(
+    const turbo_agent_compiler_config_t *config,
+    const turbo_tool_registry_t *source_registry,
+    const char *source_json,
+    size_t source_json_size,
+    turbo_agent_executable_plan_t **out_plan,
+    turbo_agent_compile_diagnostic_t *diagnostic) {
+  static const char schema[] =
+      "message AgentInspectPlan { "
+      "string template_id; "
+      "string step_id; "
+      "string tool; "
+      "string arguments_json; "
+      "}";
+  DataBind *codec = NULL;
+  DataBindRecord *record = NULL;
+  DataBindError bind_error = DATA_BIND_ERROR_INIT;
+  DataBindStringView template_id = DATA_BIND_STRING_VIEW_INIT;
+  DataBindStringView step_id = DATA_BIND_STRING_VIEW_INIT;
+  DataBindStringView tool = DATA_BIND_STRING_VIEW_INIT;
+  DataBindStringView arguments_json = DATA_BIND_STRING_VIEW_INIT;
+  turbo_agent_typed_plan_t source;
+  json_value_t *arguments = NULL;
+  char *step_copy = NULL;
+  char *tool_copy = NULL;
+  turbo_agent_compile_status_t status;
+
+  if (out_plan) *out_plan = NULL;
+  if (!config || !source_registry || !source_json || source_json_size == 0 ||
+      !out_plan) {
+    return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
+                        "invalid JSON compile arguments");
+  }
+
+  if (data_bind_create_from_text(schema, sizeof(schema) - 1u, &codec,
+                                 &bind_error) != DATA_BIND_OK ||
+      !codec) {
+    return compile_fail(diagnostic, TURBO_AGENT_COMPILE_SOURCE_INVALID,
+                        bind_error.message[0] ? bind_error.message
+                                              : "could not create AgentPlan DataBind codec");
+  }
+
+  if (data_bind_record_from_json(codec, "AgentInspectPlan", source_json,
+                                 source_json_size, &record,
+                                 &bind_error) != DATA_BIND_OK ||
+      !record) {
+    status = compile_fail(diagnostic, TURBO_AGENT_COMPILE_SOURCE_INVALID,
+                          bind_error.message[0] ? bind_error.message
+                                                : "AgentPlan source failed DataBind validation");
+    goto cleanup;
+  }
+
+  if (data_bind_record_get_string(record, "template_id", &template_id,
+                                  &bind_error) != DATA_BIND_OK ||
+      data_bind_record_get_string(record, "step_id", &step_id,
+                                  &bind_error) != DATA_BIND_OK ||
+      data_bind_record_get_string(record, "tool", &tool,
+                                  &bind_error) != DATA_BIND_OK ||
+      data_bind_record_get_string(record, "arguments_json", &arguments_json,
+                                  &bind_error) != DATA_BIND_OK) {
+    status = compile_fail(diagnostic, TURBO_AGENT_COMPILE_SOURCE_INVALID,
+                          bind_error.message[0] ? bind_error.message
+                                                : "AgentPlan fields are invalid");
+    goto cleanup;
+  }
+
+  if (!databind_view_equals(&template_id, "inspect")) {
+    status = compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNSUPPORTED_TEMPLATE,
+                          "Phase 1 source supports only template_id=inspect");
+    goto cleanup;
+  }
+
+  step_copy = databind_view_copy(&step_id);
+  tool_copy = databind_view_copy(&tool);
+  if (!step_copy || !tool_copy) {
+    status = compile_fail(diagnostic, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
+                          "could not copy DataBind plan fields");
+    goto cleanup;
+  }
+
+  if (turbo_parse_json((const uint8_t *)arguments_json.data,
+                       arguments_json.length, &arguments) != 0 ||
+      !arguments || json_type(arguments) != JSON_OBJECT) {
+    status = compile_fail(diagnostic, TURBO_AGENT_COMPILE_SOURCE_INVALID,
+                          "arguments_json must contain one JSON object");
+    goto cleanup;
+  }
+
+  turbo_agent_typed_plan_init(&source);
+  source.template_kind = TURBO_AGENT_TEMPLATE_INSPECT;
+  source.step_id = step_copy;
+  source.tool_name = tool_copy;
+  source.arguments = arguments;
+  status = turbo_agent_compile_plan(config, source_registry, &source, out_plan,
+                                    diagnostic);
+
+cleanup:
+  turbo_runtime_json_destroy(arguments);
+  free(tool_copy);
+  free(step_copy);
+  data_bind_record_free(record);
+  data_bind_free(codec);
+  return status;
 }
 
 void turbo_agent_executable_plan_destroy(turbo_agent_executable_plan_t *plan) {

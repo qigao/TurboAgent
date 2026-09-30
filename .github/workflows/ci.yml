@@ -422,6 +422,8 @@ jobs:
           if errorlevel 1 exit /b 1
           set "TOOLCHAIN=%QIGAO_VCPKG_TOOLCHAIN_FILE%"
           if not defined TOOLCHAIN set "TOOLCHAIN=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+          set "WIN_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET%"
+          if not defined WIN_TRIPLET exit /b 1
           cmake -S . -B build\windows -G Ninja ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^

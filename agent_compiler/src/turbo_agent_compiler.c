@@ -7,6 +7,7 @@
 #include <string.h>
 
 struct turbo_agent_executable_plan_s {
+  const turbo_agent_template_descriptor_t *template_descriptor;
   turbo_agent_template_kind_t template_kind;
   char *step_id;
   char *tool_name;
@@ -17,6 +18,25 @@ struct turbo_agent_executable_plan_s {
   size_t capability_count;
   uint64_t plan_hash;
 };
+
+static const turbo_agent_template_descriptor_t inspect_template = {
+    sizeof(turbo_agent_template_descriptor_t),
+    TURBO_AGENT_TEMPLATE_DESCRIPTOR_ABI_VERSION,
+    TURBO_AGENT_TEMPLATE_INSPECT,
+    1u,
+    "inspect",
+    "TurboAgent.Inspect.v1",
+    TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY};
+
+const turbo_agent_template_descriptor_t *
+turbo_agent_template_descriptor(turbo_agent_template_kind_t kind) {
+  switch (kind) {
+    case TURBO_AGENT_TEMPLATE_INSPECT:
+      return &inspect_template;
+    default:
+      return NULL;
+  }
+}
 
 static char *agent_compiler_strdup(const char *value) {
   size_t size;
@@ -167,7 +187,7 @@ static uint64_t hash_json_value(uint64_t hash, const json_value_t *value) {
 }
 
 static uint64_t executable_plan_hash(
-    turbo_agent_template_kind_t template_kind,
+    const turbo_agent_template_descriptor_t *template_descriptor,
     const char *step_id,
     const char *tool_name,
     const json_value_t *arguments,
@@ -178,7 +198,10 @@ static uint64_t executable_plan_hash(
   size_t i;
 
   hash = hash_cstring(hash, "TurboAgent.ExecutablePlan.v1");
-  hash = hash_bytes(hash, &template_kind, sizeof(template_kind));
+  hash = hash_cstring(hash, template_descriptor->name);
+  hash = hash_bytes(hash, &template_descriptor->version,
+                    sizeof(template_descriptor->version));
+  hash = hash_cstring(hash, template_descriptor->input_contract);
   hash = hash_cstring(hash, step_id);
   hash = hash_cstring(hash, tool_name);
   hash = hash_json_value(hash, arguments);
@@ -235,6 +258,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   size_t i;
   turbo_agent_executable_plan_t *plan = NULL;
   const char *projection_names[1];
+  const turbo_agent_template_descriptor_t *template_descriptor = NULL;
 
   if (out_plan) *out_plan = NULL;
   diagnostic_set(diagnostic, TURBO_AGENT_COMPILE_OK, "");
@@ -250,9 +274,10 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
                         "invalid compiler or typed-plan arguments");
   }
 
-  if (source->template_kind != TURBO_AGENT_TEMPLATE_INSPECT) {
+  template_descriptor = turbo_agent_template_descriptor(source->template_kind);
+  if (!template_descriptor) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNSUPPORTED_TEMPLATE,
-                        "Phase 1 supports only the Inspect template");
+                        "Phase 1 supports only registered template descriptors");
   }
   if (source->arguments && json_type(source->arguments) != JSON_OBJECT) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
@@ -272,9 +297,10 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
    * Inspect is read-only by contract. Phase 1 deliberately uses the existing
    * RuntimeTools idempotency fact rather than inventing a second effect system.
    */
-  if (policy.idempotency != TURBO_TOOL_IDEMPOTENCY_READ_ONLY) {
+  if ((template_descriptor->properties & TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY) != 0u &&
+      policy.idempotency != TURBO_TOOL_IDEMPOTENCY_READ_ONLY) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
-                        "Inspect requires a READ_ONLY tool");
+                        "read-only template requires a READ_ONLY tool");
   }
 
   if (turbo_tool_registry_get_required_capabilities(
@@ -296,6 +322,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
                         "could not allocate executable plan");
   }
+  plan->template_descriptor = template_descriptor;
   plan->template_kind = source->template_kind;
   plan->step_id = agent_compiler_strdup(source->step_id);
   plan->tool_name = agent_compiler_strdup(source->tool_name);
@@ -343,7 +370,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   }
 
   plan->plan_hash = executable_plan_hash(
-      plan->template_kind, plan->step_id, plan->tool_name, plan->arguments,
+      plan->template_descriptor, plan->step_id, plan->tool_name, plan->arguments,
       &plan->execution_policy, plan->capabilities, plan->capability_count);
   if (!plan->plan_hash) goto oom;
 
@@ -436,9 +463,23 @@ json_value_t *turbo_agent_executable_plan_certificate_json_value(
     goto fail;
   field = NULL;
 
-  field = json_create_string("inspect");
+  field = json_create_string(plan->template_descriptor->name);
   if (!field ||
       turbo_runtime_json_object_set(root, "template", field) !=
+          TURBO_RUNTIME_JSON_OK)
+    goto fail;
+  field = NULL;
+
+  field = json_create_int64((int64_t)plan->template_descriptor->version);
+  if (!field ||
+      turbo_runtime_json_object_set(root, "template_version", field) !=
+          TURBO_RUNTIME_JSON_OK)
+    goto fail;
+  field = NULL;
+
+  field = json_create_string(plan->template_descriptor->input_contract);
+  if (!field ||
+      turbo_runtime_json_object_set(root, "input_contract", field) !=
           TURBO_RUNTIME_JSON_OK)
     goto fail;
   field = NULL;

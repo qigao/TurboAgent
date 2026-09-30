@@ -301,6 +301,9 @@ jobs:
   windows:
     name: Windows x64
     runs-on: windows-2025
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -308,7 +311,25 @@ jobs:
 
       - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
-          mode: read
+          mode: readwrite
+
+      - name: Warm TurboAgent Windows vcpkg cache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $triplet = $env:QIGAO_VCPKG_WINDOWS_TRIPLET
+          $hostTriplet = $env:QIGAO_VCPKG_WINDOWS_HOST_TRIPLET
+          if ([string]::IsNullOrWhiteSpace($triplet)) { throw "canonical Windows vcpkg triplet is unavailable" }
+          if ([string]::IsNullOrWhiteSpace($hostTriplet)) { throw "canonical Windows vcpkg host triplet is unavailable" }
+
+          $installed = Join-Path $env:RUNNER_TEMP "turboagent-windows-vcpkg-warm"
+          Remove-Item -LiteralPath $installed -Recurse -Force -ErrorAction SilentlyContinue
+          & "$env:VCPKG_ROOT\vcpkg.exe" install `
+            "--x-manifest-root=$env:GITHUB_WORKSPACE" `
+            "--x-install-root=$installed" `
+            "--triplet=$triplet" `
+            "--host-triplet=$hostTriplet"
+          if ($LASTEXITCODE -ne 0) { throw "TurboAgent Windows vcpkg cache warm failed" }
 
       - name: Verify Windows shared vcpkg cache
         shell: pwsh

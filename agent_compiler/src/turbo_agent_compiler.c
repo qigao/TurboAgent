@@ -1,6 +1,7 @@
 #include "turbo_agent_compiler.h"
 
 #include "turbo_runtime_json.h"
+#include "turbo_tool_schema.h"
 
 #include <data_bind.h>
 
@@ -281,13 +282,32 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNSUPPORTED_TEMPLATE,
                         "Phase 1 supports only registered template descriptors");
   }
-  if (source->arguments && json_type(source->arguments) != JSON_OBJECT) {
+  if (!source->arguments || json_type(source->arguments) != JSON_OBJECT) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
-                        "Inspect arguments must be a JSON object");
+                        "Inspect arguments must be an explicit JSON object");
   }
   if (!find_tool(source_registry, source->tool_name, &definition)) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
                         "tool cannot be resolved during compilation");
+  }
+  {
+    char schema_diagnostic[256] = {0};
+    turbo_tool_schema_validation_status_t schema_status =
+        turbo_tool_schema_validate_arguments_json_value(
+            &definition, source->arguments, schema_diagnostic,
+            sizeof(schema_diagnostic));
+    if (schema_status == TURBO_TOOL_SCHEMA_VALUE_INVALID) {
+      return compile_fail(
+          diagnostic, TURBO_AGENT_COMPILE_TOOL_ARGUMENTS_INVALID,
+          schema_diagnostic[0] ? schema_diagnostic
+                               : "tool arguments do not satisfy parameter schema");
+    }
+    if (schema_status != TURBO_TOOL_SCHEMA_VALID) {
+      return compile_fail(
+          diagnostic, TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID,
+          schema_diagnostic[0] ? schema_diagnostic
+                               : "tool parameter schema is invalid or unsupported");
+    }
   }
   if (turbo_tool_registry_get_execution_policy(
           source_registry, source->tool_name, &policy) != TURBO_TOOL_OK) {

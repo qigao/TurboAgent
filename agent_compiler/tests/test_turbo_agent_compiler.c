@@ -204,7 +204,9 @@ spec("agent compiler Phase 1 boundary") {
     check_true(hash_before != 0);
 
     strcpy(tool_name, "repo.patch");
-    check_true(json_object_add_checked(arguments, "value", json_create_string("after")));
+    check_equal(turbo_runtime_json_object_set(
+                    arguments, "value", json_create_string("after")),
+                TURBO_RUNTIME_JSON_OK);
 
     context.struct_size = sizeof(context);
     context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;

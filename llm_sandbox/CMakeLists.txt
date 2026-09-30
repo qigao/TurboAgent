@@ -23,7 +23,10 @@ cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
 
 if(BUILD_TESTS)
   find_program(LLM_SANDBOX_WASM_CLANG NAMES clang clang.exe)
-  if(LLM_SANDBOX_WASM_CLANG)
+  if(NOT LLM_SANDBOX_WASM_CLANG)
+    message(FATAL_ERROR
+      "TurboAgent WasmTools tests require clang with wasm32-unknown-unknown support")
+  endif()
     function(llm_sandbox_add_guest output source max_memory)
       add_custom_command(
         OUTPUT "${output}"
@@ -153,5 +156,4 @@ if(BUILD_TESTS)
             LLM_SANDBOX_WASM_TOOL_WASM_PATH="${LLM_SANDBOX_WASM_TOOL_WASM}")
       endif()
     endif()
-  endif()
 endif()

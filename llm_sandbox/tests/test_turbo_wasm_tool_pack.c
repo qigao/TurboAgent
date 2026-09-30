@@ -93,7 +93,7 @@ spec("TurboWasm tool pack") {
     turbo_wasm_tool_pack_destroy(pack);
   }
 
-  it("compiles an Inspect plan into the Wasm backend and certificates its identity") {
+  it("compiles an Inspect plan into the Wasm backend and certificates its fingerprint") {
     turbo_wasm_tool_pack_config_t pack_config;
     turbo_wasm_tool_pack_module_config_t module_config;
     turbo_wasm_tool_pack_t *pack = NULL;

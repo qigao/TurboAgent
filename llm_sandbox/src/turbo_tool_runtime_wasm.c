@@ -421,7 +421,7 @@ static int turbo_tool_runtime_wasm_link_tool_io(
              impl) == TURBOWASM_OK;
 }
 
-static int turbo_tool_runtime_wasm_should_interrupt(void *user_data) {
+static bool turbo_tool_runtime_wasm_should_interrupt(void *user_data) {
   turbo_tool_runtime_wasm_control_t *control =
       (turbo_tool_runtime_wasm_control_t *)user_data;
   const turbo_tool_execution_context_t *context;
@@ -495,6 +495,13 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_call(
   io.output[0] = '\0';
 
   control.context = context;
+  if (context && turbo_tool_runtime_wasm_should_interrupt(&control)) {
+    status = turbo_tool_runtime_wasm_map_status(
+        TURBOWASM_INTERRUPTED, &control, 0);
+    free(io.output);
+    return status;
+  }
+
   options.fuel = impl->fuel_per_call;
   options.has_fuel_limit = impl->fuel_per_call != 0u;
   options.should_interrupt =

@@ -256,23 +256,6 @@ jobs:
         with:
           mode: read
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-
-      - name: Locate MSVC
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsInstall = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ([string]::IsNullOrWhiteSpace($vsInstall)) { throw "Visual Studio x64 C++ toolchain not found" }
-          "VSINSTALL=$vsInstall" >> $env:GITHUB_ENV
-
-      - name: Restore released native SDK graph
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64
-
       - name: Verify Windows shared vcpkg cache
         shell: pwsh
         run: |
@@ -315,6 +298,24 @@ jobs:
           if ($text -notmatch ("sqlite3(?:\[[^\]]+\])?:" + [regex]::Escape($triplet))) {
             throw "Windows cache restore did not cover sqlite3"
           }
+
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Locate MSVC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstall = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) { throw "Visual Studio x64 C++ toolchain not found" }
+          "VSINSTALL=$vsInstall" >> $env:GITHUB_ENV
+
+      - name: Restore released native SDK graph
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64
 
       - name: Build, test, install and qualify SDK
         shell: cmd

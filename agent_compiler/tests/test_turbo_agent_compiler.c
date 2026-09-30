@@ -112,6 +112,72 @@ spec("agent compiler Phase 1 boundary") {
     check_null(turbo_agent_template_descriptor(TURBO_AGENT_TEMPLATE_INVALID));
   }
 
+  it("binds model JSON through DataBind before compiling") {
+    compiler_probe_t read_probe = {0};
+    compiler_probe_t mutation_probe = {0};
+    turbo_tool_registry_t *registry = make_registry(&read_probe, &mutation_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_executable_plan_t *plan = NULL;
+    json_value_t *result = NULL;
+    const char *allowed[] = {"runtime_tools"};
+    static const char source_json[] =
+        "{"
+        "\"template_id\":\"inspect\","
+        "\"step_id\":\"inspect-json\","
+        "\"tool\":\"repo.inspect\","
+        "\"arguments_json\":\"{\\\"value\\\":\\\"bound\\\"}\""
+        "}";
+
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+
+    check_equal(turbo_agent_compile_plan_json(
+                    &config, registry, source_json, sizeof(source_json) - 1u,
+                    &plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_not_null(plan);
+    check_equal(turbo_agent_execute_compiled_plan(plan, NULL, &result),
+                TURBO_TOOL_OK);
+    check_not_null(result);
+    check_equal(json_get_string(result, "value"), "bound");
+    check_equal(read_probe.calls, 1);
+
+    turbo_runtime_json_destroy(result);
+    turbo_agent_executable_plan_destroy(plan);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("rejects structurally invalid model JSON through DataBind with zero calls") {
+    compiler_probe_t read_probe = {0};
+    compiler_probe_t mutation_probe = {0};
+    turbo_tool_registry_t *registry = make_registry(&read_probe, &mutation_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_executable_plan_t *plan = NULL;
+    const char *allowed[] = {"runtime_tools"};
+    static const char source_json[] =
+        "{"
+        "\"template_id\":\"inspect\","
+        "\"step_id\":\"inspect-json\","
+        "\"tool\":7,"
+        "\"arguments_json\":\"{}\""
+        "}";
+
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+
+    check_equal(turbo_agent_compile_plan_json(
+                    &config, registry, source_json, sizeof(source_json) - 1u,
+                    &plan, NULL),
+                TURBO_AGENT_COMPILE_SOURCE_INVALID);
+    check_null(plan);
+    check_equal(read_probe.calls, 0);
+    check_equal(mutation_probe.calls, 0);
+
+    turbo_tool_registry_destroy(registry);
+  }
+
   it("rejects unknown tools before any callback") {
     compiler_probe_t read_probe = {0};
     compiler_probe_t mutation_probe = {0};

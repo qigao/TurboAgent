@@ -103,7 +103,7 @@ if(BUILD_TESTS)
 
     cmake_add_test(
       SOURCES tests/test_turbo_wasm_tool_pack.c
-      LIBS llm_sandbox Salts::TinyTest
+      LIBS llm_sandbox agent_compiler Salts::TinyTest
       FOLDER "LLM Sandbox/tests")
 
     if(TARGET langchain)

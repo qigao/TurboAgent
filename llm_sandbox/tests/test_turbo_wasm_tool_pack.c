@@ -1,6 +1,7 @@
 #include "tinytest.h"
 
 #include "turbo_wasm_tool_pack.h"
+#include "turbo_agent_compiler.h"
 
 #include <stdlib.h>
 
@@ -89,6 +90,74 @@ spec("TurboWasm tool pack") {
     check_equal(output, "{\"pack\":true}");
 
     free(output);
+    turbo_wasm_tool_pack_destroy(pack);
+  }
+
+  it("compiles an Inspect plan into the Wasm backend and certificates its identity") {
+    turbo_wasm_tool_pack_config_t pack_config;
+    turbo_wasm_tool_pack_module_config_t module_config;
+    turbo_wasm_tool_pack_t *pack = NULL;
+    turbo_agent_compiler_config_t compiler_config;
+    turbo_agent_typed_plan_t source;
+    turbo_agent_executable_plan_t *plan = NULL;
+    turbo_tool_execution_context_t context = {0};
+    json_value_t *arguments = json_create_object();
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    const json_value_t *execution_metadata = NULL;
+    const json_value_t *limits = NULL;
+    const char *allowed[] = {"runtime_tools"};
+
+    check_not_null(arguments);
+    turbo_wasm_tool_pack_config_init(&pack_config);
+    pack = turbo_wasm_tool_pack_create(&pack_config);
+    check_not_null(pack);
+
+    test_pack_module_configure(&module_config, LLM_SANDBOX_WASM_TOOL_WASM_PATH);
+    module_config.execution_policy.mode = TURBO_TOOL_EXECUTION_EXCLUSIVE;
+    module_config.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    check_equal(turbo_wasm_tool_pack_add_module(pack, &module_config),
+                TURBO_TOOL_OK);
+
+    turbo_agent_compiler_config_init(&compiler_config);
+    compiler_config.allowed_capabilities = allowed;
+    compiler_config.allowed_capability_count = 1;
+    turbo_agent_typed_plan_init(&source);
+    source.template_kind = TURBO_AGENT_TEMPLATE_INSPECT;
+    source.step_id = "inspect-wasm";
+    source.tool_name = "echo_json";
+    source.arguments = arguments;
+
+    check_equal(turbo_agent_compile_plan(
+                    &compiler_config, turbo_wasm_tool_pack_registry(pack),
+                    &source, &plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_not_null(plan);
+
+    certificate = turbo_agent_executable_plan_certificate_json_value(plan);
+    check_not_null(certificate);
+    execution_metadata = json_object_get(certificate, "execution_metadata");
+    check_not_null(execution_metadata);
+    check_equal(json_get_string(execution_metadata, "backend"), "turbowasm");
+    check_true(strncmp(json_get_string(execution_metadata, "module_identity"),
+                       "fnv1a64:", 8) == 0);
+    limits = json_object_get(execution_metadata, "limits");
+    check_not_null(limits);
+    check_not_null(json_get_string(limits, "fuel_per_call"));
+
+    context.struct_size = sizeof(context);
+    context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    context.turn_id = "turn-wasm-phase2";
+    context.tool_call_id = "call-wasm-phase2";
+    check_equal(turbo_agent_execute_compiled_plan(plan, &context, &result),
+                TURBO_TOOL_OK);
+    check_not_null(result);
+    check_equal(json_object_size(result), 0);
+
+    turbo_runtime_json_destroy(result);
+    turbo_runtime_json_destroy(certificate);
+    turbo_agent_executable_plan_destroy(plan);
+    turbo_runtime_json_destroy(arguments);
     turbo_wasm_tool_pack_destroy(pack);
   }
 

@@ -61,7 +61,7 @@ static turbo_tool_registry_t *make_registry(compiler_probe_t *read_probe,
   read.definition.name = "repo.inspect";
   read.definition.description = "Read-only repository inspection.";
   read.definition.parameters_json =
-      "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}";
+      "{\"type\":\"object\",\"additionalProperties\":true}";
   read.definition.strict = 1;
   read.definition.user_data = read_probe;
   read.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;

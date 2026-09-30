@@ -14,8 +14,8 @@
 
 #if defined(__clang__) || defined(__GNUC__)
   #define TURBO_LLM_SANDBOX_GUEST_EXPORT(name) __attribute__((export_name(name)))
-  #define TURBO_LLM_SANDBOX_GUEST_IMPORT(module_name, import_name) \
-    __attribute__((import_module(module_name), import_name(import_name)))
+  #define TURBO_LLM_SANDBOX_GUEST_IMPORT(module_literal, import_literal) \
+    __attribute__((import_module(module_literal), import_name(import_literal)))
 #else
   #define TURBO_LLM_SANDBOX_GUEST_EXPORT(name)
   #define TURBO_LLM_SANDBOX_GUEST_IMPORT(module_name, import_name)

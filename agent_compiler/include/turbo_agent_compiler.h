@@ -53,7 +53,8 @@ typedef enum turbo_agent_compile_status_e {
   TURBO_AGENT_COMPILE_OUT_OF_MEMORY = -6,
   TURBO_AGENT_COMPILE_SOURCE_INVALID = -7,
   TURBO_AGENT_COMPILE_TOOL_ARGUMENTS_INVALID = -8,
-  TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID = -9
+  TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID = -9,
+  TURBO_AGENT_COMPILE_PLAN_LIMIT = -10
 } turbo_agent_compile_status_t;
 
 typedef struct turbo_agent_compile_diagnostic_s {
@@ -91,6 +92,15 @@ typedef struct turbo_agent_compiler_config_s {
   const char *const *allowed_capabilities;
   size_t allowed_capability_count;
   int deny_unlisted_capabilities;
+
+  /** Maximum bytes accepted by turbo_agent_compile_plan_json(). */
+  size_t max_source_bytes;
+  /** Maximum aggregate string/key/number bytes in one arguments tree. */
+  size_t max_argument_bytes;
+  /** Maximum JSON value nodes in one arguments tree. */
+  size_t max_argument_nodes;
+  /** Maximum nested object/array depth in one arguments tree. */
+  size_t max_argument_depth;
 } turbo_agent_compiler_config_t;
 
 typedef struct turbo_agent_executable_plan_s turbo_agent_executable_plan_t;

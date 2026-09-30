@@ -624,9 +624,8 @@ turbo_agent_compile_status_t turbo_agent_compile_plan_json(
     goto cleanup;
   }
 
-  if (turbo_parse_json((const uint8_t *)arguments_json.data,
-                       arguments_json.length, &arguments) != 0 ||
-      !arguments || json_type(arguments) != JSON_OBJECT) {
+  arguments = json_parse(arguments_json.data, arguments_json.length);
+  if (!arguments || json_type(arguments) != JSON_OBJECT) {
     status = compile_fail(diagnostic, TURBO_AGENT_COMPILE_SOURCE_INVALID,
                           "arguments_json must contain one JSON object");
     goto cleanup;

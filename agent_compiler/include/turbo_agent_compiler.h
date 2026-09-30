@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 #define TURBO_AGENT_TYPED_PLAN_ABI_VERSION 1u
+#define TURBO_AGENT_TEMPLATE_DESCRIPTOR_ABI_VERSION 1u
 #define TURBO_AGENT_COMPILER_CONFIG_ABI_VERSION 1u
 #define TURBO_AGENT_PLAN_CERTIFICATE_VERSION 1u
 
@@ -22,6 +23,25 @@ typedef enum turbo_agent_template_kind_e {
   TURBO_AGENT_TEMPLATE_INVALID = 0,
   TURBO_AGENT_TEMPLATE_INSPECT = 1
 } turbo_agent_template_kind_t;
+
+typedef enum turbo_agent_template_property_e {
+  TURBO_AGENT_TEMPLATE_PROPERTY_NONE = 0,
+  TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY = 1u << 0
+} turbo_agent_template_property_t;
+
+typedef struct turbo_agent_template_descriptor_s {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  turbo_agent_template_kind_t kind;
+  uint32_t version;
+  const char *name;
+  const char *input_contract;
+  uint32_t properties;
+} turbo_agent_template_descriptor_t;
+
+/** Return the immutable built-in descriptor for one supported template. */
+CXX_C_API const turbo_agent_template_descriptor_t *
+turbo_agent_template_descriptor(turbo_agent_template_kind_t kind);
 
 typedef enum turbo_agent_compile_status_e {
   TURBO_AGENT_COMPILE_OK = 0,

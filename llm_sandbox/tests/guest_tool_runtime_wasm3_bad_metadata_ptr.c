@@ -7,7 +7,7 @@ TURBO_LLM_SANDBOX_GUEST_EXPORT(TURBO_LLM_SANDBOX_EXPORT_TOOL_DESCRIBE)
 int turbo_tool_describe(int index) {
   static const char invalid_metadata[] = "not-json";
   if (index != 0) return -1;
-  return turbo_wasm_app_stdout_write(invalid_metadata, (uint32_t)(sizeof(invalid_metadata) - 1));
+  return turbo_agent_tool_output_write(invalid_metadata, (uint32_t)(sizeof(invalid_metadata) - 1));
 }
 
 TURBO_LLM_SANDBOX_GUEST_EXPORT(TURBO_LLM_SANDBOX_EXPORT_TOOL_INVOKE)

@@ -24,17 +24,12 @@ cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
 if(BUILD_TESTS)
   find_program(LLM_SANDBOX_WASM_CLANG NAMES clang clang.exe)
   if(LLM_SANDBOX_WASM_CLANG)
-    get_target_property(LLM_SANDBOX_TURBOWASM_INCLUDES TurboWasm::Runtime
-                        INTERFACE_INCLUDE_DIRECTORIES)
-    set(LLM_SANDBOX_GUEST_INCLUDE_ARGS ${LLM_SANDBOX_TURBOWASM_INCLUDES})
-    list(TRANSFORM LLM_SANDBOX_GUEST_INCLUDE_ARGS PREPEND "-I")
-
     function(llm_sandbox_add_guest output source max_memory)
       add_custom_command(
         OUTPUT "${output}"
         COMMAND
           ${LLM_SANDBOX_WASM_CLANG} --target=wasm32-unknown-unknown -O2
-          -nostdlib ${LLM_SANDBOX_GUEST_INCLUDE_ARGS} -Wl,--no-entry
+          -nostdlib -Wl,--no-entry
           -Wl,--export-if-defined=turbo_tool_count
           -Wl,--export-if-defined=turbo_tool_describe
           -Wl,--export-if-defined=turbo_tool_invoke

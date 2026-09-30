@@ -8,7 +8,7 @@ int turbo_tool_describe(int index) {
   static const char metadata[] = "{\"name\":\"bad_schema\",\"description\":\"Invalid schema.\","
                                  "\"parameters\":\"not-an-object\",\"strict\":true}";
   if (index != 0) return -1;
-  return turbo_wasm_app_stdout_write(metadata, (uint32_t)(sizeof(metadata) - 1));
+  return turbo_agent_tool_output_write(metadata, (uint32_t)(sizeof(metadata) - 1));
 }
 
 TURBO_LLM_SANDBOX_GUEST_EXPORT(TURBO_LLM_SANDBOX_EXPORT_TOOL_INVOKE)

@@ -550,6 +550,11 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_call(
     free(io.output);
     return status == TURBO_TOOL_OK ? TURBO_TOOL_ERROR : status;
   }
+  if (io.output_size != 0u &&
+      memchr(io.output, '\0', io.output_size) != NULL) {
+    free(io.output);
+    return TURBO_TOOL_ERROR;
+  }
 
   *out_guest_status = result.as.i32;
   *out_output = io.output;

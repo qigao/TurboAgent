@@ -50,7 +50,8 @@ typedef enum turbo_agent_compile_status_e {
   TURBO_AGENT_COMPILE_UNRESOLVED_TOOL = -3,
   TURBO_AGENT_COMPILE_CAPABILITY_DENIED = -4,
   TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION = -5,
-  TURBO_AGENT_COMPILE_OUT_OF_MEMORY = -6
+  TURBO_AGENT_COMPILE_OUT_OF_MEMORY = -6,
+  TURBO_AGENT_COMPILE_SOURCE_INVALID = -7
 } turbo_agent_compile_status_t;
 
 typedef struct turbo_agent_compile_diagnostic_s {
@@ -110,6 +111,29 @@ CXX_C_API turbo_agent_compile_status_t turbo_agent_compile_plan(
     const turbo_agent_compiler_config_t *config,
     const turbo_tool_registry_t *source_registry,
     const turbo_agent_typed_plan_t *source,
+    turbo_agent_executable_plan_t **out_plan,
+    turbo_agent_compile_diagnostic_t *diagnostic);
+
+/**
+ * Validate/bind a TurboAgent-owned Phase-1 source document through DataBind,
+ * then compile it through the same admission path as turbo_agent_compile_plan().
+ *
+ * Expected Phase-1 source shape:
+ * {
+ *   "template_id": "inspect",
+ *   "step_id": "...",
+ *   "tool": "...",
+ *   "arguments_json": "{...}"
+ * }
+ *
+ * DataBind owns structural/type validation only. Template/tool/capability
+ * semantics remain owned by this compiler.
+ */
+CXX_C_API turbo_agent_compile_status_t turbo_agent_compile_plan_json(
+    const turbo_agent_compiler_config_t *config,
+    const turbo_tool_registry_t *source_registry,
+    const char *source_json,
+    size_t source_json_size,
     turbo_agent_executable_plan_t **out_plan,
     turbo_agent_compile_diagnostic_t *diagnostic);
 

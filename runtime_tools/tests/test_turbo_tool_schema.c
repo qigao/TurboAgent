@@ -3,6 +3,8 @@
 #include "turbo_tool_registry.h"
 #include "turbo_tool_schema.h"
 
+#include <string.h>
+
 static int fake_tool_handler(const char *arguments_json, char **out_output, void *user_data) {
   (void)arguments_json;
   (void)out_output;
@@ -186,6 +188,68 @@ spec("turbo tool schema helpers") {
 
       turbo_runtime_json_destroy(schema);
       turbo_tool_registry_destroy(registry);
+    }
+  }
+
+
+  describe("parameter validation") {
+    it("should validate the deterministic tool-schema subset") {
+      turbo_tool_definition_t definition = {
+          .name = "typed",
+          .description = "typed input",
+          .parameters_json =
+              "{\"type\":\"object\",\"properties\":{"
+              "\"name\":{\"type\":\"string\",\"minLength\":1},"
+              "\"count\":{\"type\":\"integer\",\"minimum\":1},"
+              "\"tags\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},"
+              "\"required\":[\"name\"],\"additionalProperties\":false}",
+          .strict = 1,
+          .handler = fake_tool_handler,
+      };
+      json_value_t *valid = json_parse(
+          "{\"name\":\"ok\",\"count\":2,\"tags\":[\"a\",\"b\"]}",
+          strlen("{\"name\":\"ok\",\"count\":2,\"tags\":[\"a\",\"b\"]}"));
+      json_value_t *missing = json_create_object();
+      json_value_t *extra = json_parse(
+          "{\"name\":\"ok\",\"extra\":true}",
+          strlen("{\"name\":\"ok\",\"extra\":true}"));
+      char diagnostic[128];
+
+      check_not_null(valid);
+      check_not_null(missing);
+      check_not_null(extra);
+      check_equal(turbo_tool_schema_validate_arguments_json_value(
+                      &definition, valid, diagnostic, sizeof(diagnostic)),
+                  TURBO_TOOL_SCHEMA_VALID);
+      check_equal(turbo_tool_schema_validate_arguments_json_value(
+                      &definition, missing, diagnostic, sizeof(diagnostic)),
+                  TURBO_TOOL_SCHEMA_VALUE_INVALID);
+      check_equal(turbo_tool_schema_validate_arguments_json_value(
+                      &definition, extra, diagnostic, sizeof(diagnostic)),
+                  TURBO_TOOL_SCHEMA_VALUE_INVALID);
+
+      turbo_runtime_json_destroy(extra);
+      turbo_runtime_json_destroy(missing);
+      turbo_runtime_json_destroy(valid);
+    }
+
+    it("should fail closed on unsupported semantic schema keywords") {
+      turbo_tool_definition_t definition = {
+          .name = "unsupported",
+          .description = "unsupported schema",
+          .parameters_json =
+              "{\"type\":\"object\",\"oneOf\":[{\"type\":\"object\"}]}",
+          .strict = 1,
+          .handler = fake_tool_handler,
+      };
+      json_value_t *args = json_create_object();
+      char diagnostic[128];
+
+      check_not_null(args);
+      check_equal(turbo_tool_schema_validate_arguments_json_value(
+                      &definition, args, diagnostic, sizeof(diagnostic)),
+                  TURBO_TOOL_SCHEMA_UNSUPPORTED);
+      turbo_runtime_json_destroy(args);
     }
   }
 

@@ -1,6 +1,8 @@
 #ifndef TURBO_TOOL_SCHEMA_H
 #define TURBO_TOOL_SCHEMA_H
 
+#include <stddef.h>
+
 #include <turbo_agent_api.h>
 #include <json_parser.h>
 
@@ -10,6 +12,35 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef enum turbo_tool_schema_validation_status_e {
+  TURBO_TOOL_SCHEMA_VALID = 0,
+  TURBO_TOOL_SCHEMA_VALUE_INVALID = 1,
+  TURBO_TOOL_SCHEMA_INVALID_ARGUMENT = -1,
+  TURBO_TOOL_SCHEMA_INVALID_SCHEMA = -2,
+  TURBO_TOOL_SCHEMA_UNSUPPORTED = -3
+} turbo_tool_schema_validation_status_t;
+
+/**
+ * Validate tool arguments against the definition's effective parameter schema.
+ *
+ * The validator intentionally implements the deterministic subset used by
+ * TurboAgent tool contracts: type, properties, required, additionalProperties,
+ * items, enum, const, numeric bounds, string length, and array/object size.
+ * Unsupported semantic keywords fail closed with TURBO_TOOL_SCHEMA_UNSUPPORTED.
+ * Annotation-only keywords are ignored.
+ *
+ * strict=true is applied consistently to both parameters_json and
+ * parameters_schema by treating a missing additionalProperties as false.
+ *
+ * diagnostic is optional and receives a short caller-owned error message.
+ */
+CXX_C_API turbo_tool_schema_validation_status_t
+turbo_tool_schema_validate_arguments_json_value(
+    const turbo_tool_definition_t *definition,
+    const json_value_t *arguments,
+    char *diagnostic,
+    size_t diagnostic_capacity);
 
 /**
  * @brief Serialize registry tools into OpenAI Responses API shape.

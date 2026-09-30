@@ -350,6 +350,20 @@ size_t turbo_tool_registry_count(const turbo_tool_registry_t *registry) {
   return registry ? registry->count : 0;
 }
 
+turbo_tool_status_t turbo_tool_registry_resolve_name(
+    const turbo_tool_registry_t *registry, const char *name,
+    const char **out_canonical_name) {
+  const turbo_tool_entry_t *entry;
+  if (!registry || !name || !name[0] || !out_canonical_name) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  *out_canonical_name = NULL;
+  entry = turbo_tool_registry_find(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+  *out_canonical_name = entry->name;
+  return TURBO_TOOL_OK;
+}
+
 turbo_tool_status_t turbo_tool_registry_get_definition(const turbo_tool_registry_t *registry,
                                                        size_t index,
                                                        turbo_tool_definition_t *out_definition) {

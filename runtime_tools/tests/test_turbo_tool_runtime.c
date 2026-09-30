@@ -206,6 +206,28 @@ spec("turbo tool runtime") {
     turbo_tool_registry_destroy(source);
   }
 
+  it("should resolve unique compatible names to canonical registry identity") {
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {
+        "repo.inspect.meta", "Inspect metadata", "{\"type\":\"object\"}", NULL, 1,
+        test_echo_tool, test_echo_tool_json_value, NULL, NULL};
+    const char *canonical = NULL;
+
+    check_not_null(registry);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_resolve_name(
+                    registry, "repo.inspect.meta", &canonical),
+                TURBO_TOOL_OK);
+    check_equal(canonical, "repo.inspect.meta");
+    canonical = NULL;
+    check_equal(turbo_tool_registry_resolve_name(
+                    registry, "repo_inspect_meta", &canonical),
+                TURBO_TOOL_OK);
+    check_equal(canonical, "repo.inspect.meta");
+
+    turbo_tool_registry_destroy(registry);
+  }
+
   it("should build an ordered non-owning registry projection") {
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_registry_t *projection = NULL;

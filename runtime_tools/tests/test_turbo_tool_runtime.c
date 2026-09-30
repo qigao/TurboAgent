@@ -1,65 +1,3 @@
-
-  it("should own and preserve execution metadata through projection and composition") {
-    turbo_tool_registry_t *source = turbo_tool_registry_create();
-    turbo_tool_registry_t *projection = NULL;
-    turbo_tool_registry_t *composite = NULL;
-    const turbo_tool_registry_t *sources[1];
-    turbo_tool_definition_t definition = {
-        "meta", "metadata", "{\"type\":\"object\"}", NULL, 1,
-        test_echo_tool, test_echo_tool_json_value, NULL, NULL};
-    json_value_t *metadata = json_create_object();
-    json_value_t *limits = json_create_object();
-    const json_value_t *observed = NULL;
-    const char *names[] = {"meta"};
-
-    check_not_null(source);
-    check_not_null(metadata);
-    check_not_null(limits);
-    check_equal(turbo_tool_registry_add(source, &definition), TURBO_TOOL_OK);
-    check_equal(turbo_runtime_json_object_set(
-                    metadata, "backend", json_create_string("probe")),
-                TURBO_RUNTIME_JSON_OK);
-    check_equal(turbo_runtime_json_object_set(
-                    limits, "fuel", json_create_int64(7)),
-                TURBO_RUNTIME_JSON_OK);
-    check_equal(turbo_runtime_json_object_set(metadata, "limits", limits),
-                TURBO_RUNTIME_JSON_OK);
-    limits = NULL;
-
-    check_equal(turbo_tool_registry_set_execution_metadata(
-                    source, "meta", metadata),
-                TURBO_TOOL_OK);
-    check_equal(turbo_runtime_json_object_set(
-                    metadata, "backend", json_create_string("mutated")),
-                TURBO_RUNTIME_JSON_OK);
-
-    check_equal(turbo_tool_registry_get_execution_metadata(
-                    source, "meta", &observed),
-                TURBO_TOOL_OK);
-    check_not_null(observed);
-    check_equal(json_get_string(observed, "backend"), "probe");
-
-    check_equal(turbo_tool_registry_project(source, names, 1, &projection),
-                TURBO_TOOL_OK);
-    check_equal(turbo_tool_registry_get_execution_metadata(
-                    projection, "meta", &observed),
-                TURBO_TOOL_OK);
-    check_equal(json_get_string(observed, "backend"), "probe");
-
-    sources[0] = source;
-    check_equal(turbo_tool_registry_compose(sources, 1, &composite),
-                TURBO_TOOL_OK);
-    check_equal(turbo_tool_registry_get_execution_metadata(
-                    composite, "meta", &observed),
-                TURBO_TOOL_OK);
-    check_equal(json_get_string(observed, "backend"), "probe");
-
-    turbo_runtime_json_destroy(metadata);
-    turbo_tool_registry_destroy(composite);
-    turbo_tool_registry_destroy(projection);
-    turbo_tool_registry_destroy(source);
-  }
-
 #include "tinytest.h"
 #include <json_parser.h>
 #include "turbo_tool_registry.h"
@@ -137,6 +75,67 @@ static turbo_tool_status_t test_context_echo_tool(
 }
 
 spec("turbo tool runtime") {
+  it("should own and preserve execution metadata through projection and composition") {
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    turbo_tool_registry_t *composite = NULL;
+    const turbo_tool_registry_t *sources[1];
+    turbo_tool_definition_t definition = {
+        "meta", "metadata", "{\"type\":\"object\"}", NULL, 1,
+        test_echo_tool, test_echo_tool_json_value, NULL, NULL};
+    json_value_t *metadata = json_create_object();
+    json_value_t *limits = json_create_object();
+    const json_value_t *observed = NULL;
+    const char *names[] = {"meta"};
+
+    check_not_null(source);
+    check_not_null(metadata);
+    check_not_null(limits);
+    check_equal(turbo_tool_registry_add(source, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_runtime_json_object_set(
+                    metadata, "backend", json_create_string("probe")),
+                TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_runtime_json_object_set(
+                    limits, "fuel", json_create_int64(7)),
+                TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_runtime_json_object_set(metadata, "limits", limits),
+                TURBO_RUNTIME_JSON_OK);
+    limits = NULL;
+
+    check_equal(turbo_tool_registry_set_execution_metadata(
+                    source, "meta", metadata),
+                TURBO_TOOL_OK);
+    check_equal(turbo_runtime_json_object_set(
+                    metadata, "backend", json_create_string("mutated")),
+                TURBO_RUNTIME_JSON_OK);
+
+    check_equal(turbo_tool_registry_get_execution_metadata(
+                    source, "meta", &observed),
+                TURBO_TOOL_OK);
+    check_not_null(observed);
+    check_equal(json_get_string(observed, "backend"), "probe");
+
+    check_equal(turbo_tool_registry_project(source, names, 1, &projection),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_execution_metadata(
+                    projection, "meta", &observed),
+                TURBO_TOOL_OK);
+    check_equal(json_get_string(observed, "backend"), "probe");
+
+    sources[0] = source;
+    check_equal(turbo_tool_registry_compose(sources, 1, &composite),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_execution_metadata(
+                    composite, "meta", &observed),
+                TURBO_TOOL_OK);
+    check_equal(json_get_string(observed, "backend"), "probe");
+
+    turbo_runtime_json_destroy(metadata);
+    turbo_tool_registry_destroy(composite);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+  }
+
 
   it("should propagate v4 execution context through projection and composition") {
     turbo_tool_registry_t *source = turbo_tool_registry_create();

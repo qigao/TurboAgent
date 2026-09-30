@@ -70,6 +70,16 @@ CXX_C_API void turbo_tool_runtime_wasm_config_init(turbo_tool_runtime_wasm_confi
 CXX_C_API turbo_tool_runtime_t *
 turbo_tool_runtime_wasm_create(const turbo_tool_runtime_wasm_config_t *config);
 
+/**
+ * Create the same runtime and optionally return caller-owned descriptive
+ * execution metadata derived from the exact module bytes retained by the
+ * runtime. The metadata contains no filesystem path and grants no authority.
+ */
+CXX_C_API turbo_tool_runtime_t *
+turbo_tool_runtime_wasm_create_with_metadata(
+    const turbo_tool_runtime_wasm_config_t *config,
+    json_value_t **out_execution_metadata);
+
 #ifdef __cplusplus
 }
 #endif

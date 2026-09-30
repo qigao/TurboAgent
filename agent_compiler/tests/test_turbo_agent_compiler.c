@@ -562,6 +562,17 @@ spec("agent compiler Phase 1 boundary") {
     json_value_t *args2 = json_create_object();
     json_value_t *certificate = NULL;
     const char *allowed[] = {"runtime_tools"};
+    json_value_t *execution_metadata_probe = json_create_object();
+
+    check_not_null(execution_metadata_probe);
+    check_equal(turbo_runtime_json_object_set(
+                    execution_metadata_probe, "backend",
+                    json_create_string("probe")),
+                TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_tool_registry_set_execution_metadata(
+                    registry, "repo.inspect", execution_metadata_probe),
+                TURBO_TOOL_OK);
+    turbo_runtime_json_destroy(execution_metadata_probe);
 
     check_true(json_object_add_checked(args1, "b", json_create_int64(2)));
     check_true(json_object_add_checked(args1, "a", json_create_int64(1)));
@@ -589,6 +600,12 @@ spec("agent compiler Phase 1 boundary") {
                 "TurboAgent.Inspect.v1");
     check_equal(json_get_string(certificate, "tool"), "repo.inspect");
     check_equal(json_get_string(certificate, "backend"), "runtime_tools");
+    {
+      const json_value_t *execution_metadata =
+          json_object_get(certificate, "execution_metadata");
+      check_not_null(execution_metadata);
+      check_equal(json_get_string(execution_metadata, "backend"), "probe");
+    }
 
     turbo_runtime_json_destroy(certificate);
     turbo_agent_executable_plan_destroy(second);

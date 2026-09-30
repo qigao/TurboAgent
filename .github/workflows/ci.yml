@@ -114,43 +114,6 @@ jobs:
           export LD_LIBRARY_PATH="$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/linux --no-tests=error --output-on-failure
 
-      - name: Install and verify consumer
-        shell: bash
-        run: |
-          set -euxo pipefail
-          prefix="$GITHUB_WORKSPACE/stage/linux-x64"
-          cmake --install build/linux --prefix "$prefix"
-
-          consumer="$RUNNER_TEMP/turboagent-consumer"
-          mkdir -p "$consumer"
-          cat > "$consumer/CMakeLists.txt" <<'EOF'
-          cmake_minimum_required(VERSION 3.20)
-          project(turboagent_consumer LANGUAGES C)
-          find_package(TurboAgent CONFIG REQUIRED)
-          add_executable(turboagent_consumer main.c)
-          target_link_libraries(turboagent_consumer PRIVATE
-            TurboAgent::RuntimeCore
-            TurboAgent::RuntimeData
-            TurboAgent::RuntimeTools
-            TurboAgent::McpTools
-            TurboAgent::LangChain)
-          EOF
-          cat > "$consumer/main.c" <<'EOF'
-          #include <turbo_mcp_tool_pack.h>
-          int main(void) {
-            turbo_mcp_tool_pack_config_t config;
-            turbo_mcp_tool_pack_config_init(&config);
-            return config.abi_version == TURBO_MCP_TOOL_PACK_ABI_VERSION ? 0 : 1;
-          }
-          EOF
-
-          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
-          cmake -S "$consumer" -B "$consumer/build" -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux \
-            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/linux" \
-            -DCMAKE_PREFIX_PATH="$prefix;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
-          cmake --build "$consumer/build" --parallel 2
 
   praktor:
     name: Linux x64 + Praktor

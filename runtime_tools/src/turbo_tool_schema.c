@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum { TURBO_TOOL_SCHEMA_MAX_DEPTH = 64 };
+#define TURBO_TOOL_SCHEMA_MAX_SAFE_INTEGER 9007199254740991.0
+
 static json_value_t *
 turbo_tool_schema_clone_json_value(const json_value_t *value) {
   json_value_t *json_value;
@@ -205,6 +208,7 @@ static int turbo_tool_schema_nonnegative_size(const json_value_t *value,
   if (!value || json_type(value) != JSON_NUMBER || !out) return 0;
   number = json_number(value);
   if (!isfinite(number) || number < 0.0 || modf(number, &integral) != 0.0 ||
+      integral > TURBO_TOOL_SCHEMA_MAX_SAFE_INTEGER ||
       integral > (double)SIZE_MAX) {
     return 0;
   }
@@ -249,6 +253,7 @@ turbo_tool_schema_type_matches(const json_value_t *value,
 static turbo_tool_schema_validation_status_t
 turbo_tool_schema_validate_node(const json_value_t *value,
                                 const json_value_t *schema,
+                                size_t depth,
                                 char *diagnostic,
                                 size_t diagnostic_capacity) {
   turbo_tool_schema_validation_status_t status;
@@ -261,6 +266,12 @@ turbo_tool_schema_validate_node(const json_value_t *value,
   const json_value_t *const_value;
   const json_value_t *bound;
   size_t i;
+
+  if (depth > TURBO_TOOL_SCHEMA_MAX_DEPTH) {
+    turbo_tool_schema_diagnostic(diagnostic, diagnostic_capacity,
+                                 "parameter schema exceeds maximum depth", NULL);
+    return TURBO_TOOL_SCHEMA_UNSUPPORTED;
+  }
 
   status = turbo_tool_schema_check_keywords(schema, diagnostic,
                                             diagnostic_capacity);
@@ -431,7 +442,7 @@ turbo_tool_schema_validate_node(const json_value_t *value,
         return TURBO_TOOL_SCHEMA_UNSUPPORTED;
       }
       for (i = 0; i < count; ++i) {
-        status = turbo_tool_schema_validate_node(json_array_get(value, i), items,
+        status = turbo_tool_schema_validate_node(json_array_get(value, i), items, depth + 1u,
                                                  diagnostic, diagnostic_capacity);
         if (status != TURBO_TOOL_SCHEMA_VALID) return status;
       }
@@ -508,7 +519,7 @@ turbo_tool_schema_validate_node(const json_value_t *value,
           return TURBO_TOOL_SCHEMA_INVALID_SCHEMA;
         }
         if (!property_value) continue;
-        status = turbo_tool_schema_validate_node(property_value, property_schema,
+        status = turbo_tool_schema_validate_node(property_value, property_schema, depth + 1u,
                                                  diagnostic, diagnostic_capacity);
         if (status != TURBO_TOOL_SCHEMA_VALID) return status;
       }
@@ -537,7 +548,7 @@ turbo_tool_schema_validate_node(const json_value_t *value,
         return TURBO_TOOL_SCHEMA_VALUE_INVALID;
       }
       status = turbo_tool_schema_validate_node(json_object_value(value, i),
-                                               additional, diagnostic,
+                                               additional, depth + 1u, diagnostic,
                                                diagnostic_capacity);
       if (status != TURBO_TOOL_SCHEMA_VALID) return status;
     }
@@ -570,7 +581,7 @@ turbo_tool_schema_validate_arguments_json_value(
     return TURBO_TOOL_SCHEMA_INVALID_SCHEMA;
   }
 
-  status = turbo_tool_schema_validate_node(arguments, schema, diagnostic,
+  status = turbo_tool_schema_validate_node(arguments, schema, 0u, diagnostic,
                                            diagnostic_capacity);
   json_free(schema);
   return status;

@@ -277,6 +277,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $triplet = $env:QIGAO_VCPKG_WINDOWS_TRIPLET
+          if ([string]::IsNullOrWhiteSpace($triplet)) { throw "canonical Windows vcpkg triplet is unavailable" }
           $installed = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed\release-windows"
           $log = Join-Path $env:RUNNER_TEMP "turboagent-windows-vcpkg-cache.log"
 
@@ -291,23 +293,23 @@ jobs:
           & "$env:VCPKG_ROOT\vcpkg.exe" install `
             "--x-manifest-root=$env:GITHUB_WORKSPACE" `
             "--x-install-root=$installed" `
-            "--triplet=x64-windows" `
+            "--triplet=$triplet" `
             --only-binarycaching 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) {
             throw "Windows shared vcpkg cache-only restore failed"
           }
 
           $text = Get-Content -LiteralPath $log -Raw
-          if ($text -match "(?m)^Building [^:]+:x64-windows") {
+          if ($text -match ("(?m)^Building [^:]+:" + [regex]::Escape($triplet))) {
             throw "Windows CI must not build vcpkg packages from source"
           }
           if ($text -notmatch "Restored [1-9][0-9]* package\(s\) from NuGet") {
             throw "Windows CI did not restore packages from the shared NuGet cache"
           }
-          if ($text -notmatch "boringssl:x64-windows") {
+          if ($text -notmatch ("boringssl:" + [regex]::Escape($triplet))) {
             throw "Windows cache restore did not cover boringssl"
           }
-          if ($text -notmatch "sqlite3(?:\[[^\]]+\])?:x64-windows") {
+          if ($text -notmatch ("sqlite3(?:\\[[^\\]]+\\])?:" + [regex]::Escape($triplet))) {
             throw "Windows cache restore did not cover sqlite3"
           }
 
@@ -324,7 +326,7 @@ jobs:
           cmake -S . -B build\release-windows -G Ninja ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^
-            -DVCPKG_TARGET_TRIPLET=x64-windows ^
+            -DVCPKG_TARGET_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET% ^
             -DVCPKG_MANIFEST_MODE=ON ^
             -DVCPKG_INSTALLED_DIR="%INSTALLED%" ^
             -DCMAKE_PREFIX_PATH="%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
@@ -341,7 +343,7 @@ jobs:
           cmake --build build\release-windows --parallel 2
           if errorlevel 1 exit /b 1
 
-          set "PATH=%GITHUB_WORKSPACE%\build\release-windows\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%INSTALLED%\x64-windows\bin;%PATH%"
+          set "PATH=%GITHUB_WORKSPACE%\build\release-windows\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%INSTALLED%\%QIGAO_VCPKG_WINDOWS_TRIPLET%\bin;%PATH%"
           ctest --test-dir build\release-windows --no-tests=error --output-on-failure
           if errorlevel 1 exit /b 1
 
@@ -383,7 +385,7 @@ jobs:
             $toolchain = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
           }
 
-          cmd /c "call `"$env:VSINSTALL\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && cmake -S `"$consumer`" -B `"$consumer\build`" -G Ninja -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`" -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_INSTALLED_DIR=`"$installed`" -DCMAKE_PREFIX_PATH=`"$prefix;$env:CHTTP_ROOT;$env:SALTS_UTILS_ROOT;$env:SALTS_ROOT`" && cmake --build `"$consumer\build`" --parallel 2"
+          cmd /c "call `"$env:VSINSTALL\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && cmake -S `"$consumer`" -B `"$consumer\build`" -G Ninja -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`" -DVCPKG_TARGET_TRIPLET=$env:QIGAO_VCPKG_WINDOWS_TRIPLET -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_INSTALLED_DIR=`"$installed`" -DCMAKE_PREFIX_PATH=`"$prefix;$env:CHTTP_ROOT;$env:SALTS_UTILS_ROOT;$env:SALTS_ROOT`" && cmake --build `"$consumer\build`" --parallel 2"
           if ($LASTEXITCODE -ne 0) { throw "installed Windows consumer failed" }
 
           @"

@@ -239,6 +239,35 @@ spec("agent compiler Phase 1 boundary") {
     turbo_tool_registry_destroy(registry);
   }
 
+  it("rejects argument trees that exceed compiler resource limits") {
+    compiler_probe_t read_probe = {0};
+    compiler_probe_t mutation_probe = {0};
+    turbo_tool_registry_t *registry = make_registry(&read_probe, &mutation_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_typed_plan_t source;
+    turbo_agent_executable_plan_t *plan = NULL;
+    json_value_t *arguments = json_create_object();
+    const char *allowed[] = {"runtime_tools"};
+
+    check_not_null(arguments);
+    check_true(json_object_add_checked(arguments, "value",
+                                       json_create_string("too-many-nodes")));
+
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+    config.max_argument_nodes = 1;
+    init_source(&source, "inspect", "repo.inspect", arguments);
+
+    check_equal(turbo_agent_compile_plan(&config, registry, &source, &plan, NULL),
+                TURBO_AGENT_COMPILE_PLAN_LIMIT);
+    check_null(plan);
+    check_equal(read_probe.calls, 0);
+
+    turbo_runtime_json_destroy(arguments);
+    turbo_tool_registry_destroy(registry);
+  }
+
   it("resolves external compatible tool names and freezes canonical identity") {
     compiler_probe_t read_probe = {0};
     compiler_probe_t mutation_probe = {0};

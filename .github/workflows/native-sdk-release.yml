@@ -278,7 +278,9 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $triplet = $env:QIGAO_VCPKG_WINDOWS_TRIPLET
+          $hostTriplet = $env:QIGAO_VCPKG_WINDOWS_HOST_TRIPLET
           if ([string]::IsNullOrWhiteSpace($triplet)) { throw "canonical Windows vcpkg triplet is unavailable" }
+          if ([string]::IsNullOrWhiteSpace($hostTriplet)) { throw "canonical Windows vcpkg host triplet is unavailable" }
           $installed = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed\release-windows"
           $log = Join-Path $env:RUNNER_TEMP "turboagent-windows-vcpkg-cache.log"
 
@@ -294,6 +296,7 @@ jobs:
             "--x-manifest-root=$env:GITHUB_WORKSPACE" `
             "--x-install-root=$installed" `
             "--triplet=$triplet" `
+            "--host-triplet=$hostTriplet" `
             --only-binarycaching 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) {
             throw "Windows shared vcpkg cache-only restore failed"
@@ -327,6 +330,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^
             -DVCPKG_TARGET_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET% ^
+            -DVCPKG_HOST_TRIPLET=%QIGAO_VCPKG_WINDOWS_HOST_TRIPLET% ^
             -DVCPKG_MANIFEST_MODE=ON ^
             -DVCPKG_INSTALLED_DIR="%INSTALLED%" ^
             -DCMAKE_PREFIX_PATH="%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
@@ -385,7 +389,7 @@ jobs:
             $toolchain = Join-Path $env:VCPKG_ROOT "scripts\buildsystems\vcpkg.cmake"
           }
 
-          cmd /c "call `"$env:VSINSTALL\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && cmake -S `"$consumer`" -B `"$consumer\build`" -G Ninja -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`" -DVCPKG_TARGET_TRIPLET=$env:QIGAO_VCPKG_WINDOWS_TRIPLET -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_INSTALLED_DIR=`"$installed`" -DCMAKE_PREFIX_PATH=`"$prefix;$env:CHTTP_ROOT;$env:SALTS_UTILS_ROOT;$env:SALTS_ROOT`" && cmake --build `"$consumer\build`" --parallel 2"
+          cmd /c "call `"$env:VSINSTALL\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && cmake -S `"$consumer`" -B `"$consumer\build`" -G Ninja -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`" -DVCPKG_TARGET_TRIPLET=$env:QIGAO_VCPKG_WINDOWS_TRIPLET -DVCPKG_HOST_TRIPLET=$env:QIGAO_VCPKG_WINDOWS_HOST_TRIPLET -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_INSTALLED_DIR=`"$installed`" -DCMAKE_PREFIX_PATH=`"$prefix;$env:CHTTP_ROOT;$env:SALTS_UTILS_ROOT;$env:SALTS_ROOT`" && cmake --build `"$consumer\build`" --parallel 2"
           if ($LASTEXITCODE -ne 0) { throw "installed Windows consumer failed" }
 
           @"

@@ -310,7 +310,14 @@ jobs:
             "--triplet=$triplet" `
             "--host-triplet=$hostTriplet" `
             --only-binarycaching 2>&1 | Tee-Object -FilePath $log
-          if ($LASTEXITCODE -ne 0) {
+          $vcpkgExitCode = $LASTEXITCODE
+          $abiFiles = Get-ChildItem -Path (Join-Path $env:VCPKG_ROOT "buildtrees") -Recurse -File -Filter "$triplet.vcpkg_abi_info.txt" -ErrorAction SilentlyContinue
+          foreach ($abiFile in $abiFiles) {
+            Write-Host "::group::ABI input $($abiFile.Directory.Name)"
+            Get-Content -LiteralPath $abiFile.FullName
+            Write-Host "::endgroup::"
+          }
+          if ($vcpkgExitCode -ne 0) {
             throw "Windows shared vcpkg cache-only restore failed"
           }
 

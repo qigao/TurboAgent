@@ -309,7 +309,7 @@ jobs:
           if ($text -notmatch ("boringssl:" + [regex]::Escape($triplet))) {
             throw "Windows cache restore did not cover boringssl"
           }
-          if ($text -notmatch ("sqlite3(?:\\[[^\\]]+\\])?:" + [regex]::Escape($triplet))) {
+          if ($text -notmatch ("sqlite3(?:\[[^\]]+\])?:" + [regex]::Escape($triplet))) {
             throw "Windows cache restore did not cover sqlite3"
           }
 

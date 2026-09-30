@@ -275,7 +275,7 @@ spec("agent compiler Phase 1 boundary") {
     certificate = turbo_agent_executable_plan_certificate_json_value(first);
     check_not_null(certificate);
     check_equal(json_get_string(certificate, "template"), "inspect");
-    check_equal(json_get_int64(certificate, "template_version", 0), 1);
+    check_equal(json_get_int(certificate, "template_version", 0), 1);
     check_equal(json_get_string(certificate, "input_contract"),
                 "TurboAgent.Inspect.v1");
     check_equal(json_get_string(certificate, "tool"), "repo.inspect");

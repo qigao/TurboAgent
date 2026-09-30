@@ -98,6 +98,20 @@ static void init_source(turbo_agent_typed_plan_t *source,
 }
 
 spec("agent compiler Phase 1 boundary") {
+  it("publishes one immutable Inspect template descriptor") {
+    const turbo_agent_template_descriptor_t *descriptor =
+        turbo_agent_template_descriptor(TURBO_AGENT_TEMPLATE_INSPECT);
+    check_not_null(descriptor);
+    check_equal(descriptor->abi_version,
+                TURBO_AGENT_TEMPLATE_DESCRIPTOR_ABI_VERSION);
+    check_equal(descriptor->version, 1);
+    check_equal(descriptor->name, "inspect");
+    check_equal(descriptor->input_contract, "TurboAgent.Inspect.v1");
+    check_true((descriptor->properties &
+                TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY) != 0u);
+    check_null(turbo_agent_template_descriptor(TURBO_AGENT_TEMPLATE_INVALID));
+  }
+
   it("rejects unknown tools before any callback") {
     compiler_probe_t read_probe = {0};
     compiler_probe_t mutation_probe = {0};
@@ -261,6 +275,9 @@ spec("agent compiler Phase 1 boundary") {
     certificate = turbo_agent_executable_plan_certificate_json_value(first);
     check_not_null(certificate);
     check_equal(json_get_string(certificate, "template"), "inspect");
+    check_equal(json_get_int64(certificate, "template_version", 0), 1);
+    check_equal(json_get_string(certificate, "input_contract"),
+                "TurboAgent.Inspect.v1");
     check_equal(json_get_string(certificate, "tool"), "repo.inspect");
     check_equal(json_get_string(certificate, "backend"), "runtime_tools");
 

@@ -26,7 +26,9 @@ typedef enum {
   TURBO_TOOL_DEADLINE_EXCEEDED = -7,
   TURBO_TOOL_OUTPUT_LIMIT = -8,
   TURBO_TOOL_UNKNOWN_SIDE_EFFECT = -9,
-  TURBO_TOOL_BACKPRESSURE = -10
+  TURBO_TOOL_BACKPRESSURE = -10,
+  TURBO_TOOL_FUEL_EXHAUSTED = -11,
+  TURBO_TOOL_TRAPPED = -12
 } turbo_tool_status_t;
 
 typedef enum turbo_tool_execution_mode_e {

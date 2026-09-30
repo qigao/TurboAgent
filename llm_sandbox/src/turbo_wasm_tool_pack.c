@@ -1,103 +1,7 @@
 #include "turbo_wasm_tool_pack.h"
 
-#include <salts_fs.h>
-
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define TURBO_WASM_TOOL_PACK_FNV_OFFSET UINT64_C(14695981039346656037)
-#define TURBO_WASM_TOOL_PACK_FNV_PRIME UINT64_C(1099511628211)
-
-enum {
-  TURBO_WASM_TOOL_PACK_DEFAULT_MAX_MODULES = 16,
-  TURBO_WASM_TOOL_PACK_DEFAULT_MAX_TOOLS = 128
-};
-
-struct turbo_wasm_tool_pack_s {
-  turbo_tool_registry_t *registry;
-  size_t module_count;
-  size_t max_modules;
-  size_t max_tools;
-};
-
-static uint64_t turbo_wasm_tool_pack_module_hash(
-    const void *data, size_t size) {
-  const unsigned char *bytes = (const unsigned char *)data;
-  uint64_t hash = TURBO_WASM_TOOL_PACK_FNV_OFFSET;
-  size_t i;
-  for (i = 0; i < size; ++i) {
-    hash ^= (uint64_t)bytes[i];
-    hash *= TURBO_WASM_TOOL_PACK_FNV_PRIME;
-  }
-  return hash;
-}
-
-static json_value_t *turbo_wasm_tool_pack_execution_metadata(
-    const turbo_tool_runtime_wasm_config_t *config) {
-  salts_fs_buf_t bytes = {0};
-  json_value_t *root = NULL;
-  json_value_t *limits = NULL;
-  json_value_t *field = NULL;
-  char identity[32];
-  uint64_t hash;
-
-  if (!config || !config->module_path ||
-      salts_fs_read_file(config->module_path, &bytes) != 0)
-    return NULL;
-  hash = turbo_wasm_tool_pack_module_hash(bytes.base, bytes.len);
-  salts_fs_buf_free(&bytes);
-
-  root = json_create_object();
-  limits = json_create_object();
-  if (!root || !limits) goto fail;
-
-  field = json_create_string("turbowasm");
-  if (!field || turbo_runtime_json_object_set(root, "backend", field) !=
-                    TURBO_RUNTIME_JSON_OK)
-    goto fail;
-  field = NULL;
-
-  snprintf(identity, sizeof(identity), "fnv1a64:%016llx",
-           (unsigned long long)hash);
-  field = json_create_string(identity);
-  if (!field ||
-      turbo_runtime_json_object_set(root, "module_identity", field) !=
-          TURBO_RUNTIME_JSON_OK)
-    goto fail;
-  field = NULL;
-
-#define TURBO_WASM_LIMIT(name, value)                                      \
-  do {                                                                     \
-    field = json_create_int64((int64_t)(value));                            \
-    if (!field ||                                                          \
-        turbo_runtime_json_object_set(limits, (name), field) !=             \
-            TURBO_RUNTIME_JSON_OK)                                         \
-      goto fail;                                                           \
-    field = NULL;                                                          \
-  } while (0)
-
-  TURBO_WASM_LIMIT("max_module_bytes", config->max_module_bytes);
-  TURBO_WASM_LIMIT("max_allocation_bytes", config->max_allocation_bytes);
-  TURBO_WASM_LIMIT("max_linear_memory_bytes", config->max_linear_memory_bytes);
-  TURBO_WASM_LIMIT("max_table_elements", config->max_table_elements);
-  TURBO_WASM_LIMIT("max_input_bytes", config->max_input_bytes);
-  TURBO_WASM_LIMIT("max_output_bytes", config->max_output_bytes);
-  TURBO_WASM_LIMIT("fuel_per_call", config->fuel_per_call);
-#undef TURBO_WASM_LIMIT
-
-  if (turbo_runtime_json_object_set(root, "limits", limits) !=
-      TURBO_RUNTIME_JSON_OK)
-    goto fail;
-  limits = NULL;
-  return root;
-
-fail:
-  turbo_runtime_json_destroy(field);
-  turbo_runtime_json_destroy(limits);
-  turbo_runtime_json_destroy(root);
-  return NULL;
-}
 
 static void turbo_wasm_tool_pack_remove_runtime_tools(
     turbo_wasm_tool_pack_t *pack, turbo_tool_runtime_t *runtime) {
@@ -194,8 +98,11 @@ turbo_wasm_tool_pack_add_module(turbo_wasm_tool_pack_t *pack,
     return TURBO_TOOL_BACKPRESSURE;
   }
 
-  runtime = turbo_tool_runtime_wasm_create(&config->runtime);
-  if (!runtime) {
+  runtime = turbo_tool_runtime_wasm_create_with_metadata(
+      &config->runtime, &execution_metadata);
+  if (!runtime || !execution_metadata) {
+    turbo_runtime_json_destroy(execution_metadata);
+    turbo_tool_runtime_destroy(runtime);
     return TURBO_TOOL_ERROR;
   }
   module_tool_count = turbo_tool_runtime_count(runtime);
@@ -208,13 +115,6 @@ turbo_wasm_tool_pack_add_module(turbo_wasm_tool_pack_t *pack,
       module_tool_count > pack->max_tools - current_tool_count) {
     turbo_tool_runtime_destroy(runtime);
     return TURBO_TOOL_BACKPRESSURE;
-  }
-
-  execution_metadata =
-      turbo_wasm_tool_pack_execution_metadata(&config->runtime);
-  if (!execution_metadata) {
-    turbo_tool_runtime_destroy(runtime);
-    return TURBO_TOOL_ERROR;
   }
 
   status = turbo_tool_runtime_add_to_registry(

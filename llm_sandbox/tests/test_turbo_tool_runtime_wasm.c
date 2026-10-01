@@ -131,7 +131,7 @@ spec("TurboWasm tool sandbox") {
 
   it("rejects embedded NUL bytes in guest text output") {
     turbo_tool_runtime_t *runtime =
-        create_runtime(LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM_PATH, 0, 0, 0);
+        create_runtime(LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM_PATH, 0, 0, 0, 0);
     char *output = NULL;
 
     check_not_null(runtime);

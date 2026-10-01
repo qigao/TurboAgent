@@ -34,6 +34,9 @@
 #ifndef LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH
   #error "LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH must be defined"
 #endif
+#ifndef LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM_PATH
+  #error "LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM_PATH must be defined"
+#endif
 #ifndef LLM_SANDBOX_WASM_CONTROL_WASM_PATH
   #error "LLM_SANDBOX_WASM_CONTROL_WASM_PATH must be defined"
 #endif
@@ -124,6 +127,19 @@ spec("TurboWasm tool sandbox") {
         create_runtime(LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH, 0, 0, 0, 0);
     check_null(bad_metadata);
     check_null(bad_schema);
+  }
+
+  it("rejects embedded NUL bytes in guest text output") {
+    turbo_tool_runtime_t *runtime =
+        create_runtime(LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM_PATH, 0, 0, 0);
+    char *output = NULL;
+
+    check_not_null(runtime);
+    check_equal(turbo_tool_runtime_invoke(runtime, "nul_output", "{}", &output),
+                TURBO_TOOL_ERROR);
+    check_null(output);
+
+    turbo_tool_runtime_destroy(runtime);
   }
 
   it("enforces host input and output byte limits") {

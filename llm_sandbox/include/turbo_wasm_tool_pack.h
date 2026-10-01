@@ -86,8 +86,9 @@ CXX_C_API turbo_tool_status_t turbo_wasm_tool_pack_add_module(
  *
  * The pointer remains valid until pack destruction. Callers must not mutate or
  * destroy it. Any agent or projected registry borrowing callbacks from it must
- * be destroyed before the pack. Direct callers must serialize access; the
- * Agent tool executor honors each registered execution policy.
+ * be destroyed before the pack. Guest invocation is serialized by the
+ * TurboWasm backend itself; the execution policy remains descriptive input for
+ * higher-level scheduling and admission.
  *
  * @param pack Pack handle.
  * @return Borrowed registry, or NULL when pack is NULL.

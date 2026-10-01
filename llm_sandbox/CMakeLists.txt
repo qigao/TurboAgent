@@ -63,6 +63,8 @@ if(BUILD_TESTS)
         "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_control_test.wasm")
     set(LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM
         "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_forbidden_import_test.wasm")
+    set(LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_embedded_nul_test.wasm")
 
     llm_sandbox_add_guest(
       "${LLM_SANDBOX_WASM_TOOL_WASM}"
@@ -98,6 +100,9 @@ if(BUILD_TESTS)
     llm_sandbox_add_guest(
       "${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_forbidden_import.c" 131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_embedded_nul.c" 131072)
 
     cmake_add_test(
       SOURCES tests/test_turbo_tool_runtime_wasm.c
@@ -128,7 +133,8 @@ if(BUILD_TESTS)
                 ${LLM_SANDBOX_WASM_BAD_METADATA_WASM}
                 ${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}
                 ${LLM_SANDBOX_WASM_CONTROL_WASM}
-                ${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM})
+                ${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}
+                ${LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM})
       set_target_properties(llm_sandbox_wasm_tool_guests
                             PROPERTIES FOLDER "Wasm Tools")
       add_dependencies(test_turbo_tool_runtime_wasm llm_sandbox_wasm_tool_guests)
@@ -144,7 +150,8 @@ if(BUILD_TESTS)
           LLM_SANDBOX_WASM_BAD_METADATA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_METADATA_WASM}"
           LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}"
           LLM_SANDBOX_WASM_CONTROL_WASM_PATH="${LLM_SANDBOX_WASM_CONTROL_WASM}"
-          LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH="${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}")
+          LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH="${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}"
+          LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM_PATH="${LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM}")
       if(TARGET test_turbo_wasm_tool_pack)
         add_dependencies(test_turbo_wasm_tool_pack llm_sandbox_wasm_tool_guests)
         target_compile_definitions(

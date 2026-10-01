@@ -168,6 +168,17 @@ spec("TurboWasm tool sandbox") {
     turbo_tool_runtime_destroy(input_limited);
   }
 
+  it("rejects module bytes beyond the host read limit") {
+    turbo_tool_runtime_wasm_config_t config;
+    turbo_tool_runtime_t *runtime;
+
+    turbo_tool_runtime_wasm_config_init(&config);
+    config.module_path = LLM_SANDBOX_WASM_TOOL_WASM_PATH;
+    config.max_module_bytes = 8u;
+    runtime = turbo_tool_runtime_wasm_create(&config);
+    check_null(runtime);
+  }
+
   it("rejects modules whose initial memory exceeds the Runtime quota") {
     turbo_tool_runtime_t *runtime =
         create_runtime(LLM_SANDBOX_WASM_MEMORY_GROW_WASM_PATH, 0, 0, 64 * 1024, 0);

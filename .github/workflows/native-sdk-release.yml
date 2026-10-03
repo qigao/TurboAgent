@@ -105,7 +105,7 @@ jobs:
           prefix="$GITHUB_WORKSPACE/stage/sdk/linux-x64"
           installed="$GITHUB_WORKSPACE/vcpkg_installed/release-linux"
 
-          cmake -S . -B build/release-linux -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
+          cmake -S . -B build/release-linux -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DTURBOWASM_ROOT="$TURBOWASM_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
 
           cmake --build build/release-linux --parallel 2
           vcpkg_libs="$(find "$installed" -type d             \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
@@ -198,7 +198,7 @@ jobs:
           prefix="$GITHUB_WORKSPACE/stage/sdk/macos-arm64"
           installed="$GITHUB_WORKSPACE/vcpkg_installed/release-macos"
 
-          cmake -S . -B build/release-macos -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=arm64-osx             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
+          cmake -S . -B build/release-macos -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=arm64-osx             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DTURBOWASM_ROOT="$TURBOWASM_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
 
           cmake --build build/release-macos --parallel 2
           cmake --install build/release-macos --prefix "$prefix"
@@ -369,6 +369,7 @@ jobs:
             -DSALTS_ROOT="%SALTS_ROOT%" ^
             -DSALTS_UTILS_ROOT="%SALTS_UTILS_ROOT%" ^
             -DCHTTP_ROOT="%CHTTP_ROOT%" ^
+            -DTURBOWASM_ROOT="%TURBOWASM_ROOT%" ^
             -DENABLE_PRAKTOR_TOOLS=OFF ^
             -DENABLE_WASM_TOOLS=ON ^
             -DBUILD_EXAMPLES=OFF ^
@@ -452,7 +453,7 @@ jobs:
           prefix="$GITHUB_WORKSPACE/stage/sdk/android-arm64-v8a"
           installed="$GITHUB_WORKSPACE/vcpkg_installed/release-android"
 
-          cmake -S . -B build/release-android -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DENABLE_CODEX_BRIDGE=OFF             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DCMAKE_INSTALL_PREFIX="$prefix"
+          cmake -S . -B build/release-android -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DTURBOWASM_ROOT="$TURBOWASM_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DENABLE_CODEX_BRIDGE=OFF             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DCMAKE_INSTALL_PREFIX="$prefix"
 
           cmake --build build/release-android --parallel 2
           cmake --install build/release-android

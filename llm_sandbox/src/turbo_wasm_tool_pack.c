@@ -97,6 +97,7 @@ turbo_wasm_tool_pack_add_module(turbo_wasm_tool_pack_t *pack,
                                 const turbo_wasm_tool_pack_module_config_t *config) {
   turbo_tool_runtime_t *runtime;
   turbo_tool_status_t status;
+  int registry_committed = 0;
   json_value_t *execution_metadata = NULL;
   size_t module_tool_count;
   size_t current_tool_count;
@@ -135,6 +136,7 @@ turbo_wasm_tool_pack_add_module(turbo_wasm_tool_pack_t *pack,
       runtime, pack->registry, &config->execution_policy);
   if (status == TURBO_TOOL_OK) {
     size_t tool_index;
+    registry_committed = 1;
     for (tool_index = 0; tool_index < module_tool_count; ++tool_index) {
       turbo_tool_runtime_tool_t tool = {0};
       status = turbo_tool_runtime_get_tool(runtime, tool_index, &tool);
@@ -148,7 +150,8 @@ turbo_wasm_tool_pack_add_module(turbo_wasm_tool_pack_t *pack,
     }
   }
   if (status != TURBO_TOOL_OK) {
-    turbo_wasm_tool_pack_remove_runtime_tools(pack, runtime);
+    if (registry_committed)
+      turbo_wasm_tool_pack_remove_runtime_tools(pack, runtime);
     turbo_runtime_json_destroy(execution_metadata);
     turbo_tool_runtime_destroy(runtime);
     return status;

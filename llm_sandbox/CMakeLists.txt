@@ -1,47 +1,45 @@
 cmake_minimum_required(VERSION 3.20)
-project(llm_sandbox LANGUAGES C)
+project(wasm_tools LANGUAGES C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 include(CmakeUtils)
 
 cmake_add_source(SOURCES)
 
-add_library(llm_sandbox SHARED ${SOURCES})
-target_compile_definitions(llm_sandbox PRIVATE SHARED_CXX)
+add_library(wasm_tools SHARED ${SOURCES})
+target_compile_definitions(wasm_tools PRIVATE SHARED_CXX)
 target_include_directories(
-  llm_sandbox PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  wasm_tools PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                      $<INSTALL_INTERFACE:include>)
-target_link_libraries(llm_sandbox
+target_link_libraries(wasm_tools
   PUBLIC TurboAgent::RuntimeTools
          TurboWasm::Runtime
-  PRIVATE Salts::Core)
+  PRIVATE Salts::Core Salts::Platform)
 
-cmake_config_target(llm_sandbox FOLDER "LLM Sandbox" EXPORT_NAME LLMSandbox
-                    ALIAS TurboAgent::LLMSandbox)
+cmake_config_target(wasm_tools FOLDER "Wasm Tools" EXPORT_NAME WasmTools
+                    ALIAS TurboAgent::WasmTools)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
                       DESTINATION include)
 
 if(BUILD_TESTS)
   find_program(LLM_SANDBOX_WASM_CLANG NAMES clang clang.exe)
-  if(LLM_SANDBOX_WASM_CLANG)
-    get_target_property(LLM_SANDBOX_TURBOWASM_INCLUDES TurboWasm::Runtime
-                        INTERFACE_INCLUDE_DIRECTORIES)
-    set(LLM_SANDBOX_GUEST_INCLUDE_ARGS ${LLM_SANDBOX_TURBOWASM_INCLUDES})
-    list(TRANSFORM LLM_SANDBOX_GUEST_INCLUDE_ARGS PREPEND "-I")
-
+  if(NOT LLM_SANDBOX_WASM_CLANG)
+    message(FATAL_ERROR
+      "TurboAgent WasmTools tests require clang with wasm32-unknown-unknown support")
+  endif()
     function(llm_sandbox_add_guest output source max_memory)
       add_custom_command(
         OUTPUT "${output}"
         COMMAND
           ${LLM_SANDBOX_WASM_CLANG} --target=wasm32-unknown-unknown -O2
-          -nostdlib ${LLM_SANDBOX_GUEST_INCLUDE_ARGS} -Wl,--no-entry
+          -nostdlib -Wl,--no-entry
           -Wl,--export-if-defined=turbo_tool_count
           -Wl,--export-if-defined=turbo_tool_describe
           -Wl,--export-if-defined=turbo_tool_invoke
           -Wl,--initial-memory=131072 -Wl,--max-memory=${max_memory}
           -Wl,--allow-undefined -o "${output}" "${source}"
         DEPENDS "${source}"
-                ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_llm_sandbox_guest.h
+                ${CMAKE_CURRENT_SOURCE_DIR}/include/turbo_wasm_tools_guest.h
         VERBATIM)
     endfunction()
 
@@ -61,6 +59,12 @@ if(BUILD_TESTS)
         "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_bad_metadata_test.wasm")
     set(LLM_SANDBOX_WASM_BAD_SCHEMA_WASM
         "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_bad_schema_test.wasm")
+    set(LLM_SANDBOX_WASM_CONTROL_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_control_test.wasm")
+    set(LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_forbidden_import_test.wasm")
+    set(LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_embedded_nul_test.wasm")
 
     llm_sandbox_add_guest(
       "${LLM_SANDBOX_WASM_TOOL_WASM}"
@@ -90,22 +94,31 @@ if(BUILD_TESTS)
     llm_sandbox_add_guest(
       "${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_schema.c" 131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_CONTROL_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_control.c" 131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_forbidden_import.c" 131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_embedded_nul.c" 131072)
 
     cmake_add_test(
       SOURCES tests/test_turbo_tool_runtime_wasm.c
-      LIBS llm_sandbox Salts::TinyTest
-      FOLDER "LLM Sandbox/tests")
+      LIBS wasm_tools Salts::TinyTest
+      FOLDER "Wasm Tools/tests")
 
     cmake_add_test(
       SOURCES tests/test_turbo_wasm_tool_pack.c
-      LIBS llm_sandbox Salts::TinyTest
-      FOLDER "LLM Sandbox/tests")
+      LIBS wasm_tools agent_compiler Salts::TinyTest
+      FOLDER "Wasm Tools/tests")
 
     if(TARGET langchain)
       cmake_add_test(
         SOURCES tests/test_turbo_wasm_tool_pack_workspace.c
-        LIBS llm_sandbox langchain Salts::TinyTest
-        FOLDER "LLM Sandbox/tests")
+        LIBS wasm_tools langchain Salts::TinyTest
+        FOLDER "Wasm Tools/tests")
     endif()
 
     if(TARGET test_turbo_tool_runtime_wasm)
@@ -118,9 +131,12 @@ if(BUILD_TESTS)
                 ${LLM_SANDBOX_WASM_NEGATIVE_COUNT_WASM}
                 ${LLM_SANDBOX_WASM_ZERO_TOOLS_WASM}
                 ${LLM_SANDBOX_WASM_BAD_METADATA_WASM}
-                ${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM})
+                ${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}
+                ${LLM_SANDBOX_WASM_CONTROL_WASM}
+                ${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}
+                ${LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM})
       set_target_properties(llm_sandbox_wasm_tool_guests
-                            PROPERTIES FOLDER "LLM Sandbox")
+                            PROPERTIES FOLDER "Wasm Tools")
       add_dependencies(test_turbo_tool_runtime_wasm llm_sandbox_wasm_tool_guests)
       target_compile_definitions(
         test_turbo_tool_runtime_wasm
@@ -132,7 +148,10 @@ if(BUILD_TESTS)
           LLM_SANDBOX_WASM_NEGATIVE_COUNT_WASM_PATH="${LLM_SANDBOX_WASM_NEGATIVE_COUNT_WASM}"
           LLM_SANDBOX_WASM_ZERO_TOOLS_WASM_PATH="${LLM_SANDBOX_WASM_ZERO_TOOLS_WASM}"
           LLM_SANDBOX_WASM_BAD_METADATA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_METADATA_WASM}"
-          LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}")
+          LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}"
+          LLM_SANDBOX_WASM_CONTROL_WASM_PATH="${LLM_SANDBOX_WASM_CONTROL_WASM}"
+          LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH="${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}"
+          LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM_PATH="${LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM}")
       if(TARGET test_turbo_wasm_tool_pack)
         add_dependencies(test_turbo_wasm_tool_pack llm_sandbox_wasm_tool_guests)
         target_compile_definitions(
@@ -151,5 +170,4 @@ if(BUILD_TESTS)
             LLM_SANDBOX_WASM_TOOL_WASM_PATH="${LLM_SANDBOX_WASM_TOOL_WASM}")
       endif()
     endif()
-  endif()
 endif()

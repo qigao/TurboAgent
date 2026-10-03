@@ -29,6 +29,7 @@ struct turbo_agent_executable_plan_s {
   turbo_tool_execution_policy_t execution_policy;
   char **capabilities;
   size_t capability_count;
+  json_value_t *execution_metadata;
   uint64_t plan_hash;
 };
 
@@ -196,7 +197,8 @@ static uint64_t executable_plan_hash(
     const json_value_t *arguments,
     const turbo_tool_execution_policy_t *policy,
     char *const *capabilities,
-    size_t capability_count) {
+    size_t capability_count,
+    const json_value_t *execution_metadata) {
   uint64_t hash = TURBO_AGENT_PLAN_FNV_OFFSET_BASIS;
   size_t i;
 
@@ -217,6 +219,12 @@ static uint64_t executable_plan_hash(
   for (i = 0; i < capability_count; ++i) {
     hash = hash_cstring(hash, capabilities[i]);
   }
+  hash = hash_cstring(hash, "execution_metadata");
+  if (execution_metadata) {
+    hash = hash_json_value(hash, execution_metadata);
+  } else {
+    hash = hash_cstring(hash, "none");
+  }
   return hash;
 }
 
@@ -225,6 +233,7 @@ static void executable_plan_clear(turbo_agent_executable_plan_t *plan) {
   if (!plan) return;
   turbo_tool_registry_destroy(plan->projection);
   turbo_runtime_json_destroy(plan->arguments);
+  turbo_runtime_json_destroy(plan->execution_metadata);
   free(plan->step_id);
   free(plan->tool_name);
   for (i = 0; i < plan->capability_count; ++i) free(plan->capabilities[i]);
@@ -336,6 +345,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   const char *canonical_tool_name = NULL;
   const char *const *required = NULL;
   size_t required_count = 0;
+  const json_value_t *execution_metadata = NULL;
   size_t i;
   turbo_agent_executable_plan_t *plan = NULL;
   const char *projection_names[1];
@@ -451,6 +461,12 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
                           "tool requires a capability not admitted by the compiler");
     }
   }
+  if (turbo_tool_registry_get_execution_metadata(
+          source_registry, canonical_tool_name, &execution_metadata) !=
+      TURBO_TOOL_OK) {
+    return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
+                        "tool execution metadata is unavailable");
+  }
 
   plan = (turbo_agent_executable_plan_t *)calloc(1, sizeof(*plan));
   if (!plan) {
@@ -464,8 +480,12 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   plan->arguments = source->arguments ? json_clone(source->arguments)
                                      : json_create_object();
   plan->execution_policy = policy;
+  plan->execution_metadata =
+      execution_metadata ? json_clone(execution_metadata) : NULL;
 
-  if (!plan->step_id || !plan->tool_name || !plan->arguments) goto oom;
+  if (!plan->step_id || !plan->tool_name || !plan->arguments ||
+      (execution_metadata && !plan->execution_metadata))
+    goto oom;
 
   {
     static const char *const implicit_custom_tools[] = {"custom_tools"};
@@ -506,7 +526,8 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
 
   plan->plan_hash = executable_plan_hash(
       plan->template_descriptor, plan->step_id, plan->tool_name, plan->arguments,
-      &plan->execution_policy, plan->capabilities, plan->capability_count);
+      &plan->execution_policy, plan->capabilities, plan->capability_count,
+      plan->execution_metadata);
   if (!plan->plan_hash) goto oom;
 
   *out_plan = plan;
@@ -806,6 +827,15 @@ json_value_t *turbo_agent_executable_plan_certificate_json_value(
       TURBO_RUNTIME_JSON_OK)
     goto fail;
   caps = NULL;
+
+  if (plan->execution_metadata) {
+    field = json_clone(plan->execution_metadata);
+    if (!field ||
+        turbo_runtime_json_object_set(root, "execution_metadata", field) !=
+            TURBO_RUNTIME_JSON_OK)
+      goto fail;
+    field = NULL;
+  }
 
   return root;
 

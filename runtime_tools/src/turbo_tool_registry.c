@@ -59,6 +59,7 @@ typedef struct {
   turbo_tool_execution_policy_t execution_policy;
   char **required_capabilities;
   size_t required_capability_count;
+  json_value_t *execution_metadata;
 } turbo_tool_entry_t;
 
 struct turbo_tool_registry_s {
@@ -171,6 +172,7 @@ static void turbo_tool_registry_free_entry(turbo_tool_entry_t *entry) {
     }
     free(entry->required_capabilities);
   }
+  turbo_runtime_json_destroy(entry->execution_metadata);
   memset(entry, 0, sizeof(*entry));
 }
 
@@ -446,6 +448,38 @@ turbo_tool_status_t turbo_tool_registry_require_capability(turbo_tool_registry_t
   return TURBO_TOOL_OK;
 }
 
+turbo_tool_status_t turbo_tool_registry_set_execution_metadata(
+    turbo_tool_registry_t *registry, const char *name,
+    const json_value_t *metadata) {
+  turbo_tool_entry_t *entry;
+  json_value_t *copy = NULL;
+  if (!registry || !name || !name[0] ||
+      (metadata && json_type(metadata) != JSON_OBJECT))
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  entry = (turbo_tool_entry_t *)turbo_tool_registry_find(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+  if (metadata) {
+    copy = turbo_tool_registry_clone_json_value(metadata);
+    if (!copy) return TURBO_TOOL_OUT_OF_MEMORY;
+  }
+  turbo_runtime_json_destroy(entry->execution_metadata);
+  entry->execution_metadata = copy;
+  return TURBO_TOOL_OK;
+}
+
+turbo_tool_status_t turbo_tool_registry_get_execution_metadata(
+    const turbo_tool_registry_t *registry, const char *name,
+    const json_value_t **out_metadata) {
+  const turbo_tool_entry_t *entry;
+  if (!registry || !name || !name[0] || !out_metadata)
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  *out_metadata = NULL;
+  entry = turbo_tool_registry_find(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+  *out_metadata = entry->execution_metadata;
+  return TURBO_TOOL_OK;
+}
+
 turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *source,
                                                 const char *const *names, size_t name_count,
                                                 turbo_tool_registry_t **out_projection) {
@@ -510,6 +544,10 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
     definition.required_capability_count = entry->required_capability_count;
 
     status = turbo_tool_registry_add_v4(projection, &definition);
+    if (status == TURBO_TOOL_OK && entry->execution_metadata) {
+      status = turbo_tool_registry_set_execution_metadata(
+          projection, entry->name, entry->execution_metadata);
+    }
     if (status != TURBO_TOOL_OK) {
       turbo_tool_registry_destroy(projection);
       return status;
@@ -559,6 +597,10 @@ turbo_tool_status_t turbo_tool_registry_compose(const turbo_tool_registry_t *con
       definition.context_handler = entry->context_handler;
       definition.json_value_context_handler = entry->json_value_context_handler;
       status = turbo_tool_registry_add_v4(composite, &definition);
+      if (status == TURBO_TOOL_OK && entry->execution_metadata) {
+        status = turbo_tool_registry_set_execution_metadata(
+            composite, entry->name, entry->execution_metadata);
+      }
       if (status != TURBO_TOOL_OK) {
         turbo_tool_registry_destroy(composite);
         return status;

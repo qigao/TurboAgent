@@ -60,16 +60,19 @@ CXX_C_API void turbo_wasm_tool_pack_destroy(turbo_wasm_tool_pack_t *pack);
 /**
  * Load and atomically register one TurboWasm module.
  *
- * The module must export at least one tool. Duplicate names and capacity
- * failures leave the prior pack unchanged. The TurboWasm policy is borrowed
- * only during this call and is cloned by the created VM. Current TurboWasm
- * VMs are not reentrant, so PARALLEL_SAFE is rejected.
+ * The module path and Runtime resource limits are host-selected through the
+ * nested runtime configuration. The module must export at least one tool.
+ * Duplicate names and capacity failures leave the prior pack unchanged.
+ * Runtime instances are not reentrant, so PARALLEL_SAFE is rejected. The
+ * backend also serializes every invocation internally because direct
+ * RuntimeTools/compiled-plan callers do not pass through Agent ToolExecutor
+ * scheduling.
  *
- * This is a single-owner control-plane operation. Do not call it concurrently
- * with registry projection or tool execution.
+ * This is a single-owner control-plane operation. Do not call add_module()
+ * concurrently with registry projection or tool execution.
  *
  * @param pack Destination pack.
- * @param config Module path, TurboWasm policy, host limits, and tool policy.
+ * @param config Module path, Runtime limits/fuel, host limits, and tool policy.
  * @return OK on commit; INVALID_ARGUMENT for an invalid ABI or policy,
  * BACKPRESSURE for a pack capacity limit, DUPLICATE for a name collision,
  * OUT_OF_MEMORY for bridge allocation failure, or ERROR for module/guest ABI,
@@ -83,8 +86,9 @@ CXX_C_API turbo_tool_status_t turbo_wasm_tool_pack_add_module(
  *
  * The pointer remains valid until pack destruction. Callers must not mutate or
  * destroy it. Any agent or projected registry borrowing callbacks from it must
- * be destroyed before the pack. Direct callers must serialize access; the
- * Agent tool executor honors each registered execution policy.
+ * be destroyed before the pack. Guest invocation is serialized by the
+ * TurboWasm backend itself; the execution policy remains descriptive input for
+ * higher-level scheduling and admission.
  *
  * @param pack Pack handle.
  * @return Borrowed registry, or NULL when pack is NULL.

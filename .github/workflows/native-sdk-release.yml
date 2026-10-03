@@ -379,7 +379,7 @@ jobs:
           cmake --build build\release-windows --parallel 2
           if errorlevel 1 exit /b 1
 
-          set "PATH=%GITHUB_WORKSPACE%\build\release-windows\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%INSTALLED%\%QIGAO_VCPKG_WINDOWS_TRIPLET%\bin;%PATH%"
+          set "PATH=%GITHUB_WORKSPACE%\build\release-windows\bin;%TURBOWASM_ROOT%\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%INSTALLED%\%QIGAO_VCPKG_WINDOWS_TRIPLET%\bin;%PATH%"
           ctest --test-dir build\release-windows --no-tests=error --output-on-failure
           if errorlevel 1 exit /b 1
 
@@ -387,6 +387,9 @@ jobs:
           if errorlevel 1 exit /b 1
 
           if not exist "%PREFIX%\lib\cmake\TurboAgent\TurboAgentConfig.cmake" exit /b 1
+          if not exist "%PREFIX%\include\turbo_wasm_tools.h" exit /b 1
+          findstr /C:"WasmTools" "%PREFIX%\lib\cmake\TurboAgent\TurboAgentTargets.cmake" >nul
+          if errorlevel 1 exit /b 1
           if exist "%PREFIX%\include\turbo_praktor_tool_pack.h" exit /b 1
 
       - name: Write SDK manifest

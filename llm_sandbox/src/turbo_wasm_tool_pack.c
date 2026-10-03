@@ -3,6 +3,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  TURBO_WASM_TOOL_PACK_DEFAULT_MAX_MODULES = 16,
+  TURBO_WASM_TOOL_PACK_DEFAULT_MAX_TOOLS = 128
+};
+
+struct turbo_wasm_tool_pack_s {
+  turbo_tool_registry_t *registry;
+  size_t module_count;
+  size_t max_modules;
+  size_t max_tools;
+};
+
 static void turbo_wasm_tool_pack_remove_runtime_tools(
     turbo_wasm_tool_pack_t *pack, turbo_tool_runtime_t *runtime) {
   size_t i;

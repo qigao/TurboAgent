@@ -77,11 +77,13 @@ jobs:
           salts_root="$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts linux-x64 'lib/cmake/Salts/SaltsConfig.cmake')"
           utils_root="$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils linux-x64 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
           chttp_root="$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp linux-x64 'lib/cmake/Chttp/ChttpConfig.cmake')"
+          turbowasm_root="$(restore_sdk qigao/turbowasm 'TurboWasm.Native.*.nupkg' turbowasm linux-x64 'lib/cmake/TurboWasm/TurboWasmConfig.cmake')"
 
           {
             echo "SALTS_ROOT=$salts_root"
             echo "SALTS_UTILS_ROOT=$utils_root"
             echo "CHTTP_ROOT=$chttp_root"
+            echo "TURBOWASM_ROOT=$turbowasm_root"
           } >> "$GITHUB_ENV"
 
       - name: Configure
@@ -95,11 +97,12 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DVCPKG_MANIFEST_MODE=ON \
             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/linux" \
-            -DCMAKE_PREFIX_PATH="$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
             -DSALTS_ROOT="$SALTS_ROOT" \
             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT" \
             -DCHTTP_ROOT="$CHTTP_ROOT" \
-            -DENABLE_WASM_TOOLS=OFF \
+            -DTURBOWASM_ROOT="$TURBOWASM_ROOT" \
+            -DENABLE_WASM_TOOLS=ON \
             -DBUILD_EXAMPLES=OFF \
             -DBUILD_BENCHMARKS=OFF \
             -DENABLE_ASAN=OFF
@@ -111,7 +114,7 @@ jobs:
           cmake --build build/linux --parallel 2
           vcpkg_libs="$(find "$GITHUB_WORKSPACE/vcpkg_installed/linux" -type d \
             \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
-          export LD_LIBRARY_PATH="$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$TURBOWASM_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/linux --no-tests=error --output-on-failure
 
 

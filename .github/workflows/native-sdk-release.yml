@@ -95,7 +95,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash cmake/ci/restore-native-sdk.sh linux-x64 1
+        run: bash cmake/ci/restore-native-sdk.sh linux-x64 1 1
 
       - name: Build, test, install and qualify SDK
         shell: bash
@@ -105,15 +105,17 @@ jobs:
           prefix="$GITHUB_WORKSPACE/stage/sdk/linux-x64"
           installed="$GITHUB_WORKSPACE/vcpkg_installed/release-linux"
 
-          cmake -S . -B build/release-linux -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
+          cmake -S . -B build/release-linux -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
 
           cmake --build build/release-linux --parallel 2
           vcpkg_libs="$(find "$installed" -type d             \( -path '*/x64-linux/debug/lib' -o -path '*/x64-linux/lib' \) -print | paste -sd: -)"
-          export LD_LIBRARY_PATH="$PRAKTOR_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$TURBOWASM_ROOT/lib:$PRAKTOR_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$CHTTP_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$vcpkg_libs:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/release-linux --no-tests=error --output-on-failure
           cmake --install build/release-linux --prefix "$prefix"
 
           test -f "$prefix/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+          test -f "$prefix/include/turbo_wasm_tools.h"
+          grep -F "WasmTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
           test -f "$prefix/include/turbo_praktor_tool_pack.h"
           grep -F "PraktorTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
 
@@ -140,7 +142,7 @@ jobs:
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION ? 0 : 1;
           }
           EOF
-          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$prefix;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$prefix;$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
           cmake --build "$consumer/build" --parallel 2
 
           cat > "$prefix/turboagent-sdk-manifest.txt" <<EOF
@@ -186,7 +188,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash cmake/ci/restore-native-sdk.sh macos-arm64 1
+        run: bash cmake/ci/restore-native-sdk.sh macos-arm64 1 1
 
       - name: Build, install and qualify SDK
         shell: bash
@@ -196,12 +198,14 @@ jobs:
           prefix="$GITHUB_WORKSPACE/stage/sdk/macos-arm64"
           installed="$GITHUB_WORKSPACE/vcpkg_installed/release-macos"
 
-          cmake -S . -B build/release-macos -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=arm64-osx             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=OFF             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
+          cmake -S . -B build/release-macos -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=arm64-osx             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DENABLE_ASAN=OFF
 
           cmake --build build/release-macos --parallel 2
           cmake --install build/release-macos --prefix "$prefix"
 
           test -f "$prefix/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+          test -f "$prefix/include/turbo_wasm_tools.h"
+          grep -F "WasmTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
           test -f "$prefix/include/turbo_praktor_tool_pack.h"
           grep -F "PraktorTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
 
@@ -224,7 +228,7 @@ jobs:
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION ? 0 : 1;
           }
           EOF
-          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=arm64-osx             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$prefix;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=arm64-osx             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$prefix;$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
           cmake --build "$consumer/build" --parallel 2
 
           cat > "$prefix/turboagent-sdk-manifest.txt" <<EOF
@@ -340,7 +344,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64
+        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64 -WithWasm
 
       - name: Build, test, install and qualify SDK
         shell: cmd
@@ -361,12 +365,12 @@ jobs:
             -DVCPKG_HOST_TRIPLET=%QIGAO_VCPKG_WINDOWS_HOST_TRIPLET% ^
             -DVCPKG_MANIFEST_MODE=OFF ^
             -DVCPKG_INSTALLED_DIR="%INSTALLED%" ^
-            -DCMAKE_PREFIX_PATH="%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
+            -DCMAKE_PREFIX_PATH="%TURBOWASM_ROOT%;%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
             -DSALTS_ROOT="%SALTS_ROOT%" ^
             -DSALTS_UTILS_ROOT="%SALTS_UTILS_ROOT%" ^
             -DCHTTP_ROOT="%CHTTP_ROOT%" ^
             -DENABLE_PRAKTOR_TOOLS=OFF ^
-            -DENABLE_WASM_TOOLS=OFF ^
+            -DENABLE_WASM_TOOLS=ON ^
             -DBUILD_EXAMPLES=OFF ^
             -DBUILD_BENCHMARKS=OFF ^
             -DENABLE_ASAN=OFF
@@ -435,7 +439,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash cmake/ci/restore-native-sdk.sh android-arm64-v8a 1
+        run: bash cmake/ci/restore-native-sdk.sh android-arm64-v8a 1 1
 
       - name: Build, install and qualify SDK
         shell: bash
@@ -445,12 +449,14 @@ jobs:
           prefix="$GITHUB_WORKSPACE/stage/sdk/android-arm64-v8a"
           installed="$GITHUB_WORKSPACE/vcpkg_installed/release-android"
 
-          cmake -S . -B build/release-android -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DCMAKE_PREFIX_PATH="$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=OFF             -DENABLE_CODEX_BRIDGE=OFF             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DCMAKE_INSTALL_PREFIX="$prefix"
+          cmake -S . -B build/release-android -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DENABLE_CODEX_BRIDGE=OFF             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DCMAKE_INSTALL_PREFIX="$prefix"
 
           cmake --build build/release-android --parallel 2
           cmake --install build/release-android
 
           test -f "$prefix/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+          test -f "$prefix/include/turbo_wasm_tools.h"
+          grep -F "WasmTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
           test -f "$prefix/include/turbo_praktor_tool_pack.h"
           grep -F "PraktorTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
 
@@ -473,7 +479,7 @@ jobs:
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION ? 0 : 1;
           }
           EOF
-          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DTurboAgent_DIR="$prefix/lib/cmake/TurboAgent"             -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts"             -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils"             -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp"             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript"             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor"             -DCMAKE_PREFIX_PATH="$prefix;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DTurboAgent_DIR="$prefix/lib/cmake/TurboAgent"             -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts"             -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils"             -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp"             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript"             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor"             -DCMAKE_PREFIX_PATH="$prefix;$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
           cmake --build "$consumer/build" --parallel 2
 
           cat > "$prefix/turboagent-sdk-manifest.txt" <<EOF
@@ -511,6 +517,8 @@ jobs:
             test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
             test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
             test -f "package/sdk/$rid/include/turbo_tool.h"
+            test -f "package/sdk/$rid/include/turbo_wasm_tools.h"
+            grep -F "WasmTools" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
             test -f "package/sdk/$rid/turboagent-sdk-manifest.txt"
           done
           for rid in linux-x64 macos-arm64 android-arm64-v8a; do
@@ -552,6 +560,7 @@ jobs:
           for rid in linux-x64 windows-x64 macos-arm64 android-arm64-v8a; do
             grep -Fx "sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_tool.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_wasm_tools.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
           done
           unzip -p "$nupkg" '*.nuspec' > "$RUNNER_TEMP/turboagent.nuspec"
           if grep -q '<dependencies' "$RUNNER_TEMP/turboagent.nuspec"; then

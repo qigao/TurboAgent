@@ -636,12 +636,12 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_json_value_with_contex
   if (!out_result) return TURBO_TOOL_INVALID_ARGUMENT;
   *out_result = NULL;
   if (arguments) {
-    arguments_json = turbo_json_serialize(arguments, NULL);
+    arguments_json = json_serialize(arguments, NULL);
     if (!arguments_json) return TURBO_TOOL_ERROR;
   }
   status = turbo_tool_runtime_wasm_invoke_with_context(
       impl, name, arguments_json, context, &output_json);
-  turbo_json_serialize_free(arguments_json);
+  json_serialize_free(arguments_json);
   if (status != TURBO_TOOL_OK) return status;
 
   parsed = json_parse(output_json, strlen(output_json));
@@ -706,7 +706,7 @@ static int turbo_tool_runtime_wasm_load_tool(
       json_type(strict) != JSON_BOOL)
     goto cleanup;
 
-  parameters_json = turbo_json_serialize(parameters, NULL);
+  parameters_json = json_serialize(parameters, NULL);
   if (!parameters_json) goto cleanup;
   tool->name = (char *)tstr_dup(name);
   tool->description = (char *)tstr_dup(description);
@@ -724,7 +724,7 @@ static int turbo_tool_runtime_wasm_load_tool(
 
 cleanup:
   if (rc != 0) turbo_tool_runtime_wasm_tool_clear(tool);
-  turbo_json_serialize_free(parameters_json);
+  json_serialize_free(parameters_json);
   turbo_runtime_json_destroy(metadata);
   free(metadata_json);
   return rc;

@@ -70,6 +70,19 @@ CXX_C_API uint64_t
 turbo_agent_praktor_inline_source_plan_hash(
     const turbo_agent_praktor_inline_source_t *source);
 
+/**
+ * Classify one canonical Praktor execution JSON for a Change/Repair plan.
+ *
+ * workflow_status != "success" is an execution failure.
+ * A successful workflow must expose outputs.verify_result as an object with a
+ * boolean "verified" field. Missing/malformed verify output fails closed as
+ * VERIFY_FAILED and can never request replanning.
+ */
+CXX_C_API turbo_agent_template_outcome_t
+turbo_agent_template_finish_praktor_result(
+    const turbo_agent_template_plan_t *plan,
+    const json_value_t *execution_result);
+
 #ifdef __cplusplus
 }
 #endif

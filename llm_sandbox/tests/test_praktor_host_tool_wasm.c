@@ -2,6 +2,7 @@
 
 #include "turbo_praktor_tool_pack.h"
 #include "turbo_wasm_tool_pack.h"
+#include "turbo_runtime_json.h"
 
 #include <salts_fs.h>
 #include <json_parser.h>

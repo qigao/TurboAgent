@@ -1,0 +1,72 @@
+#ifndef TURBO_AGENT_PRAKTOR_LOWERING_H
+#define TURBO_AGENT_PRAKTOR_LOWERING_H
+
+#include "turbo_agent_templates.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define TURBO_AGENT_PRAKTOR_INLINE_SOURCE_ABI_VERSION 1u
+
+typedef enum turbo_agent_praktor_lowering_status_e {
+  TURBO_AGENT_PRAKTOR_LOWERING_OK = 0,
+  TURBO_AGENT_PRAKTOR_LOWERING_INVALID_ARGUMENT = -1,
+  TURBO_AGENT_PRAKTOR_LOWERING_INVALID_PLAN = -2,
+  TURBO_AGENT_PRAKTOR_LOWERING_OUT_OF_MEMORY = -3,
+  TURBO_AGENT_PRAKTOR_LOWERING_UNSUPPORTED_RETRY = -4
+} turbo_agent_praktor_lowering_status_t;
+
+typedef struct turbo_agent_praktor_lowering_diagnostic_s {
+  turbo_agent_praktor_lowering_status_t status;
+  char message[256];
+} turbo_agent_praktor_lowering_diagnostic_t;
+
+typedef struct turbo_agent_praktor_inline_source_s
+    turbo_agent_praktor_inline_source_t;
+
+/**
+ * Lower one already-admitted Change/Repair TemplatePlan into deterministic,
+ * in-memory Praktor YAML source.
+ *
+ * This API does not link or call Praktor. It owns only deterministic lowering
+ * from frozen compiler facts. The returned source can later be passed to the
+ * released Praktor inline WorkflowPlan ABI.
+ *
+ * Current Phase-3 lowering fails closed when any DAG step has retry_limit > 0,
+ * because released Praktor does not yet implement the documented task retry
+ * policy. See qigao/praktor#68.
+ */
+CXX_C_API turbo_agent_praktor_lowering_status_t
+turbo_agent_template_lower_praktor_inline(
+    const turbo_agent_template_plan_t *plan,
+    turbo_agent_praktor_inline_source_t **out_source,
+    turbo_agent_praktor_lowering_diagnostic_t *diagnostic);
+
+CXX_C_API void
+turbo_agent_praktor_inline_source_destroy(
+    turbo_agent_praktor_inline_source_t *source);
+
+/** Borrowed logical source identity: turboagent:plan:<16-hex-plan-hash>. */
+CXX_C_API const char *
+turbo_agent_praktor_inline_source_id(
+    const turbo_agent_praktor_inline_source_t *source);
+
+/** Borrowed exact UTF-8 YAML bytes. Not NUL-dependent; use size accessor. */
+CXX_C_API const char *
+turbo_agent_praktor_inline_source_yaml(
+    const turbo_agent_praktor_inline_source_t *source);
+
+CXX_C_API size_t
+turbo_agent_praktor_inline_source_yaml_size(
+    const turbo_agent_praktor_inline_source_t *source);
+
+CXX_C_API uint64_t
+turbo_agent_praktor_inline_source_plan_hash(
+    const turbo_agent_praktor_inline_source_t *source);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

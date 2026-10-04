@@ -64,6 +64,13 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v4(
 CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v5(
     turbo_tool_registry_t *registry, const turbo_tool_definition_v5_t *definition);
 
+/**
+ * Add a tool definition with canonical result and semantic effect metadata.
+ * A zero effect set is normalized to TURBO_TOOL_EFFECT_UNKNOWN.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v6(
+    turbo_tool_registry_t *registry, const turbo_tool_definition_v6_t *definition);
+
 /** @brief Remove one tool and release its registry-owned resources. */
 CXX_C_API turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *registry,
                                                          const char *name);
@@ -125,6 +132,16 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_get_result_contract(
     const turbo_tool_registry_t *registry, const char *name,
     const char **out_schema_json, const json_value_t **out_schema,
     int *out_strict_result);
+
+/**
+ * Read canonical semantic effect facts.
+ *
+ * Legacy v1-v5 registrations return TURBO_TOOL_EFFECT_UNKNOWN. Returned flags
+ * are copied and remain independent from required capability metadata.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_get_effects(
+    const turbo_tool_registry_t *registry, const char *name,
+    turbo_tool_effect_flags_t *out_effect_flags);
 
 /**
  * @brief Add one required capability to an existing tool.

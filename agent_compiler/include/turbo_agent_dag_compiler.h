@@ -8,8 +8,15 @@ extern "C" {
 #endif
 
 #define TURBO_AGENT_DAG_STEP_ABI_VERSION 1u
-#define TURBO_AGENT_DAG_SOURCE_ABI_VERSION 1u
-#define TURBO_AGENT_DAG_CERTIFICATE_VERSION 1u
+#define TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V1 1u
+#define TURBO_AGENT_DAG_SOURCE_ABI_VERSION 2u
+#define TURBO_AGENT_DAG_CERTIFICATE_VERSION 2u
+
+typedef enum turbo_agent_dag_template_kind_e {
+  TURBO_AGENT_DAG_TEMPLATE_GENERIC = 0,
+  TURBO_AGENT_DAG_TEMPLATE_CHANGE = 1,
+  TURBO_AGENT_DAG_TEMPLATE_REPAIR = 2
+} turbo_agent_dag_template_kind_t;
 
 typedef enum turbo_agent_dag_step_flag_e {
   TURBO_AGENT_DAG_STEP_NONE = 0,
@@ -48,7 +55,26 @@ typedef struct turbo_agent_dag_source_s {
   const turbo_agent_dag_step_source_t *steps;
   size_t step_count;
   uint32_t replan_budget;
+
+  /**
+   * Template identity frozen into plan hash/certificate.
+   *
+   * GENERIC preserves the Phase-3 admission surface. Change/Repair lowering
+   * must set an explicit template kind before Praktor sees the plan.
+   */
+  turbo_agent_dag_template_kind_t template_kind;
+
+  /**
+   * Harness-owned plan generation.
+   *
+   * A replan creates a new compiled identity by incrementing this value before
+   * compilation. Praktor never mutates or advances it.
+   */
+  uint32_t plan_generation;
 } turbo_agent_dag_source_t;
+
+#define TURBO_AGENT_DAG_SOURCE_V1_SIZE \
+  offsetof(turbo_agent_dag_source_t, template_kind)
 
 typedef struct turbo_agent_executable_dag_s turbo_agent_executable_dag_t;
 
@@ -80,6 +106,14 @@ turbo_agent_executable_dag_hash(const turbo_agent_executable_dag_t *plan);
 
 CXX_C_API size_t
 turbo_agent_executable_dag_step_count(const turbo_agent_executable_dag_t *plan);
+
+CXX_C_API turbo_agent_dag_template_kind_t
+turbo_agent_executable_dag_template_kind(
+    const turbo_agent_executable_dag_t *plan);
+
+CXX_C_API uint32_t
+turbo_agent_executable_dag_plan_generation(
+    const turbo_agent_executable_dag_t *plan);
 
 /**
  * Borrow the exact compiler-approved RuntimeTools projection.

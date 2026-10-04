@@ -94,8 +94,10 @@ CXX_C_API turbo_agent_compile_status_t turbo_agent_compile_change_template(
  *
  *   diagnose -> change -> verify
  *
- * Replanning is never performed by this plan. max_replans is only frozen into
- * identity/certificate and interpreted by turbo_agent_template_finish_verify().
+ * Replanning is never performed by this plan. The underlying DAG v2 freezes
+ * Repair template identity, plan generation and replan budget into its
+ * certificate/hash. turbo_agent_template_finish_verify() only classifies the
+ * terminal verify result; it never advances the generation itself.
  */
 CXX_C_API turbo_agent_compile_status_t turbo_agent_compile_repair_template(
     const turbo_agent_compiler_config_t *config,

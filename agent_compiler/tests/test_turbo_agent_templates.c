@@ -147,8 +147,13 @@ spec("AgentCompiler Change/Repair template semantics") {
     certificate = turbo_agent_template_plan_certificate_json_value(plan);
     check_not_null(certificate);
     check_equal(json_get_string(certificate, "template"), "change");
+    check_true(turbo_agent_template_plan_hash(plan) ==
+               turbo_agent_executable_dag_hash(
+                   turbo_agent_template_plan_dag(plan)));
     dag = json_object_get(certificate, "dag");
     check_not_null(dag);
+    check_equal(json_get_string(dag, "template"), "change");
+    check_equal(json_get_int(dag, "plan_generation", -1), 1);
     steps = json_object_get(dag, "steps");
     check_not_null(steps);
     check_equal(json_array_size(steps), 3);
@@ -334,7 +339,7 @@ spec("AgentCompiler Change/Repair template semantics") {
     check_equal(
         turbo_agent_compile_change_template(
             &config, registry, &source, &plan, NULL),
-        TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION);
+        TURBO_AGENT_COMPILE_RETRY_UNSAFE);
     check_null(plan);
 
     bind_slot(&source.change, "repo.patch_keyed", args[1], 1u);

@@ -29,7 +29,6 @@ typedef enum turbo_agent_template_kind_e {
 typedef enum turbo_agent_template_property_e {
   TURBO_AGENT_TEMPLATE_PROPERTY_NONE = 0,
   TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY = 1u << 0,
-  /** Template must compile through the finite DAG compiler, not Phase-1 single-step API. */
   TURBO_AGENT_TEMPLATE_PROPERTY_DAG_ONLY = 1u << 1
 } turbo_agent_template_property_t;
 
@@ -61,7 +60,8 @@ typedef enum turbo_agent_compile_status_e {
   TURBO_AGENT_COMPILE_PLAN_LIMIT = -10,
   TURBO_AGENT_COMPILE_DUPLICATE_STEP = -11,
   TURBO_AGENT_COMPILE_MISSING_DEPENDENCY = -12,
-  TURBO_AGENT_COMPILE_CYCLE = -13
+  TURBO_AGENT_COMPILE_CYCLE = -13,
+  TURBO_AGENT_COMPILE_RETRY_UNSAFE = -14
 } turbo_agent_compile_status_t;
 
 typedef struct turbo_agent_compile_diagnostic_s {

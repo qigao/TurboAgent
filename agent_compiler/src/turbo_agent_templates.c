@@ -6,70 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define TEMPLATE_FNV_OFFSET UINT64_C(14695981039346656037)
-#define TEMPLATE_FNV_PRIME UINT64_C(1099511628211)
-
 struct turbo_agent_template_plan_s {
   turbo_agent_template_kind_t kind;
   uint32_t template_version;
   uint32_t plan_version;
   uint32_t max_replans;
   turbo_agent_executable_dag_t *dag;
-  uint64_t plan_hash;
 };
-
-static uint64_t template_hash_bytes(
-    uint64_t hash, const void *data, size_t size) {
-  const unsigned char *bytes = (const unsigned char *)data;
-  size_t i;
-  for (i = 0; i < size; ++i) {
-    hash ^= (uint64_t)bytes[i];
-    hash *= TEMPLATE_FNV_PRIME;
-  }
-  return hash;
-}
-
-static uint64_t template_hash_u32(uint64_t hash, uint32_t value) {
-  const unsigned char bytes[4] = {
-      (unsigned char)(value & UINT32_C(0xff)),
-      (unsigned char)((value >> 8) & UINT32_C(0xff)),
-      (unsigned char)((value >> 16) & UINT32_C(0xff)),
-      (unsigned char)((value >> 24) & UINT32_C(0xff))};
-  return template_hash_bytes(hash, bytes, sizeof(bytes));
-}
-
-static uint64_t template_hash_u64(uint64_t hash, uint64_t value) {
-  unsigned char bytes[8];
-  size_t i;
-  for (i = 0; i < 8u; ++i) {
-    bytes[i] =
-        (unsigned char)((value >> (i * 8u)) & UINT64_C(0xff));
-  }
-  return template_hash_bytes(hash, bytes, sizeof(bytes));
-}
-
-static uint64_t template_hash_cstring(uint64_t hash, const char *value) {
-  static const unsigned char separator = 0xffu;
-  if (value) hash = template_hash_bytes(hash, value, strlen(value));
-  return template_hash_bytes(hash, &separator, 1u);
-}
-
-static uint64_t template_plan_hash(
-    const turbo_agent_template_plan_t *plan) {
-  const turbo_agent_template_descriptor_t *descriptor;
-  uint64_t hash = TEMPLATE_FNV_OFFSET;
-  if (!plan || !plan->dag) return 0u;
-  descriptor = turbo_agent_template_descriptor(plan->kind);
-  if (!descriptor) return 0u;
-  hash = template_hash_cstring(hash, "TurboAgent.TemplatePlan.v1");
-  hash = template_hash_cstring(hash, descriptor->name);
-  hash = template_hash_u32(hash, descriptor->version);
-  hash = template_hash_u32(hash, plan->plan_version);
-  hash = template_hash_u32(hash, plan->max_replans);
-  hash = template_hash_u64(
-      hash, turbo_agent_executable_dag_hash(plan->dag));
-  return hash;
-}
 
 static void template_diag(
     turbo_agent_compile_diagnostic_t *diagnostic,
@@ -142,12 +85,6 @@ static turbo_agent_compile_status_t template_validate_slot_policy(
         diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
         "change template slot must not use a READ_ONLY tool");
   }
-  if (slot->retry_limit != 0u &&
-      policy.idempotency == TURBO_TOOL_IDEMPOTENCY_NONE) {
-    return template_fail(
-        diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
-        "template retry requires an idempotent tool");
-  }
   return TURBO_AGENT_COMPILE_OK;
 }
 
@@ -166,6 +103,18 @@ static void template_dag_step(
   step->dependency_count = dependency_count;
   step->retry_limit = slot->retry_limit;
   step->flags = flags;
+}
+
+static turbo_agent_dag_template_kind_t template_dag_kind(
+    turbo_agent_template_kind_t kind) {
+  switch (kind) {
+    case TURBO_AGENT_TEMPLATE_CHANGE:
+      return TURBO_AGENT_DAG_TEMPLATE_CHANGE;
+    case TURBO_AGENT_TEMPLATE_REPAIR:
+      return TURBO_AGENT_DAG_TEMPLATE_REPAIR;
+    default:
+      return TURBO_AGENT_DAG_TEMPLATE_GENERIC;
+  }
 }
 
 static turbo_agent_compile_status_t template_compile_three_step(
@@ -228,6 +177,8 @@ static turbo_agent_compile_status_t template_compile_three_step(
   source.steps = steps;
   source.step_count = 3u;
   source.replan_budget = max_replans;
+  source.template_kind = template_dag_kind(kind);
+  source.plan_generation = plan_version;
 
   status = turbo_agent_compile_dag(
       config, registry, &source, &dag, diagnostic);
@@ -245,13 +196,6 @@ static turbo_agent_compile_status_t template_compile_three_step(
   plan->plan_version = plan_version;
   plan->max_replans = max_replans;
   plan->dag = dag;
-  plan->plan_hash = template_plan_hash(plan);
-  if (!plan->plan_hash) {
-    turbo_agent_template_plan_destroy(plan);
-    return template_fail(
-        diagnostic, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
-        "could not hash template plan");
-  }
 
   *out_plan = plan;
   template_diag(diagnostic, TURBO_AGENT_COMPILE_OK, "ok");
@@ -353,7 +297,9 @@ uint32_t turbo_agent_template_plan_max_replans(
 
 uint64_t turbo_agent_template_plan_hash(
     const turbo_agent_template_plan_t *plan) {
-  return plan ? plan->plan_hash : 0u;
+  return plan && plan->dag
+             ? turbo_agent_executable_dag_hash(plan->dag)
+             : 0u;
 }
 
 const turbo_agent_executable_dag_t *turbo_agent_template_plan_dag(
@@ -430,7 +376,7 @@ json_value_t *turbo_agent_template_plan_certificate_json_value(
   TEMPLATE_SET_INT("plan_version", plan->plan_version);
   TEMPLATE_SET_INT("max_replans", plan->max_replans);
   snprintf(hash_text, sizeof(hash_text), "%016llx",
-           (unsigned long long)plan->plan_hash);
+           (unsigned long long)turbo_agent_executable_dag_hash(plan->dag));
   TEMPLATE_SET_STRING("plan_hash", hash_text);
 
   if (turbo_runtime_json_object_set(root, "dag", dag) !=

@@ -1124,4 +1124,74 @@ spec("Praktor workflow tool pack") {
     free(workspace);
   }
 
+
+  it("compiles and executes released inline HostTool plan without files") {
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_tool_pack_t *pack;
+    turbo_praktor_inline_plan_config_t inline_config;
+    turbo_praktor_inline_plan_t *plan = NULL;
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    praktor_test_host_capture_t capture = {0};
+    turbo_tool_execution_context_t context = {0};
+    json_value_t *result = NULL;
+    const char *names[] = {"repo.inspect"};
+    static const char schema[] =
+        "{\"type\":\"object\",\"properties\":{"
+        "\"path\":{\"type\":\"string\"},"
+        "\"limit\":{\"type\":\"integer\"}},"
+        "\"required\":[\"path\",\"limit\"],"
+        "\"additionalProperties\":false}";
+    static const char yaml[] =
+        "input_policy: strict\n"
+        "tasks:\n"
+        "  - name: inspect\n"
+        "    tool: repo.inspect\n"
+        "    with: {\"limit\":2,\"path\":\"src\"}\n";
+
+    check_not_null(registry);
+    check_equal(praktor_test_register_host_tool(registry, &capture, schema), 0);
+    check_equal(turbo_tool_registry_project(registry, names, 1, &projection),
+                TURBO_TOOL_OK);
+    check_not_null(projection);
+
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+
+    if (turbo_praktor_tool_pack_supports_inline_workflow_plan(pack)) {
+      check_true(turbo_praktor_tool_pack_host_tool_max_retries(pack) > 0u);
+      turbo_praktor_inline_plan_config_init(&inline_config);
+      inline_config.source_id = "turboagent:test:inline";
+      inline_config.workflow_yaml = yaml;
+      inline_config.workflow_yaml_size = sizeof(yaml) - 1u;
+      inline_config.approved_host_tools = projection;
+      check_equal(turbo_praktor_tool_pack_compile_inline_plan(
+                      pack, &inline_config, &plan),
+                  TURBO_TOOL_OK);
+      check_not_null(plan);
+
+      context.struct_size = sizeof(context);
+      context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+      context.deadline_mono_ms = salts_monotonic_ms() + 5000u;
+      context.thread_id = "thread-host";
+      context.run_id = "run-host";
+      context.turn_id = "turn-host";
+      context.tool_call_id = "call-host";
+      check_equal(turbo_praktor_inline_plan_execute(plan, &context, &result),
+                  TURBO_TOOL_OK);
+      check_not_null(result);
+      check_equal(capture.calls, 1);
+      check_true(capture.saw_context);
+      check_true(capture.saw_lineage);
+      check_true(capture.saw_deadline);
+    }
+
+    turbo_runtime_json_destroy(result);
+    turbo_praktor_inline_plan_destroy(plan);
+    turbo_praktor_tool_pack_destroy(pack);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(registry);
+  }
+
 }

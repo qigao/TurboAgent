@@ -970,6 +970,7 @@ void turbo_praktor_tool_pack_destroy(turbo_praktor_tool_pack_t *pack) {
 static turbo_tool_status_t turbo_praktor_effective_capabilities(
     const turbo_praktor_workflow_config_t *config,
     const json_value_t *plan_description, int plan_bound,
+    const turbo_tool_registry_t *approved_host_tools,
     turbo_praktor_capability_list_t *out) {
   const char *const *requested;
   size_t requested_count;
@@ -984,7 +985,8 @@ static turbo_tool_status_t turbo_praktor_effective_capabilities(
 
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
   if (plan_bound) {
-    status = turbo_praktor_effect_capabilities(plan_description, out);
+    status = turbo_praktor_effect_capabilities(
+        plan_description, approved_host_tools, out);
     if (status != TURBO_TOOL_OK) goto fail;
   } else
 #endif
@@ -1074,7 +1076,8 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
 #endif
 
   status = turbo_praktor_effective_capabilities(
-      config, plan_description, plan_bound, &capabilities);
+      config, plan_description, plan_bound,
+      turbo_praktor_approved_host_tools(config), &capabilities);
   if (status != TURBO_TOOL_OK) goto cleanup;
 
   parameters_json = config->parameters_json
@@ -1105,6 +1108,8 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
   binding->max_result_bytes = pack->max_result_bytes;
   binding->project_agent_output =
       plan_bound && turbo_praktor_require_harness_safe(config);
+  binding->approved_host_tools =
+      turbo_praktor_approved_host_tools(config);
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
   binding->plan = plan;
   plan = NULL;
@@ -1180,6 +1185,21 @@ int turbo_praktor_tool_pack_supports_execution_events(
   return api &&
          (api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_EVENTS) != 0 &&
          api->execute_workflow_plan_observed;
+#else
+  (void)pack;
+  return 0;
+#endif
+}
+
+
+int
+turbo_praktor_tool_pack_supports_host_tools(
+    const turbo_praktor_tool_pack_t *pack) {
+#if TURBO_PRAKTOR_HAS_HOST_TOOL
+  const praktor_api *api = pack ? pack->api : NULL;
+  return api && api->abi_minor >= 5u &&
+         (api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0 &&
+         api->execute_workflow_plan_host_tools != NULL;
 #else
   (void)pack;
   return 0;

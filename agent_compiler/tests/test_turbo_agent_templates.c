@@ -123,6 +123,68 @@ spec("AgentCompiler Change and Repair templates") {
                (int)TURBO_AGENT_TEMPLATE_REPAIR);
   }
 
+  it("keeps the legacy single-step compiler Inspect-only") {
+    template_probe_t read_probe = {0};
+    template_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_template_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_typed_plan_t source;
+    turbo_agent_executable_plan_t *plan = NULL;
+    json_value_t *args = template_args("single");
+
+    check_not_null(registry);
+    check_not_null(args);
+    template_config(&config);
+    turbo_agent_typed_plan_init(&source);
+    source.template_kind = TURBO_AGENT_TEMPLATE_CHANGE;
+    source.step_id = "change";
+    source.tool_name = "repo.patch";
+    source.arguments = args;
+
+    check_equal(
+        turbo_agent_compile_plan(&config, registry, &source, &plan, NULL),
+        TURBO_AGENT_COMPILE_UNSUPPORTED_TEMPLATE);
+    check_null(plan);
+    check_equal(read_probe.calls, 0);
+    check_equal(write_probe.calls, 0);
+
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("rejects Inspect identity on the multi-step DAG surface") {
+    template_probe_t read_probe = {0};
+    template_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_template_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t dag;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *plan = NULL;
+    json_value_t *args = template_args("inspect");
+
+    check_not_null(registry);
+    check_not_null(args);
+    template_config(&config);
+    turbo_agent_dag_step_source_init(&step);
+    step.step_id = "inspect";
+    step.tool_name = "repo.inspect";
+    step.arguments = args;
+    turbo_agent_dag_source_init(&dag);
+    dag.steps = &step;
+    dag.step_count = 1u;
+    dag.template_kind = TURBO_AGENT_TEMPLATE_INSPECT;
+
+    check_equal(
+        turbo_agent_compile_dag(&config, registry, &dag, &plan, NULL),
+        TURBO_AGENT_COMPILE_INVALID_ARGUMENT);
+    check_null(plan);
+
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
   it("compiles Change into the fixed inspect-change-verify topology") {
     template_probe_t read_probe = {0};
     template_probe_t write_probe = {0};

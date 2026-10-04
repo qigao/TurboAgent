@@ -31,6 +31,9 @@
 #ifndef LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH
   #error "LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH must be defined"
 #endif
+#ifndef LLM_SANDBOX_WASM_BAD_EFFECTS_WASM_PATH
+  #error "LLM_SANDBOX_WASM_BAD_EFFECTS_WASM_PATH must be defined"
+#endif
 #ifndef LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH
   #error "LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH must be defined"
 #endif
@@ -124,13 +127,16 @@ spec("TurboWasm tool sandbox") {
     turbo_tool_runtime_destroy(empty);
   }
 
-  it("rejects malformed metadata and non-object parameter schemas") {
+  it("rejects malformed schemas and invalid semantic effect metadata") {
     turbo_tool_runtime_t *bad_metadata =
         create_runtime(LLM_SANDBOX_WASM_BAD_METADATA_WASM_PATH, 0, 0, 0, 0);
     turbo_tool_runtime_t *bad_schema =
         create_runtime(LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH, 0, 0, 0, 0);
+    turbo_tool_runtime_t *bad_effects =
+        create_runtime(LLM_SANDBOX_WASM_BAD_EFFECTS_WASM_PATH, 0, 0, 0, 0);
     check_null(bad_metadata);
     check_null(bad_schema);
+    check_null(bad_effects);
   }
 
   it("rejects embedded NUL bytes in guest text output") {

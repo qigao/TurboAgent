@@ -630,6 +630,10 @@ spec("turbo tool runtime") {
     invalid.strict_result = 2;
     check_equal(turbo_tool_registry_add_v5(registry, &invalid),
                 TURBO_TOOL_INVALID_ARGUMENT);
+    invalid.result_schema_json = NULL;
+    invalid.strict_result = 1;
+    check_equal(turbo_tool_registry_add_v5(registry, &invalid),
+                TURBO_TOOL_INVALID_ARGUMENT);
 
     turbo_tool_registry_destroy(registry);
   }

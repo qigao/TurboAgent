@@ -113,6 +113,56 @@ spec("AgentCompiler RuntimeTools result contracts") {
     turbo_tool_registry_destroy(registry);
   }
 
+  it("keeps constrained consumer slots opaque until implication is proven") {
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+
+    check_not_null(registry);
+    check_equal(add_v5_tool(
+                    registry,
+                    "string_producer",
+                    "{\"type\":\"object\"}",
+                    "{\"type\":\"string\"}"),
+                0);
+    check_equal(add_v5_tool(
+                    registry,
+                    "enum_consumer",
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\",\"enum\":[\"only\"]}}}",
+                    NULL),
+                0);
+
+    check_equal(
+        turbo_agent_tool_result_slot_compatibility(
+            registry, "string_producer", "enum_consumer", "value"),
+        TURBO_AGENT_CONTRACT_UNKNOWN);
+
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("keeps number-to-integer narrowing opaque without producer constraint proof") {
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+
+    check_not_null(registry);
+    check_equal(add_v5_tool(
+                    registry,
+                    "number_producer",
+                    "{\"type\":\"object\"}",
+                    "{\"type\":\"number\"}"),
+                0);
+    check_equal(add_v5_tool(
+                    registry,
+                    "integer_consumer",
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"integer\"}}}",
+                    NULL),
+                0);
+
+    check_equal(
+        turbo_agent_tool_result_slot_compatibility(
+            registry, "number_producer", "integer_consumer", "value"),
+        TURBO_AGENT_CONTRACT_UNKNOWN);
+
+    turbo_tool_registry_destroy(registry);
+  }
+
   it("allows integer producer results to feed number slots") {
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
 

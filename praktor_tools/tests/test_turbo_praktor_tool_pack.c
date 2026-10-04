@@ -940,6 +940,85 @@ spec("Praktor workflow tool pack") {
     free(workspace);
   }
 
+  it("rejects a cancelled HostTool execution before the RuntimeTools callback") {
+    static const char schema[] =
+        "{\"type\":\"object\",\"properties\":{"
+        "\"path\":{\"type\":\"string\"},"
+        "\"limit\":{\"type\":\"integer\"}},"
+        "\"required\":[\"path\",\"limit\"],"
+        "\"additionalProperties\":false}";
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    const char *projection_names[] = {"repo.inspect"};
+    praktor_test_host_capture_t capture = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack = NULL;
+    turbo_cancel_source_t *cancel_source = NULL;
+    turbo_cancel_token_t *cancel_token = NULL;
+    turbo_tool_execution_context_t context = {0};
+    json_value_t *arguments = NULL;
+    json_value_t *result = NULL;
+
+    check_not_null(workspace);
+    check_not_null(source);
+    check_equal(praktor_test_write_host_tool_workflow(
+                    workspace, workflow_path, sizeof(workflow_path)),
+                0);
+    check_equal(praktor_test_register_host_tool(source, &capture, schema), 0);
+    check_equal(turbo_tool_registry_project(
+                    source, projection_names, 1, &projection),
+                TURBO_TOOL_OK);
+    check_not_null(projection);
+
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    turbo_praktor_workflow_config_init(&workflow_config);
+    workflow_config.tool_name = "praktor_host_cancel";
+    workflow_config.description = "Cancelled reviewed HostTool workflow.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.strict = 1;
+    workflow_config.approved_host_tools = projection;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                TURBO_TOOL_OK);
+
+    check_equal(turbo_cancel_source_create(NULL, &cancel_source), 0);
+    check_equal(turbo_cancel_source_token(cancel_source, &cancel_token), 0);
+    check_equal(turbo_cancel_source_cancel(
+                    cancel_source, TURBO_CANCEL_USER),
+                0);
+
+    arguments = json_parse("{\"path\":\"src\"}",
+                           strlen("{\"path\":\"src\"}"));
+    check_not_null(arguments);
+    context.struct_size = sizeof(context);
+    context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    context.cancel_token = cancel_token;
+    context.thread_id = "thread-host";
+    context.run_id = "run-host";
+    context.turn_id = "turn-host";
+    context.tool_call_id = "call-host";
+
+    check_equal(turbo_tool_registry_execute_json_value_with_context(
+                    turbo_praktor_tool_pack_registry(pack),
+                    "praktor_host_cancel", arguments, &context, &result),
+                TURBO_TOOL_CANCELLED);
+    check_null(result);
+    check_equal(capture.calls, 0);
+
+    turbo_runtime_json_destroy(arguments);
+    turbo_cancel_token_release(cancel_token);
+    turbo_cancel_source_destroy(cancel_source);
+    turbo_praktor_tool_pack_destroy(pack);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
   it("rejects HostTool workflows whose identity is outside the approved projection") {
     static const char schema[] =
         "{\"type\":\"object\",\"additionalProperties\":true}";

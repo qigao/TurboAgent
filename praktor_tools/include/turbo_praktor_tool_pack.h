@@ -14,7 +14,8 @@ extern "C" {
 
 #define TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION 1u
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V1 1u
-#define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION 2u
+#define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V2 2u
+#define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION 3u
 
 typedef struct turbo_praktor_tool_pack_s turbo_praktor_tool_pack_t;
 
@@ -60,10 +61,25 @@ typedef struct turbo_praktor_workflow_config_s {
    * falls back to the legacy reviewed-path contract.
    */
   int require_harness_safe;
+
+  /**
+   * Borrowed compiler-approved RuntimeTools projection for reviewed HostTool
+   * identities retained by this WorkflowPlan.
+   *
+   * The registry is execution authority, not discovery. Every HostTool name
+   * must match one exact canonical definition in this projection. The
+   * projection and every callback dependency it borrows must outlive the
+   * registered workflow and remain quiescent while it can execute.
+   *
+   * NULL is valid only for plans that contain no HostTool tasks.
+   */
+  const turbo_tool_registry_t *approved_host_tools;
 } turbo_praktor_workflow_config_t;
 
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_V1_SIZE \
   offsetof(turbo_praktor_workflow_config_t, require_harness_safe)
+#define TURBO_PRAKTOR_WORKFLOW_CONFIG_V2_SIZE \
+  offsetof(turbo_praktor_workflow_config_t, approved_host_tools)
 
 CXX_C_API void
 turbo_praktor_tool_pack_config_init(turbo_praktor_tool_pack_config_t *config);
@@ -111,6 +127,11 @@ turbo_praktor_tool_pack_supports_workflow_plan(
 /** Return whether the linked Praktor exposes lifecycle event callbacks. */
 CXX_C_API int
 turbo_praktor_tool_pack_supports_execution_events(
+    const turbo_praktor_tool_pack_t *pack);
+
+/** Return whether the linked Praktor exposes reviewed HostTool ABI 2.5+. */
+CXX_C_API int
+turbo_praktor_tool_pack_supports_host_tools(
     const turbo_praktor_tool_pack_t *pack);
 
 #ifdef __cplusplus

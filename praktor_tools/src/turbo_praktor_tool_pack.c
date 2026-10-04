@@ -30,6 +30,12 @@
 #define TURBO_PRAKTOR_HAS_HOST_TOOL 0
 #endif
 
+#if defined(PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) && PRAKTOR_ABI_MINOR >= 6
+#define TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN 1
+#else
+#define TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN 0
+#endif
+
 enum {
   TURBO_PRAKTOR_DEFAULT_MAX_WORKFLOWS = 64,
   TURBO_PRAKTOR_DEFAULT_MAX_RESULT_BYTES = 1024 * 1024,
@@ -58,6 +64,15 @@ struct turbo_praktor_tool_pack_s {
   turbo_tool_registry_t *registry;
   size_t workflow_count;
   size_t max_workflows;
+  size_t max_result_bytes;
+};
+
+struct turbo_praktor_inline_plan_s {
+  const praktor_api *api;
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  praktor_workflow_plan *plan;
+#endif
+  const turbo_tool_registry_t *approved_host_tools;
   size_t max_result_bytes;
 };
 
@@ -1459,6 +1474,209 @@ int turbo_praktor_tool_pack_supports_execution_events(
 #endif
 }
 
+
+
+void turbo_praktor_inline_plan_config_init(
+    turbo_praktor_inline_plan_config_t *config) {
+  if (!config) return;
+  memset(config, 0, sizeof(*config));
+  config->struct_size = sizeof(*config);
+  config->abi_version = TURBO_PRAKTOR_INLINE_PLAN_CONFIG_ABI_VERSION;
+  config->max_result_bytes = TURBO_PRAKTOR_DEFAULT_MAX_RESULT_BYTES;
+}
+
+int turbo_praktor_tool_pack_supports_inline_workflow_plan(
+    const turbo_praktor_tool_pack_t *pack) {
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  const praktor_api *api = pack ? pack->api : NULL;
+  return api && api->abi_minor >= 6u &&
+         (api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) != 0 &&
+         (api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0 &&
+         api->compile_workflow_inline != NULL &&
+         api->execute_workflow_plan_host_tools != NULL &&
+         api->release_workflow_plan != NULL;
+#else
+  (void)pack;
+  return 0;
+#endif
+}
+
+size_t turbo_praktor_tool_pack_host_tool_max_retries(
+    const turbo_praktor_tool_pack_t *pack) {
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  return turbo_praktor_tool_pack_supports_inline_workflow_plan(pack)
+             ? (size_t)PRAKTOR_HOST_TOOL_MAX_RETRIES
+             : 0u;
+#else
+  (void)pack;
+  return 0u;
+#endif
+}
+
+turbo_tool_status_t turbo_praktor_tool_pack_compile_inline_plan(
+    turbo_praktor_tool_pack_t *pack,
+    const turbo_praktor_inline_plan_config_t *config,
+    turbo_praktor_inline_plan_t **out_plan) {
+  if (out_plan) *out_plan = NULL;
+  if (!pack || !config || !out_plan ||
+      config->struct_size < sizeof(*config) ||
+      config->abi_version != TURBO_PRAKTOR_INLINE_PLAN_CONFIG_ABI_VERSION ||
+      !config->source_id || !config->source_id[0] ||
+      !config->workflow_yaml || !config->workflow_yaml_size ||
+      !config->approved_host_tools || !config->max_result_bytes) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  {
+    turbo_praktor_inline_plan_t *compiled;
+    praktor_compile_inline_request request = PRAKTOR_COMPILE_INLINE_REQUEST_INIT;
+    praktor_workflow_plan *praktor_plan = NULL;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    praktor_result status;
+
+    if (!turbo_praktor_tool_pack_supports_inline_workflow_plan(pack)) {
+      return TURBO_TOOL_ERROR;
+    }
+    request.source_id = config->source_id;
+    request.workflow_yaml = config->workflow_yaml;
+    request.workflow_yaml_size = config->workflow_yaml_size;
+    status = (praktor_result)pack->api->compile_workflow_inline(
+        &request, &praktor_plan, &error);
+    if (status != PRAKTOR_RESULT_SUCCESS || !praktor_plan) {
+      if (praktor_plan) pack->api->release_workflow_plan(praktor_plan);
+      return status == PRAKTOR_RESULT_OUT_OF_MEMORY
+                 ? TURBO_TOOL_OUT_OF_MEMORY
+                 : TURBO_TOOL_ERROR;
+    }
+
+    compiled = (turbo_praktor_inline_plan_t *)calloc(1, sizeof(*compiled));
+    if (!compiled) {
+      pack->api->release_workflow_plan(praktor_plan);
+      return TURBO_TOOL_OUT_OF_MEMORY;
+    }
+    compiled->api = pack->api;
+    compiled->plan = praktor_plan;
+    compiled->approved_host_tools = config->approved_host_tools;
+    compiled->max_result_bytes = config->max_result_bytes;
+    *out_plan = compiled;
+    return TURBO_TOOL_OK;
+  }
+#else
+  (void)pack;
+  return TURBO_TOOL_ERROR;
+#endif
+}
+
+turbo_tool_status_t turbo_praktor_inline_plan_execute(
+    const turbo_praktor_inline_plan_t *plan,
+    const turbo_tool_execution_context_t *context,
+    json_value_t **out_result) {
+  if (out_result) *out_result = NULL;
+  if (!plan || !out_result || !plan->api || !plan->approved_host_tools ||
+      !plan->max_result_bytes) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  {
+    static const char empty_input[] = "{}";
+    praktor_plan_execute_request request = PRAKTOR_PLAN_EXECUTE_REQUEST_INIT;
+    praktor_execution_control control = PRAKTOR_EXECUTION_CONTROL_INIT;
+    praktor_execution_observer observer = PRAKTOR_EXECUTION_OBSERVER_INIT;
+    const praktor_execution_observer *observer_ptr = NULL;
+    praktor_host_tool_executor host_tools = PRAKTOR_HOST_TOOL_EXECUTOR_INIT;
+    turbo_praktor_host_bridge_t bridge;
+    praktor_owned_json output = PRAKTOR_OWNED_JSON_INIT;
+    praktor_error error = PRAKTOR_ERROR_INIT;
+    praktor_result status;
+    turbo_tool_status_t tool_status;
+    json_value_t *parsed = NULL;
+
+    tool_status = turbo_praktor_context_status(context);
+    if (tool_status != TURBO_TOOL_OK) return tool_status;
+
+    request.plan = plan->plan;
+    request.input_json = empty_input;
+    request.input_json_size = sizeof(empty_input) - 1u;
+    if (context) {
+      turbo_praktor_control_from_context(context, &control);
+      observer.thread_id = context->thread_id;
+      observer.run_id = context->run_id;
+      observer.turn_id = context->turn_id;
+      observer.tool_call_id = context->tool_call_id;
+#if TURBO_PRAKTOR_HAS_EXECUTION_EVENTS
+      if ((plan->api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_EVENTS) != 0 &&
+          plan->api->execute_workflow_plan_observed) {
+        observer.on_event = turbo_praktor_event_bridge;
+        observer.user_data = (void *)context;
+      }
+#endif
+      observer_ptr = &observer;
+    }
+
+    memset(&bridge, 0, sizeof(bridge));
+    bridge.approved_host_tools = plan->approved_host_tools;
+    bridge.parent_context = context;
+    bridge.max_result_bytes = plan->max_result_bytes;
+    host_tools.user_data = &bridge;
+    host_tools.validate = turbo_praktor_host_validate;
+    host_tools.invoke = turbo_praktor_host_invoke;
+
+    status = (praktor_result)plan->api->execute_workflow_plan_host_tools(
+        &request, context ? &control : NULL, observer_ptr, &host_tools,
+        &output, &error);
+
+    if (status == PRAKTOR_RESULT_CANCELLED) {
+      tool_status = TURBO_TOOL_CANCELLED;
+      goto cleanup;
+    }
+    if (status == PRAKTOR_RESULT_TIMED_OUT) {
+      tool_status = TURBO_TOOL_DEADLINE_EXCEEDED;
+      goto cleanup;
+    }
+    if (status != PRAKTOR_RESULT_SUCCESS ||
+        !output.data || !output.size ||
+        output.size > plan->max_result_bytes) {
+      tool_status = TURBO_TOOL_ERROR;
+      goto cleanup;
+    }
+
+    parsed = json_parse(output.data, output.size);
+    if (!parsed || json_type(parsed) != JSON_OBJECT) {
+      tool_status = TURBO_TOOL_ERROR;
+      goto cleanup;
+    }
+    if (turbo_praktor_context_has_observation(context) &&
+        context->detail_sink) {
+      context->detail_sink(parsed, context->detail_sink_user_data);
+    }
+    *out_result = parsed;
+    parsed = NULL;
+    tool_status = TURBO_TOOL_OK;
+
+cleanup:
+    turbo_runtime_json_destroy(parsed);
+    plan->api->release_json(&output);
+    return tool_status;
+  }
+#else
+  (void)context;
+  return TURBO_TOOL_ERROR;
+#endif
+}
+
+void turbo_praktor_inline_plan_destroy(
+    turbo_praktor_inline_plan_t *plan) {
+  if (!plan) return;
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  if (plan->api && plan->plan && plan->api->release_workflow_plan) {
+    plan->api->release_workflow_plan(plan->plan);
+  }
+#endif
+  memset(plan, 0, sizeof(*plan));
+  free(plan);
+}
 
 int
 turbo_praktor_tool_pack_supports_host_tools(

@@ -13,11 +13,32 @@ extern "C" {
 #endif
 
 #define TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION 1u
+#define TURBO_PRAKTOR_INLINE_EXECUTION_ABI_VERSION 1u
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V1 1u
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V2 2u
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION 3u
 
 typedef struct turbo_praktor_tool_pack_s turbo_praktor_tool_pack_t;
+
+
+typedef struct turbo_praktor_inline_execution_request_s {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  /** Logical reviewed source identity, e.g. turboagent:plan:<hash>. */
+  const char *source_id;
+  /** Exact deterministic inline Praktor YAML bytes. */
+  const char *workflow_yaml;
+  size_t workflow_yaml_size;
+  /** Borrowed JSON object for workflow inputs. NULL means {}. */
+  const json_value_t *inputs;
+  /** Compiler-approved RuntimeTools projection. Required for HostTool plans. */
+  const turbo_tool_registry_t *approved_host_tools;
+  /** Optional borrowed execution control/lineage context. */
+  const turbo_tool_execution_context_t *context;
+  /** Maximum canonical Praktor result bytes accepted by the adapter. */
+  size_t max_result_bytes;
+} turbo_praktor_inline_execution_request_t;
+
 
 typedef struct turbo_praktor_tool_pack_config_s {
   uint32_t struct_size;
@@ -81,6 +102,25 @@ typedef struct turbo_praktor_workflow_config_s {
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_V2_SIZE \
   offsetof(turbo_praktor_workflow_config_t, approved_host_tools)
 
+
+CXX_C_API void
+turbo_praktor_inline_execution_request_init(
+    turbo_praktor_inline_execution_request_t *request);
+
+/**
+ * Compile and execute one already-admitted immutable inline WorkflowPlan
+ * through released Praktor ABI 2.6+.
+ *
+ * This function has no file-backed fallback. It requires
+ * PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN and the reviewed HostTool ABI.
+ * Praktor validates every HostTool identity before the DAG starts; execution
+ * then uses only the compiler-approved RuntimeTools projection.
+ */
+CXX_C_API turbo_tool_status_t
+turbo_praktor_execute_inline_workflow(
+    const turbo_praktor_inline_execution_request_t *request,
+    json_value_t **out_result);
+
 CXX_C_API void
 turbo_praktor_tool_pack_config_init(turbo_praktor_tool_pack_config_t *config);
 
@@ -132,6 +172,11 @@ turbo_praktor_tool_pack_supports_execution_events(
 /** Return whether the linked Praktor exposes reviewed HostTool ABI 2.5+. */
 CXX_C_API int
 turbo_praktor_tool_pack_supports_host_tools(
+    const turbo_praktor_tool_pack_t *pack);
+
+/** Return whether the linked Praktor exposes ABI 2.6 inline WorkflowPlans. */
+CXX_C_API int
+turbo_praktor_tool_pack_supports_inline_workflow_plan(
     const turbo_praktor_tool_pack_t *pack);
 
 #ifdef __cplusplus

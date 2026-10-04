@@ -248,7 +248,8 @@ static turbo_tool_status_t turbo_tool_registry_add_with_policy(
       !turbo_tool_execution_policy_valid(execution_policy) ||
       (required_capability_count > 0 && !required_capabilities) ||
       (strict_result != 0 && strict_result != 1) ||
-      (strict_result != 0 && !result_schema_json)) {
+      (strict_result != 0 && !result_schema_json) ||
+      !turbo_tool_effect_flags_valid(effect_flags)) {
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
   if (result_schema_json) {

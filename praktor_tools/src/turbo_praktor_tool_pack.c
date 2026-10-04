@@ -1320,7 +1320,7 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
   }
 
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
-  if (config->abi_version >= TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+  if (config->abi_version >= TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V2 &&
       (pack->api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
       pack->api->compile_workflow && pack->api->describe_workflow_plan &&
       pack->api->execute_workflow_plan && pack->api->release_workflow_plan) {
@@ -1329,7 +1329,8 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
     if (status != TURBO_TOOL_OK) return status;
     plan_bound = 1;
     if (!turbo_praktor_plan_metadata_valid(
-            plan_description, turbo_praktor_require_harness_safe(config))) {
+            plan_description, turbo_praktor_require_harness_safe(config),
+            turbo_praktor_approved_host_tools(config))) {
       turbo_runtime_json_destroy(plan_description);
       pack->api->release_workflow_plan(plan);
       return TURBO_TOOL_UNKNOWN_SIDE_EFFECT;

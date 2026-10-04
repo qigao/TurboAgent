@@ -49,20 +49,23 @@ static char *praktor_wasm_workspace(void) {
   return praktor_wasm_strdup(path);
 }
 
+static const char praktor_wasm_inline_yaml[] =
+    "input_policy: strict\n"
+    "outputs:\n"
+    "  echoed:\n"
+    "    type: object\n"
+    "    required: true\n"
+    "    value: \"{{ tasks.echo.outputs.result }}\"\n"
+    "tasks:\n"
+    "  - name: echo\n"
+    "    tool: echo_json\n"
+    "    with: {}\n";
+
 static int praktor_wasm_write_workflow(
     const char *workspace, char *out_path, size_t out_size) {
-  static const char yaml[] =
-      "input_policy: strict\n"
-      "outputs:\n"
-      "  echoed:\n"
-      "    type: object\n"
-      "    required: true\n"
-      "    value: \"{{ tasks.echo.outputs.result }}\"\n"
-      "tasks:\n"
-      "  - name: echo\n"
-      "    tool: echo_json\n"
-      "    with: {}\n";
-  salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1u);
+  salts_fs_buf_t buffer =
+      salts_fs_buf_init((void *)praktor_wasm_inline_yaml,
+                        sizeof(praktor_wasm_inline_yaml) - 1u);
   if (salts_fs_path_join(out_path, out_size, workspace, "wasm-host-tool.yml") != 0)
     return -1;
   return salts_fs_write_file(out_path, &buffer);
@@ -143,4 +146,59 @@ spec("Praktor HostTool TurboWasm bridge") {
     salts_fs_rmdir(workspace);
     free(workspace);
   }
+
+  it("executes an inline WasmToolPack projection without filesystem workflow state") {
+    turbo_wasm_tool_pack_config_t wasm_pack_config;
+    turbo_wasm_tool_pack_module_config_t module_config;
+    turbo_wasm_tool_pack_t *wasm_pack = NULL;
+    turbo_tool_registry_t *projection = NULL;
+    const char *projection_names[] = {"echo_json"};
+    turbo_praktor_inline_plan_config_t inline_config;
+    turbo_praktor_inline_plan_t *inline_plan = NULL;
+    json_value_t *result = NULL;
+    const json_value_t *outputs;
+
+    turbo_wasm_tool_pack_config_init(&wasm_pack_config);
+    wasm_pack = turbo_wasm_tool_pack_create(&wasm_pack_config);
+    check_not_null(wasm_pack);
+    turbo_wasm_tool_pack_module_config_init(&module_config);
+    module_config.runtime.module_path = LLM_SANDBOX_WASM_TOOL_WASM_PATH;
+    module_config.execution_policy.mode = TURBO_TOOL_EXECUTION_EXCLUSIVE;
+    module_config.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    check_equal(turbo_wasm_tool_pack_add_module(wasm_pack, &module_config),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_project(
+                    turbo_wasm_tool_pack_registry(wasm_pack),
+                    projection_names, 1, &projection),
+                TURBO_TOOL_OK);
+    check_not_null(projection);
+
+    turbo_praktor_inline_plan_config_init(&inline_config);
+    inline_config.source_id = "turboagent:plan:wasm-inline";
+    inline_config.workflow_yaml = praktor_wasm_inline_yaml;
+    inline_config.workflow_yaml_size =
+        sizeof(praktor_wasm_inline_yaml) - 1u;
+    inline_config.approved_host_tools = projection;
+
+    check_equal(turbo_praktor_inline_plan_compile(
+                    &inline_config, &inline_plan),
+                TURBO_TOOL_OK);
+    check_not_null(inline_plan);
+    check_equal(turbo_praktor_inline_plan_execute(
+                    inline_plan, NULL, &result),
+                TURBO_TOOL_OK);
+    check_not_null(result);
+    check_equal(json_get_string(result, "workflow_status"), "success");
+    outputs = json_object_get(result, "outputs");
+    check_not_null(outputs);
+    check_not_null(json_object_get(outputs, "echoed"));
+    check_equal(json_type(json_object_get(outputs, "echoed")), JSON_OBJECT);
+    check_equal(json_object_size(json_object_get(outputs, "echoed")), 0);
+
+    turbo_runtime_json_destroy(result);
+    turbo_praktor_inline_plan_destroy(inline_plan);
+    turbo_tool_registry_destroy(projection);
+    turbo_wasm_tool_pack_destroy(wasm_pack);
+  }
+
 }

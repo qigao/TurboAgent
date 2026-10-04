@@ -474,6 +474,8 @@ static turbo_agent_compile_status_t dag_admit_step(
       turbo_tool_registry_get_required_capabilities(
           source_registry, canonical_name,
           &required, &required_count) != TURBO_TOOL_OK ||
+      turbo_tool_registry_get_effects(
+          source_registry, canonical_name, &effect_flags) != TURBO_TOOL_OK ||
       turbo_tool_registry_get_execution_metadata(
           source_registry, canonical_name, &execution_metadata) !=
       TURBO_TOOL_OK) {

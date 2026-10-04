@@ -118,8 +118,9 @@ static uint32_t dag_source_plan_generation(
 }
 
 static int dag_template_kind_valid(turbo_agent_dag_template_kind_t kind) {
-  return kind >= TURBO_AGENT_DAG_TEMPLATE_GENERIC &&
-         kind <= TURBO_AGENT_DAG_TEMPLATE_REPAIR;
+  return kind == TURBO_AGENT_DAG_TEMPLATE_GENERIC ||
+         kind == TURBO_AGENT_DAG_TEMPLATE_CHANGE ||
+         kind == TURBO_AGENT_DAG_TEMPLATE_REPAIR;
 }
 
 static const char *dag_template_kind_name(turbo_agent_dag_template_kind_t kind) {

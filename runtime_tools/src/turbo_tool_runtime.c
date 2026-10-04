@@ -363,7 +363,14 @@ turbo_tool_status_t turbo_tool_runtime_get_tool_v2(
   out_tool->struct_size = sizeof(*out_tool);
   out_tool->abi_version = TURBO_TOOL_RUNTIME_TOOL_V2_ABI_VERSION;
   if (runtime->vtable_v3) {
-    return runtime->vtable_v3->get_tool_v2(runtime->impl, index, out_tool);
+    status = runtime->vtable_v3->get_tool_v2(runtime->impl, index, out_tool);
+    if (status != TURBO_TOOL_OK) return status;
+    if (out_tool->struct_size < sizeof(*out_tool) ||
+        out_tool->abi_version != TURBO_TOOL_RUNTIME_TOOL_V2_ABI_VERSION) {
+      memset(out_tool, 0, sizeof(*out_tool));
+      return TURBO_TOOL_ERROR;
+    }
+    return TURBO_TOOL_OK;
   }
   status = runtime->vtable->get_tool(runtime->impl, index, &out_tool->base);
   if (status != TURBO_TOOL_OK) return status;

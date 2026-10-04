@@ -378,11 +378,18 @@ spec("AgentCompiler Change/Repair template semantics") {
         turbo_agent_template_verify_status_from_praktor_result(result),
         TURBO_AGENT_VERIFY_PASSED);
 
-    check_true(json_object_set_bool(
-        json_object_get(result, "outputs")
-            ? json_object_get(json_object_get(result, "outputs"), "verify_result")
-            : NULL,
-        "passed", false));
+    {
+      json_value_t *result_outputs =
+          (json_value_t *)json_object_get(result, "outputs");
+      json_value_t *result_verify =
+          result_outputs
+              ? (json_value_t *)json_object_get(result_outputs, "verify_result")
+              : NULL;
+      check_not_null(result_verify);
+      if (result_verify) {
+        json_object_set_bool(result_verify, "passed", false);
+      }
+    }
     check_equal(
         turbo_agent_template_verify_status_from_praktor_result(result),
         TURBO_AGENT_VERIFY_SEMANTIC_FAILURE);

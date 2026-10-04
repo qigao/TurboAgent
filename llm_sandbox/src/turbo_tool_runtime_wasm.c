@@ -744,7 +744,7 @@ static int turbo_tool_runtime_wasm_load_tool(
     goto cleanup;
   if (result_schema && json_type(result_schema) != JSON_OBJECT) goto cleanup;
   if (strict_result && json_type(strict_result) != JSON_BOOL) goto cleanup;
-  if (strict_result && json_bool(strict_result) && !result_schema) goto cleanup;
+  if (strict_result && !result_schema) goto cleanup;
 
   parameters_json = json_serialize(parameters, NULL);
   if (!parameters_json) goto cleanup;

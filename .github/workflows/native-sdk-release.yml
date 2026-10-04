@@ -669,6 +669,8 @@ jobs:
           for rid in linux-x64 windows-x64 macos-arm64 android-arm64-v8a; do
             grep -Fx "sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_tool.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_tool_registry.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_tool_runtime.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_contracts.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_dag_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"

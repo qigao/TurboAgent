@@ -62,6 +62,7 @@ typedef struct {
   char *result_schema_json;
   json_value_t *result_schema;
   int strict_result;
+  turbo_tool_effect_flags_t effect_flags;
   json_value_t *execution_metadata;
 } turbo_tool_entry_t;
 
@@ -209,12 +210,32 @@ static int turbo_tool_execution_policy_valid(const turbo_tool_execution_policy_t
          policy->idempotency <= TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
 }
 
+static int turbo_tool_effect_flags_valid(turbo_tool_effect_flags_t flags) {
+  if ((flags & ~TURBO_TOOL_EFFECT_KNOWN_MASK) != 0) return 0;
+  if (flags == 0) return 1;
+  if ((flags & TURBO_TOOL_EFFECT_UNKNOWN) != 0 &&
+      flags != TURBO_TOOL_EFFECT_UNKNOWN) {
+    return 0;
+  }
+  if ((flags & TURBO_TOOL_EFFECT_PURE) != 0 &&
+      flags != TURBO_TOOL_EFFECT_PURE) {
+    return 0;
+  }
+  return 1;
+}
+
+static turbo_tool_effect_flags_t turbo_tool_effect_flags_normalize(
+    turbo_tool_effect_flags_t flags) {
+  return flags == 0 ? TURBO_TOOL_EFFECT_UNKNOWN : flags;
+}
+
 static turbo_tool_status_t turbo_tool_registry_add_with_policy(
     turbo_tool_registry_t *registry, const turbo_tool_definition_t *definition,
     const turbo_tool_execution_policy_t *execution_policy, const char *const *required_capabilities,
     size_t required_capability_count, turbo_tool_context_handler_fn context_handler,
     turbo_tool_json_value_context_handler_fn json_value_context_handler,
-    const char *result_schema_json, int strict_result) {
+    const char *result_schema_json, int strict_result,
+    turbo_tool_effect_flags_t effect_flags) {
   turbo_tool_status_t status;
   turbo_tool_entry_t *entry;
   json_value_t *parsed_result_schema = NULL;
@@ -283,6 +304,7 @@ static turbo_tool_status_t turbo_tool_registry_add_with_policy(
   entry->result_schema = parsed_result_schema;
   parsed_result_schema = NULL;
   entry->strict_result = result_schema_json ? strict_result : 0;
+  entry->effect_flags = turbo_tool_effect_flags_normalize(effect_flags);
   if (required_capability_count > 0) {
     entry->required_capabilities =
         (char **)calloc(required_capability_count, sizeof(*entry->required_capabilities));
@@ -321,7 +343,8 @@ turbo_tool_status_t turbo_tool_registry_add(turbo_tool_registry_t *registry,
   const turbo_tool_execution_policy_t legacy_policy = {TURBO_TOOL_EXECUTION_SEQUENTIAL,
                                                        TURBO_TOOL_IDEMPOTENCY_NONE};
   return turbo_tool_registry_add_with_policy(registry, definition, &legacy_policy, NULL, 0,
-                                             NULL, NULL, NULL, 0);
+                                             NULL, NULL, NULL, 0,
+                                             TURBO_TOOL_EFFECT_UNKNOWN);
 }
 
 turbo_tool_status_t turbo_tool_registry_add_v2(turbo_tool_registry_t *registry,
@@ -482,6 +505,20 @@ turbo_tool_status_t turbo_tool_registry_get_result_contract(
   return TURBO_TOOL_OK;
 }
 
+turbo_tool_status_t turbo_tool_registry_get_effects(
+    const turbo_tool_registry_t *registry, const char *name,
+    turbo_tool_effect_flags_t *out_effect_flags) {
+  const turbo_tool_entry_t *entry;
+  if (!registry || !name || !out_effect_flags) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  *out_effect_flags = TURBO_TOOL_EFFECT_UNKNOWN;
+  entry = turbo_tool_registry_find(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+  *out_effect_flags = entry->effect_flags;
+  return TURBO_TOOL_OK;
+}
+
 turbo_tool_status_t turbo_tool_registry_require_capability(turbo_tool_registry_t *registry,
                                                            const char *name,
                                                            const char *capability) {
@@ -560,7 +597,7 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
 
   for (name_index = 0; name_index < name_count; ++name_index) {
     const turbo_tool_entry_t *entry;
-    turbo_tool_definition_v5_t definition;
+    turbo_tool_definition_v6_t definition;
     turbo_tool_status_t status;
     size_t previous;
 
@@ -589,7 +626,7 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
 
     memset(&definition, 0, sizeof(definition));
     definition.struct_size = sizeof(definition);
-    definition.abi_version = TURBO_TOOL_DEFINITION_V5_ABI_VERSION;
+    definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
     definition.definition.name = entry->name;
     definition.definition.description = entry->description;
     definition.definition.parameters_json = entry->parameters_json;
@@ -601,13 +638,14 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
     definition.json_value_context_handler = entry->json_value_context_handler;
     definition.result_schema_json = entry->result_schema_json;
     definition.strict_result = entry->strict_result;
+    definition.effect_flags = entry->effect_flags;
     definition.definition.user_data = entry->user_data;
     definition.definition.user_data_free = NULL;
     definition.execution_policy = entry->execution_policy;
     definition.required_capabilities = (const char *const *)entry->required_capabilities;
     definition.required_capability_count = entry->required_capability_count;
 
-    status = turbo_tool_registry_add_v5(projection, &definition);
+    status = turbo_tool_registry_add_v6(projection, &definition);
     if (status == TURBO_TOOL_OK && entry->execution_metadata) {
       status = turbo_tool_registry_set_execution_metadata(
           projection, entry->name, entry->execution_metadata);
@@ -641,11 +679,11 @@ turbo_tool_status_t turbo_tool_registry_compose(const turbo_tool_registry_t *con
     }
     for (tool_index = 0; tool_index < sources[source_index]->count; ++tool_index) {
       const turbo_tool_entry_t *entry = &sources[source_index]->entries[tool_index];
-      turbo_tool_definition_v5_t definition;
+      turbo_tool_definition_v6_t definition;
       turbo_tool_status_t status;
       memset(&definition, 0, sizeof(definition));
       definition.struct_size = sizeof(definition);
-      definition.abi_version = TURBO_TOOL_DEFINITION_V5_ABI_VERSION;
+      definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
       definition.definition.name = entry->name;
       definition.definition.description = entry->description;
       definition.definition.parameters_json = entry->parameters_json;
@@ -662,7 +700,8 @@ turbo_tool_status_t turbo_tool_registry_compose(const turbo_tool_registry_t *con
       definition.json_value_context_handler = entry->json_value_context_handler;
       definition.result_schema_json = entry->result_schema_json;
       definition.strict_result = entry->strict_result;
-      status = turbo_tool_registry_add_v5(composite, &definition);
+    definition.effect_flags = entry->effect_flags;
+      status = turbo_tool_registry_add_v6(composite, &definition);
       if (status == TURBO_TOOL_OK && entry->execution_metadata) {
         status = turbo_tool_registry_set_execution_metadata(
             composite, entry->name, entry->execution_metadata);

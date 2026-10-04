@@ -3,6 +3,7 @@
 #include <praktor.h>
 #include <json_parser.h>
 #include <turbo_runtime_json.h>
+#include <turbo_tool_schema.h>
 #include <salts_fs.h>
 #include <salts/clock.h>
 #include <tstr.h>
@@ -22,6 +23,12 @@
 #define TURBO_PRAKTOR_HAS_EXECUTION_EVENTS 0
 #endif
 
+#if defined(PRAKTOR_CAPABILITY_HOST_TOOL) && PRAKTOR_ABI_MINOR >= 5
+#define TURBO_PRAKTOR_HAS_HOST_TOOL 1
+#else
+#define TURBO_PRAKTOR_HAS_HOST_TOOL 0
+#endif
+
 enum {
   TURBO_PRAKTOR_DEFAULT_MAX_WORKFLOWS = 64,
   TURBO_PRAKTOR_DEFAULT_MAX_RESULT_BYTES = 1024 * 1024,
@@ -38,6 +45,7 @@ typedef struct turbo_praktor_binding_s {
   tstr workflow_path;
   size_t max_result_bytes;
   int project_agent_output;
+  const turbo_tool_registry_t *approved_host_tools;
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
   praktor_workflow_plan *plan;
 #endif
@@ -54,9 +62,15 @@ struct turbo_praktor_tool_pack_s {
 static int turbo_praktor_api_valid(const praktor_api *api) {
   return api && api->struct_size >= sizeof(*api) &&
          api->abi_major == PRAKTOR_ABI_MAJOR &&
+         api->abi_minor >= 5u &&
          (api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0 &&
          (api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0 &&
-         api->execute_workflow && api->execute_workflow_controlled && api->release_json;
+         (api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
+         (api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0 &&
+         api->execute_workflow && api->execute_workflow_controlled &&
+         api->compile_workflow && api->describe_workflow_plan &&
+         api->execute_workflow_plan && api->release_workflow_plan &&
+         api->execute_workflow_plan_host_tools && api->release_json;
 }
 
 static int turbo_praktor_execution_policy_valid(
@@ -122,6 +136,9 @@ static int turbo_praktor_workflow_config_valid(
   if (config->abi_version == TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V1) {
     return config->struct_size >= TURBO_PRAKTOR_WORKFLOW_CONFIG_V1_SIZE;
   }
+  if (config->abi_version == TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V2) {
+    return config->struct_size >= TURBO_PRAKTOR_WORKFLOW_CONFIG_V2_SIZE;
+  }
   return config->abi_version == TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
          config->struct_size >= sizeof(*config);
 }
@@ -129,9 +146,18 @@ static int turbo_praktor_workflow_config_valid(
 static int turbo_praktor_require_harness_safe(
     const turbo_praktor_workflow_config_t *config) {
   return config &&
-         config->abi_version >= TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
-         config->struct_size >= sizeof(*config) &&
+         config->abi_version >= TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V2 &&
+         config->struct_size >= TURBO_PRAKTOR_WORKFLOW_CONFIG_V2_SIZE &&
          config->require_harness_safe != 0;
+}
+
+static const turbo_tool_registry_t *turbo_praktor_approved_host_tools(
+    const turbo_praktor_workflow_config_t *config) {
+  return config &&
+         config->abi_version >= TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+         config->struct_size >= sizeof(*config)
+             ? config->approved_host_tools
+             : NULL;
 }
 
 typedef struct turbo_praktor_capability_list_s {

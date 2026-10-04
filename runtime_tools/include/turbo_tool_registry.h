@@ -54,6 +54,16 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v3(
 CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v4(
     turbo_tool_registry_t *registry, const turbo_tool_definition_v4_t *definition);
 
+/**
+ * @brief Add a context-aware tool definition with one canonical result contract.
+ *
+ * result_schema_json is copied by the registry. NULL means opaque/unknown.
+ * Runtime execution behavior is unchanged; result validation is opt-in at
+ * compiler/executor boundaries.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_add_v5(
+    turbo_tool_registry_t *registry, const turbo_tool_definition_v5_t *definition);
+
 /** @brief Remove one tool and release its registry-owned resources. */
 CXX_C_API turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *registry,
                                                          const char *name);
@@ -103,6 +113,18 @@ turbo_tool_registry_get_execution_policy(const turbo_tool_registry_t *registry, 
 CXX_C_API turbo_tool_status_t turbo_tool_registry_get_required_capabilities(
     const turbo_tool_registry_t *registry, const char *name, const char *const **out_capabilities,
     size_t *out_count);
+
+/**
+ * Read the canonical result contract for one tool.
+ *
+ * Returned pointers are borrowed from the registry. Tools registered before v5
+ * or v5 tools with no result schema return TURBO_TOOL_OK with both schema
+ * outputs NULL and strict_result=0, meaning opaque/unknown.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_get_result_contract(
+    const turbo_tool_registry_t *registry, const char *name,
+    const char **out_schema_json, const json_value_t **out_schema,
+    int *out_strict_result);
 
 /**
  * @brief Add one required capability to an existing tool.

@@ -130,20 +130,39 @@ jobs:
           add_executable(turboagent_release_consumer main.c)
           target_link_libraries(turboagent_release_consumer PRIVATE
             TurboAgent::RuntimeTools
+            TurboAgent::AgentCompiler
             TurboAgent::PraktorTools)
           EOF
           cat > "$consumer/main.c" <<'EOF'
           #include <turbo_praktor_tool_pack.h>
-          #include <turbo_tool.h>
+          #include <turbo_agent_contracts.h>
+          #include <turbo_tool_registry.h>
+          #include <turbo_tool_runtime.h>
           int main(void) {
             turbo_praktor_tool_pack_config_t config;
             turbo_praktor_workflow_config_t workflow;
             turbo_tool_execution_context_t context = {0};
+            turbo_tool_definition_v5_t definition = {0};
+            turbo_tool_runtime_tool_v2_t runtime_tool = {0};
+            const char *schema_json = NULL;
+            const json_value_t *schema = NULL;
+            int strict_result = 0;
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             context.struct_size = sizeof(context);
             context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
+            if (turbo_tool_registry_add_v5(NULL, &definition) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_result_contract(
+                    NULL, "missing", &schema_json, &schema, &strict_result) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_get_tool_v2(NULL, 0, &runtime_tool) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_agent_tool_result_slot_compatibility(
+                    NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
+              return 2;
+            }
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
                            workflow.abi_version ==
                                TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
@@ -228,16 +247,36 @@ jobs:
           add_executable(turboagent_release_consumer main.c)
           target_link_libraries(turboagent_release_consumer PRIVATE
             TurboAgent::RuntimeTools
+            TurboAgent::AgentCompiler
             TurboAgent::PraktorTools)
           EOF
           cat > "$consumer/main.c" <<'EOF'
           #include <turbo_praktor_tool_pack.h>
+          #include <turbo_agent_contracts.h>
+          #include <turbo_tool_registry.h>
+          #include <turbo_tool_runtime.h>
           int main(void) {
             turbo_praktor_tool_pack_config_t config;
             turbo_praktor_workflow_config_t workflow;
+            turbo_tool_definition_v5_t definition = {0};
+            turbo_tool_runtime_tool_v2_t runtime_tool = {0};
+            const char *schema_json = NULL;
+            const json_value_t *schema = NULL;
+            int strict_result = 0;
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
+            if (turbo_tool_registry_add_v5(NULL, &definition) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_result_contract(
+                    NULL, "missing", &schema_json, &schema, &strict_result) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_get_tool_v2(NULL, 0, &runtime_tool) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_agent_tool_result_slot_compatibility(
+                    NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
+              return 2;
+            }
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
                            workflow.abi_version ==
                                TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
@@ -491,16 +530,36 @@ jobs:
           add_library(turboagent_release_consumer SHARED main.c)
           target_link_libraries(turboagent_release_consumer PRIVATE
             TurboAgent::RuntimeTools
+            TurboAgent::AgentCompiler
             TurboAgent::PraktorTools)
           EOF
           cat > "$consumer/main.c" <<'EOF'
           #include <turbo_praktor_tool_pack.h>
+          #include <turbo_agent_contracts.h>
+          #include <turbo_tool_registry.h>
+          #include <turbo_tool_runtime.h>
           int turboagent_release_consumer_probe(void) {
             turbo_praktor_tool_pack_config_t config;
             turbo_praktor_workflow_config_t workflow;
+            turbo_tool_definition_v5_t definition = {0};
+            turbo_tool_runtime_tool_v2_t runtime_tool = {0};
+            const char *schema_json = NULL;
+            const json_value_t *schema = NULL;
+            int strict_result = 0;
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
+            if (turbo_tool_registry_add_v5(NULL, &definition) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_result_contract(
+                    NULL, "missing", &schema_json, &schema, &strict_result) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_get_tool_v2(NULL, 0, &runtime_tool) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_agent_tool_result_slot_compatibility(
+                    NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
+              return 2;
+            }
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
                            workflow.abi_version ==
                                TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
@@ -548,6 +607,7 @@ jobs:
             test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
             test -f "package/sdk/$rid/include/turbo_tool.h"
             test -f "package/sdk/$rid/include/turbo_agent_compiler.h"
+            test -f "package/sdk/$rid/include/turbo_agent_contracts.h"
             test -f "package/sdk/$rid/include/turbo_agent_dag_compiler.h"
             test -f "package/sdk/$rid/include/turbo_agent_templates.h"
             test -f "package/sdk/$rid/include/turbo_agent_praktor_lowering.h"
@@ -596,6 +656,7 @@ jobs:
             grep -Fx "sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_tool.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_contracts.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_dag_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_templates.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_praktor_lowering.h" "$RUNNER_TEMP/turboagent-nupkg.txt"

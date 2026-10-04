@@ -518,4 +518,170 @@ spec("turbo tool runtime") {
     turbo_tool_registry_destroy(registry);
     turbo_tool_runtime_destroy(runtime);
   }
+
+  it("should own v5 result contracts and preserve them through projections") {
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    turbo_tool_registry_t *composite = NULL;
+    const turbo_tool_registry_t *sources[1];
+    const char *names[] = {"typed_result"};
+    turbo_tool_definition_v5_t definition = {0};
+    char result_schema[64] = "{\"type\":\"string\"}";
+    const char *observed_json = NULL;
+    const json_value_t *observed_schema = NULL;
+    int strict_result = 0;
+
+    check_not_null(source);
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V5_ABI_VERSION;
+    definition.definition.name = "typed_result";
+    definition.definition.description = "typed result";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.strict = 1;
+    definition.definition.json_value_handler = test_echo_tool_json_value;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    definition.result_schema_json = result_schema;
+    definition.strict_result = 1;
+
+    check_equal(turbo_tool_registry_add_v5(source, &definition), TURBO_TOOL_OK);
+    strcpy(result_schema, "{\"type\":\"number\"}");
+
+    check_equal(turbo_tool_registry_get_result_contract(
+                    source, "typed_result", &observed_json,
+                    &observed_schema, &strict_result),
+                TURBO_TOOL_OK);
+    check_equal(observed_json, "{\"type\":\"string\"}");
+    check_not_null(observed_schema);
+    check_equal(json_get_string(observed_schema, "type"), "string");
+    check_equal(strict_result, 1);
+
+    check_equal(turbo_tool_registry_project(
+                    source, names, 1, &projection),
+                TURBO_TOOL_OK);
+    observed_json = NULL;
+    observed_schema = NULL;
+    strict_result = 0;
+    check_equal(turbo_tool_registry_get_result_contract(
+                    projection, "typed_result", &observed_json,
+                    &observed_schema, &strict_result),
+                TURBO_TOOL_OK);
+    check_equal(observed_json, "{\"type\":\"string\"}");
+    check_equal(json_get_string(observed_schema, "type"), "string");
+    check_equal(strict_result, 1);
+
+    sources[0] = projection;
+    check_equal(turbo_tool_registry_compose(sources, 1, &composite),
+                TURBO_TOOL_OK);
+    observed_json = NULL;
+    observed_schema = NULL;
+    strict_result = 0;
+    check_equal(turbo_tool_registry_get_result_contract(
+                    composite, "typed_result", &observed_json,
+                    &observed_schema, &strict_result),
+                TURBO_TOOL_OK);
+    check_equal(observed_json, "{\"type\":\"string\"}");
+    check_equal(strict_result, 1);
+
+    turbo_tool_registry_destroy(composite);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+  }
+
+  it("should keep legacy result contracts explicitly opaque and reject invalid v5 metadata") {
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_v4_t legacy = {0};
+    turbo_tool_definition_v5_t invalid = {0};
+    const char *schema_json = (const char *)1;
+    const json_value_t *schema = (const json_value_t *)1;
+    int strict_result = 7;
+
+    check_not_null(registry);
+    legacy.struct_size = sizeof(legacy);
+    legacy.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+    legacy.definition.name = "legacy_result";
+    legacy.definition.description = "legacy result";
+    legacy.definition.parameters_json = "{\"type\":\"object\"}";
+    legacy.definition.json_value_handler = test_echo_tool_json_value;
+    legacy.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    legacy.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    check_equal(turbo_tool_registry_add_v4(registry, &legacy), TURBO_TOOL_OK);
+
+    check_equal(turbo_tool_registry_get_result_contract(
+                    registry, "legacy_result", &schema_json,
+                    &schema, &strict_result),
+                TURBO_TOOL_OK);
+    check_null(schema_json);
+    check_null(schema);
+    check_equal(strict_result, 0);
+
+    invalid.struct_size = sizeof(invalid);
+    invalid.abi_version = TURBO_TOOL_DEFINITION_V5_ABI_VERSION;
+    invalid.definition.name = "invalid_result";
+    invalid.definition.description = "invalid result";
+    invalid.definition.parameters_json = "{\"type\":\"object\"}";
+    invalid.definition.json_value_handler = test_echo_tool_json_value;
+    invalid.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    invalid.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    invalid.result_schema_json = "{bad";
+    check_equal(turbo_tool_registry_add_v5(registry, &invalid),
+                TURBO_TOOL_INVALID_ARGUMENT);
+    invalid.result_schema_json = "{\"type\":\"string\"}";
+    invalid.strict_result = 2;
+    check_equal(turbo_tool_registry_add_v5(registry, &invalid),
+                TURBO_TOOL_INVALID_ARGUMENT);
+    invalid.result_schema_json = NULL;
+    invalid.strict_result = 1;
+    check_equal(turbo_tool_registry_add_v5(registry, &invalid),
+                TURBO_TOOL_INVALID_ARGUMENT);
+
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("should preserve native runtime v5 result contracts through registry bridge") {
+    turbo_tool_runtime_t *runtime = turbo_tool_runtime_native_create();
+    turbo_tool_registry_t *bridge = NULL;
+    turbo_tool_definition_v5_t definition = {0};
+    turbo_tool_runtime_tool_v2_t tool = {0};
+    const char *schema_json = NULL;
+    const json_value_t *schema = NULL;
+    int strict_result = 0;
+
+    check_not_null(runtime);
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V5_ABI_VERSION;
+    definition.definition.name = "native_typed";
+    definition.definition.description = "native typed";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.json_value_handler = test_echo_tool_json_value;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    definition.result_schema_json = "{\"type\":\"string\"}";
+    definition.strict_result = 1;
+
+    check_equal(turbo_tool_runtime_native_add_tool_v5(
+                    runtime, &definition),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_runtime_get_tool_v2(runtime, 0, &tool),
+                TURBO_TOOL_OK);
+    check_equal(tool.abi_version, TURBO_TOOL_RUNTIME_TOOL_V2_ABI_VERSION);
+    check_equal(tool.base.name, "native_typed");
+    check_equal(tool.result_schema_json, "{\"type\":\"string\"}");
+    check_equal(tool.strict_result, 1);
+
+    bridge = turbo_tool_runtime_build_registry_bridge(runtime);
+    check_not_null(bridge);
+    check_equal(turbo_tool_registry_get_result_contract(
+                    bridge, "native_typed", &schema_json,
+                    &schema, &strict_result),
+                TURBO_TOOL_OK);
+    check_equal(schema_json, "{\"type\":\"string\"}");
+    check_not_null(schema);
+    check_equal(json_get_string(schema, "type"), "string");
+    check_equal(strict_result, 1);
+
+    turbo_tool_registry_destroy(bridge);
+    turbo_tool_runtime_destroy(runtime);
+  }
+
 }

@@ -46,6 +46,9 @@ spec("TurboWasm tool pack") {
     const char *const *required_capabilities = NULL;
     size_t required_capability_count = 0;
     const json_value_t *execution_metadata = NULL;
+    const char *result_schema_json = NULL;
+    const json_value_t *result_schema = NULL;
+    int strict_result = -1;
     char *output = NULL;
 
     turbo_wasm_tool_pack_config_init(&pack_config);
@@ -77,6 +80,14 @@ spec("TurboWasm tool pack") {
     check_true(strncmp(json_get_string(execution_metadata, "module_fingerprint"),
                        "fnv1a64:", 8) == 0);
     check_not_null(json_object_get(execution_metadata, "limits"));
+    check_equal(turbo_tool_registry_get_result_contract(
+                    turbo_wasm_tool_pack_registry(pack), "echo_json",
+                    &result_schema_json, &result_schema, &strict_result),
+                TURBO_TOOL_OK);
+    check_not_null(result_schema_json);
+    check_not_null(result_schema);
+    check_equal(json_get_string(result_schema, "type"), "object");
+    check_equal(strict_result, 0);
 
     check_equal(turbo_wasm_tool_pack_add_module(pack, &module_config),
                 TURBO_TOOL_DUPLICATE);

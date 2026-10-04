@@ -8,6 +8,15 @@
  * through the three bounded TurboAgent host imports below. The guest exports
  * remain ordinary core-Wasm functions; no TurboWasm-private guest facade is
  * required.
+ *
+ * turbo_tool_describe() writes one JSON object:
+ *   name, description, parameters, strict
+ * and may additionally publish:
+ *   result        - canonical JSON-Schema object for the tool result
+ *   strict_result - boolean result-contract qualifier
+ *
+ * Both result fields are additive. Older guests that omit them remain valid
+ * and are surfaced to RuntimeTools as an opaque/unknown result contract.
  */
 
 #include <stdint.h>

@@ -9,7 +9,8 @@ TURBO_WASM_TOOLS_GUEST_EXPORT(TURBO_WASM_TOOLS_EXPORT_TOOL_DESCRIBE)
 int turbo_tool_describe(int index) {
   static const char metadata[] =
       "{\"name\":\"echo_json\",\"description\":\"Echo JSON from guest wasm.\","
-      "\"parameters\":{\"type\":\"object\"},\"strict\":true}";
+      "\"parameters\":{\"type\":\"object\"},\"strict\":true,"
+      "\"result\":{\"type\":\"object\"},\"strict_result\":false}";
   if (index != 0) return -1;
   return turbo_agent_tool_output_write(metadata, (uint32_t)(sizeof(metadata) - 1));
 }

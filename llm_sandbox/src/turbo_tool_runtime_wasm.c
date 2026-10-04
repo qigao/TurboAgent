@@ -35,6 +35,9 @@ typedef struct turbo_tool_runtime_wasm_tool_s {
   char *parameters_json;
   json_value_t *parameters_schema;
   int strict;
+  char *result_schema_json;
+  json_value_t *result_schema;
+  int strict_result;
 } turbo_tool_runtime_wasm_tool_t;
 
 typedef struct turbo_tool_runtime_wasm_io_s {
@@ -197,6 +200,8 @@ static void turbo_tool_runtime_wasm_tool_clear(turbo_tool_runtime_wasm_tool_t *t
   tstr_free(tool->description);
   tstr_free(tool->parameters_json);
   turbo_runtime_json_destroy(tool->parameters_schema);
+  tstr_free(tool->result_schema_json);
+  turbo_runtime_json_destroy(tool->result_schema);
   memset(tool, 0, sizeof(*tool));
 }
 
@@ -585,6 +590,28 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_get_tool(
   return TURBO_TOOL_OK;
 }
 
+static turbo_tool_status_t turbo_tool_runtime_wasm_get_tool_v2(
+    const void *impl, size_t index, turbo_tool_runtime_tool_v2_t *out_tool) {
+  const turbo_tool_runtime_wasm_impl_t *wasm_impl =
+      (const turbo_tool_runtime_wasm_impl_t *)impl;
+  const turbo_tool_runtime_wasm_tool_t *tool;
+
+  if (!wasm_impl || !out_tool) return TURBO_TOOL_INVALID_ARGUMENT;
+  if (index >= wasm_impl->tool_count) return TURBO_TOOL_NOT_FOUND;
+  tool = &wasm_impl->tools[index];
+  memset(out_tool, 0, sizeof(*out_tool));
+  out_tool->struct_size = sizeof(*out_tool);
+  out_tool->abi_version = TURBO_TOOL_RUNTIME_TOOL_V2_ABI_VERSION;
+  out_tool->base.name = tool->name;
+  out_tool->base.description = tool->description;
+  out_tool->base.parameters_json = tool->parameters_json;
+  out_tool->base.parameters_schema = tool->parameters_schema;
+  out_tool->base.strict = tool->strict;
+  out_tool->result_schema_json = tool->result_schema_json;
+  out_tool->strict_result = tool->strict_result;
+  return TURBO_TOOL_OK;
+}
+
 static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_with_context(
     void *impl,
     const char *name,
@@ -660,18 +687,23 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_json_value(
       impl, name, arguments, NULL, out_result);
 }
 
-static const turbo_tool_runtime_vtable_v2_t turbo_tool_runtime_wasm_vtable = {
-    sizeof(turbo_tool_runtime_vtable_v2_t),
-    TURBO_TOOL_RUNTIME_VTABLE_V2_ABI_VERSION,
+static const turbo_tool_runtime_vtable_v3_t turbo_tool_runtime_wasm_vtable = {
+    sizeof(turbo_tool_runtime_vtable_v3_t),
+    TURBO_TOOL_RUNTIME_VTABLE_V3_ABI_VERSION,
     {
-        turbo_tool_runtime_wasm_destroy_impl,
-        turbo_tool_runtime_wasm_tool_count,
-        turbo_tool_runtime_wasm_get_tool,
-        turbo_tool_runtime_wasm_invoke,
-        turbo_tool_runtime_wasm_invoke_json_value,
+        sizeof(turbo_tool_runtime_vtable_v2_t),
+        TURBO_TOOL_RUNTIME_VTABLE_V2_ABI_VERSION,
+        {
+            turbo_tool_runtime_wasm_destroy_impl,
+            turbo_tool_runtime_wasm_tool_count,
+            turbo_tool_runtime_wasm_get_tool,
+            turbo_tool_runtime_wasm_invoke,
+            turbo_tool_runtime_wasm_invoke_json_value,
+        },
+        turbo_tool_runtime_wasm_invoke_with_context,
+        turbo_tool_runtime_wasm_invoke_json_value_with_context,
     },
-    turbo_tool_runtime_wasm_invoke_with_context,
-    turbo_tool_runtime_wasm_invoke_json_value_with_context,
+    turbo_tool_runtime_wasm_get_tool_v2,
 };
 
 static int turbo_tool_runtime_wasm_load_tool(
@@ -680,10 +712,13 @@ static int turbo_tool_runtime_wasm_load_tool(
   json_value_t *metadata = NULL;
   json_value_t *parameters;
   json_value_t *strict;
+  json_value_t *result_schema;
+  json_value_t *strict_result;
   const char *name;
   const char *description;
   char *metadata_json = NULL;
   char *parameters_json = NULL;
+  char *result_schema_json = NULL;
   int32_t guest_status;
   size_t prior_index;
   int rc = -1;
@@ -701,21 +736,38 @@ static int turbo_tool_runtime_wasm_load_tool(
   description = json_get_string(metadata, "description");
   parameters = json_object_get(metadata, "parameters");
   strict = json_object_get(metadata, "strict");
+  result_schema = json_object_get(metadata, "result");
+  strict_result = json_object_get(metadata, "strict_result");
   if (!name || !name[0] || !description || !parameters ||
       json_type(parameters) != JSON_OBJECT || !strict ||
       json_type(strict) != JSON_BOOL)
     goto cleanup;
+  if (result_schema && json_type(result_schema) != JSON_OBJECT) goto cleanup;
+  if (strict_result && json_type(strict_result) != JSON_BOOL) goto cleanup;
+  if (strict_result && !result_schema) goto cleanup;
 
   parameters_json = json_serialize(parameters, NULL);
   if (!parameters_json) goto cleanup;
+  if (result_schema) {
+    result_schema_json = json_serialize(result_schema, NULL);
+    if (!result_schema_json) goto cleanup;
+  }
   tool->name = (char *)tstr_dup(name);
   tool->description = (char *)tstr_dup(description);
   tool->parameters_json = (char *)tstr_dup(parameters_json);
   tool->parameters_schema =
       turbo_tool_schema_parse_parameters_json_value(parameters_json, 0);
   tool->strict = json_bool(strict) ? 1 : 0;
+  if (result_schema_json) {
+    tool->result_schema_json = (char *)tstr_dup(result_schema_json);
+    tool->result_schema = json_clone(result_schema);
+    tool->strict_result =
+        strict_result && json_bool(strict_result) ? 1 : 0;
+  }
   if (!tool->name || !tool->description || !tool->parameters_json ||
-      !tool->parameters_schema)
+      !tool->parameters_schema ||
+      (result_schema_json &&
+       (!tool->result_schema_json || !tool->result_schema)))
     goto cleanup;
   for (prior_index = 0; prior_index < index; ++prior_index)
     if (strcmp(impl->tools[prior_index].name, tool->name) == 0)
@@ -724,6 +776,7 @@ static int turbo_tool_runtime_wasm_load_tool(
 
 cleanup:
   if (rc != 0) turbo_tool_runtime_wasm_tool_clear(tool);
+  json_serialize_free(result_schema_json);
   json_serialize_free(parameters_json);
   turbo_runtime_json_destroy(metadata);
   free(metadata_json);
@@ -901,7 +954,7 @@ turbo_tool_runtime_wasm_create_with_metadata(
       if (turbo_tool_runtime_wasm_load_tool(impl, i) != 0) goto fail;
   }
 
-  runtime = turbo_tool_runtime_create_v2(&turbo_tool_runtime_wasm_vtable, impl);
+  runtime = turbo_tool_runtime_create_v3(&turbo_tool_runtime_wasm_vtable, impl);
   if (!runtime) goto fail;
 
   if (out_execution_metadata) {

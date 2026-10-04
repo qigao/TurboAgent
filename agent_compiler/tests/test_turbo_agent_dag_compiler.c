@@ -178,6 +178,10 @@ spec("AgentCompiler Phase 3 DAG admission") {
     certificate = turbo_agent_executable_dag_certificate_json_value(plan);
     check_not_null(certificate);
     check_equal(json_get_string(certificate, "backend"), "praktor_host_tool");
+    check_equal(json_get_int(certificate, "version", -1),
+                TURBO_AGENT_DAG_CERTIFICATE_VERSION);
+    check_equal(json_get_string(certificate, "template"), "generic");
+    check_equal(json_get_int(certificate, "plan_generation", -1), 0);
     check_equal(json_get_int(certificate, "replan_budget", -1), 2);
     check_equal(json_array_size(json_object_get(certificate, "steps")), 3);
 
@@ -411,4 +415,175 @@ spec("AgentCompiler Phase 3 DAG admission") {
     turbo_runtime_json_destroy(args);
     turbo_tool_registry_destroy(registry);
   }
+  it("changes plan identity across template and replan generation") {
+    dag_probe_t read_probe = {0};
+    dag_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_dag_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t change_source;
+    turbo_agent_dag_source_t repair_source;
+    turbo_agent_dag_source_t replan_source;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *change = NULL;
+    turbo_agent_executable_dag_t *repair = NULL;
+    turbo_agent_executable_dag_t *replan = NULL;
+    json_value_t *args = dag_args("same");
+    json_value_t *certificate = NULL;
+    const char *allowed[] = {"runtime_tools"};
+
+    check_not_null(registry);
+    check_not_null(args);
+    dag_config(&config, allowed, 1u);
+    dag_step(&step, "verify", "repo.inspect", args, NULL, 0u);
+
+    dag_source(&change_source, &step, 1u);
+    change_source.template_kind = TURBO_AGENT_DAG_TEMPLATE_CHANGE;
+    change_source.plan_generation = 1u;
+
+    dag_source(&repair_source, &step, 1u);
+    repair_source.template_kind = TURBO_AGENT_DAG_TEMPLATE_REPAIR;
+    repair_source.plan_generation = 1u;
+
+    dag_source(&replan_source, &step, 1u);
+    replan_source.template_kind = TURBO_AGENT_DAG_TEMPLATE_REPAIR;
+    replan_source.plan_generation = 2u;
+
+    check_equal(turbo_agent_compile_dag(
+                    &config, registry, &change_source, &change, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_equal(turbo_agent_compile_dag(
+                    &config, registry, &repair_source, &repair, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_equal(turbo_agent_compile_dag(
+                    &config, registry, &replan_source, &replan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+
+    check_true(turbo_agent_executable_dag_hash(change) !=
+               turbo_agent_executable_dag_hash(repair));
+    check_true(turbo_agent_executable_dag_hash(repair) !=
+               turbo_agent_executable_dag_hash(replan));
+    check_equal(turbo_agent_executable_dag_template_kind(replan),
+                TURBO_AGENT_DAG_TEMPLATE_REPAIR);
+    check_equal(turbo_agent_executable_dag_plan_generation(replan), 2u);
+
+    certificate = turbo_agent_executable_dag_certificate_json_value(replan);
+    check_not_null(certificate);
+    check_equal(json_get_string(certificate, "template"), "repair");
+    check_equal(json_get_int(certificate, "plan_generation", -1), 2);
+
+    turbo_runtime_json_destroy(certificate);
+    turbo_agent_executable_dag_destroy(replan);
+    turbo_agent_executable_dag_destroy(repair);
+    turbo_agent_executable_dag_destroy(change);
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("rejects retries for non-idempotent tools before callbacks") {
+    dag_probe_t read_probe = {0};
+    dag_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_dag_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *plan = NULL;
+    json_value_t *args = dag_args("patch");
+    const char *allowed[] = {"runtime_tools"};
+
+    dag_config(&config, allowed, 1u);
+    dag_step(&step, "patch", "repo.patch", args, NULL, 0u);
+    step.retry_limit = 1u;
+    dag_source(&source, &step, 1u);
+    source.template_kind = TURBO_AGENT_DAG_TEMPLATE_CHANGE;
+
+    check_equal(
+        turbo_agent_compile_dag(&config, registry, &source, &plan, NULL),
+        TURBO_AGENT_COMPILE_RETRY_UNSAFE);
+    check_null(plan);
+    check_equal(read_probe.calls, 0);
+    check_equal(write_probe.calls, 0);
+
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("admits bounded retries for read-only tools") {
+    dag_probe_t read_probe = {0};
+    dag_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_dag_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *plan = NULL;
+    json_value_t *args = dag_args("verify");
+    json_value_t *certificate = NULL;
+    const json_value_t *steps = NULL;
+    const json_value_t *first = NULL;
+    const char *allowed[] = {"runtime_tools"};
+
+    dag_config(&config, allowed, 1u);
+    dag_step(&step, "verify", "repo.inspect", args, NULL, 0u);
+    step.retry_limit = 2u;
+    dag_source(&source, &step, 1u);
+    source.template_kind = TURBO_AGENT_DAG_TEMPLATE_REPAIR;
+
+    check_equal(
+        turbo_agent_compile_dag(&config, registry, &source, &plan, NULL),
+        TURBO_AGENT_COMPILE_OK);
+    check_not_null(plan);
+    certificate = turbo_agent_executable_dag_certificate_json_value(plan);
+    check_not_null(certificate);
+    steps = json_object_get(certificate, "steps");
+    first = json_array_get(steps, 0u);
+    check_equal(json_get_int(first, "retry_limit", -1), 2);
+
+    turbo_runtime_json_destroy(certificate);
+    turbo_agent_executable_dag_destroy(plan);
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("accepts DAG source v1 prefix without reading v2 identity fields") {
+    dag_probe_t read_probe = {0};
+    dag_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_dag_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *plan = NULL;
+    json_value_t *args = dag_args("legacy");
+    json_value_t *certificate = NULL;
+    const char *allowed[] = {"runtime_tools"};
+
+    dag_config(&config, allowed, 1u);
+    dag_step(&step, "inspect", "repo.inspect", args, NULL, 0u);
+    dag_source(&source, &step, 1u);
+    source.struct_size = TURBO_AGENT_DAG_SOURCE_V1_SIZE;
+    source.abi_version = TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V1;
+    source.template_kind = (turbo_agent_dag_template_kind_t)999;
+    source.plan_generation = 999u;
+
+    check_equal(
+        turbo_agent_compile_dag(&config, registry, &source, &plan, NULL),
+        TURBO_AGENT_COMPILE_OK);
+    check_not_null(plan);
+    check_equal(turbo_agent_executable_dag_template_kind(plan),
+                TURBO_AGENT_DAG_TEMPLATE_GENERIC);
+    check_equal(turbo_agent_executable_dag_plan_generation(plan), 0u);
+
+    certificate = turbo_agent_executable_dag_certificate_json_value(plan);
+    check_not_null(certificate);
+    check_equal(json_get_string(certificate, "template"), "generic");
+    check_equal(json_get_int(certificate, "plan_generation", -1), 0);
+
+    turbo_runtime_json_destroy(certificate);
+    turbo_agent_executable_dag_destroy(plan);
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
 }

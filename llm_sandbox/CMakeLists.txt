@@ -114,6 +114,13 @@ if(BUILD_TESTS)
       LIBS wasm_tools agent_compiler Salts::TinyTest
       FOLDER "Wasm Tools/tests")
 
+    if(TARGET praktor_tools)
+      cmake_add_test(
+        SOURCES tests/test_praktor_host_tool_wasm.c
+        LIBS wasm_tools praktor_tools Salts::TinyTest
+        FOLDER "Wasm Tools/tests")
+    endif()
+
     if(TARGET langchain)
       cmake_add_test(
         SOURCES tests/test_turbo_wasm_tool_pack_workspace.c
@@ -166,6 +173,14 @@ if(BUILD_TESTS)
                          llm_sandbox_wasm_tool_guests)
         target_compile_definitions(
           test_turbo_wasm_tool_pack_workspace
+          PRIVATE
+            LLM_SANDBOX_WASM_TOOL_WASM_PATH="${LLM_SANDBOX_WASM_TOOL_WASM}")
+      endif()
+      if(TARGET test_praktor_host_tool_wasm)
+        add_dependencies(test_praktor_host_tool_wasm
+                         llm_sandbox_wasm_tool_guests)
+        target_compile_definitions(
+          test_praktor_host_tool_wasm
           PRIVATE
             LLM_SANDBOX_WASM_TOOL_WASM_PATH="${LLM_SANDBOX_WASM_TOOL_WASM}")
       endif()

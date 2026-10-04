@@ -3,6 +3,7 @@
 #include "turbo_runtime_control.h"
 
 #include <salts_fs.h>
+#include <salts/clock.h>
 #include <json_parser.h>
 
 #include <stdio.h>
@@ -109,6 +110,95 @@ static int praktor_test_write_harness_safe_workflow(
   salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
   if (salts_fs_path_join(out_path, out_size, workspace, "harness-safe.yml") != 0) return -1;
   return salts_fs_write_file(out_path, &buffer);
+}
+
+static int praktor_test_write_host_tool_workflow(
+    const char *workspace, char *out_path, size_t out_size) {
+  static const char yaml[] =
+      "input_policy: strict\n"
+      "inputs:\n"
+      "  path:\n"
+      "    type: string\n"
+      "    required: true\n"
+      "outputs:\n"
+      "  status:\n"
+      "    type: string\n"
+      "    required: true\n"
+      "    value: \"{{ tasks.inspect.outputs.result.status }}\"\n"
+      "tasks:\n"
+      "  - name: inspect\n"
+      "    tool: repo.inspect\n"
+      "    with:\n"
+      "      path: \"{{ variables.path }}\"\n"
+      "      limit: 2\n";
+  salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (salts_fs_path_join(out_path, out_size, workspace, "host-tool.yml") != 0)
+    return -1;
+  return salts_fs_write_file(out_path, &buffer);
+}
+
+typedef struct praktor_test_host_capture_s {
+  int calls;
+  int saw_context;
+  int saw_lineage;
+  int saw_deadline;
+} praktor_test_host_capture_t;
+
+static turbo_tool_status_t praktor_test_host_tool_handler(
+    const json_value_t *arguments,
+    const turbo_tool_execution_context_t *context,
+    json_value_t **out_result, void *user_data) {
+  praktor_test_host_capture_t *capture =
+      (praktor_test_host_capture_t *)user_data;
+  json_value_t *result;
+  if (!capture || !arguments || !out_result ||
+      strcmp(json_get_string(arguments, "path"), "src") != 0 ||
+      (int)json_get_double(arguments, "limit", -1.0) != 2) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  ++capture->calls;
+  capture->saw_context =
+      context &&
+      context->abi_version == TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION &&
+      context->struct_size >= sizeof(*context);
+  capture->saw_lineage =
+      capture->saw_context && context->thread_id && context->run_id &&
+      context->turn_id && context->tool_call_id &&
+      strcmp(context->thread_id, "thread-host") == 0 &&
+      strcmp(context->run_id, "run-host") == 0 &&
+      strcmp(context->turn_id, "turn-host") == 0 &&
+      strcmp(context->tool_call_id, "call-host") == 0;
+  capture->saw_deadline =
+      capture->saw_context && context->deadline_mono_ms != 0;
+
+  result = json_create_object();
+  if (!result) return TURBO_TOOL_OUT_OF_MEMORY;
+  json_object_set_string(result, "status", "ok");
+  json_object_set_string(result, "source", "runtime_tools");
+  *out_result = result;
+  return TURBO_TOOL_OK;
+}
+
+static int praktor_test_register_host_tool(
+    turbo_tool_registry_t *registry,
+    praktor_test_host_capture_t *capture,
+    const char *parameters_json) {
+  static const char *const capabilities[] = {"repo_read"};
+  turbo_tool_definition_v4_t definition;
+  memset(&definition, 0, sizeof(definition));
+  definition.struct_size = sizeof(definition);
+  definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+  definition.definition.name = "repo.inspect";
+  definition.definition.description = "Reviewed repository inspection.";
+  definition.definition.parameters_json = parameters_json;
+  definition.definition.strict = 1;
+  definition.definition.user_data = capture;
+  definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+  definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+  definition.required_capabilities = capabilities;
+  definition.required_capability_count = 1;
+  definition.json_value_context_handler = praktor_test_host_tool_handler;
+  return turbo_tool_registry_add_v4(registry, &definition) == TURBO_TOOL_OK ? 0 : -1;
 }
 
 typedef struct praktor_test_observation_s {
@@ -562,6 +652,52 @@ spec("Praktor workflow tool pack") {
     free(workspace);
   }
 
+  it("preserves WorkflowPlan semantics for workflow config v2 prefix callers") {
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack;
+    turbo_tool_definition_t definition = {0};
+    json_value_t *schema = NULL;
+
+    check_not_null(workspace);
+    check_equal(praktor_test_write_harness_safe_workflow(
+                     workspace, workflow_path, sizeof(workflow_path)),
+                 0);
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+
+    memset(&workflow_config, 0, sizeof(workflow_config));
+    workflow_config.struct_size = TURBO_PRAKTOR_WORKFLOW_CONFIG_V2_SIZE;
+    workflow_config.abi_version = TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V2;
+    workflow_config.tool_name = "praktor_v2";
+    workflow_config.description = "v2 WorkflowPlan compatibility.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.strict = 1;
+    workflow_config.execution_policy.mode = TURBO_TOOL_EXECUTION_EXCLUSIVE;
+    workflow_config.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    workflow_config.require_harness_safe = 1;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                TURBO_TOOL_OK);
+
+    check_equal(turbo_tool_registry_get_definition(
+                    turbo_praktor_tool_pack_registry(pack), 0, &definition),
+                TURBO_TOOL_OK);
+    schema = json_parse(definition.parameters_json,
+                        strlen(definition.parameters_json));
+    check_not_null(schema);
+    check_false(json_get_bool(schema, "additionalProperties", true));
+    check_not_null(json_object_get(
+        json_object_get(schema, "properties"), "payload"));
+
+    turbo_runtime_json_destroy(schema);
+    turbo_praktor_tool_pack_destroy(pack);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
   it("uses WorkflowPlan contracts for harness-native registration and execution") {
     char *workspace = praktor_test_workspace();
     char workflow_path[SALTS_FS_MAX_PATH] = {0};
@@ -710,6 +846,280 @@ spec("Praktor workflow tool pack") {
     }
 
     turbo_praktor_tool_pack_destroy(pack);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
+  it("resolves reviewed HostTool authority through an exact RuntimeTools projection") {
+    static const char schema[] =
+        "{\"type\":\"object\",\"properties\":{"
+        "\"path\":{\"type\":\"string\"},"
+        "\"limit\":{\"type\":\"integer\"}},"
+        "\"required\":[\"path\",\"limit\"],"
+        "\"additionalProperties\":false}";
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    const char *projection_names[] = {"repo.inspect"};
+    praktor_test_host_capture_t capture = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack = NULL;
+    const char *const *capabilities = NULL;
+    size_t capability_count = 0;
+    turbo_tool_execution_context_t context = {0};
+    json_value_t *arguments = NULL;
+    json_value_t *result = NULL;
+    const json_value_t *outputs;
+
+    check_not_null(workspace);
+    check_not_null(source);
+    check_equal(praktor_test_write_host_tool_workflow(
+                    workspace, workflow_path, sizeof(workflow_path)),
+                0);
+    check_equal(praktor_test_register_host_tool(source, &capture, schema), 0);
+    check_equal(turbo_tool_registry_project(
+                    source, projection_names, 1, &projection),
+                TURBO_TOOL_OK);
+    check_not_null(projection);
+
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    check_true(turbo_praktor_tool_pack_supports_host_tools(pack));
+
+    turbo_praktor_workflow_config_init(&workflow_config);
+    workflow_config.tool_name = "praktor_host_native";
+    workflow_config.description = "Reviewed HostTool workflow.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.strict = 1;
+    workflow_config.approved_host_tools = projection;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                TURBO_TOOL_OK);
+
+    check_equal(turbo_tool_registry_get_required_capabilities(
+                    turbo_praktor_tool_pack_registry(pack),
+                    "praktor_host_native", &capabilities, &capability_count),
+                TURBO_TOOL_OK);
+    check_equal(capability_count, 2);
+    check_equal(capabilities[0], "runtime_tools");
+    check_equal(capabilities[1], "repo_read");
+
+    arguments = json_parse("{\"path\":\"src\"}",
+                           strlen("{\"path\":\"src\"}"));
+    check_not_null(arguments);
+    context.struct_size = sizeof(context);
+    context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    context.deadline_mono_ms = salts_monotonic_ms() + 5000u;
+    context.thread_id = "thread-host";
+    context.run_id = "run-host";
+    context.turn_id = "turn-host";
+    context.tool_call_id = "call-host";
+
+    check_equal(turbo_tool_registry_execute_json_value_with_context(
+                    turbo_praktor_tool_pack_registry(pack),
+                    "praktor_host_native", arguments, &context, &result),
+                TURBO_TOOL_OK);
+    check_not_null(result);
+    check_equal(json_get_string(result, "workflow_status"), "success");
+    outputs = json_object_get(result, "outputs");
+    check_not_null(outputs);
+    check_equal(json_get_string(outputs, "status"), "ok");
+    check_equal(capture.calls, 1);
+    check_true(capture.saw_context);
+    check_true(capture.saw_lineage);
+    check_true(capture.saw_deadline);
+
+    turbo_runtime_json_destroy(result);
+    turbo_runtime_json_destroy(arguments);
+    turbo_praktor_tool_pack_destroy(pack);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
+  it("rejects a cancelled HostTool execution before the RuntimeTools callback") {
+    static const char schema[] =
+        "{\"type\":\"object\",\"properties\":{"
+        "\"path\":{\"type\":\"string\"},"
+        "\"limit\":{\"type\":\"integer\"}},"
+        "\"required\":[\"path\",\"limit\"],"
+        "\"additionalProperties\":false}";
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    const char *projection_names[] = {"repo.inspect"};
+    praktor_test_host_capture_t capture = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack = NULL;
+    turbo_cancel_source_t *cancel_source = NULL;
+    turbo_cancel_token_t *cancel_token = NULL;
+    turbo_tool_execution_context_t context = {0};
+    json_value_t *arguments = NULL;
+    json_value_t *result = NULL;
+
+    check_not_null(workspace);
+    check_not_null(source);
+    check_equal(praktor_test_write_host_tool_workflow(
+                    workspace, workflow_path, sizeof(workflow_path)),
+                0);
+    check_equal(praktor_test_register_host_tool(source, &capture, schema), 0);
+    check_equal(turbo_tool_registry_project(
+                    source, projection_names, 1, &projection),
+                TURBO_TOOL_OK);
+    check_not_null(projection);
+
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    turbo_praktor_workflow_config_init(&workflow_config);
+    workflow_config.tool_name = "praktor_host_cancel";
+    workflow_config.description = "Cancelled reviewed HostTool workflow.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.strict = 1;
+    workflow_config.approved_host_tools = projection;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                TURBO_TOOL_OK);
+
+    check_equal(turbo_cancel_source_create(NULL, &cancel_source), 0);
+    check_equal(turbo_cancel_source_token(cancel_source, &cancel_token), 0);
+    check_equal(turbo_cancel_source_cancel(
+                    cancel_source, TURBO_CANCEL_USER),
+                0);
+
+    arguments = json_parse("{\"path\":\"src\"}",
+                           strlen("{\"path\":\"src\"}"));
+    check_not_null(arguments);
+    context.struct_size = sizeof(context);
+    context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    context.cancel_token = cancel_token;
+    context.thread_id = "thread-host";
+    context.run_id = "run-host";
+    context.turn_id = "turn-host";
+    context.tool_call_id = "call-host";
+
+    check_equal(turbo_tool_registry_execute_json_value_with_context(
+                    turbo_praktor_tool_pack_registry(pack),
+                    "praktor_host_cancel", arguments, &context, &result),
+                TURBO_TOOL_CANCELLED);
+    check_null(result);
+    check_equal(capture.calls, 0);
+
+    turbo_runtime_json_destroy(arguments);
+    turbo_cancel_token_release(cancel_token);
+    turbo_cancel_source_destroy(cancel_source);
+    turbo_praktor_tool_pack_destroy(pack);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
+  it("rejects HostTool workflows whose identity is outside the approved projection") {
+    static const char schema[] =
+        "{\"type\":\"object\",\"additionalProperties\":true}";
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    praktor_test_host_capture_t capture = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack = NULL;
+
+    check_not_null(workspace);
+    check_not_null(source);
+    check_equal(praktor_test_write_host_tool_workflow(
+                    workspace, workflow_path, sizeof(workflow_path)),
+                0);
+    check_equal(praktor_test_register_host_tool(source, &capture, schema), 0);
+    check_equal(turbo_tool_registry_project(source, NULL, 0, &projection),
+                TURBO_TOOL_OK);
+    check_not_null(projection);
+
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    turbo_praktor_workflow_config_init(&workflow_config);
+    workflow_config.tool_name = "praktor_host_denied";
+    workflow_config.description = "Denied HostTool workflow.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.strict = 1;
+    workflow_config.approved_host_tools = projection;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_equal(capture.calls, 0);
+
+    turbo_praktor_tool_pack_destroy(pack);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
+  it("validates resolved HostTool arguments before invoking RuntimeTools") {
+    static const char incompatible_schema[] =
+        "{\"type\":\"object\",\"properties\":{"
+        "\"path\":{\"type\":\"string\"},"
+        "\"limit\":{\"type\":\"string\"}},"
+        "\"required\":[\"path\",\"limit\"],"
+        "\"additionalProperties\":false}";
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    const char *projection_names[] = {"repo.inspect"};
+    praktor_test_host_capture_t capture = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack = NULL;
+    json_value_t *arguments = NULL;
+    json_value_t *result = NULL;
+
+    check_not_null(workspace);
+    check_not_null(source);
+    check_equal(praktor_test_write_host_tool_workflow(
+                    workspace, workflow_path, sizeof(workflow_path)),
+                0);
+    check_equal(praktor_test_register_host_tool(
+                    source, &capture, incompatible_schema),
+                0);
+    check_equal(turbo_tool_registry_project(
+                    source, projection_names, 1, &projection),
+                TURBO_TOOL_OK);
+
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+    turbo_praktor_workflow_config_init(&workflow_config);
+    workflow_config.tool_name = "praktor_host_schema";
+    workflow_config.description = "HostTool schema boundary.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.strict = 1;
+    workflow_config.approved_host_tools = projection;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                TURBO_TOOL_OK);
+
+    arguments = json_parse("{\"path\":\"src\"}",
+                           strlen("{\"path\":\"src\"}"));
+    check_not_null(arguments);
+    check_equal(turbo_tool_registry_execute_json_value(
+                    turbo_praktor_tool_pack_registry(pack),
+                    "praktor_host_schema", arguments, &result),
+                TURBO_TOOL_OK);
+    check_not_null(result);
+    check_equal(json_get_string(result, "workflow_status"), "failed");
+    check_equal(capture.calls, 0);
+
+    turbo_runtime_json_destroy(result);
+    turbo_runtime_json_destroy(arguments);
+    turbo_praktor_tool_pack_destroy(pack);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
     praktor_test_cleanup(workspace, workflow_path);
     free(workspace);
   }

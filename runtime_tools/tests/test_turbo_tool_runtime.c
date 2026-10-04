@@ -684,4 +684,154 @@ spec("turbo tool runtime") {
     turbo_tool_runtime_destroy(runtime);
   }
 
+
+  it("should preserve canonical v6 effects through projection and composition") {
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projection = NULL;
+    turbo_tool_registry_t *composite = NULL;
+    const turbo_tool_registry_t *sources[1];
+    const char *names[] = {"pure_read"};
+    const char *required[] = {"runtime_tools", "network"};
+    turbo_tool_definition_v6_t definition = {0};
+    turbo_tool_effect_flags_t effects = 0;
+    const char *const *caps = NULL;
+    size_t cap_count = 0;
+
+    check_not_null(source);
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+    definition.definition.name = "pure_read";
+    definition.definition.description = "effect contract";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.json_value_handler = test_echo_tool_json_value;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    definition.required_capabilities = required;
+    definition.required_capability_count = 2u;
+    definition.result_schema_json = "{\"type\":\"object\"}";
+    definition.effect_flags = TURBO_TOOL_EFFECT_PURE;
+
+    check_equal(turbo_tool_registry_add_v6(source, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_effects(source, "pure_read", &effects),
+                TURBO_TOOL_OK);
+    check_equal(effects, TURBO_TOOL_EFFECT_PURE);
+    check_equal(turbo_tool_registry_get_required_capabilities(
+                    source, "pure_read", &caps, &cap_count),
+                TURBO_TOOL_OK);
+    check_equal(cap_count, 2u);
+    check_equal(caps[1], "network");
+
+    check_equal(turbo_tool_registry_project(source, names, 1u, &projection),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_effects(projection, "pure_read", &effects),
+                TURBO_TOOL_OK);
+    check_equal(effects, TURBO_TOOL_EFFECT_PURE);
+
+    sources[0] = projection;
+    check_equal(turbo_tool_registry_compose(sources, 1u, &composite),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_effects(composite, "pure_read", &effects),
+                TURBO_TOOL_OK);
+    check_equal(effects, TURBO_TOOL_EFFECT_PURE);
+    check_equal(turbo_tool_registry_get_required_capabilities(
+                    composite, "pure_read", &caps, &cap_count),
+                TURBO_TOOL_OK);
+    check_equal(cap_count, 2u);
+    check_equal(caps[1], "network");
+
+    turbo_tool_registry_destroy(composite);
+    turbo_tool_registry_destroy(projection);
+    turbo_tool_registry_destroy(source);
+  }
+
+  it("should keep legacy effects UNKNOWN and reject invalid effect combinations") {
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_v5_t legacy = {0};
+    turbo_tool_definition_v6_t invalid = {0};
+    turbo_tool_effect_flags_t effects = 0;
+
+    check_not_null(registry);
+    legacy.struct_size = sizeof(legacy);
+    legacy.abi_version = TURBO_TOOL_DEFINITION_V5_ABI_VERSION;
+    legacy.definition.name = "legacy_effect";
+    legacy.definition.description = "legacy";
+    legacy.definition.parameters_json = "{\"type\":\"object\"}";
+    legacy.definition.json_value_handler = test_echo_tool_json_value;
+    legacy.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    legacy.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    check_equal(turbo_tool_registry_add_v5(registry, &legacy), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_effects(
+                    registry, "legacy_effect", &effects),
+                TURBO_TOOL_OK);
+    check_equal(effects, TURBO_TOOL_EFFECT_UNKNOWN);
+
+    invalid.struct_size = sizeof(invalid);
+    invalid.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+    invalid.definition.name = "invalid_effect";
+    invalid.definition.description = "invalid";
+    invalid.definition.parameters_json = "{\"type\":\"object\"}";
+    invalid.definition.json_value_handler = test_echo_tool_json_value;
+    invalid.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
+    invalid.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+
+    invalid.effect_flags = TURBO_TOOL_EFFECT_PURE | TURBO_TOOL_EFFECT_WRITE;
+    check_equal(turbo_tool_registry_add_v6(registry, &invalid),
+                TURBO_TOOL_INVALID_ARGUMENT);
+    invalid.effect_flags = TURBO_TOOL_EFFECT_UNKNOWN | TURBO_TOOL_EFFECT_READ;
+    check_equal(turbo_tool_registry_add_v6(registry, &invalid),
+                TURBO_TOOL_INVALID_ARGUMENT);
+    invalid.effect_flags = UINT64_C(1) << 63;
+    check_equal(turbo_tool_registry_add_v6(registry, &invalid),
+                TURBO_TOOL_INVALID_ARGUMENT);
+
+    invalid.effect_flags = 0;
+    check_equal(turbo_tool_registry_add_v6(registry, &invalid), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_effects(
+                    registry, "invalid_effect", &effects),
+                TURBO_TOOL_OK);
+    check_equal(effects, TURBO_TOOL_EFFECT_UNKNOWN);
+
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("should preserve native v6 effects through runtime catalog and registry bridge") {
+    turbo_tool_runtime_t *runtime = turbo_tool_runtime_native_create();
+    turbo_tool_registry_t *bridge = NULL;
+    turbo_tool_definition_v6_t definition = {0};
+    turbo_tool_runtime_tool_v3_t tool = {0};
+    turbo_tool_effect_flags_t effects = 0;
+
+    check_not_null(runtime);
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+    definition.definition.name = "native_effect";
+    definition.definition.description = "native effect";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.json_value_handler = test_echo_tool_json_value;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    definition.result_schema_json = "{\"type\":\"object\"}";
+    definition.effect_flags = TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK;
+
+    check_equal(turbo_tool_runtime_native_add_tool_v6(runtime, &definition),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_runtime_get_tool_v3(runtime, 0u, &tool),
+                TURBO_TOOL_OK);
+    check_equal(tool.abi_version, TURBO_TOOL_RUNTIME_TOOL_V3_ABI_VERSION);
+    check_equal(tool.base.base.name, "native_effect");
+    check_equal(tool.effect_flags,
+                TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK);
+
+    bridge = turbo_tool_runtime_build_registry_bridge(runtime);
+    check_not_null(bridge);
+    check_equal(turbo_tool_registry_get_effects(
+                    bridge, "native_effect", &effects),
+                TURBO_TOOL_OK);
+    check_equal(effects,
+                TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK);
+
+    turbo_tool_registry_destroy(bridge);
+    turbo_tool_runtime_destroy(runtime);
+  }
+
 }

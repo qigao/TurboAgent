@@ -10,7 +10,7 @@ extern "C" {
 #define TURBO_AGENT_DAG_STEP_ABI_VERSION 1u
 #define TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V1 1u
 #define TURBO_AGENT_DAG_SOURCE_ABI_VERSION 2u
-#define TURBO_AGENT_DAG_CERTIFICATE_VERSION 2u
+#define TURBO_AGENT_DAG_CERTIFICATE_VERSION 3u
 
 typedef enum turbo_agent_dag_template_kind_e {
   TURBO_AGENT_DAG_TEMPLATE_GENERIC = 0,
@@ -113,6 +113,21 @@ turbo_agent_executable_dag_template_kind(
 
 CXX_C_API uint32_t
 turbo_agent_executable_dag_plan_generation(
+    const turbo_agent_executable_dag_t *plan);
+
+/** Deterministic fail-closed aggregate semantic effect summary. */
+CXX_C_API turbo_tool_effect_flags_t
+turbo_agent_executable_dag_effects(
+    const turbo_agent_executable_dag_t *plan);
+
+/**
+ * Pure query for future optimizer admission.
+ *
+ * Returns true only when every step is explicitly PURE, READ_ONLY and
+ * PARALLEL_SAFE. UNKNOWN or any mutation/process/network effect is a barrier.
+ */
+CXX_C_API int
+turbo_agent_executable_dag_pure_region_eligible(
     const turbo_agent_executable_dag_t *plan);
 
 /**

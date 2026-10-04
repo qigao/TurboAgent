@@ -387,9 +387,10 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   }
 
   template_descriptor = turbo_agent_template_descriptor(source->template_kind);
-  if (!template_descriptor) {
+  if (!template_descriptor ||
+      source->template_kind != TURBO_AGENT_TEMPLATE_INSPECT) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNSUPPORTED_TEMPLATE,
-                        "Phase 1 supports only registered template descriptors");
+                        "single-step compilation supports only Inspect");
   }
   if (!source->arguments || json_type(source->arguments) != JSON_OBJECT) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,

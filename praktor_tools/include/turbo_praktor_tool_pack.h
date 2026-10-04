@@ -13,11 +13,35 @@ extern "C" {
 #endif
 
 #define TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION 1u
+#define TURBO_PRAKTOR_INLINE_PLAN_CONFIG_ABI_VERSION 1u
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V1 1u
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V2 2u
 #define TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION 3u
 
 typedef struct turbo_praktor_tool_pack_s turbo_praktor_tool_pack_t;
+typedef struct turbo_praktor_inline_plan_s turbo_praktor_inline_plan_t;
+
+typedef struct turbo_praktor_inline_plan_config_s {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  /**
+   * Logical non-path identity produced by AgentCompiler, for example
+   * turboagent:plan:<hash>. Borrowed only for the compile call.
+   */
+  const char *source_id;
+  /** Exact deterministic UTF-8 YAML bytes. Borrowed only for the compile call. */
+  const char *workflow_yaml;
+  size_t workflow_yaml_size;
+  /**
+   * Borrowed compiler-approved RuntimeTools projection.
+   *
+   * This registry and all callback dependencies it borrows must outlive the
+   * compiled inline plan and remain quiescent while execution is active.
+   */
+  const turbo_tool_registry_t *approved_host_tools;
+  /** Maximum canonical Praktor execution JSON accepted by this bridge. */
+  size_t max_result_bytes;
+} turbo_praktor_inline_plan_config_t;
 
 typedef struct turbo_praktor_tool_pack_config_s {
   uint32_t struct_size;
@@ -87,6 +111,41 @@ turbo_praktor_tool_pack_config_init(turbo_praktor_tool_pack_config_t *config);
 CXX_C_API void
 turbo_praktor_workflow_config_init(turbo_praktor_workflow_config_t *config);
 
+
+CXX_C_API void
+turbo_praktor_inline_plan_config_init(
+    turbo_praktor_inline_plan_config_t *config);
+
+/**
+ * Compile one compiler-owned deterministic inline source through released
+ * Praktor ABI 2.6 and retain exactly one immutable WorkflowPlan.
+ *
+ * Compilation validates source_kind/source_id, HostTool plan metadata, exact
+ * approved RuntimeTools identities, and the released HostTool retry bound.
+ * There is no file-backed/temp-file fallback.
+ */
+CXX_C_API turbo_tool_status_t
+turbo_praktor_inline_plan_compile(
+    const turbo_praktor_inline_plan_config_t *config,
+    turbo_praktor_inline_plan_t **out_plan);
+
+/**
+ * Execute one immutable inline WorkflowPlan using the existing reviewed
+ * HostTool -> RuntimeTools bridge.
+ *
+ * The generated workflow accepts no model-authored runtime input; execution
+ * therefore supplies the canonical empty input object internally.
+ */
+CXX_C_API turbo_tool_status_t
+turbo_praktor_inline_plan_execute(
+    const turbo_praktor_inline_plan_t *plan,
+    const turbo_tool_execution_context_t *context,
+    json_value_t **out_result);
+
+CXX_C_API void
+turbo_praktor_inline_plan_destroy(turbo_praktor_inline_plan_t *plan);
+
+
 /**
  * Create an empty pack bound to the linked Praktor C ABI.
  *
@@ -132,6 +191,11 @@ turbo_praktor_tool_pack_supports_execution_events(
 /** Return whether the linked Praktor exposes reviewed HostTool ABI 2.5+. */
 CXX_C_API int
 turbo_praktor_tool_pack_supports_host_tools(
+    const turbo_praktor_tool_pack_t *pack);
+
+/** Return whether the linked released Praktor exposes ABI 2.6 inline plans. */
+CXX_C_API int
+turbo_praktor_tool_pack_supports_inline_workflow_plan(
     const turbo_praktor_tool_pack_t *pack);
 
 #ifdef __cplusplus

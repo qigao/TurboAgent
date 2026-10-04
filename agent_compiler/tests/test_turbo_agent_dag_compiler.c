@@ -586,4 +586,44 @@ spec("AgentCompiler Phase 3 DAG admission") {
     turbo_tool_registry_destroy(registry);
   }
 
+  it("maps DAG source v2 wire template values into canonical identity") {
+    dag_probe_t read_probe = {0};
+    dag_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_dag_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *plan = NULL;
+    json_value_t *args = dag_args("v2");
+    json_value_t *certificate = NULL;
+    const char *allowed[] = {"runtime_tools"};
+
+    dag_config(&config, allowed, 1u);
+    dag_step(&step, "verify", "repo.inspect", args, NULL, 0u);
+    dag_source(&source, &step, 1u);
+    source.abi_version = TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V2;
+    source.template_kind =
+        (turbo_agent_dag_template_kind_t)TURBO_AGENT_DAG_TEMPLATE_V2_REPAIR;
+    source.plan_generation = 5u;
+
+    check_equal(
+        turbo_agent_compile_dag(&config, registry, &source, &plan, NULL),
+        TURBO_AGENT_COMPILE_OK);
+    check_not_null(plan);
+    check_equal(turbo_agent_executable_dag_template_kind(plan),
+                TURBO_AGENT_TEMPLATE_REPAIR);
+    check_equal(turbo_agent_executable_dag_plan_generation(plan), 5u);
+
+    certificate = turbo_agent_executable_dag_certificate_json_value(plan);
+    check_not_null(certificate);
+    check_equal(json_get_string(certificate, "template"), "repair");
+    check_equal(json_get_int(certificate, "plan_generation", -1), 5);
+
+    turbo_runtime_json_destroy(certificate);
+    turbo_agent_executable_dag_destroy(plan);
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
 }

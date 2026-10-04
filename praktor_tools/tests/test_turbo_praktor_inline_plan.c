@@ -8,6 +8,7 @@ typedef struct bridge_probe_s {
   int inspect_calls;
   int change_calls;
   int verify_calls;
+  int verify_semantic_failure;
 } bridge_probe_t;
 
 static turbo_tool_status_t inspect_cb(
@@ -42,10 +43,13 @@ static turbo_tool_status_t verify_cb(
   bridge_probe_t *p = (bridge_probe_t *)user_data;
   (void)args; (void)ctx;
   ++p->verify_calls;
-  if (p->verify_calls < 3) return TURBO_TOOL_ERROR;
+  if (!p->verify_semantic_failure && p->verify_calls < 3) {
+    return TURBO_TOOL_ERROR;
+  }
   *out = json_create_object();
   if (!*out) return TURBO_TOOL_OUT_OF_MEMORY;
-  json_object_set_bool(*out, "verified", true);
+  json_object_set_bool(*out, "verified",
+                       p->verify_semantic_failure ? false : true);
   return TURBO_TOOL_OK;
 }
 
@@ -146,4 +150,81 @@ spec("released Praktor inline TemplatePlan bridge") {
     turbo_runtime_json_destroy(empty);
     turbo_tool_registry_destroy(registry);
   }
+
+  it("executes Repair inline and returns REPLAN_REQUIRED on semantic verify failure") {
+    bridge_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_compiler_config_t compiler;
+    turbo_agent_repair_source_t source;
+    turbo_agent_template_plan_t *template_plan = NULL;
+    turbo_agent_praktor_inline_source_t *lowered = NULL;
+    turbo_praktor_inline_plan_config_t inline_config;
+    turbo_praktor_inline_plan_t *inline_plan = NULL;
+    json_value_t *empty = json_create_object();
+    json_value_t *result = NULL;
+    const char *allowed[] = {"runtime_tools"};
+
+    probe.verify_semantic_failure = 1;
+    check_not_null(registry);
+    check_not_null(empty);
+    check_equal(add_tool(registry, "repo.inspect",
+                         TURBO_TOOL_IDEMPOTENCY_READ_ONLY,
+                         inspect_cb, &probe), 0);
+    check_equal(add_tool(registry, "repo.patch",
+                         TURBO_TOOL_IDEMPOTENCY_NONE,
+                         change_cb, &probe), 0);
+    check_equal(add_tool(registry, "repo.verify",
+                         TURBO_TOOL_IDEMPOTENCY_READ_ONLY,
+                         verify_cb, &probe), 0);
+
+    turbo_agent_compiler_config_init(&compiler);
+    compiler.allowed_capabilities = allowed;
+    compiler.allowed_capability_count = 1u;
+    turbo_agent_repair_source_init(&source);
+    source.plan_version = 1u;
+    source.max_replans = 2u;
+    source.diagnose.tool_name = "repo.inspect";
+    source.diagnose.arguments = empty;
+    source.change.tool_name = "repo.patch";
+    source.change.arguments = empty;
+    source.verify.tool_name = "repo.verify";
+    source.verify.arguments = empty;
+
+    check_equal(turbo_agent_compile_repair_template(
+                    &compiler, registry, &source, &template_plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_equal(turbo_agent_template_lower_praktor_inline(
+                    template_plan, &lowered, NULL),
+                TURBO_AGENT_PRAKTOR_LOWERING_OK);
+
+    turbo_praktor_inline_plan_config_init(&inline_config);
+    inline_config.source_id = turbo_agent_praktor_inline_source_id(lowered);
+    inline_config.workflow_yaml = turbo_agent_praktor_inline_source_yaml(lowered);
+    inline_config.workflow_yaml_size =
+        turbo_agent_praktor_inline_source_yaml_size(lowered);
+    inline_config.approved_host_tools =
+        turbo_agent_template_plan_approved_tools(template_plan);
+
+    check_equal(turbo_praktor_inline_plan_compile(
+                    &inline_config, &inline_plan),
+                TURBO_TOOL_OK);
+    check_equal(turbo_praktor_inline_plan_execute(
+                    inline_plan, NULL, &result),
+                TURBO_TOOL_OK);
+    check_not_null(result);
+    check_equal(probe.inspect_calls, 1);
+    check_equal(probe.change_calls, 1);
+    check_equal(probe.verify_calls, 1);
+    check_equal(turbo_agent_template_finish_praktor_result(
+                    template_plan, result),
+                TURBO_AGENT_TEMPLATE_OUTCOME_REPLAN_REQUIRED);
+
+    turbo_runtime_json_destroy(result);
+    turbo_praktor_inline_plan_destroy(inline_plan);
+    turbo_agent_praktor_inline_source_destroy(lowered);
+    turbo_agent_template_plan_destroy(template_plan);
+    turbo_runtime_json_destroy(empty);
+    turbo_tool_registry_destroy(registry);
+  }
+
 }

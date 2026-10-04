@@ -42,11 +42,33 @@ static const turbo_agent_template_descriptor_t inspect_template = {
     "TurboAgent.Inspect.v1",
     TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY};
 
+static const turbo_agent_template_descriptor_t change_template = {
+    sizeof(turbo_agent_template_descriptor_t),
+    TURBO_AGENT_TEMPLATE_DESCRIPTOR_ABI_VERSION,
+    TURBO_AGENT_TEMPLATE_CHANGE,
+    1u,
+    "change",
+    "TurboAgent.Change.v1",
+    TURBO_AGENT_TEMPLATE_PROPERTY_NONE};
+
+static const turbo_agent_template_descriptor_t repair_template = {
+    sizeof(turbo_agent_template_descriptor_t),
+    TURBO_AGENT_TEMPLATE_DESCRIPTOR_ABI_VERSION,
+    TURBO_AGENT_TEMPLATE_REPAIR,
+    1u,
+    "repair",
+    "TurboAgent.Repair.v1",
+    TURBO_AGENT_TEMPLATE_PROPERTY_NONE};
+
 const turbo_agent_template_descriptor_t *
 turbo_agent_template_descriptor(turbo_agent_template_kind_t kind) {
   switch (kind) {
     case TURBO_AGENT_TEMPLATE_INSPECT:
       return &inspect_template;
+    case TURBO_AGENT_TEMPLATE_CHANGE:
+      return &change_template;
+    case TURBO_AGENT_TEMPLATE_REPAIR:
+      return &repair_template;
     default:
       return NULL;
   }

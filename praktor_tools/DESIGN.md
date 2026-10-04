@@ -31,8 +31,10 @@ flowchart LR
 ```
 
 The workflow path is host registration state and never appears in model
-arguments. Older Praktor SDKs fall back to the existing reviewed absolute-path
-binding.
+arguments. PraktorTools now requires the released Praktor HostTool baseline
+(ABI 2.5+); older SDKs fail fast instead of selecting a source/compatibility
+fallback. Workflow-config v1 callers retain their reviewed path execution
+semantics inside that modern SDK baseline.
 
 ## Alternatives
 
@@ -56,7 +58,7 @@ reviewed plan are fixed before inference.
 | Item | Contract |
 |---|---|
 | Pack | owns one tool registry and the linked Praktor API view |
-| Workflow binding | owns an immutable WorkflowPlan when available; otherwise copies the reviewed absolute path |
+| Workflow binding | owns an immutable WorkflowPlan for v2/v3 configs; v1 retains the reviewed absolute-path contract |
 | Tool schema/name/description | copied by the Tool Registry |
 | Model arguments | borrowed for one callback and serialized as workflow inputs |
 | Praktor full result | published to Tool Execution Context v2 detail sink, then released |
@@ -115,24 +117,57 @@ policy capabilities:
 | `plugin`, `native_extension`, `model_api` | `custom_tools` |
 | `filesystem_read` | no additional capability |
 
-Unknown effects widen to the conservative legacy set plus `custom_tools`.
-Host-supplied capability requirements are unioned with discovered effects and
-therefore cannot narrow the Praktor analysis.
+Unknown effects widen to the conservative set plus `custom_tools`.
+
+There is one intentionally narrower resolution rule for Praktor HostTool plans:
+if every unknown reason is exactly a frozen HostTool identity, every identity is
+present in a compiler-approved RuntimeTools projection, and the raw
+`harness_safe` profile has no rejection reason other than those HostTool
+unknowns, TurboAgent resolves only that `host_tool` uncertainty. The workflow
+capability set then unions the real required capabilities of every projected
+RuntimeTool. Any other unknown reason remains fail-closed.
+
+Host-supplied capability requirements are unioned with discovered/resolved
+effects and therefore cannot narrow the analysis.
 
 Without WorkflowPlan support, the legacy conservative set remains
 `network + shell + patch + outside_workspace`.
 
-## Harness-safe profile
+## Harness-safe profile and HostTool authority
 
-Workflow config v2 enables `require_harness_safe` by default. When plan
-metadata is available, registration requires
-`profiles.harness_safe.qualified=true`.
+Workflow config v2 introduced `require_harness_safe` and keeps it enabled by
+default. Workflow config v3 adds the borrowed `approved_host_tools`
+RuntimeTools projection.
 
-The profile checks deterministic reviewability; it does not replace TurboAgent
-policy. Network/process/system-control workflows can still qualify and remain
-subject to the corresponding host capabilities and approvals.
+For ordinary plans, registration still requires
+`profiles.harness_safe.qualified=true`. For HostTool plans, raw Praktor
+metadata intentionally reports `unknown_effects=true`; TurboAgent may treat
+the plan as harness-safe only after the HostTool-only resolution rule above
+proves that every frozen HostTool identity is inside the approved projection.
 
-Workflow config v1 remains accepted and stays on the legacy execution path.
+```mermaid
+flowchart LR
+  C[AgentCompiler admission] --> P[approved RuntimeTools projection]
+  W[Reviewed WorkflowPlan] --> V[Praktor HostTool preflight]
+  V --> B[TurboAgent HostTool bridge]
+  P --> B
+  B --> R[RuntimeTools execute-with-context]
+  R --> N[Native]
+  R --> X[WasmToolPack / TurboWasm]
+  R --> M[MCP / remote]
+```
+
+The projection is borrowed execution authority, not a discovery registry.
+Praktor receives no access to the full RuntimeTools catalog and performs no
+backend-specific Native/Wasm/MCP selection.
+
+At invocation, unresolved templates are not value-schema-validated during
+preflight because placeholders may not yet have their final scalar type.
+After Praktor resolves the template, TurboAgent runs the canonical RuntimeTools
+schema validator immediately before dispatch.
+
+Workflow config v1 remains accepted and retains its reviewed-path execution
+semantics; v2 retains WorkflowPlan semantics unchanged.
 
 ## Result semantics
 
@@ -155,8 +190,10 @@ message. Plan mismatch is detected before workflow side effects.
 - `max_workflows` is a hard registration bound.
 - `max_result_bytes` bounds the canonical Praktor result before projection.
 - Tool Execution Context ABI v1 remains accepted; v2 adds observation sinks.
-- Workflow config ABI v1 remains accepted; v2 adds harness-safe admission.
-- Praktor WorkflowPlan/events are feature-detected at compile/runtime boundaries.
-- Older released Praktor SDKs retain conservative reviewed-path behavior.
+- Workflow config ABI v1 remains accepted; v2 adds harness-safe admission; v3
+  adds borrowed approved HostTool authority.
+- Praktor ABI 2.5+ / `PRAKTOR_CAPABILITY_HOST_TOOL` is the fail-fast baseline
+  for PraktorTools.
+- No older-SDK, source-checkout, SHA, or package-version fallback is used.
 
 The module remains optional behind `ENABLE_PRAKTOR_TOOLS`.

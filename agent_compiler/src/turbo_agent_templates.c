@@ -2,6 +2,7 @@
 
 #include "turbo_runtime_json.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -314,7 +315,8 @@ turbo_agent_compile_status_t turbo_agent_compile_repair_template(
     turbo_agent_compile_diagnostic_t *diagnostic) {
   if (!source || source->struct_size != sizeof(*source) ||
       source->abi_version != TURBO_AGENT_REPAIR_SOURCE_ABI_VERSION ||
-      source->plan_version > source->max_replans + 1u) {
+      source->plan_version == 0u ||
+      (source->plan_version - 1u) > source->max_replans) {
     if (out_plan) *out_plan = NULL;
     return template_fail(
         diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,

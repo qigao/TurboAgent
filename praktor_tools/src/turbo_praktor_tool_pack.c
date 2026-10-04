@@ -45,6 +45,7 @@ typedef struct turbo_praktor_binding_s {
   tstr workflow_path;
   size_t max_result_bytes;
   int project_agent_output;
+  int has_host_tools;
   const turbo_tool_registry_t *approved_host_tools;
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
   praktor_workflow_plan *plan;
@@ -548,6 +549,10 @@ static const char *turbo_praktor_error_phase_name(praktor_error_phase phase) {
     case PRAKTOR_ERROR_PHASE_INPUT_CONTRACT:
       return "input_contract";
 #endif
+#if PRAKTOR_ABI_MINOR >= 5
+    case PRAKTOR_ERROR_PHASE_HOST_TOOL:
+      return "host_tool";
+#endif
     case PRAKTOR_ERROR_PHASE_NONE:
     default:
       return "none";
@@ -703,6 +708,230 @@ cleanup:
   if (payload_text) json_serialize_free(payload_text);
   turbo_runtime_json_destroy(payload);
   turbo_runtime_json_destroy(trace);
+}
+#endif
+
+#if TURBO_PRAKTOR_HAS_HOST_TOOL
+typedef struct turbo_praktor_host_bridge_s {
+  const turbo_tool_registry_t *approved_host_tools;
+  const turbo_tool_execution_context_t *parent_context;
+  size_t max_result_bytes;
+} turbo_praktor_host_bridge_t;
+
+static void turbo_praktor_host_error(praktor_error *error,
+                                     const char *message) {
+  if (!error) return;
+  error->phase = PRAKTOR_ERROR_PHASE_HOST_TOOL;
+  snprintf(error->message, sizeof(error->message), "%s",
+           message ? message : "TurboAgent HostTool bridge failed");
+}
+
+static int32_t PRAKTOR_CALL turbo_praktor_host_validate(
+    void *user_data, const char *tool_name,
+    const char *arguments_template_json,
+    size_t arguments_template_json_size, praktor_error *error) {
+  turbo_praktor_host_bridge_t *bridge =
+      (turbo_praktor_host_bridge_t *)user_data;
+  json_value_t *arguments_template = NULL;
+  if (!bridge || !bridge->approved_host_tools || !tool_name ||
+      !arguments_template_json || !arguments_template_json_size) {
+    turbo_praktor_host_error(error, "invalid HostTool preflight request");
+    return PRAKTOR_HOST_TOOL_FAILED;
+  }
+  if (!turbo_praktor_registry_exact_definition(
+          bridge->approved_host_tools, tool_name, NULL)) {
+    turbo_praktor_host_error(error,
+                             "HostTool is not in the approved RuntimeTools projection");
+    return PRAKTOR_HOST_TOOL_NOT_FOUND;
+  }
+  arguments_template =
+      json_parse(arguments_template_json, arguments_template_json_size);
+  if (!arguments_template ||
+      json_type(arguments_template) != JSON_OBJECT) {
+    turbo_runtime_json_destroy(arguments_template);
+    turbo_praktor_host_error(error,
+                             "HostTool argument template must be a JSON object");
+    return PRAKTOR_HOST_TOOL_FAILED;
+  }
+  turbo_runtime_json_destroy(arguments_template);
+  return PRAKTOR_HOST_TOOL_OK;
+}
+
+static uint64_t turbo_praktor_min_deadline(uint64_t current,
+                                           uint64_t candidate) {
+  if (!current) return candidate;
+  if (!candidate) return current;
+  return current < candidate ? current : candidate;
+}
+
+static void turbo_praktor_host_context(
+    const turbo_praktor_host_bridge_t *bridge,
+    const praktor_execution_control *control,
+    const praktor_execution_observer *observer,
+    turbo_tool_execution_context_t *context) {
+  const turbo_tool_execution_context_t *parent =
+      bridge ? bridge->parent_context : NULL;
+  uint64_t deadline = 0;
+  memset(context, 0, sizeof(*context));
+  context->struct_size = sizeof(*context);
+  context->abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+
+  if (parent &&
+      parent->abi_version >= TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION_V1 &&
+      parent->struct_size >= TURBO_TOOL_EXECUTION_CONTEXT_V1_SIZE) {
+    uint64_t token_deadline = 0;
+    context->cancel_token = parent->cancel_token;
+    deadline = parent->deadline_mono_ms;
+    if (parent->cancel_token) {
+      token_deadline =
+          turbo_cancel_token_deadline_mono_ms(parent->cancel_token);
+      deadline = turbo_praktor_min_deadline(deadline, token_deadline);
+    }
+    context->thread_id = parent->thread_id;
+    context->run_id = parent->run_id;
+    context->turn_id = parent->turn_id;
+    context->tool_call_id = parent->tool_call_id;
+  }
+  if (turbo_praktor_context_has_observation(parent)) {
+    context->event_sink = parent->event_sink;
+    context->event_sink_user_data = parent->event_sink_user_data;
+    context->detail_sink = parent->detail_sink;
+    context->detail_sink_user_data = parent->detail_sink_user_data;
+  }
+
+  if (control &&
+      control->struct_size >= sizeof(praktor_execution_control) &&
+      control->timeout_ms) {
+    uint64_t now = salts_monotonic_ms();
+    uint64_t candidate =
+        control->timeout_ms > UINT64_MAX - now
+            ? UINT64_MAX
+            : now + control->timeout_ms;
+    deadline = turbo_praktor_min_deadline(deadline, candidate);
+  }
+  context->deadline_mono_ms = deadline;
+
+  if (observer &&
+      observer->struct_size >= sizeof(praktor_execution_observer)) {
+    if (observer->thread_id) context->thread_id = observer->thread_id;
+    if (observer->run_id) context->run_id = observer->run_id;
+    if (observer->turn_id) context->turn_id = observer->turn_id;
+    if (observer->tool_call_id) context->tool_call_id = observer->tool_call_id;
+  }
+}
+
+static int32_t turbo_praktor_host_status(turbo_tool_status_t status) {
+  switch (status) {
+    case TURBO_TOOL_OK:
+      return PRAKTOR_HOST_TOOL_OK;
+    case TURBO_TOOL_NOT_FOUND:
+      return PRAKTOR_HOST_TOOL_NOT_FOUND;
+    case TURBO_TOOL_CANCELLED:
+      return PRAKTOR_HOST_TOOL_CANCELLED;
+    case TURBO_TOOL_DEADLINE_EXCEEDED:
+      return PRAKTOR_HOST_TOOL_TIMED_OUT;
+    default:
+      return PRAKTOR_HOST_TOOL_FAILED;
+  }
+}
+
+static int32_t PRAKTOR_CALL turbo_praktor_host_invoke(
+    void *user_data, const char *tool_name,
+    const char *arguments_json, size_t arguments_json_size,
+    const praktor_execution_control *control,
+    const praktor_execution_observer *observer,
+    praktor_host_tool_result_sink_fn result_sink,
+    void *result_sink_user_data, praktor_error *error) {
+  turbo_praktor_host_bridge_t *bridge =
+      (turbo_praktor_host_bridge_t *)user_data;
+  turbo_tool_definition_t definition = {0};
+  turbo_tool_execution_context_t context;
+  turbo_tool_schema_validation_status_t schema_status;
+  turbo_tool_status_t status;
+  json_value_t *arguments = NULL;
+  json_value_t *result = NULL;
+  char schema_diagnostic[256] = {0};
+  char *serialized = NULL;
+  size_t serialized_size = 0;
+  int32_t host_status;
+
+  if (!bridge || !bridge->approved_host_tools || !tool_name ||
+      !arguments_json || !arguments_json_size || !result_sink) {
+    turbo_praktor_host_error(error, "invalid HostTool invocation request");
+    return PRAKTOR_HOST_TOOL_FAILED;
+  }
+  if (!turbo_praktor_registry_exact_definition(
+          bridge->approved_host_tools, tool_name, &definition)) {
+    turbo_praktor_host_error(error,
+                             "HostTool left the approved RuntimeTools projection");
+    return PRAKTOR_HOST_TOOL_NOT_FOUND;
+  }
+  if (control &&
+      control->struct_size >= sizeof(praktor_execution_control) &&
+      control->is_cancelled &&
+      control->is_cancelled(control->user_data) != 0) {
+    turbo_praktor_host_error(error, "HostTool invocation was cancelled");
+    return PRAKTOR_HOST_TOOL_CANCELLED;
+  }
+
+  arguments = json_parse(arguments_json, arguments_json_size);
+  if (!arguments || json_type(arguments) != JSON_OBJECT) {
+    turbo_runtime_json_destroy(arguments);
+    turbo_praktor_host_error(error,
+                             "resolved HostTool arguments must be a JSON object");
+    return PRAKTOR_HOST_TOOL_DENIED;
+  }
+  schema_status = turbo_tool_schema_validate_arguments_json_value(
+      &definition, arguments, schema_diagnostic, sizeof(schema_diagnostic));
+  if (schema_status != TURBO_TOOL_SCHEMA_VALID) {
+    turbo_runtime_json_destroy(arguments);
+    turbo_praktor_host_error(
+        error, schema_diagnostic[0]
+                   ? schema_diagnostic
+                   : "resolved HostTool arguments violate the admitted schema");
+    return PRAKTOR_HOST_TOOL_DENIED;
+  }
+
+  turbo_praktor_host_context(bridge, control, observer, &context);
+  status = turbo_praktor_context_status(&context);
+  if (status != TURBO_TOOL_OK) {
+    turbo_runtime_json_destroy(arguments);
+    return turbo_praktor_host_status(status);
+  }
+
+  status = turbo_tool_registry_execute_json_value_with_context(
+      bridge->approved_host_tools, tool_name, arguments, &context, &result);
+  turbo_runtime_json_destroy(arguments);
+  if (status != TURBO_TOOL_OK) {
+    turbo_runtime_json_destroy(result);
+    turbo_praktor_host_error(error, "RuntimeTools HostTool execution failed");
+    return turbo_praktor_host_status(status);
+  }
+  if (!result) {
+    turbo_praktor_host_error(error,
+                             "RuntimeTools HostTool returned no JSON result");
+    return PRAKTOR_HOST_TOOL_FAILED;
+  }
+
+  serialized = json_serialize(result, &serialized_size);
+  turbo_runtime_json_destroy(result);
+  if (!serialized ||
+      serialized_size > bridge->max_result_bytes) {
+    if (serialized) json_serialize_free(serialized);
+    turbo_praktor_host_error(error,
+                             "RuntimeTools HostTool result exceeds adapter bound");
+    return PRAKTOR_HOST_TOOL_FAILED;
+  }
+  host_status =
+      result_sink(serialized, serialized_size, result_sink_user_data) == 0
+          ? PRAKTOR_HOST_TOOL_OK
+          : PRAKTOR_HOST_TOOL_FAILED;
+  json_serialize_free(serialized);
+  if (host_status != PRAKTOR_HOST_TOOL_OK) {
+    turbo_praktor_host_error(error,
+                             "Praktor rejected the HostTool result payload");
+  }
+  return host_status;
 }
 #endif
 
@@ -1108,6 +1337,10 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
   binding->max_result_bytes = pack->max_result_bytes;
   binding->project_agent_output =
       plan_bound && turbo_praktor_require_harness_safe(config);
+#if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
+  binding->has_host_tools =
+      plan_bound && turbo_praktor_plan_has_host_tools(plan_description);
+#endif
   binding->approved_host_tools =
       turbo_praktor_approved_host_tools(config);
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN

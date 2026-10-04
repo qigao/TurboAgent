@@ -151,10 +151,10 @@ turbo_agent_template_finish_verify(
  *
  *   workflow_status == "success"
  *   outputs.verify_result is an object
- *   outputs.verify_result.passed is a JSON boolean
+ *   outputs.verify_result.verified is a JSON boolean
  *
- * passed=true -> PASSED
- * passed=false -> SEMANTIC_FAILURE
+ * verified=true -> PASSED
+ * verified=false -> SEMANTIC_FAILURE
  * anything missing/malformed/non-success -> EXECUTION_FAILURE
  *
  * The function is pure and never invokes Praktor, a model, or a tool.

@@ -46,19 +46,19 @@ spec("AgentCompiler RuntimeTools result contracts") {
     check_equal(add_v5_tool(
                     registry,
                     "producer",
-                    "{"type":"object"}",
-                    "{"type":"string"}"),
+                    "{\"type\":\"object\"}",
+                    "{\"type\":\"string\"}"),
                 0);
     check_equal(add_v5_tool(
                     registry,
                     "consumer_string",
-                    "{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}",
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"],\"additionalProperties\":false}",
                     NULL),
                 0);
     check_equal(add_v5_tool(
                     registry,
                     "consumer_integer",
-                    "{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"],"additionalProperties":false}",
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"integer\"}},\"required\":[\"value\"],\"additionalProperties\":false}",
                     NULL),
                 0);
 
@@ -81,19 +81,19 @@ spec("AgentCompiler RuntimeTools result contracts") {
     check_equal(add_v5_tool(
                     registry,
                     "opaque",
-                    "{"type":"object"}",
+                    "{\"type\":\"object\"}",
                     NULL),
                 0);
     check_equal(add_v5_tool(
                     registry,
                     "object_producer",
-                    "{"type":"object"}",
-                    "{"type":"object","properties":{"value":{"type":"string"}}}"),
+                    "{\"type\":\"object\"}",
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}"),
                 0);
     check_equal(add_v5_tool(
                     registry,
                     "consumer",
-                    "{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}",
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"]}",
                     NULL),
                 0);
 
@@ -170,13 +170,13 @@ spec("AgentCompiler RuntimeTools result contracts") {
     check_equal(add_v5_tool(
                     registry,
                     "integer_producer",
-                    "{"type":"object"}",
-                    "{"type":"integer"}"),
+                    "{\"type\":\"object\"}",
+                    "{\"type\":\"integer\"}"),
                 0);
     check_equal(add_v5_tool(
                     registry,
                     "number_consumer",
-                    "{"type":"object","properties":{"value":{"type":"number"}}}",
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}",
                     NULL),
                 0);
 

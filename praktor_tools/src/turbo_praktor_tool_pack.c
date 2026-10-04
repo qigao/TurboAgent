@@ -30,6 +30,12 @@
 #define TURBO_PRAKTOR_HAS_HOST_TOOL 0
 #endif
 
+#if defined(PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) && PRAKTOR_ABI_MINOR >= 6
+#define TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN 1
+#else
+#define TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN 0
+#endif
+
 enum {
   TURBO_PRAKTOR_DEFAULT_MAX_WORKFLOWS = 64,
   TURBO_PRAKTOR_DEFAULT_MAX_RESULT_BYTES = 1024 * 1024,
@@ -61,16 +67,25 @@ struct turbo_praktor_tool_pack_s {
   size_t max_result_bytes;
 };
 
+struct turbo_praktor_inline_plan_s {
+  const praktor_api *api;
+  praktor_workflow_plan *plan;
+  const turbo_tool_registry_t *approved_host_tools;
+  size_t max_result_bytes;
+};
+
 static int turbo_praktor_api_valid(const praktor_api *api) {
   return api && api->struct_size >= sizeof(*api) &&
          api->abi_major == PRAKTOR_ABI_MAJOR &&
-         api->abi_minor >= 5u &&
+         api->abi_minor >= 6u &&
          (api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0 &&
          (api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0 &&
          (api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
          (api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0 &&
+         (api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) != 0 &&
          api->execute_workflow && api->execute_workflow_controlled &&
-         api->compile_workflow && api->describe_workflow_plan &&
+         api->compile_workflow && api->compile_workflow_inline &&
+         api->describe_workflow_plan &&
          api->execute_workflow_plan && api->release_workflow_plan &&
          api->execute_workflow_plan_host_tools && api->release_json;
 }

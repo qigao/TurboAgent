@@ -450,9 +450,13 @@ turbo_tool_status_t turbo_tool_runtime_get_tool_v3(
     status = runtime->vtable_v4->get_tool_v3(runtime->impl, index, out_tool);
     if (status != TURBO_TOOL_OK) return status;
     if (out_tool->struct_size < sizeof(*out_tool) ||
-        out_tool->abi_version != TURBO_TOOL_RUNTIME_TOOL_V3_ABI_VERSION) {
+        out_tool->abi_version != TURBO_TOOL_RUNTIME_TOOL_V3_ABI_VERSION ||
+        !turbo_tool_runtime_effect_flags_valid(out_tool->effect_flags)) {
       memset(out_tool, 0, sizeof(*out_tool));
       return TURBO_TOOL_ERROR;
+    }
+    if (out_tool->effect_flags == 0) {
+      out_tool->effect_flags = TURBO_TOOL_EFFECT_UNKNOWN;
     }
     return TURBO_TOOL_OK;
   }

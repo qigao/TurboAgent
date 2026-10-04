@@ -355,4 +355,47 @@ spec("AgentCompiler Change/Repair template semantics") {
     turbo_runtime_json_destroy(args[0]);
     turbo_tool_registry_destroy(registry);
   }
+
+  it("classifies canonical Praktor verify result fail-closed") {
+    json_value_t *result = json_create_object();
+    json_value_t *outputs = json_create_object();
+    json_value_t *verify = json_create_object();
+    json_value_t *malformed = json_create_object();
+
+    check_not_null(result);
+    check_not_null(outputs);
+    check_not_null(verify);
+    check_not_null(malformed);
+
+    json_object_set_string(result, "workflow_status", "success");
+    json_object_set_bool(verify, "passed", true);
+    check_true(json_object_add_checked(outputs, "verify_result", verify));
+    verify = NULL;
+    check_true(json_object_add_checked(result, "outputs", outputs));
+    outputs = NULL;
+
+    check_equal(
+        turbo_agent_template_verify_status_from_praktor_result(result),
+        TURBO_AGENT_VERIFY_PASSED);
+
+    check_true(json_object_set_bool(
+        json_object_get(result, "outputs")
+            ? json_object_get(json_object_get(result, "outputs"), "verify_result")
+            : NULL,
+        "passed", false));
+    check_equal(
+        turbo_agent_template_verify_status_from_praktor_result(result),
+        TURBO_AGENT_VERIFY_SEMANTIC_FAILURE);
+
+    json_object_set_string(malformed, "workflow_status", "failed");
+    check_equal(
+        turbo_agent_template_verify_status_from_praktor_result(malformed),
+        TURBO_AGENT_VERIFY_EXECUTION_FAILURE);
+
+    turbo_runtime_json_destroy(malformed);
+    turbo_runtime_json_destroy(verify);
+    turbo_runtime_json_destroy(outputs);
+    turbo_runtime_json_destroy(result);
+  }
+
 }

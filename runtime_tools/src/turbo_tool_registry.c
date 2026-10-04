@@ -355,7 +355,7 @@ turbo_tool_status_t turbo_tool_registry_add_v2(turbo_tool_registry_t *registry,
   }
   return turbo_tool_registry_add_with_policy(registry, &definition->definition,
                                              &definition->execution_policy, NULL, 0, NULL, NULL,
-                                             NULL, 0);
+                                             NULL, 0, TURBO_TOOL_EFFECT_UNKNOWN);
 }
 
 turbo_tool_status_t turbo_tool_registry_add_v3(turbo_tool_registry_t *registry,
@@ -367,7 +367,7 @@ turbo_tool_status_t turbo_tool_registry_add_v3(turbo_tool_registry_t *registry,
   return turbo_tool_registry_add_with_policy(
       registry, &definition->definition, &definition->execution_policy,
       definition->required_capabilities, definition->required_capability_count, NULL, NULL,
-      NULL, 0);
+      NULL, 0, TURBO_TOOL_EFFECT_UNKNOWN);
 }
 
 turbo_tool_status_t turbo_tool_registry_add_v4(turbo_tool_registry_t *registry,
@@ -380,7 +380,7 @@ turbo_tool_status_t turbo_tool_registry_add_v4(turbo_tool_registry_t *registry,
       registry, &definition->definition, &definition->execution_policy,
       definition->required_capabilities, definition->required_capability_count,
       definition->context_handler, definition->json_value_context_handler,
-      NULL, 0);
+      NULL, 0, TURBO_TOOL_EFFECT_UNKNOWN);
 }
 
 turbo_tool_status_t turbo_tool_registry_add_v5(
@@ -393,7 +393,8 @@ turbo_tool_status_t turbo_tool_registry_add_v5(
       registry, &definition->definition, &definition->execution_policy,
       definition->required_capabilities, definition->required_capability_count,
       definition->context_handler, definition->json_value_context_handler,
-      definition->result_schema_json, definition->strict_result);
+      definition->result_schema_json, definition->strict_result,
+      TURBO_TOOL_EFFECT_UNKNOWN);
 }
 
 turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *registry, const char *name) {

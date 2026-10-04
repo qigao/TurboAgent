@@ -173,6 +173,28 @@ typedef struct turbo_tool_definition_v4_s {
   turbo_tool_json_value_context_handler_fn json_value_context_handler;
 } turbo_tool_definition_v4_t;
 
+#define TURBO_TOOL_DEFINITION_V5_ABI_VERSION 5u
+
+/**
+ * Additive canonical result contract.
+ *
+ * result_schema_json is borrowed only for registration; the registry copies it.
+ * NULL means the tool result is opaque/unknown. strict_result is descriptive
+ * compiler metadata and does not silently enable runtime validation.
+ */
+typedef struct turbo_tool_definition_v5_s {
+  size_t struct_size;
+  unsigned int abi_version;
+  turbo_tool_definition_t definition;
+  turbo_tool_execution_policy_t execution_policy;
+  const char *const *required_capabilities;
+  size_t required_capability_count;
+  turbo_tool_context_handler_fn context_handler;
+  turbo_tool_json_value_context_handler_fn json_value_context_handler;
+  const char *result_schema_json;
+  int strict_result;
+} turbo_tool_definition_v5_t;
+
 #ifdef __cplusplus
 }
 #endif

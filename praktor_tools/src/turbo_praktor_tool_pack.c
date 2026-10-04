@@ -1476,6 +1476,55 @@ int turbo_praktor_tool_pack_supports_execution_events(
 
 
 
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+static int turbo_praktor_inline_description_valid(
+    const json_value_t *description,
+    const char *source_id,
+    const turbo_tool_registry_t *approved_host_tools) {
+  const char *source_kind;
+  const char *described_source_id;
+  const json_value_t *dependencies;
+  const json_value_t *host_tools;
+  size_t index;
+
+  if (!description || json_type(description) != JSON_OBJECT ||
+      !source_id || !source_id[0] ||
+      !turbo_praktor_plan_metadata_valid(
+          description, 1, approved_host_tools)) {
+    return 0;
+  }
+
+  source_kind = json_get_string(description, "source_kind");
+  described_source_id = json_get_string(description, "source_id");
+  dependencies = json_object_get(description, "dependencies");
+  host_tools = json_object_get(description, "host_tools");
+
+  if (!source_kind || strcmp(source_kind, "inline") != 0 ||
+      !described_source_id || strcmp(described_source_id, source_id) != 0 ||
+      !dependencies || json_type(dependencies) != JSON_ARRAY ||
+      json_array_size(dependencies) != 0u ||
+      !host_tools || json_type(host_tools) != JSON_ARRAY ||
+      json_array_size(host_tools) == 0u) {
+    return 0;
+  }
+
+  for (index = 0; index < json_array_size(host_tools); ++index) {
+    const json_value_t *entry = json_array_get(host_tools, index);
+    const char *workflow_path;
+    int64_t retry_count;
+    if (!entry || json_type(entry) != JSON_OBJECT) return 0;
+    workflow_path = json_get_string(entry, "workflow_path");
+    retry_count = json_get_int64(entry, "retry_count", -1);
+    if (!workflow_path || strcmp(workflow_path, source_id) != 0 ||
+        retry_count < 0 ||
+        (uint64_t)retry_count > (uint64_t)PRAKTOR_HOST_TOOL_MAX_RETRIES) {
+      return 0;
+    }
+  }
+  return 1;
+}
+#endif
+
 void turbo_praktor_inline_plan_config_init(
     turbo_praktor_inline_plan_config_t *config) {
   if (!config) return;
@@ -1532,6 +1581,8 @@ turbo_tool_status_t turbo_praktor_tool_pack_compile_inline_plan(
     turbo_praktor_inline_plan_t *compiled;
     praktor_compile_inline_request request = PRAKTOR_COMPILE_INLINE_REQUEST_INIT;
     praktor_workflow_plan *praktor_plan = NULL;
+    praktor_owned_json description = PRAKTOR_OWNED_JSON_INIT;
+    json_value_t *description_json = NULL;
     praktor_error error = PRAKTOR_ERROR_INIT;
     praktor_result status;
 
@@ -1549,6 +1600,26 @@ turbo_tool_status_t turbo_praktor_tool_pack_compile_inline_plan(
                  ? TURBO_TOOL_OUT_OF_MEMORY
                  : TURBO_TOOL_ERROR;
     }
+
+    status = (praktor_result)pack->api->describe_workflow_plan(
+        praktor_plan, &description, &error);
+    if (status != PRAKTOR_RESULT_SUCCESS ||
+        !description.data || !description.size) {
+      pack->api->release_json(&description);
+      pack->api->release_workflow_plan(praktor_plan);
+      return TURBO_TOOL_ERROR;
+    }
+    description_json = json_parse(description.data, description.size);
+    pack->api->release_json(&description);
+    if (!description_json ||
+        !turbo_praktor_inline_description_valid(
+            description_json, config->source_id,
+            config->approved_host_tools)) {
+      turbo_runtime_json_destroy(description_json);
+      pack->api->release_workflow_plan(praktor_plan);
+      return TURBO_TOOL_ERROR;
+    }
+    turbo_runtime_json_destroy(description_json);
 
     compiled = (turbo_praktor_inline_plan_t *)calloc(1, sizeof(*compiled));
     if (!compiled) {

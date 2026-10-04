@@ -22,6 +22,20 @@ typedef struct turbo_tool_runtime_tool_s {
   int strict;
 } turbo_tool_runtime_tool_t;
 
+#define TURBO_TOOL_RUNTIME_TOOL_V2_ABI_VERSION 2u
+
+/**
+ * Additive runtime catalog view with canonical result contract metadata.
+ * Legacy runtimes are exposed through this view with result_schema_json=NULL.
+ */
+typedef struct turbo_tool_runtime_tool_v2_s {
+  size_t struct_size;
+  uint32_t abi_version;
+  turbo_tool_runtime_tool_t base;
+  const char *result_schema_json;
+  int strict_result;
+} turbo_tool_runtime_tool_v2_t;
+
 typedef struct turbo_tool_runtime_vtable_s {
   void (*destroy)(void *impl);
   size_t (*tool_count)(const void *impl);
@@ -54,6 +68,19 @@ typedef struct turbo_tool_runtime_vtable_v2_s {
       const turbo_tool_execution_context_t *context, json_value_t **out_result);
 } turbo_tool_runtime_vtable_v2_t;
 
+#define TURBO_TOOL_RUNTIME_VTABLE_V3_ABI_VERSION 3u
+
+/**
+ * Additive runtime vtable exposing result-aware catalog metadata.
+ */
+typedef struct turbo_tool_runtime_vtable_v3_s {
+  size_t struct_size;
+  uint32_t abi_version;
+  turbo_tool_runtime_vtable_v2_t base;
+  turbo_tool_status_t (*get_tool_v2)(
+      const void *impl, size_t index, turbo_tool_runtime_tool_v2_t *out_tool);
+} turbo_tool_runtime_vtable_v3_t;
+
 /**
  * @brief Create a generic tool runtime backed by a caller-provided vtable.
  * @param vtable Backend vtable. All entries must be non-NULL.
@@ -66,6 +93,10 @@ CXX_C_API turbo_tool_runtime_t *turbo_tool_runtime_create(const turbo_tool_runti
 /** Create a runtime that can receive borrowed invocation context. */
 CXX_C_API turbo_tool_runtime_t *
 turbo_tool_runtime_create_v2(const turbo_tool_runtime_vtable_v2_t *vtable, void *impl);
+
+/** Create a runtime whose catalog can publish canonical result contracts. */
+CXX_C_API turbo_tool_runtime_t *
+turbo_tool_runtime_create_v3(const turbo_tool_runtime_vtable_v3_t *vtable, void *impl);
 
 /**
  * @brief Retain a runtime handle for shared ownership.
@@ -97,6 +128,14 @@ CXX_C_API size_t turbo_tool_runtime_count(const turbo_tool_runtime_t *runtime);
 CXX_C_API turbo_tool_status_t turbo_tool_runtime_get_tool(const turbo_tool_runtime_t *runtime,
                                                           size_t index,
                                                           turbo_tool_runtime_tool_t *out_tool);
+
+/**
+ * Read the additive result-aware catalog view.
+ * Legacy runtimes return the base descriptor with an opaque result contract.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_get_tool_v2(
+    const turbo_tool_runtime_t *runtime, size_t index,
+    turbo_tool_runtime_tool_v2_t *out_tool);
 
 /**
  * @brief Invoke one runtime tool by name with raw JSON arguments.
@@ -179,6 +218,10 @@ CXX_C_API turbo_tool_runtime_t *turbo_tool_runtime_native_create(void);
  */
 CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_add_tool(
     turbo_tool_runtime_t *runtime, const turbo_tool_definition_t *definition);
+
+/** Add one native callback tool with the canonical v5 result contract surface. */
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_add_tool_v5(
+    turbo_tool_runtime_t *runtime, const turbo_tool_definition_v5_t *definition);
 
 #ifdef __cplusplus
 }

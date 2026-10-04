@@ -160,6 +160,26 @@ static const turbo_tool_registry_t *turbo_praktor_approved_host_tools(
              : NULL;
 }
 
+static int turbo_praktor_registry_exact_definition(
+    const turbo_tool_registry_t *registry, const char *name,
+    turbo_tool_definition_t *out_definition) {
+  size_t index;
+  if (out_definition) memset(out_definition, 0, sizeof(*out_definition));
+  if (!registry || !name || !name[0]) return 0;
+  for (index = 0; index < turbo_tool_registry_count(registry); ++index) {
+    turbo_tool_definition_t definition = {0};
+    if (turbo_tool_registry_get_definition(registry, index, &definition) !=
+        TURBO_TOOL_OK) {
+      return 0;
+    }
+    if (definition.name && strcmp(definition.name, name) == 0) {
+      if (out_definition) *out_definition = definition;
+      return 1;
+    }
+  }
+  return 0;
+}
+
 typedef struct turbo_praktor_capability_list_s {
   const char **items;
   size_t count;
@@ -238,38 +258,202 @@ static turbo_tool_status_t turbo_praktor_capability_from_effect(
   return turbo_praktor_add_conservative_capabilities(list);
 }
 
+static int turbo_praktor_plan_has_host_tools(
+    const json_value_t *description) {
+  const json_value_t *host_tools =
+      description ? json_object_get(description, "host_tools") : NULL;
+  return host_tools && json_type(host_tools) == JSON_ARRAY &&
+         json_array_size(host_tools) != 0;
+}
+
+static int turbo_praktor_host_tool_manifest_contains(
+    const json_value_t *description, const char *tool_name) {
+  const json_value_t *host_tools =
+      description ? json_object_get(description, "host_tools") : NULL;
+  size_t index;
+  if (!host_tools || json_type(host_tools) != JSON_ARRAY || !tool_name) return 0;
+  for (index = 0; index < json_array_size(host_tools); ++index) {
+    const json_value_t *entry = json_array_get(host_tools, index);
+    const char *name =
+        entry && json_type(entry) == JSON_OBJECT ? json_get_string(entry, "tool") : NULL;
+    if (name && strcmp(name, tool_name) == 0) return 1;
+  }
+  return 0;
+}
+
+static int turbo_praktor_host_tools_resolved(
+    const json_value_t *description,
+    const turbo_tool_registry_t *approved_host_tools) {
+  const json_value_t *host_tools =
+      description ? json_object_get(description, "host_tools") : NULL;
+  size_t index;
+  if (!host_tools || json_type(host_tools) != JSON_ARRAY) return 0;
+  if (json_array_size(host_tools) == 0) return 1;
+  if (!approved_host_tools) return 0;
+  for (index = 0; index < json_array_size(host_tools); ++index) {
+    const json_value_t *entry = json_array_get(host_tools, index);
+    const char *name =
+        entry && json_type(entry) == JSON_OBJECT ? json_get_string(entry, "tool") : NULL;
+    if (!name ||
+        !turbo_praktor_registry_exact_definition(
+            approved_host_tools, name, NULL)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int turbo_praktor_host_tool_unknowns_only(
+    const json_value_t *description,
+    const turbo_tool_registry_t *approved_host_tools) {
+  static const char prefix[] =
+      "host tool effects resolved by embedding host: ";
+  static const char profile_reason[] =
+      "harness_safe rejects workflows with unknown effects";
+  const json_value_t *manifest;
+  const json_value_t *unknown_reasons;
+  const json_value_t *profiles;
+  const json_value_t *profile;
+  const json_value_t *profile_reasons;
+  size_t index;
+  int saw_unknown = 0;
+
+  if (!turbo_praktor_host_tools_resolved(description, approved_host_tools) ||
+      !turbo_praktor_plan_has_host_tools(description)) {
+    return 0;
+  }
+  manifest = json_object_get(description, "effect_manifest");
+  if (!manifest || json_type(manifest) != JSON_OBJECT ||
+      !json_get_bool(manifest, "unknown_effects", false)) {
+    return 0;
+  }
+  unknown_reasons = json_object_get(manifest, "unknown_reasons");
+  if (!unknown_reasons || json_type(unknown_reasons) != JSON_ARRAY ||
+      json_array_size(unknown_reasons) == 0) {
+    return 0;
+  }
+  for (index = 0; index < json_array_size(unknown_reasons); ++index) {
+    const json_value_t *value = json_array_get(unknown_reasons, index);
+    const char *reason =
+        value && json_type(value) == JSON_STRING ? json_string(value) : NULL;
+    const char *name;
+    if (!reason || strncmp(reason, prefix, sizeof(prefix) - 1u) != 0) return 0;
+    name = reason + sizeof(prefix) - 1u;
+    if (!name[0] ||
+        !turbo_praktor_host_tool_manifest_contains(description, name) ||
+        !turbo_praktor_registry_exact_definition(
+            approved_host_tools, name, NULL)) {
+      return 0;
+    }
+    saw_unknown = 1;
+  }
+
+  profiles = json_object_get(description, "profiles");
+  profile = profiles && json_type(profiles) == JSON_OBJECT
+                ? json_object_get(profiles, "harness_safe")
+                : NULL;
+  profile_reasons =
+      profile && json_type(profile) == JSON_OBJECT
+          ? json_object_get(profile, "reasons")
+          : NULL;
+  if (!profile_reasons || json_type(profile_reasons) != JSON_ARRAY ||
+      json_array_size(profile_reasons) == 0) {
+    return 0;
+  }
+  for (index = 0; index < json_array_size(profile_reasons); ++index) {
+    const json_value_t *value = json_array_get(profile_reasons, index);
+    const char *reason =
+        value && json_type(value) == JSON_STRING ? json_string(value) : NULL;
+    if (!reason || strcmp(reason, profile_reason) != 0) return 0;
+  }
+  return saw_unknown;
+}
+
 static int turbo_praktor_plan_metadata_valid(
-    const json_value_t *description, int require_harness_safe) {
+    const json_value_t *description, int require_harness_safe,
+    const turbo_tool_registry_t *approved_host_tools) {
   const json_value_t *schema;
   const json_value_t *profiles;
   const json_value_t *profile;
   if (!description || json_type(description) != JSON_OBJECT) return 0;
   schema = json_object_get(description, "input_schema");
   if (!schema || json_type(schema) != JSON_OBJECT) return 0;
+  if (!turbo_praktor_host_tools_resolved(description, approved_host_tools)) {
+    return 0;
+  }
   if (!require_harness_safe) return 1;
   profiles = json_object_get(description, "profiles");
   profile = profiles && json_type(profiles) == JSON_OBJECT
                 ? json_object_get(profiles, "harness_safe")
                 : NULL;
-  return profile && json_type(profile) == JSON_OBJECT &&
-         json_get_bool(profile, "qualified", false);
+  if (!profile || json_type(profile) != JSON_OBJECT) return 0;
+  if (json_get_bool(profile, "qualified", false)) return 1;
+  return turbo_praktor_host_tool_unknowns_only(
+      description, approved_host_tools);
+}
+
+static turbo_tool_status_t turbo_praktor_host_tool_capabilities(
+    const json_value_t *description,
+    const turbo_tool_registry_t *approved_host_tools,
+    turbo_praktor_capability_list_t *list) {
+  const json_value_t *host_tools =
+      description ? json_object_get(description, "host_tools") : NULL;
+  size_t index;
+  if (!host_tools || json_type(host_tools) != JSON_ARRAY) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  for (index = 0; index < json_array_size(host_tools); ++index) {
+    const json_value_t *entry = json_array_get(host_tools, index);
+    const char *name =
+        entry && json_type(entry) == JSON_OBJECT ? json_get_string(entry, "tool") : NULL;
+    const char *const *required = NULL;
+    size_t required_count = 0;
+    size_t capability_index;
+    turbo_tool_status_t status;
+    if (!name ||
+        !turbo_praktor_registry_exact_definition(
+            approved_host_tools, name, NULL)) {
+      return TURBO_TOOL_NOT_FOUND;
+    }
+    status = turbo_tool_registry_get_required_capabilities(
+        approved_host_tools, name, &required, &required_count);
+    if (status != TURBO_TOOL_OK) return status;
+    if (required_count == 0) {
+      status = turbo_praktor_capability_add(list, "custom_tools");
+      if (status != TURBO_TOOL_OK) return status;
+      continue;
+    }
+    for (capability_index = 0; capability_index < required_count;
+         ++capability_index) {
+      status = turbo_praktor_capability_add(
+          list, required[capability_index]);
+      if (status != TURBO_TOOL_OK) return status;
+    }
+  }
+  return TURBO_TOOL_OK;
 }
 
 static turbo_tool_status_t turbo_praktor_effect_capabilities(
     const json_value_t *description,
+    const turbo_tool_registry_t *approved_host_tools,
     turbo_praktor_capability_list_t *list) {
   const json_value_t *manifest;
   const json_value_t *effects;
   size_t index;
   turbo_tool_status_t status;
+  int resolved_host_unknowns = 0;
   manifest = description ? json_object_get(description, "effect_manifest") : NULL;
   if (!manifest || json_type(manifest) != JSON_OBJECT) {
     return turbo_praktor_add_conservative_capabilities(list);
   }
   if (json_get_bool(manifest, "unknown_effects", false)) {
-    status = turbo_praktor_capability_add(list, "custom_tools");
-    if (status != TURBO_TOOL_OK) return status;
-    return turbo_praktor_add_conservative_capabilities(list);
+    resolved_host_unknowns = turbo_praktor_host_tool_unknowns_only(
+        description, approved_host_tools);
+    if (!resolved_host_unknowns) {
+      status = turbo_praktor_capability_add(list, "custom_tools");
+      if (status != TURBO_TOOL_OK) return status;
+      return turbo_praktor_add_conservative_capabilities(list);
+    }
   }
   effects = json_object_get(manifest, "effects");
   if (!effects || json_type(effects) != JSON_ARRAY) {
@@ -281,7 +465,13 @@ static turbo_tool_status_t turbo_praktor_effect_capabilities(
                              ? json_string(value)
                              : NULL;
     if (!effect) return turbo_praktor_add_conservative_capabilities(list);
+    if (resolved_host_unknowns && strcmp(effect, "host_tool") == 0) continue;
     status = turbo_praktor_capability_from_effect(list, effect);
+    if (status != TURBO_TOOL_OK) return status;
+  }
+  if (turbo_praktor_plan_has_host_tools(description)) {
+    status = turbo_praktor_host_tool_capabilities(
+        description, approved_host_tools, list);
     if (status != TURBO_TOOL_OK) return status;
   }
   return TURBO_TOOL_OK;

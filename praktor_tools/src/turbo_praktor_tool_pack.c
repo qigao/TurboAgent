@@ -1511,13 +1511,13 @@ static int turbo_praktor_inline_description_valid(
   for (index = 0; index < json_array_size(host_tools); ++index) {
     const json_value_t *entry = json_array_get(host_tools, index);
     const char *workflow_path;
-    int64_t retry_count;
+    int retry_count;
     if (!entry || json_type(entry) != JSON_OBJECT) return 0;
     workflow_path = json_get_string(entry, "workflow_path");
-    retry_count = json_get_int64(entry, "retry_count", -1);
+    retry_count = json_get_int(entry, "retry_count", -1);
     if (!workflow_path || strcmp(workflow_path, source_id) != 0 ||
         retry_count < 0 ||
-        (uint64_t)retry_count > (uint64_t)PRAKTOR_HOST_TOOL_MAX_RETRIES) {
+        (uint32_t)retry_count > PRAKTOR_HOST_TOOL_MAX_RETRIES) {
       return 0;
     }
   }

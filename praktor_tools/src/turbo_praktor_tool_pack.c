@@ -960,22 +960,49 @@ static turbo_tool_status_t turbo_praktor_execute_text(
 #if TURBO_PRAKTOR_HAS_WORKFLOW_PLAN
   if (binding->plan && binding->api->execute_workflow_plan) {
     praktor_plan_execute_request request = PRAKTOR_PLAN_EXECUTE_REQUEST_INIT;
+    praktor_execution_observer observer = PRAKTOR_EXECUTION_OBSERVER_INIT;
+    const praktor_execution_observer *observer_ptr = NULL;
     request.plan = binding->plan;
     request.input_json = input_json;
     request.input_json_size = input_size;
-#if TURBO_PRAKTOR_HAS_EXECUTION_EVENTS
-    if (context &&
-        (binding->api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_EVENTS) != 0 &&
-        binding->api->execute_workflow_plan_observed) {
-      praktor_execution_observer observer = PRAKTOR_EXECUTION_OBSERVER_INIT;
-      observer.on_event = turbo_praktor_event_bridge;
-      observer.user_data = (void *)context;
+
+    if (context) {
       observer.thread_id = context->thread_id;
       observer.run_id = context->run_id;
       observer.turn_id = context->turn_id;
       observer.tool_call_id = context->tool_call_id;
+#if TURBO_PRAKTOR_HAS_EXECUTION_EVENTS
+      if ((binding->api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_EVENTS) != 0 &&
+          binding->api->execute_workflow_plan_observed) {
+        observer.on_event = turbo_praktor_event_bridge;
+        observer.user_data = (void *)context;
+      }
+#endif
+      observer_ptr = &observer;
+    }
+
+#if TURBO_PRAKTOR_HAS_HOST_TOOL
+    if (binding->has_host_tools) {
+      turbo_praktor_host_bridge_t bridge;
+      praktor_host_tool_executor host_tools = PRAKTOR_HOST_TOOL_EXECUTOR_INIT;
+      memset(&bridge, 0, sizeof(bridge));
+      bridge.approved_host_tools = binding->approved_host_tools;
+      bridge.parent_context = context;
+      bridge.max_result_bytes = binding->max_result_bytes;
+      host_tools.user_data = &bridge;
+      host_tools.validate = turbo_praktor_host_validate;
+      host_tools.invoke = turbo_praktor_host_invoke;
+      status = (praktor_result)binding->api->execute_workflow_plan_host_tools(
+          &request, context ? &control : NULL, observer_ptr, &host_tools,
+          &output, &error);
+    } else
+#endif
+#if TURBO_PRAKTOR_HAS_EXECUTION_EVENTS
+    if (observer_ptr && observer.on_event &&
+        (binding->api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_EVENTS) != 0 &&
+        binding->api->execute_workflow_plan_observed) {
       status = (praktor_result)binding->api->execute_workflow_plan_observed(
-          &request, &control, &observer, &output, &error);
+          &request, context ? &control : NULL, observer_ptr, &output, &error);
     } else
 #endif
     {
@@ -1006,6 +1033,12 @@ static turbo_tool_status_t turbo_praktor_execute_text(
     tool_status = TURBO_TOOL_DEADLINE_EXCEEDED;
     goto cleanup;
   }
+#if PRAKTOR_ABI_MINOR >= 5
+  if (status == PRAKTOR_RESULT_HOST_TOOL_REJECTED) {
+    tool_status = TURBO_TOOL_ERROR;
+    goto cleanup;
+  }
+#endif
   if (output.size > binding->max_result_bytes) {
     tool_status = TURBO_TOOL_ERROR;
     goto cleanup;

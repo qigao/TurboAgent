@@ -42,11 +42,33 @@ static const turbo_agent_template_descriptor_t inspect_template = {
     "TurboAgent.Inspect.v1",
     TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY};
 
+static const turbo_agent_template_descriptor_t change_template = {
+    sizeof(turbo_agent_template_descriptor_t),
+    TURBO_AGENT_TEMPLATE_DESCRIPTOR_ABI_VERSION,
+    TURBO_AGENT_TEMPLATE_CHANGE,
+    1u,
+    "change",
+    "TurboAgent.Change.v1",
+    TURBO_AGENT_TEMPLATE_PROPERTY_DAG_ONLY};
+
+static const turbo_agent_template_descriptor_t repair_template = {
+    sizeof(turbo_agent_template_descriptor_t),
+    TURBO_AGENT_TEMPLATE_DESCRIPTOR_ABI_VERSION,
+    TURBO_AGENT_TEMPLATE_REPAIR,
+    1u,
+    "repair",
+    "TurboAgent.Repair.v1",
+    TURBO_AGENT_TEMPLATE_PROPERTY_DAG_ONLY};
+
 const turbo_agent_template_descriptor_t *
 turbo_agent_template_descriptor(turbo_agent_template_kind_t kind) {
   switch (kind) {
     case TURBO_AGENT_TEMPLATE_INSPECT:
       return &inspect_template;
+    case TURBO_AGENT_TEMPLATE_CHANGE:
+      return &change_template;
+    case TURBO_AGENT_TEMPLATE_REPAIR:
+      return &repair_template;
     default:
       return NULL;
   }
@@ -367,7 +389,13 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   template_descriptor = turbo_agent_template_descriptor(source->template_kind);
   if (!template_descriptor) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNSUPPORTED_TEMPLATE,
-                        "Phase 1 supports only registered template descriptors");
+                        "template descriptor is not registered");
+  }
+  if ((template_descriptor->properties &
+       TURBO_AGENT_TEMPLATE_PROPERTY_DAG_ONLY) != 0u) {
+    return compile_fail(
+        diagnostic, TURBO_AGENT_COMPILE_UNSUPPORTED_TEMPLATE,
+        "DAG-only template must use the Phase-3 template compiler");
   }
   if (!source->arguments || json_type(source->arguments) != JSON_OBJECT) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,

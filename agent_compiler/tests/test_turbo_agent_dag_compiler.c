@@ -683,6 +683,7 @@ spec("AgentCompiler Phase 3 DAG admission") {
     turbo_agent_executable_dag_t *legacy_plan = NULL;
     json_value_t *args = dag_args("same");
     const char *allowed[] = {"runtime_tools"};
+    const char *legacy_caps[] = {"runtime_tools"};
 
     check_not_null(pure_registry);
     check_not_null(read_registry);
@@ -699,6 +700,8 @@ spec("AgentCompiler Phase 3 DAG admission") {
     legacy.definition.user_data = &legacy_probe;
     legacy.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
     legacy.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    legacy.required_capabilities = legacy_caps;
+    legacy.required_capability_count = 1u;
     legacy.json_value_context_handler = dag_probe_handler;
     legacy.result_schema_json = "{\"type\":\"object\"}";
     check_equal(turbo_tool_registry_add_v5(legacy_registry, &legacy),

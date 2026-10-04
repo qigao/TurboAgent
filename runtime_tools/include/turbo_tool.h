@@ -195,6 +195,45 @@ typedef struct turbo_tool_definition_v5_s {
   int strict_result;
 } turbo_tool_definition_v5_t;
 
+typedef uint64_t turbo_tool_effect_flags_t;
+
+#define TURBO_TOOL_EFFECT_UNKNOWN            (UINT64_C(1) << 0)
+#define TURBO_TOOL_EFFECT_PURE               (UINT64_C(1) << 1)
+#define TURBO_TOOL_EFFECT_READ               (UINT64_C(1) << 2)
+#define TURBO_TOOL_EFFECT_WRITE              (UINT64_C(1) << 3)
+#define TURBO_TOOL_EFFECT_PROCESS            (UINT64_C(1) << 4)
+#define TURBO_TOOL_EFFECT_NETWORK            (UINT64_C(1) << 5)
+#define TURBO_TOOL_EFFECT_EXTERNAL_MUTATION  (UINT64_C(1) << 6)
+#define TURBO_TOOL_EFFECT_KNOWN_MASK \
+  (TURBO_TOOL_EFFECT_UNKNOWN | TURBO_TOOL_EFFECT_PURE | \
+   TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_WRITE | \
+   TURBO_TOOL_EFFECT_PROCESS | TURBO_TOOL_EFFECT_NETWORK | \
+   TURBO_TOOL_EFFECT_EXTERNAL_MUTATION)
+
+#define TURBO_TOOL_DEFINITION_V6_ABI_VERSION 6u
+
+/**
+ * Additive canonical semantic effect facts.
+ *
+ * effect_flags are compiler/optimizer facts and never grant authority.
+ * Capabilities remain independently enforced. A zero flag set is normalized
+ * by the registry to UNKNOWN. PURE and UNKNOWN are each mutually exclusive
+ * with every other effect flag.
+ */
+typedef struct turbo_tool_definition_v6_s {
+  size_t struct_size;
+  unsigned int abi_version;
+  turbo_tool_definition_t definition;
+  turbo_tool_execution_policy_t execution_policy;
+  const char *const *required_capabilities;
+  size_t required_capability_count;
+  turbo_tool_context_handler_fn context_handler;
+  turbo_tool_json_value_context_handler_fn json_value_context_handler;
+  const char *result_schema_json;
+  int strict_result;
+  turbo_tool_effect_flags_t effect_flags;
+} turbo_tool_definition_v6_t;
+
 #ifdef __cplusplus
 }
 #endif

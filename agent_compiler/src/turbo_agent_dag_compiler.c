@@ -24,6 +24,7 @@ typedef struct turbo_agent_executable_dag_step_s {
   uint32_t retry_limit;
   uint32_t flags;
   turbo_tool_execution_policy_t execution_policy;
+  turbo_tool_effect_flags_t effect_flags;
   char **capabilities;
   size_t capability_count;
   json_value_t *execution_metadata;
@@ -38,6 +39,7 @@ struct turbo_agent_executable_dag_s {
   turbo_tool_registry_t *approved_tools;
   char **capabilities;
   size_t capability_count;
+  turbo_tool_effect_flags_t effect_flags;
   uint64_t plan_hash;
 };
 
@@ -415,6 +417,7 @@ static turbo_agent_compile_status_t dag_admit_step(
   const char *const *required = NULL;
   size_t required_count = 0u;
   const json_value_t *execution_metadata = NULL;
+  turbo_tool_effect_flags_t effect_flags = TURBO_TOOL_EFFECT_UNKNOWN;
   char schema_diagnostic[256] = {0};
   size_t nodes = 0u;
   size_t bytes = 0u;
@@ -471,6 +474,8 @@ static turbo_agent_compile_status_t dag_admit_step(
       turbo_tool_registry_get_required_capabilities(
           source_registry, canonical_name,
           &required, &required_count) != TURBO_TOOL_OK ||
+      turbo_tool_registry_get_effects(
+          source_registry, canonical_name, &effect_flags) != TURBO_TOOL_OK ||
       turbo_tool_registry_get_execution_metadata(
           source_registry, canonical_name, &execution_metadata) !=
       TURBO_TOOL_OK) {
@@ -494,6 +499,7 @@ static turbo_agent_compile_status_t dag_admit_step(
   step->arguments = json_clone(source->arguments);
   step->retry_limit = source->retry_limit;
   step->flags = source->flags;
+  step->effect_flags = effect_flags;
   if (execution_metadata) {
     step->execution_metadata = json_clone(execution_metadata);
   }
@@ -651,6 +657,41 @@ static turbo_agent_compile_status_t dag_build_capability_union(
   return TURBO_AGENT_COMPILE_OK;
 }
 
+static turbo_tool_effect_flags_t dag_effect_summary(
+    const turbo_agent_executable_dag_t *plan) {
+  turbo_tool_effect_flags_t known = 0;
+  int all_pure = 1;
+  size_t i;
+  if (!plan || !plan->step_count) return TURBO_TOOL_EFFECT_UNKNOWN;
+  for (i = 0; i < plan->step_count; ++i) {
+    turbo_tool_effect_flags_t flags = plan->steps[i].effect_flags;
+    if (flags == TURBO_TOOL_EFFECT_UNKNOWN ||
+        (flags & TURBO_TOOL_EFFECT_UNKNOWN) != 0) {
+      return TURBO_TOOL_EFFECT_UNKNOWN;
+    }
+    if (flags == TURBO_TOOL_EFFECT_PURE) continue;
+    all_pure = 0;
+    known |= flags & ~TURBO_TOOL_EFFECT_PURE;
+  }
+  if (all_pure) return TURBO_TOOL_EFFECT_PURE;
+  return known ? known : TURBO_TOOL_EFFECT_UNKNOWN;
+}
+
+static int dag_pure_region_eligible_internal(
+    const turbo_agent_executable_dag_t *plan) {
+  size_t i;
+  if (!plan || !plan->step_count) return 0;
+  for (i = 0; i < plan->step_count; ++i) {
+    const turbo_agent_executable_dag_step_t *step = &plan->steps[i];
+    if (step->effect_flags != TURBO_TOOL_EFFECT_PURE ||
+        step->execution_policy.idempotency != TURBO_TOOL_IDEMPOTENCY_READ_ONLY ||
+        step->execution_policy.mode != TURBO_TOOL_EXECUTION_PARALLEL_SAFE) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static turbo_agent_compile_status_t dag_build_projection(
     const turbo_tool_registry_t *source_registry,
     turbo_agent_executable_dag_t *plan,
@@ -692,7 +733,7 @@ static uint64_t dag_compute_hash(const turbo_agent_executable_dag_t *plan) {
   uint64_t hash = DAG_FNV_OFFSET;
   size_t i;
 
-  hash = dag_hash_cstring(hash, "TurboAgent.ExecutableDAG.v2");
+  hash = dag_hash_cstring(hash, "TurboAgent.ExecutableDAG.v3");
   hash = dag_hash_u32(hash, TURBO_AGENT_DAG_CERTIFICATE_VERSION);
   hash = dag_hash_u32(hash, (uint32_t)plan->template_kind);
   hash = dag_hash_u32(hash, plan->plan_generation);
@@ -709,6 +750,7 @@ static uint64_t dag_compute_hash(const turbo_agent_executable_dag_t *plan) {
     if (!hash) return 0u;
     hash = dag_hash_u32(hash, (uint32_t)step->execution_policy.mode);
     hash = dag_hash_u32(hash, (uint32_t)step->execution_policy.idempotency);
+    hash = dag_hash_u64(hash, step->effect_flags);
     hash = dag_hash_u32(hash, step->retry_limit);
     hash = dag_hash_u32(hash, step->flags);
     hash = dag_hash_u64(hash, (uint64_t)step->dependency_count);
@@ -817,6 +859,7 @@ turbo_agent_compile_status_t turbo_agent_compile_dag(
   status = dag_build_projection(source_registry, plan, diagnostic);
   if (status != TURBO_AGENT_COMPILE_OK) goto fail;
 
+  plan->effect_flags = dag_effect_summary(plan);
   plan->plan_hash = dag_compute_hash(plan);
   if (!plan->plan_hash) {
     status = dag_fail(diagnostic, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
@@ -858,6 +901,16 @@ turbo_agent_dag_template_kind_t turbo_agent_executable_dag_template_kind(
 uint32_t turbo_agent_executable_dag_plan_generation(
     const turbo_agent_executable_dag_t *plan) {
   return plan ? plan->plan_generation : 0u;
+}
+
+turbo_tool_effect_flags_t turbo_agent_executable_dag_effects(
+    const turbo_agent_executable_dag_t *plan) {
+  return plan ? plan->effect_flags : TURBO_TOOL_EFFECT_UNKNOWN;
+}
+
+int turbo_agent_executable_dag_pure_region_eligible(
+    const turbo_agent_executable_dag_t *plan) {
+  return dag_pure_region_eligible_internal(plan);
 }
 
 const turbo_tool_registry_t *turbo_agent_executable_dag_approved_tools(
@@ -907,6 +960,12 @@ json_value_t *turbo_agent_executable_dag_certificate_json_value(
   field = json_create_int64((int64_t)plan->replan_budget);
   if (!field ||
       turbo_runtime_json_object_set(root, "replan_budget", field) !=
+          TURBO_RUNTIME_JSON_OK) goto fail;
+  field = NULL;
+
+  field = json_create_int64((int64_t)plan->effect_flags);
+  if (!field ||
+      turbo_runtime_json_object_set(root, "effect_flags", field) !=
           TURBO_RUNTIME_JSON_OK) goto fail;
   field = NULL;
 
@@ -975,6 +1034,7 @@ json_value_t *turbo_agent_executable_dag_certificate_json_value(
     DAG_SET_INT("flags", step->flags);
     DAG_SET_INT("execution_mode", step->execution_policy.mode);
     DAG_SET_INT("idempotency", step->execution_policy.idempotency);
+    DAG_SET_INT("effect_flags", step->effect_flags);
 
     field = json_clone(step->arguments);
     if (!field ||

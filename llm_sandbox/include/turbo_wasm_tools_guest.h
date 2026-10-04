@@ -14,9 +14,13 @@
  * and may additionally publish:
  *   result        - canonical JSON-Schema object for the tool result
  *   strict_result - boolean result-contract qualifier
+ *   effects       - array of semantic effect names:
+ *                   pure/read/write/process/network/external_mutation/unknown
  *
- * Both result fields are additive. Older guests that omit them remain valid
- * and are surfaced to RuntimeTools as an opaque/unknown result contract.
+ * Result/effect fields are additive. Older guests that omit result metadata
+ * remain opaque for result typing; guests that omit effects are surfaced as
+ * TURBO_TOOL_EFFECT_UNKNOWN. Invalid or contradictory effect sets are rejected
+ * when the Wasm tool catalog is loaded.
  */
 
 #include <stdint.h>

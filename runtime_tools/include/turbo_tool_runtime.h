@@ -36,6 +36,16 @@ typedef struct turbo_tool_runtime_tool_v2_s {
   int strict_result;
 } turbo_tool_runtime_tool_v2_t;
 
+#define TURBO_TOOL_RUNTIME_TOOL_V3_ABI_VERSION 3u
+
+/** Additive runtime catalog view with canonical semantic effect facts. */
+typedef struct turbo_tool_runtime_tool_v3_s {
+  size_t struct_size;
+  uint32_t abi_version;
+  turbo_tool_runtime_tool_v2_t base;
+  turbo_tool_effect_flags_t effect_flags;
+} turbo_tool_runtime_tool_v3_t;
+
 typedef struct turbo_tool_runtime_vtable_s {
   void (*destroy)(void *impl);
   size_t (*tool_count)(const void *impl);
@@ -81,6 +91,17 @@ typedef struct turbo_tool_runtime_vtable_v3_s {
       const void *impl, size_t index, turbo_tool_runtime_tool_v2_t *out_tool);
 } turbo_tool_runtime_vtable_v3_t;
 
+#define TURBO_TOOL_RUNTIME_VTABLE_V4_ABI_VERSION 4u
+
+/** Additive runtime vtable exposing semantic-effect-aware catalog metadata. */
+typedef struct turbo_tool_runtime_vtable_v4_s {
+  size_t struct_size;
+  uint32_t abi_version;
+  turbo_tool_runtime_vtable_v3_t base;
+  turbo_tool_status_t (*get_tool_v3)(
+      const void *impl, size_t index, turbo_tool_runtime_tool_v3_t *out_tool);
+} turbo_tool_runtime_vtable_v4_t;
+
 /**
  * @brief Create a generic tool runtime backed by a caller-provided vtable.
  * @param vtable Backend vtable. All entries must be non-NULL.
@@ -97,6 +118,10 @@ turbo_tool_runtime_create_v2(const turbo_tool_runtime_vtable_v2_t *vtable, void 
 /** Create a runtime whose catalog can publish canonical result contracts. */
 CXX_C_API turbo_tool_runtime_t *
 turbo_tool_runtime_create_v3(const turbo_tool_runtime_vtable_v3_t *vtable, void *impl);
+
+/** Create a runtime whose catalog can publish canonical semantic effects. */
+CXX_C_API turbo_tool_runtime_t *
+turbo_tool_runtime_create_v4(const turbo_tool_runtime_vtable_v4_t *vtable, void *impl);
 
 /**
  * @brief Retain a runtime handle for shared ownership.
@@ -136,6 +161,14 @@ CXX_C_API turbo_tool_status_t turbo_tool_runtime_get_tool(const turbo_tool_runti
 CXX_C_API turbo_tool_status_t turbo_tool_runtime_get_tool_v2(
     const turbo_tool_runtime_t *runtime, size_t index,
     turbo_tool_runtime_tool_v2_t *out_tool);
+
+/**
+ * Read the additive result/effect-aware catalog view.
+ * Legacy runtimes surface TURBO_TOOL_EFFECT_UNKNOWN.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_get_tool_v3(
+    const turbo_tool_runtime_t *runtime, size_t index,
+    turbo_tool_runtime_tool_v3_t *out_tool);
 
 /**
  * @brief Invoke one runtime tool by name with raw JSON arguments.
@@ -222,6 +255,10 @@ CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_add_tool(
 /** Add one native callback tool with the canonical v5 result contract surface. */
 CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_add_tool_v5(
     turbo_tool_runtime_t *runtime, const turbo_tool_definition_v5_t *definition);
+
+/** Add one native callback tool with canonical result + semantic effects. */
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_add_tool_v6(
+    turbo_tool_runtime_t *runtime, const turbo_tool_definition_v6_t *definition);
 
 #ifdef __cplusplus
 }

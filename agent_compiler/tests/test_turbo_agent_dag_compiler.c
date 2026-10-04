@@ -83,6 +83,36 @@ static turbo_tool_registry_t *make_dag_registry(
   return registry;
 }
 
+static turbo_tool_registry_t *make_effect_registry(
+    turbo_tool_effect_flags_t effects,
+    dag_probe_t *probe) {
+  turbo_tool_registry_t *registry = turbo_tool_registry_create();
+  static const char *caps[] = {"runtime_tools"};
+  turbo_tool_definition_v6_t definition = {0};
+
+  if (!registry) return NULL;
+  definition.struct_size = sizeof(definition);
+  definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+  definition.definition.name = "math.project";
+  definition.definition.description = "Effect-qualified projection.";
+  definition.definition.parameters_json =
+      "{\"type\":\"object\",\"additionalProperties\":true}";
+  definition.definition.strict = 1;
+  definition.definition.user_data = probe;
+  definition.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
+  definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+  definition.required_capabilities = caps;
+  definition.required_capability_count = 1u;
+  definition.json_value_context_handler = dag_probe_handler;
+  definition.result_schema_json = "{\"type\":\"object\"}";
+  definition.effect_flags = effects;
+  if (turbo_tool_registry_add_v6(registry, &definition) != TURBO_TOOL_OK) {
+    turbo_tool_registry_destroy(registry);
+    return NULL;
+  }
+  return registry;
+}
+
 static json_value_t *dag_args(const char *value) {
   json_value_t *args = json_create_object();
   if (!args) return NULL;
@@ -584,6 +614,132 @@ spec("AgentCompiler Phase 3 DAG admission") {
     turbo_agent_executable_dag_destroy(plan);
     turbo_runtime_json_destroy(args);
     turbo_tool_registry_destroy(registry);
+  }
+
+
+  it("freezes PURE effects into DAG identity and admits a pure optimizer region") {
+    dag_probe_t probe = {0};
+    turbo_tool_registry_t *registry =
+        make_effect_registry(TURBO_TOOL_EFFECT_PURE, &probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t steps[2];
+    turbo_agent_executable_dag_t *plan = NULL;
+    json_value_t *args[2] = {dag_args("a"), dag_args("b")};
+    json_value_t *certificate = NULL;
+    const json_value_t *cert_steps;
+    const char *dep[] = {"a"};
+    const char *allowed[] = {"runtime_tools"};
+
+    check_not_null(registry);
+    dag_config(&config, allowed, 1u);
+    dag_step(&steps[0], "a", "math.project", args[0], NULL, 0u);
+    dag_step(&steps[1], "b", "math.project", args[1], dep, 1u);
+    dag_source(&source, steps, 2u);
+
+    check_equal(turbo_agent_compile_dag(
+                    &config, registry, &source, &plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_not_null(plan);
+    check_equal(turbo_agent_executable_dag_effects(plan),
+                TURBO_TOOL_EFFECT_PURE);
+    check_true(turbo_agent_executable_dag_pure_region_eligible(plan));
+    check_equal(probe.calls, 0);
+
+    certificate = turbo_agent_executable_dag_certificate_json_value(plan);
+    check_not_null(certificate);
+    check_equal(json_get_int(certificate, "effect_flags", -1),
+                (int)TURBO_TOOL_EFFECT_PURE);
+    cert_steps = json_object_get(certificate, "steps");
+    check_equal(json_get_int(json_array_get(cert_steps, 0u),
+                             "effect_flags", -1),
+                (int)TURBO_TOOL_EFFECT_PURE);
+    check_equal(json_get_int(json_array_get(cert_steps, 1u),
+                             "effect_flags", -1),
+                (int)TURBO_TOOL_EFFECT_PURE);
+
+    turbo_runtime_json_destroy(certificate);
+    turbo_agent_executable_dag_destroy(plan);
+    turbo_runtime_json_destroy(args[1]);
+    turbo_runtime_json_destroy(args[0]);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("treats UNKNOWN and non-pure effects as optimizer barriers and hashes them") {
+    dag_probe_t pure_probe = {0};
+    dag_probe_t read_probe = {0};
+    dag_probe_t legacy_probe = {0};
+    turbo_tool_registry_t *pure_registry =
+        make_effect_registry(TURBO_TOOL_EFFECT_PURE, &pure_probe);
+    turbo_tool_registry_t *read_registry =
+        make_effect_registry(TURBO_TOOL_EFFECT_READ, &read_probe);
+    turbo_tool_registry_t *legacy_registry = turbo_tool_registry_create();
+    turbo_tool_definition_v5_t legacy = {0};
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *pure_plan = NULL;
+    turbo_agent_executable_dag_t *read_plan = NULL;
+    turbo_agent_executable_dag_t *legacy_plan = NULL;
+    json_value_t *args = dag_args("same");
+    const char *allowed[] = {"runtime_tools"};
+    const char *legacy_caps[] = {"runtime_tools"};
+
+    check_not_null(pure_registry);
+    check_not_null(read_registry);
+    check_not_null(legacy_registry);
+    check_not_null(args);
+
+    legacy.struct_size = sizeof(legacy);
+    legacy.abi_version = TURBO_TOOL_DEFINITION_V5_ABI_VERSION;
+    legacy.definition.name = "math.project";
+    legacy.definition.description = "Legacy opaque effects.";
+    legacy.definition.parameters_json =
+        "{\"type\":\"object\",\"additionalProperties\":true}";
+    legacy.definition.strict = 1;
+    legacy.definition.user_data = &legacy_probe;
+    legacy.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
+    legacy.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    legacy.required_capabilities = legacy_caps;
+    legacy.required_capability_count = 1u;
+    legacy.json_value_context_handler = dag_probe_handler;
+    legacy.result_schema_json = "{\"type\":\"object\"}";
+    check_equal(turbo_tool_registry_add_v5(legacy_registry, &legacy),
+                TURBO_TOOL_OK);
+
+    dag_config(&config, allowed, 1u);
+    dag_step(&step, "one", "math.project", args, NULL, 0u);
+    dag_source(&source, &step, 1u);
+
+    check_equal(turbo_agent_compile_dag(
+                    &config, pure_registry, &source, &pure_plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_equal(turbo_agent_compile_dag(
+                    &config, read_registry, &source, &read_plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_equal(turbo_agent_compile_dag(
+                    &config, legacy_registry, &source, &legacy_plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+
+    check_true(turbo_agent_executable_dag_pure_region_eligible(pure_plan));
+    check_false(turbo_agent_executable_dag_pure_region_eligible(read_plan));
+    check_false(turbo_agent_executable_dag_pure_region_eligible(legacy_plan));
+    check_equal(turbo_agent_executable_dag_effects(read_plan),
+                TURBO_TOOL_EFFECT_READ);
+    check_equal(turbo_agent_executable_dag_effects(legacy_plan),
+                TURBO_TOOL_EFFECT_UNKNOWN);
+    check_true(turbo_agent_executable_dag_hash(pure_plan) !=
+               turbo_agent_executable_dag_hash(read_plan));
+    check_true(turbo_agent_executable_dag_hash(pure_plan) !=
+               turbo_agent_executable_dag_hash(legacy_plan));
+
+    turbo_agent_executable_dag_destroy(legacy_plan);
+    turbo_agent_executable_dag_destroy(read_plan);
+    turbo_agent_executable_dag_destroy(pure_plan);
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(legacy_registry);
+    turbo_tool_registry_destroy(read_registry);
+    turbo_tool_registry_destroy(pure_registry);
   }
 
 }

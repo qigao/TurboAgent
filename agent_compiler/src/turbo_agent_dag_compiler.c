@@ -93,6 +93,9 @@ static int dag_source_valid(const turbo_agent_dag_source_t *source) {
   if (source->abi_version == TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V1) {
     return source->struct_size >= TURBO_AGENT_DAG_SOURCE_V1_SIZE;
   }
+  if (source->abi_version == TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V2) {
+    return source->struct_size >= sizeof(*source);
+  }
   return source->abi_version == TURBO_AGENT_DAG_SOURCE_ABI_VERSION &&
          source->struct_size >= sizeof(*source);
 }
@@ -100,9 +103,20 @@ static int dag_source_valid(const turbo_agent_dag_source_t *source) {
 static turbo_agent_dag_template_kind_t dag_source_template_kind(
     const turbo_agent_dag_source_t *source) {
   if (!source ||
-      source->abi_version < TURBO_AGENT_DAG_SOURCE_ABI_VERSION ||
+      source->abi_version == TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V1 ||
       source->struct_size < sizeof(*source)) {
     return TURBO_AGENT_DAG_TEMPLATE_GENERIC;
+  }
+  if (source->abi_version == TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V2) {
+    switch ((uint32_t)source->template_kind) {
+      case TURBO_AGENT_DAG_TEMPLATE_V2_CHANGE:
+        return TURBO_AGENT_DAG_TEMPLATE_CHANGE;
+      case TURBO_AGENT_DAG_TEMPLATE_V2_REPAIR:
+        return TURBO_AGENT_DAG_TEMPLATE_REPAIR;
+      case TURBO_AGENT_DAG_TEMPLATE_V2_GENERIC:
+      default:
+        return TURBO_AGENT_DAG_TEMPLATE_GENERIC;
+    }
   }
   return source->template_kind;
 }
@@ -110,7 +124,7 @@ static turbo_agent_dag_template_kind_t dag_source_template_kind(
 static uint32_t dag_source_plan_generation(
     const turbo_agent_dag_source_t *source) {
   if (!source ||
-      source->abi_version < TURBO_AGENT_DAG_SOURCE_ABI_VERSION ||
+      source->abi_version == TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V1 ||
       source->struct_size < sizeof(*source)) {
     return 0u;
   }
@@ -693,7 +707,7 @@ static uint64_t dag_compute_hash(const turbo_agent_executable_dag_t *plan) {
   uint64_t hash = DAG_FNV_OFFSET;
   size_t i;
 
-  hash = dag_hash_cstring(hash, "TurboAgent.ExecutableDAG.v2");
+  hash = dag_hash_cstring(hash, "TurboAgent.ExecutableDAG.v3");
   hash = dag_hash_u32(hash, TURBO_AGENT_DAG_CERTIFICATE_VERSION);
   hash = dag_hash_u32(hash, (uint32_t)plan->template_kind);
   hash = dag_hash_u32(hash, plan->plan_generation);

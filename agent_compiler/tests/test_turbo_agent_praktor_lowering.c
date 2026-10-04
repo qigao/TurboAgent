@@ -369,4 +369,53 @@ spec("AgentCompiler deterministic Praktor lowering") {
     turbo_runtime_json_destroy(inspect_args);
     turbo_tool_registry_destroy(registry);
   }
+  it("classifies Praktor verify results without hidden replanning") {
+    lowering_probe_t read_probe = {0};
+    lowering_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        lowering_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_repair_source_t source;
+    turbo_agent_template_plan_t *plan = NULL;
+    json_value_t *args = lowering_empty_args();
+    json_value_t *success_false = json_parse(
+        "{\"workflow_status\":\"success\",\"outputs\":{\"verify_result\":{\"verified\":false}}}",
+        strlen("{\"workflow_status\":\"success\",\"outputs\":{\"verify_result\":{\"verified\":false}}}"));
+    json_value_t *malformed = json_parse(
+        "{\"workflow_status\":\"success\",\"outputs\":{\"verify_result\":{}}}",
+        strlen("{\"workflow_status\":\"success\",\"outputs\":{\"verify_result\":{}}}"));
+    json_value_t *failed = json_parse(
+        "{\"workflow_status\":\"failed\"}",
+        strlen("{\"workflow_status\":\"failed\"}"));
+
+    lowering_config(&config);
+    turbo_agent_repair_source_init(&source);
+    source.plan_version = 1u;
+    source.max_replans = 2u;
+    lowering_slot(&source.diagnose, "repo.inspect", args, 0u);
+    lowering_slot(&source.change, "repo.patch", args, 0u);
+    lowering_slot(&source.verify, "repo.verify", args, 0u);
+
+    check_equal(
+        turbo_agent_compile_repair_template(
+            &config, registry, &source, &plan, NULL),
+        TURBO_AGENT_COMPILE_OK);
+    check_equal(
+        turbo_agent_template_finish_praktor_result(plan, success_false),
+        TURBO_AGENT_TEMPLATE_OUTCOME_REPLAN_REQUIRED);
+    check_equal(
+        turbo_agent_template_finish_praktor_result(plan, malformed),
+        TURBO_AGENT_TEMPLATE_OUTCOME_VERIFY_FAILED);
+    check_equal(
+        turbo_agent_template_finish_praktor_result(plan, failed),
+        TURBO_AGENT_TEMPLATE_OUTCOME_EXECUTION_FAILED);
+
+    turbo_runtime_json_destroy(failed);
+    turbo_runtime_json_destroy(malformed);
+    turbo_runtime_json_destroy(success_false);
+    turbo_agent_template_plan_destroy(plan);
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
 }

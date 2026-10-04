@@ -46,6 +46,22 @@ static int contract_scalar(turbo_agent_contract_type_t type) {
          type == TURBO_AGENT_CONTRACT_TYPE_NULL;
 }
 
+static int contract_type_only_scalar(
+    const json_value_t *schema,
+    turbo_agent_contract_type_t *out_type) {
+  turbo_agent_contract_type_t type;
+  if (out_type) *out_type = TURBO_AGENT_CONTRACT_TYPE_UNKNOWN;
+  if (!schema || json_type(schema) != JSON_OBJECT ||
+      json_object_size(schema) != 1u ||
+      !json_object_get(schema, "type")) {
+    return 0;
+  }
+  type = contract_type(schema);
+  if (!contract_scalar(type)) return 0;
+  if (out_type) *out_type = type;
+  return 1;
+}
+
 static int contract_definition_by_name(
     const turbo_tool_registry_t *registry,
     const char *name,
@@ -123,17 +139,23 @@ turbo_agent_tool_result_slot_compatibility(
           : NULL;
 
   producer_type = contract_type(result_schema);
-  consumer_type = contract_type(slot);
+  if (!contract_type_only_scalar(slot, &consumer_type)) {
+    turbo_runtime_json_destroy(owned_parameters);
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
   turbo_runtime_json_destroy(owned_parameters);
 
-  if (!contract_scalar(producer_type) ||
-      !contract_scalar(consumer_type)) {
+  if (!contract_scalar(producer_type)) {
     return TURBO_AGENT_CONTRACT_UNKNOWN;
   }
   if (producer_type == consumer_type ||
       (producer_type == TURBO_AGENT_CONTRACT_TYPE_INTEGER &&
        consumer_type == TURBO_AGENT_CONTRACT_TYPE_NUMBER)) {
     return TURBO_AGENT_CONTRACT_COMPATIBLE;
+  }
+  if ((producer_type == TURBO_AGENT_CONTRACT_TYPE_NUMBER &&
+       consumer_type == TURBO_AGENT_CONTRACT_TYPE_INTEGER)) {
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
   }
   return TURBO_AGENT_CONTRACT_INCOMPATIBLE;
 }

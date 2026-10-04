@@ -21,7 +21,9 @@ extern "C" {
 
 typedef enum turbo_agent_template_kind_e {
   TURBO_AGENT_TEMPLATE_INVALID = 0,
-  TURBO_AGENT_TEMPLATE_INSPECT = 1
+  TURBO_AGENT_TEMPLATE_INSPECT = 1,
+  TURBO_AGENT_TEMPLATE_CHANGE = 2,
+  TURBO_AGENT_TEMPLATE_REPAIR = 3
 } turbo_agent_template_kind_t;
 
 typedef enum turbo_agent_template_property_e {

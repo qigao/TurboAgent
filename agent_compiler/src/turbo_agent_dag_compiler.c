@@ -114,8 +114,9 @@ static turbo_agent_dag_template_kind_t dag_source_template_kind(
       case TURBO_AGENT_DAG_TEMPLATE_V2_REPAIR:
         return TURBO_AGENT_DAG_TEMPLATE_REPAIR;
       case TURBO_AGENT_DAG_TEMPLATE_V2_GENERIC:
-      default:
         return TURBO_AGENT_DAG_TEMPLATE_GENERIC;
+      default:
+        return (turbo_agent_dag_template_kind_t)UINT32_MAX;
     }
   }
   return source->template_kind;

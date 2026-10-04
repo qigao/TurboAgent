@@ -21,12 +21,16 @@ extern "C" {
 
 typedef enum turbo_agent_template_kind_e {
   TURBO_AGENT_TEMPLATE_INVALID = 0,
-  TURBO_AGENT_TEMPLATE_INSPECT = 1
+  TURBO_AGENT_TEMPLATE_INSPECT = 1,
+  TURBO_AGENT_TEMPLATE_CHANGE = 2,
+  TURBO_AGENT_TEMPLATE_REPAIR = 3
 } turbo_agent_template_kind_t;
 
 typedef enum turbo_agent_template_property_e {
   TURBO_AGENT_TEMPLATE_PROPERTY_NONE = 0,
-  TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY = 1u << 0
+  TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY = 1u << 0,
+  /** Template must compile through the finite DAG compiler, not Phase-1 single-step API. */
+  TURBO_AGENT_TEMPLATE_PROPERTY_DAG_ONLY = 1u << 1
 } turbo_agent_template_property_t;
 
 typedef struct turbo_agent_template_descriptor_s {

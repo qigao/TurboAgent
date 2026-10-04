@@ -134,6 +134,72 @@ CXX_C_API int
 turbo_praktor_tool_pack_supports_host_tools(
     const turbo_praktor_tool_pack_t *pack);
 
+
+#define TURBO_PRAKTOR_INLINE_PLAN_CONFIG_ABI_VERSION 1u
+
+typedef struct turbo_praktor_inline_plan_s turbo_praktor_inline_plan_t;
+
+typedef struct turbo_praktor_inline_plan_config_s {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  /** Logical immutable source identity; never interpreted as a filesystem path. */
+  const char *source_id;
+  /** Borrowed exact UTF-8 inline WorkflowPlan source for the compile call only. */
+  const char *workflow_yaml;
+  size_t workflow_yaml_size;
+  /**
+   * Borrowed compiler-approved RuntimeTools projection.
+   *
+   * Every HostTool identity must resolve exactly in this projection before any
+   * DAG task starts. The projection and callback dependencies must outlive the
+   * compiled inline plan and remain quiescent while it may execute.
+   */
+  const turbo_tool_registry_t *approved_host_tools;
+  /** Maximum canonical Praktor execution result accepted by this bridge. */
+  size_t max_result_bytes;
+} turbo_praktor_inline_plan_config_t;
+
+CXX_C_API void
+turbo_praktor_inline_plan_config_init(
+    turbo_praktor_inline_plan_config_t *config);
+
+/** True only for released Praktor ABI 2.6+ inline WorkflowPlan capability. */
+CXX_C_API int
+turbo_praktor_tool_pack_supports_inline_workflow_plan(
+    const turbo_praktor_tool_pack_t *pack);
+
+/** Released public hard cap for HostTool retries; zero when inline ABI is absent. */
+CXX_C_API size_t
+turbo_praktor_tool_pack_host_tool_max_retries(
+    const turbo_praktor_tool_pack_t *pack);
+
+/**
+ * Compile reviewed in-memory HostTool-only WorkflowPlan source.
+ *
+ * There is deliberately no file-backed fallback. On unsupported/invalid
+ * released ABI the call fails closed and leaves out_plan NULL.
+ */
+CXX_C_API turbo_tool_status_t
+turbo_praktor_tool_pack_compile_inline_plan(
+    turbo_praktor_tool_pack_t *pack,
+    const turbo_praktor_inline_plan_config_t *config,
+    turbo_praktor_inline_plan_t **out_plan);
+
+/**
+ * Execute one immutable inline plan through the approved RuntimeTools
+ * projection and return the complete canonical Praktor JSON result.
+ */
+CXX_C_API turbo_tool_status_t
+turbo_praktor_inline_plan_execute(
+    const turbo_praktor_inline_plan_t *plan,
+    const turbo_tool_execution_context_t *context,
+    json_value_t **out_result);
+
+CXX_C_API void
+turbo_praktor_inline_plan_destroy(
+    turbo_praktor_inline_plan_t *plan);
+
+
 #ifdef __cplusplus
 }
 #endif

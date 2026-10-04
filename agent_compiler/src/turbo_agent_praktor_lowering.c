@@ -262,11 +262,6 @@ static turbo_agent_praktor_lowering_status_t lower_emit_step(
         diagnostic, TURBO_AGENT_PRAKTOR_LOWERING_INVALID_PLAN,
         "template DAG certificate does not match canonical topology");
   }
-  if (retry_limit != 0) {
-    return lower_fail(
-        diagnostic, TURBO_AGENT_PRAKTOR_LOWERING_UNSUPPORTED_RETRY,
-        "Praktor inline lowering does not support retry_limit > 0 yet");
-  }
   if (!lower_arguments_are_concrete(arguments)) {
     return lower_fail(
         diagnostic, TURBO_AGENT_PRAKTOR_LOWERING_INVALID_PLAN,
@@ -297,6 +292,18 @@ static turbo_agent_praktor_lowering_status_t lower_emit_step(
     if (!lower_append(buffer, "    depends_on: ") ||
         !lower_append_n(
             buffer, dependencies_text, dependencies_size) ||
+        !lower_append(buffer, "\n")) {
+      goto oom;
+    }
+  }
+
+  if (retry_limit != 0) {
+    char retry_text[32];
+    const int retry_size =
+        snprintf(retry_text, sizeof(retry_text), "%d", retry_limit);
+    if (retry_size <= 0 || (size_t)retry_size >= sizeof(retry_text) ||
+        !lower_append(buffer, "    retries:\n      count: ") ||
+        !lower_append_n(buffer, retry_text, (size_t)retry_size) ||
         !lower_append(buffer, "\n")) {
       goto oom;
     }

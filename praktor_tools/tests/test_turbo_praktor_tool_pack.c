@@ -652,6 +652,52 @@ spec("Praktor workflow tool pack") {
     free(workspace);
   }
 
+  it("preserves WorkflowPlan semantics for workflow config v2 prefix callers") {
+    char *workspace = praktor_test_workspace();
+    char workflow_path[SALTS_FS_MAX_PATH] = {0};
+    turbo_praktor_tool_pack_config_t pack_config;
+    turbo_praktor_workflow_config_t workflow_config;
+    turbo_praktor_tool_pack_t *pack;
+    turbo_tool_definition_t definition = {0};
+    json_value_t *schema = NULL;
+
+    check_not_null(workspace);
+    check_equal(praktor_test_write_harness_safe_workflow(
+                     workspace, workflow_path, sizeof(workflow_path)),
+                 0);
+    turbo_praktor_tool_pack_config_init(&pack_config);
+    pack = turbo_praktor_tool_pack_create(&pack_config);
+    check_not_null(pack);
+
+    memset(&workflow_config, 0, sizeof(workflow_config));
+    workflow_config.struct_size = TURBO_PRAKTOR_WORKFLOW_CONFIG_V2_SIZE;
+    workflow_config.abi_version = TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION_V2;
+    workflow_config.tool_name = "praktor_v2";
+    workflow_config.description = "v2 WorkflowPlan compatibility.";
+    workflow_config.workflow_path = workflow_path;
+    workflow_config.strict = 1;
+    workflow_config.execution_policy.mode = TURBO_TOOL_EXECUTION_EXCLUSIVE;
+    workflow_config.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    workflow_config.require_harness_safe = 1;
+    check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
+                TURBO_TOOL_OK);
+
+    check_equal(turbo_tool_registry_get_definition(
+                    turbo_praktor_tool_pack_registry(pack), 0, &definition),
+                TURBO_TOOL_OK);
+    schema = json_parse(definition.parameters_json,
+                        strlen(definition.parameters_json));
+    check_not_null(schema);
+    check_false(json_get_bool(schema, "additionalProperties", true));
+    check_not_null(json_object_get(
+        json_object_get(schema, "properties"), "payload"));
+
+    turbo_runtime_json_destroy(schema);
+    turbo_praktor_tool_pack_destroy(pack);
+    praktor_test_cleanup(workspace, workflow_path);
+    free(workspace);
+  }
+
   it("uses WorkflowPlan contracts for harness-native registration and execution") {
     char *workspace = praktor_test_workspace();
     char workflow_path[SALTS_FS_MAX_PATH] = {0};

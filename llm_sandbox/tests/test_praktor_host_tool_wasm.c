@@ -50,20 +50,15 @@ static int praktor_wasm_write_workflow(
     const char *workspace, char *out_path, size_t out_size) {
   static const char yaml[] =
       "input_policy: strict\n"
-      "inputs:\n"
-      "  message:\n"
-      "    type: string\n"
-      "    required: true\n"
       "outputs:\n"
-      "  message:\n"
-      "    type: string\n"
+      "  echoed:\n"
+      "    type: object\n"
       "    required: true\n"
-      "    value: \"{{ tasks.echo.outputs.result.message }}\"\n"
+      "    value: \"{{ tasks.echo.outputs.result }}\"\n"
       "tasks:\n"
       "  - name: echo\n"
       "    tool: echo_json\n"
-      "    with:\n"
-      "      message: \"{{ variables.message }}\"\n";
+      "    with: {}\n";
   salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1u);
   if (salts_fs_path_join(out_path, out_size, workspace, "wasm-host-tool.yml") != 0)
     return -1;
@@ -122,8 +117,7 @@ spec("Praktor HostTool TurboWasm bridge") {
                     praktor_pack, &workflow_config),
                 TURBO_TOOL_OK);
 
-    arguments = json_parse("{\"message\":\"phase3\"}",
-                           strlen("{\"message\":\"phase3\"}"));
+    arguments = json_parse("{}", strlen("{}"));
     check_not_null(arguments);
     check_equal(turbo_tool_registry_execute_json_value(
                     turbo_praktor_tool_pack_registry(praktor_pack),
@@ -133,7 +127,9 @@ spec("Praktor HostTool TurboWasm bridge") {
     check_equal(json_get_string(result, "workflow_status"), "success");
     outputs = json_object_get(result, "outputs");
     check_not_null(outputs);
-    check_equal(json_get_string(outputs, "message"), "phase3");
+    check_not_null(json_object_get(outputs, "echoed"));
+    check_equal(json_type(json_object_get(outputs, "echoed")), JSON_OBJECT);
+    check_equal(json_object_size(json_object_get(outputs, "echoed")), 0);
 
     turbo_runtime_json_destroy(result);
     turbo_runtime_json_destroy(arguments);

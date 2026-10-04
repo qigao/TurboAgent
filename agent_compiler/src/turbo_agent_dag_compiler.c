@@ -33,6 +33,8 @@ struct turbo_agent_executable_dag_s {
   turbo_agent_executable_dag_step_t *steps;
   size_t step_count;
   uint32_t replan_budget;
+  turbo_agent_dag_template_kind_t template_kind;
+  uint32_t plan_generation;
   turbo_tool_registry_t *approved_tools;
   char **capabilities;
   size_t capability_count;
@@ -84,6 +86,52 @@ static int dag_config_valid(const turbo_agent_compiler_config_t *config) {
          config->max_argument_bytes != 0u &&
          config->max_argument_nodes != 0u &&
          config->max_argument_depth != 0u;
+}
+
+static int dag_source_valid(const turbo_agent_dag_source_t *source) {
+  if (!source) return 0;
+  if (source->abi_version == TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V1) {
+    return source->struct_size >= TURBO_AGENT_DAG_SOURCE_V1_SIZE;
+  }
+  return source->abi_version == TURBO_AGENT_DAG_SOURCE_ABI_VERSION &&
+         source->struct_size >= sizeof(*source);
+}
+
+static turbo_agent_dag_template_kind_t dag_source_template_kind(
+    const turbo_agent_dag_source_t *source) {
+  if (!source ||
+      source->abi_version < TURBO_AGENT_DAG_SOURCE_ABI_VERSION ||
+      source->struct_size < sizeof(*source)) {
+    return TURBO_AGENT_DAG_TEMPLATE_GENERIC;
+  }
+  return source->template_kind;
+}
+
+static uint32_t dag_source_plan_generation(
+    const turbo_agent_dag_source_t *source) {
+  if (!source ||
+      source->abi_version < TURBO_AGENT_DAG_SOURCE_ABI_VERSION ||
+      source->struct_size < sizeof(*source)) {
+    return 0u;
+  }
+  return source->plan_generation;
+}
+
+static int dag_template_kind_valid(turbo_agent_dag_template_kind_t kind) {
+  return kind >= TURBO_AGENT_DAG_TEMPLATE_GENERIC &&
+         kind <= TURBO_AGENT_DAG_TEMPLATE_REPAIR;
+}
+
+static const char *dag_template_kind_name(turbo_agent_dag_template_kind_t kind) {
+  switch (kind) {
+    case TURBO_AGENT_DAG_TEMPLATE_CHANGE:
+      return "change";
+    case TURBO_AGENT_DAG_TEMPLATE_REPAIR:
+      return "repair";
+    case TURBO_AGENT_DAG_TEMPLATE_GENERIC:
+    default:
+      return "generic";
+  }
 }
 
 static int dag_capability_allowed(
@@ -430,6 +478,13 @@ static turbo_agent_compile_status_t dag_admit_step(
                     "DAG tool metadata is unavailable");
   }
 
+  if (source->retry_limit != 0u &&
+      step->execution_policy.idempotency == TURBO_TOOL_IDEMPOTENCY_NONE) {
+    return dag_fail(
+        diagnostic, TURBO_AGENT_COMPILE_RETRY_UNSAFE,
+        "DAG retry requires READ_ONLY or KEYED tool idempotency");
+  }
+
   status = dag_copy_capabilities(
       config, required, required_count, step, diagnostic);
   if (status != TURBO_AGENT_COMPILE_OK) return status;
@@ -637,8 +692,10 @@ static uint64_t dag_compute_hash(const turbo_agent_executable_dag_t *plan) {
   uint64_t hash = DAG_FNV_OFFSET;
   size_t i;
 
-  hash = dag_hash_cstring(hash, "TurboAgent.ExecutableDAG.v1");
+  hash = dag_hash_cstring(hash, "TurboAgent.ExecutableDAG.v2");
   hash = dag_hash_u32(hash, TURBO_AGENT_DAG_CERTIFICATE_VERSION);
+  hash = dag_hash_u32(hash, (uint32_t)plan->template_kind);
+  hash = dag_hash_u32(hash, plan->plan_generation);
   hash = dag_hash_u32(hash, plan->replan_budget);
   hash = dag_hash_u64(hash, (uint64_t)plan->step_count);
 
@@ -685,6 +742,8 @@ void turbo_agent_dag_source_init(turbo_agent_dag_source_t *source) {
   memset(source, 0, sizeof(*source));
   source->struct_size = sizeof(*source);
   source->abi_version = TURBO_AGENT_DAG_SOURCE_ABI_VERSION;
+  source->template_kind = TURBO_AGENT_DAG_TEMPLATE_GENERIC;
+  source->plan_generation = 0u;
 }
 
 turbo_agent_compile_status_t turbo_agent_compile_dag(
@@ -701,10 +760,10 @@ turbo_agent_compile_status_t turbo_agent_compile_dag(
   dag_diagnostic_set(diagnostic, TURBO_AGENT_COMPILE_OK, "");
 
   if (!dag_config_valid(config) || !source_registry || !source || !out_plan ||
-      source->struct_size != sizeof(*source) ||
-      source->abi_version != TURBO_AGENT_DAG_SOURCE_ABI_VERSION ||
+      !dag_source_valid(source) ||
       !source->steps || source->step_count == 0u ||
-      source->step_count > TURBO_AGENT_DAG_MAX_STEPS) {
+      source->step_count > TURBO_AGENT_DAG_MAX_STEPS ||
+      !dag_template_kind_valid(dag_source_template_kind(source))) {
     return dag_fail(diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
                     "invalid DAG compiler arguments");
   }
@@ -739,6 +798,8 @@ turbo_agent_compile_status_t turbo_agent_compile_dag(
   }
   plan->step_count = source->step_count;
   plan->replan_budget = source->replan_budget;
+  plan->template_kind = dag_source_template_kind(source);
+  plan->plan_generation = dag_source_plan_generation(source);
 
   for (i = 0; i < source->step_count; ++i) {
     status = dag_admit_step(
@@ -789,6 +850,16 @@ size_t turbo_agent_executable_dag_step_count(
   return plan ? plan->step_count : 0u;
 }
 
+turbo_agent_dag_template_kind_t turbo_agent_executable_dag_template_kind(
+    const turbo_agent_executable_dag_t *plan) {
+  return plan ? plan->template_kind : TURBO_AGENT_DAG_TEMPLATE_GENERIC;
+}
+
+uint32_t turbo_agent_executable_dag_plan_generation(
+    const turbo_agent_executable_dag_t *plan) {
+  return plan ? plan->plan_generation : 0u;
+}
+
 const turbo_tool_registry_t *turbo_agent_executable_dag_approved_tools(
     const turbo_agent_executable_dag_t *plan) {
   return plan ? plan->approved_tools : NULL;
@@ -818,6 +889,18 @@ json_value_t *turbo_agent_executable_dag_certificate_json_value(
   field = json_create_string("praktor_host_tool");
   if (!field ||
       turbo_runtime_json_object_set(root, "backend", field) !=
+          TURBO_RUNTIME_JSON_OK) goto fail;
+  field = NULL;
+
+  field = json_create_string(dag_template_kind_name(plan->template_kind));
+  if (!field ||
+      turbo_runtime_json_object_set(root, "template", field) !=
+          TURBO_RUNTIME_JSON_OK) goto fail;
+  field = NULL;
+
+  field = json_create_int64((int64_t)plan->plan_generation);
+  if (!field ||
+      turbo_runtime_json_object_set(root, "plan_generation", field) !=
           TURBO_RUNTIME_JSON_OK) goto fail;
   field = NULL;
 

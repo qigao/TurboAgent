@@ -8,6 +8,7 @@
 #include <salts/clock.h>
 #include <tstr.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 

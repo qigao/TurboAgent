@@ -643,6 +643,7 @@ spec("turbo tool runtime") {
     turbo_tool_registry_t *bridge = NULL;
     turbo_tool_definition_v5_t definition = {0};
     turbo_tool_runtime_tool_v2_t tool = {0};
+    turbo_tool_runtime_tool_v3_t effect_tool = {0};
     const char *schema_json = NULL;
     const json_value_t *schema = NULL;
     int strict_result = 0;
@@ -668,6 +669,9 @@ spec("turbo tool runtime") {
     check_equal(tool.base.name, "native_typed");
     check_equal(tool.result_schema_json, "{\"type\":\"string\"}");
     check_equal(tool.strict_result, 1);
+    check_equal(turbo_tool_runtime_get_tool_v3(runtime, 0, &effect_tool),
+                TURBO_TOOL_OK);
+    check_equal(effect_tool.effect_flags, TURBO_TOOL_EFFECT_UNKNOWN);
 
     bridge = turbo_tool_runtime_build_registry_bridge(runtime);
     check_not_null(bridge);

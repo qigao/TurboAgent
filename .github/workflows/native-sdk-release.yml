@@ -136,11 +136,19 @@ jobs:
           #include <turbo_tool.h>
           int main(void) {
             turbo_praktor_tool_pack_config_t config;
+            turbo_praktor_workflow_config_t workflow;
             turbo_tool_execution_context_t context = {0};
             turbo_praktor_tool_pack_config_init(&config);
+            turbo_praktor_workflow_config_init(&workflow);
             context.struct_size = sizeof(context);
             context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
-            return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION ? 0 : 1;
+            (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
+            return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
+                           workflow.abi_version ==
+                               TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+                           workflow.struct_size == sizeof(workflow)
+                       ? 0
+                       : 1;
           }
           EOF
           cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$prefix;$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
@@ -225,8 +233,16 @@ jobs:
           #include <turbo_praktor_tool_pack.h>
           int main(void) {
             turbo_praktor_tool_pack_config_t config;
+            turbo_praktor_workflow_config_t workflow;
             turbo_praktor_tool_pack_config_init(&config);
-            return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION ? 0 : 1;
+            turbo_praktor_workflow_config_init(&workflow);
+            (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
+            return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
+                           workflow.abi_version ==
+                               TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+                           workflow.struct_size == sizeof(workflow)
+                       ? 0
+                       : 1;
           }
           EOF
           cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_TARGET_TRIPLET=arm64-osx             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DCMAKE_PREFIX_PATH="$prefix;$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"

@@ -15,6 +15,18 @@ struct turbo_wasm_tool_pack_s {
   size_t max_tools;
 };
 
+static void turbo_wasm_tool_pack_remove_runtime_tools(
+    turbo_wasm_tool_pack_t *pack, turbo_tool_runtime_t *runtime) {
+  size_t i;
+  if (!pack || !runtime) return;
+  for (i = 0; i < turbo_tool_runtime_count(runtime); ++i) {
+    turbo_tool_runtime_tool_t tool = {0};
+    if (turbo_tool_runtime_get_tool(runtime, i, &tool) == TURBO_TOOL_OK &&
+        tool.name)
+      (void)turbo_tool_registry_remove(pack->registry, tool.name);
+  }
+}
+
 static int
 turbo_wasm_tool_pack_execution_policy_valid(const turbo_tool_execution_policy_t *policy) {
   if (!policy || policy->mode < TURBO_TOOL_EXECUTION_SEQUENTIAL ||
@@ -85,6 +97,8 @@ turbo_wasm_tool_pack_add_module(turbo_wasm_tool_pack_t *pack,
                                 const turbo_wasm_tool_pack_module_config_t *config) {
   turbo_tool_runtime_t *runtime;
   turbo_tool_status_t status;
+  int registry_committed = 0;
+  json_value_t *execution_metadata = NULL;
   size_t module_tool_count;
   size_t current_tool_count;
 
@@ -97,28 +111,54 @@ turbo_wasm_tool_pack_add_module(turbo_wasm_tool_pack_t *pack,
     return TURBO_TOOL_BACKPRESSURE;
   }
 
-  runtime = turbo_tool_runtime_wasm_create(&config->runtime);
-  if (!runtime) {
+  runtime = turbo_tool_runtime_wasm_create_with_metadata(
+      &config->runtime, &execution_metadata);
+  if (!runtime || !execution_metadata) {
+    turbo_runtime_json_destroy(execution_metadata);
+    turbo_tool_runtime_destroy(runtime);
     return TURBO_TOOL_ERROR;
   }
   module_tool_count = turbo_tool_runtime_count(runtime);
   current_tool_count = turbo_tool_registry_count(pack->registry);
   if (!module_tool_count) {
+    turbo_runtime_json_destroy(execution_metadata);
     turbo_tool_runtime_destroy(runtime);
     return TURBO_TOOL_ERROR;
   }
   if (current_tool_count > pack->max_tools ||
       module_tool_count > pack->max_tools - current_tool_count) {
+    turbo_runtime_json_destroy(execution_metadata);
     turbo_tool_runtime_destroy(runtime);
     return TURBO_TOOL_BACKPRESSURE;
   }
 
-  status = turbo_tool_runtime_add_to_registry(runtime, pack->registry, &config->execution_policy);
-  turbo_tool_runtime_destroy(runtime);
+  status = turbo_tool_runtime_add_to_registry(
+      runtime, pack->registry, &config->execution_policy);
+  if (status == TURBO_TOOL_OK) {
+    size_t tool_index;
+    registry_committed = 1;
+    for (tool_index = 0; tool_index < module_tool_count; ++tool_index) {
+      turbo_tool_runtime_tool_t tool = {0};
+      status = turbo_tool_runtime_get_tool(runtime, tool_index, &tool);
+      if (status != TURBO_TOOL_OK || !tool.name) {
+        status = TURBO_TOOL_ERROR;
+        break;
+      }
+      status = turbo_tool_registry_set_execution_metadata(
+          pack->registry, tool.name, execution_metadata);
+      if (status != TURBO_TOOL_OK) break;
+    }
+  }
   if (status != TURBO_TOOL_OK) {
+    if (registry_committed)
+      turbo_wasm_tool_pack_remove_runtime_tools(pack, runtime);
+    turbo_runtime_json_destroy(execution_metadata);
+    turbo_tool_runtime_destroy(runtime);
     return status;
   }
 
+  turbo_runtime_json_destroy(execution_metadata);
+  turbo_tool_runtime_destroy(runtime);
   pack->module_count++;
   return TURBO_TOOL_OK;
 }

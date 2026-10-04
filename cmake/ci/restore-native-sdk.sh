@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-rid="${1:?usage: restore-native-sdk.sh <rid> <with-praktor:0|1>}"
+rid="${1:?usage: restore-native-sdk.sh <rid> <with-praktor:0|1> [with-wasm:0|1]}"
 with_praktor="${2:-0}"
+with_wasm="${3:-0}"
+if [[ "$with_wasm" != "0" && "$with_wasm" != "1" ]]; then
+  echo "with-wasm must be 0 or 1" >&2
+  exit 2
+fi
 sdk_root="${RUNNER_TEMP:?RUNNER_TEMP is required}/turboagent-release-sdks"
 mkdir -p "$sdk_root"
 
@@ -46,4 +51,9 @@ if [[ "$with_praktor" == "1" ]]; then
     echo "TURBOSCRIPT_ROOT=$turboscript_root"
     echo "PRAKTOR_ROOT=$praktor_root"
   } >> "$GITHUB_ENV"
+fi
+
+if [[ "$with_wasm" == "1" ]]; then
+  turbowasm_root="$(restore_sdk qigao/turbowasm 'TurboWasm.Native.*.nupkg' turbowasm 'lib/cmake/TurboWasm/TurboWasmConfig.cmake')"
+  echo "TURBOWASM_ROOT=$turbowasm_root" >> "$GITHUB_ENV"
 fi

@@ -15,24 +15,6 @@ static int pack_workspace_write_text(const char *path, const char *text) {
   return salts_fs_write_file(path, &buffer);
 }
 
-static turbo_wasm_policy_t *pack_workspace_wasm_policy_create(char *module_name,
-                                                              size_t module_name_size) {
-  turbo_wasm_policy_t *policy = turbo_wasm_policy_create();
-  char module_root[SALTS_FS_MAX_PATH];
-
-  if (!policy ||
-      salts_fs_path_dirname(LLM_SANDBOX_WASM_TOOL_WASM_PATH, module_root, sizeof(module_root)) !=
-          0 ||
-      salts_fs_path_basename(LLM_SANDBOX_WASM_TOOL_WASM_PATH, module_name, module_name_size) != 0 ||
-      turbo_wasm_policy_set_capabilities(policy, TURBO_WASM_CAP_CORE | TURBO_WASM_CAP_APP) !=
-          TURBO_WASM_OK ||
-      turbo_wasm_policy_set_module_root(policy, module_root) != TURBO_WASM_OK) {
-    turbo_wasm_policy_destroy(policy);
-    return NULL;
-  }
-  return policy;
-}
-
 spec("TurboWasm tool pack workspace integration") {
   it("projects skill-declared Wasm tools only when Agent policy allows them") {
     static const char skill_text[] = "---\n"
@@ -47,12 +29,9 @@ spec("TurboWasm tool pack workspace integration") {
     char skills[SALTS_FS_MAX_PATH];
     char skill_dir[SALTS_FS_MAX_PATH];
     char skill_path[SALTS_FS_MAX_PATH];
-    char module_name[SALTS_FS_MAX_PATH];
     turbo_wasm_tool_pack_config_t pack_config;
     turbo_wasm_tool_pack_module_config_t module_config;
     turbo_wasm_tool_pack_t *pack = NULL;
-    turbo_wasm_policy_t *wasm_policy =
-        pack_workspace_wasm_policy_create(module_name, sizeof(module_name));
     turbo_agent_policy_t agent_policy = turbo_agent_policy_default();
     turbo_agent_workspace_tool_capability_t capability = {
         "echo_json", TURBO_AGENT_POLICY_CAPABILITY_RUNTIME_TOOLS};
@@ -62,7 +41,6 @@ spec("TurboWasm tool pack workspace integration") {
     char *output = NULL;
 
     check_not_null(root);
-    check_not_null(wasm_policy);
     check_equal(salts_fs_path_join(skills, sizeof(skills), root, "skills"), 0);
     check_equal(salts_fs_path_join(skill_dir, sizeof(skill_dir), skills, "wasm-echo"), 0);
     check_equal(salts_fs_mkdir(skills, 0700), 0);
@@ -74,11 +52,8 @@ spec("TurboWasm tool pack workspace integration") {
     pack = turbo_wasm_tool_pack_create(&pack_config);
     check_not_null(pack);
     turbo_wasm_tool_pack_module_config_init(&module_config);
-    module_config.runtime.module_path = module_name;
-    module_config.runtime.policy = wasm_policy;
+    module_config.runtime.module_path = LLM_SANDBOX_WASM_TOOL_WASM_PATH;
     check_equal(turbo_wasm_tool_pack_add_module(pack, &module_config), TURBO_TOOL_OK);
-    turbo_wasm_policy_destroy(wasm_policy);
-    wasm_policy = NULL;
 
     agent_policy.allow_runtime_tools = 1;
     turbo_agent_workspace_config_init(&workspace_config);

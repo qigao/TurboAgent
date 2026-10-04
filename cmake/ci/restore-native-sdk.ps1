@@ -1,5 +1,6 @@
 param(
-  [Parameter(Mandatory = $true)][string]$Rid
+  [Parameter(Mandatory = $true)][string]$Rid,
+  [switch]$WithWasm
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,3 +51,8 @@ $chttpRoot = Restore-Sdk "qigao/chttp" "CHttp.Native.*.nupkg" "chttp" "lib\cmake
 "SALTS_ROOT=$saltsRoot" >> $env:GITHUB_ENV
 "SALTS_UTILS_ROOT=$utilsRoot" >> $env:GITHUB_ENV
 "CHTTP_ROOT=$chttpRoot" >> $env:GITHUB_ENV
+
+if ($WithWasm) {
+  $turbowasmRoot = Restore-Sdk "qigao/turbowasm" "TurboWasm.Native.*.nupkg" "turbowasm" "lib\cmake\TurboWasm\TurboWasmConfig.cmake"
+  "TURBOWASM_ROOT=$turbowasmRoot" >> $env:GITHUB_ENV
+}

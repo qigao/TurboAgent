@@ -3,7 +3,7 @@
 TurboAgent 的 native SDK package，由 `qigao/TurboAgent` 自己构建、验证和发布。
 
 TurboAgent.Native **不发布 NuGet dependency metadata**，因此 package 本身不保留
-Salts / SaltsUtils / CHttp / Praktor 的任何版本号。发布 CI 与仓库 CI 始终从各依赖仓库
+Salts / SaltsUtils / CHttp / TurboWasm / Praktor 的任何版本号。发布 CI 与仓库 CI 始终从各依赖仓库
 恢复当前 latest released SDK，再通过 CMake `find_dependency(... CONFIG)` 验证兼容性。
 
 TurboAgent 自身的第三方 C/C++ 依赖（例如 OpenSSL / sqlite）仍由项目的
@@ -16,7 +16,11 @@ vcpkg manifest/toolchain 解析，也不写入 Native package 的版本依赖元
 - `sdk/macos-arm64`
 - `sdk/android-arm64-v8a`
 
-Praktor 0.4.x 当前不发布 Windows SDK，因此：
+TurboWasm-backed `TurboAgent::WasmTools` 当前在四个平台的 Native SDK 中都发布。
+因此使用当前完整 TurboAgent package 执行 `find_package(TurboAgent CONFIG REQUIRED)`
+时，需要让对应平台的 latest released TurboWasm SDK 可发现。
+
+Praktor 当前不发布 Windows SDK，因此：
 
 - Linux / macOS / Android SDK 包含 `TurboAgent::PraktorTools`
 - Windows SDK 不包含 `TurboAgent::PraktorTools`
@@ -24,12 +28,15 @@ Praktor 0.4.x 当前不发布 Windows SDK，因此：
 
 ## Consume
 
-还原 NuGet graph 后，为目标平台设置：
+还原最新 released native SDK graph 后，为目标平台设置：
 
 - `SALTS_ROOT`
 - `SALTS_UTILS_ROOT`
 - `CHTTP_ROOT`
+- `TURBOWASM_ROOT`
 - Linux/macOS/Android 如需 PraktorTools，再设置 `PRAKTOR_ROOT` 和可发现的 TurboScript SDK
+
+不写死任何 GitHub native package 版本；消费端始终恢复各仓库的 latest released SDK。
 
 然后使用 vcpkg toolchain 配置消费者：
 
@@ -43,13 +50,22 @@ target_link_libraries(my_app PRIVATE
   TurboAgent::LangChain)
 ```
 
+TurboWasm sandbox tools：
+
+```cmake
+target_link_libraries(my_app PRIVATE TurboAgent::WasmTools)
+```
+
+`WasmTools` 通过 installed `TurboWasm::Runtime` target 链接；TurboAgent 不 vendor
+TurboWasm，也不通过 source checkout 或 pinned package version 兜底。
+
 Praktor workflow tools：
 
 ```cmake
 target_link_libraries(my_app PRIVATE TurboAgent::PraktorTools)
 ```
 
-TurboAgent 1.1.0 包含 harness-native Praktor WorkflowPlan 集成：
+TurboAgent harness-native Praktor WorkflowPlan 集成包括：
 
 - immutable reviewed WorkflowPlan identity
 - generated workflow schema

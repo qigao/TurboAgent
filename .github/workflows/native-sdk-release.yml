@@ -142,22 +142,26 @@ jobs:
             turbo_praktor_tool_pack_config_t config;
             turbo_praktor_workflow_config_t workflow;
             turbo_tool_execution_context_t context = {0};
-            turbo_tool_definition_v5_t definition = {0};
-            turbo_tool_runtime_tool_v2_t runtime_tool = {0};
+            turbo_tool_definition_v6_t definition = {0};
+            turbo_tool_runtime_tool_v3_t runtime_tool = {0};
             const char *schema_json = NULL;
             const json_value_t *schema = NULL;
             int strict_result = 0;
+            turbo_tool_effect_flags_t effect_flags = 0;
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             context.struct_size = sizeof(context);
             context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
-            if (turbo_tool_registry_add_v5(NULL, &definition) !=
+            if (turbo_tool_registry_add_v6(NULL, &definition) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_registry_get_result_contract(
                     NULL, "missing", &schema_json, &schema, &strict_result) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
-                turbo_tool_runtime_get_tool_v2(NULL, 0, &runtime_tool) !=
+                turbo_tool_registry_get_effects(
+                    NULL, "missing", &effect_flags) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_get_tool_v3(NULL, 0, &runtime_tool) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_agent_tool_result_slot_compatibility(
                     NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
@@ -258,20 +262,24 @@ jobs:
           int main(void) {
             turbo_praktor_tool_pack_config_t config;
             turbo_praktor_workflow_config_t workflow;
-            turbo_tool_definition_v5_t definition = {0};
-            turbo_tool_runtime_tool_v2_t runtime_tool = {0};
+            turbo_tool_definition_v6_t definition = {0};
+            turbo_tool_runtime_tool_v3_t runtime_tool = {0};
             const char *schema_json = NULL;
             const json_value_t *schema = NULL;
             int strict_result = 0;
+            turbo_tool_effect_flags_t effect_flags = 0;
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
-            if (turbo_tool_registry_add_v5(NULL, &definition) !=
+            if (turbo_tool_registry_add_v6(NULL, &definition) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_registry_get_result_contract(
                     NULL, "missing", &schema_json, &schema, &strict_result) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
-                turbo_tool_runtime_get_tool_v2(NULL, 0, &runtime_tool) !=
+                turbo_tool_registry_get_effects(
+                    NULL, "missing", &effect_flags) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_get_tool_v3(NULL, 0, &runtime_tool) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_agent_tool_result_slot_compatibility(
                     NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
@@ -541,20 +549,24 @@ jobs:
           int turboagent_release_consumer_probe(void) {
             turbo_praktor_tool_pack_config_t config;
             turbo_praktor_workflow_config_t workflow;
-            turbo_tool_definition_v5_t definition = {0};
-            turbo_tool_runtime_tool_v2_t runtime_tool = {0};
+            turbo_tool_definition_v6_t definition = {0};
+            turbo_tool_runtime_tool_v3_t runtime_tool = {0};
             const char *schema_json = NULL;
             const json_value_t *schema = NULL;
             int strict_result = 0;
+            turbo_tool_effect_flags_t effect_flags = 0;
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
-            if (turbo_tool_registry_add_v5(NULL, &definition) !=
+            if (turbo_tool_registry_add_v6(NULL, &definition) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_registry_get_result_contract(
                     NULL, "missing", &schema_json, &schema, &strict_result) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
-                turbo_tool_runtime_get_tool_v2(NULL, 0, &runtime_tool) !=
+                turbo_tool_registry_get_effects(
+                    NULL, "missing", &effect_flags) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_get_tool_v3(NULL, 0, &runtime_tool) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_agent_tool_result_slot_compatibility(
                     NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
@@ -606,6 +618,8 @@ jobs:
             test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
             test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
             test -f "package/sdk/$rid/include/turbo_tool.h"
+            test -f "package/sdk/$rid/include/turbo_tool_registry.h"
+            test -f "package/sdk/$rid/include/turbo_tool_runtime.h"
             test -f "package/sdk/$rid/include/turbo_agent_compiler.h"
             test -f "package/sdk/$rid/include/turbo_agent_contracts.h"
             test -f "package/sdk/$rid/include/turbo_agent_dag_compiler.h"

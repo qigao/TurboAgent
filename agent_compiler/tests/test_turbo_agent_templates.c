@@ -281,7 +281,7 @@ spec("AgentCompiler Change and Repair templates") {
     template_tool(&source.diagnose, "repo.diagnose", diagnose_args);
     template_tool(&source.change, "repo.patch", change_args);
     template_tool(&source.verify, "repo.verify", verify_args);
-    source.plan_generation = 7u;
+    source.plan_generation = 2u;
     source.replan_budget = 3u;
 
     check_equal(
@@ -291,11 +291,12 @@ spec("AgentCompiler Change and Repair templates") {
     check_not_null(plan);
     check_equal(turbo_agent_executable_dag_template_kind(plan),
                 TURBO_AGENT_TEMPLATE_REPAIR);
-    check_equal(turbo_agent_executable_dag_plan_generation(plan), 7u);
+    check_equal(turbo_agent_executable_dag_plan_generation(plan), 2u);
 
     certificate = turbo_agent_executable_dag_certificate_json_value(plan);
     check_not_null(certificate);
     check_equal(json_get_string(certificate, "template"), "repair");
+    check_equal(json_get_int(certificate, "plan_generation", -1), 2);
     check_equal(json_get_int(certificate, "replan_budget", -1), 3);
     steps = json_object_get(certificate, "steps");
     check_equal(json_get_string(json_array_get(steps, 0u), "step_id"),
@@ -311,6 +312,36 @@ spec("AgentCompiler Change and Repair templates") {
     turbo_runtime_json_destroy(verify_args);
     turbo_runtime_json_destroy(change_args);
     turbo_runtime_json_destroy(diagnose_args);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("rejects Repair generations beyond the finite replan budget") {
+    template_probe_t read_probe = {0};
+    template_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_template_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_repair_source_t source;
+    turbo_agent_executable_dag_t *plan = NULL;
+    json_value_t *args = template_args(NULL);
+
+    template_config(&config);
+    turbo_agent_repair_source_init(&source);
+    template_tool(&source.diagnose, "repo.diagnose", args);
+    template_tool(&source.change, "repo.patch", args);
+    template_tool(&source.verify, "repo.verify", args);
+    source.plan_generation = 4u;
+    source.replan_budget = 3u;
+
+    check_equal(
+        turbo_agent_compile_repair_template(
+            &config, registry, &source, &plan, NULL),
+        TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION);
+    check_null(plan);
+    check_equal(read_probe.calls, 0);
+    check_equal(write_probe.calls, 0);
+
+    turbo_runtime_json_destroy(args);
     turbo_tool_registry_destroy(registry);
   }
 

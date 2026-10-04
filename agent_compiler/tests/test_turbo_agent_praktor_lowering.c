@@ -264,6 +264,9 @@ spec("AgentCompiler deterministic Praktor lowering") {
     check_true(strcmp(
                    turbo_agent_praktor_inline_source_id(v1),
                    turbo_agent_praktor_inline_source_id(v2)) != 0);
+    check_equal(
+        turbo_agent_praktor_inline_source_yaml_size(v1),
+        turbo_agent_praktor_inline_source_yaml_size(v2));
     check_true(memcmp(
                    turbo_agent_praktor_inline_source_yaml(v1),
                    turbo_agent_praktor_inline_source_yaml(v2),

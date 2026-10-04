@@ -1320,6 +1320,100 @@ void turbo_praktor_workflow_config_init(
   config->require_harness_safe = 1;
 }
 
+void turbo_praktor_inline_plan_config_init(
+    turbo_praktor_inline_plan_config_t *config) {
+  if (!config) return;
+  memset(config, 0, sizeof(*config));
+  config->struct_size = sizeof(*config);
+  config->abi_version = TURBO_PRAKTOR_INLINE_PLAN_CONFIG_ABI_VERSION;
+  config->max_result_bytes = TURBO_PRAKTOR_DEFAULT_MAX_RESULT_BYTES;
+}
+
+turbo_tool_status_t turbo_praktor_inline_plan_compile(
+    const turbo_praktor_inline_plan_config_t *config,
+    turbo_praktor_inline_plan_t **out_plan) {
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  const praktor_api *api;
+  turbo_praktor_inline_plan_t *plan = NULL;
+  turbo_tool_status_t status;
+
+  if (out_plan) *out_plan = NULL;
+  if (!config || !out_plan ||
+      config->struct_size < sizeof(*config) ||
+      config->abi_version != TURBO_PRAKTOR_INLINE_PLAN_CONFIG_ABI_VERSION ||
+      !config->source_id || !config->source_id[0] ||
+      !config->workflow_yaml || !config->workflow_yaml_size ||
+      !config->approved_host_tools ||
+      !config->max_result_bytes) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+  api = praktor_get_api();
+  if (!turbo_praktor_api_valid(api)) return TURBO_TOOL_NOT_FOUND;
+
+  plan = (turbo_praktor_inline_plan_t *)calloc(1, sizeof(*plan));
+  if (!plan) return TURBO_TOOL_OUT_OF_MEMORY;
+  status = turbo_praktor_compile_inline_plan(
+      api, config->source_id, config->workflow_yaml,
+      config->workflow_yaml_size, config->approved_host_tools,
+      &plan->plan);
+  if (status != TURBO_TOOL_OK) {
+    free(plan);
+    return status;
+  }
+  plan->api = api;
+  plan->approved_host_tools = config->approved_host_tools;
+  plan->max_result_bytes = config->max_result_bytes;
+  *out_plan = plan;
+  return TURBO_TOOL_OK;
+#else
+  (void)config;
+  if (out_plan) *out_plan = NULL;
+  return TURBO_TOOL_NOT_FOUND;
+#endif
+}
+
+turbo_tool_status_t turbo_praktor_inline_plan_execute(
+    const turbo_praktor_inline_plan_t *plan,
+    const turbo_tool_execution_context_t *context,
+    json_value_t **out_result) {
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  turbo_praktor_binding_t binding;
+  if (out_result) *out_result = NULL;
+  if (!plan || !plan->api || !plan->plan ||
+      !plan->approved_host_tools || !plan->max_result_bytes ||
+      !out_result) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+  memset(&binding, 0, sizeof(binding));
+  binding.api = plan->api;
+  binding.max_result_bytes = plan->max_result_bytes;
+  binding.has_host_tools = 1;
+  binding.approved_host_tools = plan->approved_host_tools;
+  binding.plan = plan->plan;
+  return turbo_praktor_execute_json_common(
+      NULL, context, out_result, &binding);
+#else
+  (void)plan;
+  (void)context;
+  if (out_result) *out_result = NULL;
+  return TURBO_TOOL_NOT_FOUND;
+#endif
+}
+
+void turbo_praktor_inline_plan_destroy(
+    turbo_praktor_inline_plan_t *plan) {
+  if (!plan) return;
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  if (plan->plan && plan->api && plan->api->release_workflow_plan) {
+    plan->api->release_workflow_plan(plan->plan);
+  }
+#endif
+  memset(plan, 0, sizeof(*plan));
+  free(plan);
+}
+
 turbo_praktor_tool_pack_t *
 turbo_praktor_tool_pack_create(const turbo_praktor_tool_pack_config_t *config) {
   turbo_praktor_tool_pack_t *pack;
@@ -1589,6 +1683,22 @@ turbo_praktor_tool_pack_supports_host_tools(
   return api && api->abi_minor >= 5u &&
          (api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0 &&
          api->execute_workflow_plan_host_tools != NULL;
+#else
+  (void)pack;
+  return 0;
+#endif
+}
+
+int turbo_praktor_tool_pack_supports_inline_workflow_plan(
+    const turbo_praktor_tool_pack_t *pack) {
+#if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
+  const praktor_api *api = pack ? pack->api : NULL;
+  return api && api->abi_minor >= 6u &&
+         (api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) != 0 &&
+         api->compile_workflow_inline != NULL &&
+         api->describe_workflow_plan != NULL &&
+         api->execute_workflow_plan_host_tools != NULL &&
+         api->release_workflow_plan != NULL;
 #else
   (void)pack;
   return 0;

@@ -16,7 +16,7 @@ typedef enum turbo_agent_dag_template_kind_e {
   TURBO_AGENT_DAG_TEMPLATE_GENERIC = 0,
   TURBO_AGENT_DAG_TEMPLATE_CHANGE = 1,
   TURBO_AGENT_DAG_TEMPLATE_REPAIR = 2
-} turbo_agent_dag_template_kind_t
+} turbo_agent_dag_template_kind_t;
 
 typedef enum turbo_agent_dag_step_flag_e {
   TURBO_AGENT_DAG_STEP_NONE = 0,

@@ -549,6 +549,7 @@ jobs:
             test -f "package/sdk/$rid/include/turbo_tool.h"
             test -f "package/sdk/$rid/include/turbo_agent_compiler.h"
             test -f "package/sdk/$rid/include/turbo_agent_dag_compiler.h"
+            test -f "package/sdk/$rid/include/turbo_agent_templates.h"
             test -f "package/sdk/$rid/include/turbo_wasm_tools.h"
             grep -F "AgentCompiler" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
             grep -F "WasmTools" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
@@ -595,6 +596,7 @@ jobs:
             grep -Fx "sdk/$rid/include/turbo_tool.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_agent_dag_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_templates.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
             grep -Fx "sdk/$rid/include/turbo_wasm_tools.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
           done
           unzip -p "$nupkg" '*.nuspec' > "$RUNNER_TEMP/turboagent.nuspec"

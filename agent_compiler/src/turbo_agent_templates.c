@@ -190,6 +190,11 @@ turbo_agent_compile_status_t turbo_agent_compile_repair_template(
         diagnostic, TURBO_AGENT_COMPILE_INVALID_ARGUMENT,
         "invalid Repair template source");
   }
+  if (source->plan_generation > source->replan_budget) {
+    return template_fail(
+        diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
+        "Repair plan generation exceeds the finite replan budget");
+  }
 
   status = template_role_policy(
       source_registry, &source->diagnose, 1, diagnostic);

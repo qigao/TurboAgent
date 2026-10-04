@@ -280,7 +280,7 @@ spec("AgentCompiler deterministic Praktor lowering") {
     turbo_tool_registry_destroy(registry);
   }
 
-  it("fails closed when admitted retries cannot be represented by released Praktor") {
+  it("encodes compiler-admitted finite retries as Praktor HostTool retries.count") {
     lowering_probe_t read_probe = {0};
     lowering_probe_t write_probe = {0};
     turbo_tool_registry_t *registry =
@@ -289,14 +289,14 @@ spec("AgentCompiler deterministic Praktor lowering") {
     turbo_agent_change_source_t source;
     turbo_agent_template_plan_t *plan = NULL;
     turbo_agent_praktor_inline_source_t *lowered = NULL;
-    turbo_agent_praktor_lowering_diagnostic_t diagnostic;
     json_value_t *args = lowering_empty_args();
+    const char *yaml;
 
     lowering_config(&config);
     turbo_agent_change_source_init(&source);
     lowering_slot(&source.inspect, "repo.inspect", args, 1u);
     lowering_slot(&source.change, "repo.patch", args, 0u);
-    lowering_slot(&source.verify, "repo.verify", args, 0u);
+    lowering_slot(&source.verify, "repo.verify", args, 2u);
 
     check_equal(
         turbo_agent_compile_change_template(
@@ -304,11 +304,24 @@ spec("AgentCompiler deterministic Praktor lowering") {
         TURBO_AGENT_COMPILE_OK);
     check_equal(
         turbo_agent_template_lower_praktor_inline(
-            plan, &lowered, &diagnostic),
-        TURBO_AGENT_PRAKTOR_LOWERING_UNSUPPORTED_RETRY);
-    check_null(lowered);
-    check_not_null(strstr(diagnostic.message, "retry_limit"));
+            plan, &lowered, NULL),
+        TURBO_AGENT_PRAKTOR_LOWERING_OK);
+    check_not_null(lowered);
+    yaml = turbo_agent_praktor_inline_source_yaml(lowered);
+    check_not_null(yaml);
+    check_not_null(strstr(
+        yaml,
+        "name: \"inspect\"\n    tool: \"repo.inspect\"\n"
+        "    retries:\n      count: 1\n"));
+    check_not_null(strstr(
+        yaml,
+        "name: \"verify\"\n    tool: \"repo.verify\"\n"
+        "    depends_on: [\"change\"]\n"
+        "    retries:\n      count: 2\n"));
+    check_equal(read_probe.calls, 0);
+    check_equal(write_probe.calls, 0);
 
+    turbo_agent_praktor_inline_source_destroy(lowered);
     turbo_agent_template_plan_destroy(plan);
     turbo_runtime_json_destroy(args);
     turbo_tool_registry_destroy(registry);

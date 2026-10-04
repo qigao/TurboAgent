@@ -398,6 +398,20 @@ turbo_tool_status_t turbo_tool_registry_add_v5(
       TURBO_TOOL_EFFECT_UNKNOWN);
 }
 
+turbo_tool_status_t turbo_tool_registry_add_v6(
+    turbo_tool_registry_t *registry, const turbo_tool_definition_v6_t *definition) {
+  if (!definition || definition->struct_size < sizeof(*definition) ||
+      definition->abi_version != TURBO_TOOL_DEFINITION_V6_ABI_VERSION) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  return turbo_tool_registry_add_with_policy(
+      registry, &definition->definition, &definition->execution_policy,
+      definition->required_capabilities, definition->required_capability_count,
+      definition->context_handler, definition->json_value_context_handler,
+      definition->result_schema_json, definition->strict_result,
+      definition->effect_flags);
+}
+
 turbo_tool_status_t turbo_tool_registry_remove(turbo_tool_registry_t *registry, const char *name) {
   size_t index;
   if (!registry || !name) return TURBO_TOOL_INVALID_ARGUMENT;

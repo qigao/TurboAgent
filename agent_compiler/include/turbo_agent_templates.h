@@ -143,6 +143,26 @@ turbo_agent_template_finish_verify(
     const turbo_agent_template_plan_t *plan,
     turbo_agent_verify_status_t verify_status);
 
+/**
+ * Classify the canonical Praktor execution result for Change/Repair verify.
+ *
+ * Phase 3 uses one narrow template-level runtime contract rather than a
+ * universal output type system:
+ *
+ *   workflow_status == "success"
+ *   outputs.verify_result is an object
+ *   outputs.verify_result.verified is a JSON boolean
+ *
+ * verified=true -> PASSED
+ * verified=false -> SEMANTIC_FAILURE
+ * anything missing/malformed/non-success -> EXECUTION_FAILURE
+ *
+ * The function is pure and never invokes Praktor, a model, or a tool.
+ */
+CXX_C_API turbo_agent_verify_status_t
+turbo_agent_template_verify_status_from_praktor_result(
+    const json_value_t *praktor_result);
+
 /** Caller-owned deterministic certificate for template + underlying DAG. */
 CXX_C_API json_value_t *
 turbo_agent_template_plan_certificate_json_value(

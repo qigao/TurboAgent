@@ -314,6 +314,38 @@ const turbo_tool_registry_t *turbo_agent_template_plan_approved_tools(
              : NULL;
 }
 
+turbo_agent_verify_status_t
+turbo_agent_template_verify_status_from_praktor_result(
+    const json_value_t *praktor_result) {
+  const char *workflow_status;
+  const json_value_t *outputs;
+  const json_value_t *verify_result;
+  const json_value_t *verified;
+
+  if (!praktor_result || json_type(praktor_result) != JSON_OBJECT) {
+    return TURBO_AGENT_VERIFY_EXECUTION_FAILURE;
+  }
+  workflow_status = json_get_string(praktor_result, "workflow_status");
+  if (!workflow_status || strcmp(workflow_status, "success") != 0) {
+    return TURBO_AGENT_VERIFY_EXECUTION_FAILURE;
+  }
+  outputs = json_object_get(praktor_result, "outputs");
+  if (!outputs || json_type(outputs) != JSON_OBJECT) {
+    return TURBO_AGENT_VERIFY_EXECUTION_FAILURE;
+  }
+  verify_result = json_object_get(outputs, "verify_result");
+  if (!verify_result || json_type(verify_result) != JSON_OBJECT) {
+    return TURBO_AGENT_VERIFY_EXECUTION_FAILURE;
+  }
+  verified = json_object_get(verify_result, "verified");
+  if (!verified || json_type(verified) != JSON_BOOL) {
+    return TURBO_AGENT_VERIFY_EXECUTION_FAILURE;
+  }
+  return json_bool(verified)
+             ? TURBO_AGENT_VERIFY_PASSED
+             : TURBO_AGENT_VERIFY_SEMANTIC_FAILURE;
+}
+
 turbo_agent_template_outcome_t turbo_agent_template_finish_verify(
     const turbo_agent_template_plan_t *plan,
     turbo_agent_verify_status_t verify_status) {

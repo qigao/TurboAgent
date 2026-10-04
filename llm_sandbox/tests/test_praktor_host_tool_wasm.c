@@ -33,16 +33,19 @@ static char *praktor_wasm_strdup(const char *text) {
 static char *praktor_wasm_workspace(void) {
   char temp[SALTS_FS_MAX_PATH];
   char path[SALTS_FS_MAX_PATH];
+  char leaf[80];
   unsigned int counter = ++praktor_wasm_test_counter;
   if (salts_fs_get_tmpdir(temp, sizeof(temp)) != 0) return NULL;
 #ifdef _WIN32
-  snprintf(path, sizeof(path), "%s/turbo_praktor_wasm_%lu_%u", temp,
+  snprintf(leaf, sizeof(leaf), "turbo_praktor_wasm_%lu_%u",
            (unsigned long)GetCurrentProcessId(), counter);
 #else
-  snprintf(path, sizeof(path), "%s/turbo_praktor_wasm_%lu_%u", temp,
+  snprintf(leaf, sizeof(leaf), "turbo_praktor_wasm_%lu_%u",
            (unsigned long)getpid(), counter);
 #endif
-  if (salts_fs_mkdir(path, 0700) != 0) return NULL;
+  if (salts_fs_path_join(path, sizeof(path), temp, leaf) != 0 ||
+      salts_fs_mkdir(path, 0700) != 0)
+    return NULL;
   return praktor_wasm_strdup(path);
 }
 

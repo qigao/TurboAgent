@@ -12,11 +12,11 @@ extern "C" {
 #define TURBO_AGENT_DAG_SOURCE_ABI_VERSION 2u
 #define TURBO_AGENT_DAG_CERTIFICATE_VERSION 2u
 
-typedef enum turbo_agent_dag_template_kind_e {
-  TURBO_AGENT_DAG_TEMPLATE_GENERIC = 0,
-  TURBO_AGENT_DAG_TEMPLATE_CHANGE = 1,
-  TURBO_AGENT_DAG_TEMPLATE_REPAIR = 2
-} turbo_agent_dag_template_kind_t;
+typedef turbo_agent_template_kind_t turbo_agent_dag_template_kind_t;
+
+#define TURBO_AGENT_DAG_TEMPLATE_GENERIC TURBO_AGENT_TEMPLATE_INVALID
+#define TURBO_AGENT_DAG_TEMPLATE_CHANGE TURBO_AGENT_TEMPLATE_CHANGE
+#define TURBO_AGENT_DAG_TEMPLATE_REPAIR TURBO_AGENT_TEMPLATE_REPAIR
 
 typedef enum turbo_agent_dag_step_flag_e {
   TURBO_AGENT_DAG_STEP_NONE = 0,

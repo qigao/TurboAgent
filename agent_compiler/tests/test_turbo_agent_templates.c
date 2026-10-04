@@ -368,7 +368,7 @@ spec("AgentCompiler Change/Repair template semantics") {
     check_not_null(malformed);
 
     json_object_set_string(result, "workflow_status", "success");
-    json_object_set_bool(verify, "passed", true);
+    json_object_set_bool(verify, "verified", true);
     check_true(json_object_add_checked(outputs, "verify_result", verify));
     verify = NULL;
     check_true(json_object_add_checked(result, "outputs", outputs));
@@ -387,7 +387,7 @@ spec("AgentCompiler Change/Repair template semantics") {
               : NULL;
       check_not_null(result_verify);
       if (result_verify) {
-        json_object_set_bool(result_verify, "passed", false);
+        json_object_set_bool(result_verify, "verified", false);
       }
     }
     check_equal(

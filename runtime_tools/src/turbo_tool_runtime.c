@@ -6,6 +6,21 @@
 
 static const char *const turbo_tool_runtime_required_capabilities[] = {"runtime_tools"};
 
+static int turbo_tool_runtime_effect_flags_valid(
+    turbo_tool_effect_flags_t flags) {
+  if ((flags & ~TURBO_TOOL_EFFECT_KNOWN_MASK) != 0) return 0;
+  if (flags == 0) return 1;
+  if ((flags & TURBO_TOOL_EFFECT_UNKNOWN) != 0 &&
+      flags != TURBO_TOOL_EFFECT_UNKNOWN) {
+    return 0;
+  }
+  if ((flags & TURBO_TOOL_EFFECT_PURE) != 0 &&
+      flags != TURBO_TOOL_EFFECT_PURE) {
+    return 0;
+  }
+  return 1;
+}
+
 static char *turbo_tool_runtime_strdup(const char *src) {
   size_t len;
   char *copy;

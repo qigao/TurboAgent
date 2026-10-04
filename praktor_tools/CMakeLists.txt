@@ -28,6 +28,7 @@ if(BUILD_TESTS)
     ${TEST_SOURCES}
     LIBS
     praktor_tools
+    TurboAgent::AgentCompiler
     Salts::Core
     Salts::TinyTest
     INCLUDES

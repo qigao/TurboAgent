@@ -586,6 +586,35 @@ spec("AgentCompiler Phase 3 DAG admission") {
     turbo_tool_registry_destroy(registry);
   }
 
+  it("keeps invalid DAG source v2 template values fail-closed") {
+    dag_probe_t read_probe = {0};
+    dag_probe_t write_probe = {0};
+    turbo_tool_registry_t *registry =
+        make_dag_registry(&read_probe, &write_probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *plan = NULL;
+    json_value_t *args = dag_args("v2-invalid");
+    const char *allowed[] = {"runtime_tools"};
+
+    dag_config(&config, allowed, 1u);
+    dag_step(&step, "verify", "repo.inspect", args, NULL, 0u);
+    dag_source(&source, &step, 1u);
+    source.abi_version = TURBO_AGENT_DAG_SOURCE_ABI_VERSION_V2;
+    source.template_kind = (turbo_agent_dag_template_kind_t)99;
+
+    check_equal(
+        turbo_agent_compile_dag(&config, registry, &source, &plan, NULL),
+        TURBO_AGENT_COMPILE_INVALID_ARGUMENT);
+    check_null(plan);
+    check_equal(read_probe.calls, 0);
+    check_equal(write_probe.calls, 0);
+
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
   it("maps DAG source v2 wire template values into canonical identity") {
     dag_probe_t read_probe = {0};
     dag_probe_t write_probe = {0};

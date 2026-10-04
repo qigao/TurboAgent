@@ -38,6 +38,7 @@ typedef struct turbo_tool_runtime_wasm_tool_s {
   char *result_schema_json;
   json_value_t *result_schema;
   int strict_result;
+  turbo_tool_effect_flags_t effect_flags;
 } turbo_tool_runtime_wasm_tool_t;
 
 typedef struct turbo_tool_runtime_wasm_io_s {
@@ -192,6 +193,53 @@ fail:
   turbo_runtime_json_destroy(limits);
   turbo_runtime_json_destroy(root);
   return NULL;
+}
+
+static int turbo_tool_runtime_wasm_effect_flag(
+    const char *name, turbo_tool_effect_flags_t *out) {
+  if (!name || !out) return -1;
+  if (strcmp(name, "pure") == 0) *out = TURBO_TOOL_EFFECT_PURE;
+  else if (strcmp(name, "read") == 0) *out = TURBO_TOOL_EFFECT_READ;
+  else if (strcmp(name, "write") == 0) *out = TURBO_TOOL_EFFECT_WRITE;
+  else if (strcmp(name, "process") == 0) *out = TURBO_TOOL_EFFECT_PROCESS;
+  else if (strcmp(name, "network") == 0) *out = TURBO_TOOL_EFFECT_NETWORK;
+  else if (strcmp(name, "external_mutation") == 0)
+    *out = TURBO_TOOL_EFFECT_EXTERNAL_MUTATION;
+  else if (strcmp(name, "unknown") == 0) *out = TURBO_TOOL_EFFECT_UNKNOWN;
+  else return -1;
+  return 0;
+}
+
+static int turbo_tool_runtime_wasm_parse_effects(
+    const json_value_t *metadata, turbo_tool_effect_flags_t *out) {
+  const json_value_t *effects;
+  turbo_tool_effect_flags_t flags = 0;
+  size_t i;
+  if (!metadata || !out) return -1;
+  effects = json_object_get(metadata, "effects");
+  if (!effects) {
+    *out = TURBO_TOOL_EFFECT_UNKNOWN;
+    return 0;
+  }
+  if (json_type(effects) != JSON_ARRAY) return -1;
+  for (i = 0; i < json_array_size(effects); ++i) {
+    const json_value_t *value = json_array_get(effects, i);
+    const char *name =
+        value && json_type(value) == JSON_STRING ? json_string(value) : NULL;
+    turbo_tool_effect_flags_t flag = 0;
+    if (!name || turbo_tool_runtime_wasm_effect_flag(name, &flag) != 0)
+      return -1;
+    flags |= flag;
+  }
+  if (flags == 0) flags = TURBO_TOOL_EFFECT_UNKNOWN;
+  if ((flags & TURBO_TOOL_EFFECT_UNKNOWN) != 0 &&
+      flags != TURBO_TOOL_EFFECT_UNKNOWN)
+    return -1;
+  if ((flags & TURBO_TOOL_EFFECT_PURE) != 0 &&
+      flags != TURBO_TOOL_EFFECT_PURE)
+    return -1;
+  *out = flags;
+  return 0;
 }
 
 static void turbo_tool_runtime_wasm_tool_clear(turbo_tool_runtime_wasm_tool_t *tool) {
@@ -612,6 +660,24 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_get_tool_v2(
   return TURBO_TOOL_OK;
 }
 
+static turbo_tool_status_t turbo_tool_runtime_wasm_get_tool_v3(
+    const void *impl, size_t index, turbo_tool_runtime_tool_v3_t *out_tool) {
+  const turbo_tool_runtime_wasm_impl_t *wasm_impl =
+      (const turbo_tool_runtime_wasm_impl_t *)impl;
+  const turbo_tool_runtime_wasm_tool_t *tool;
+  if (!wasm_impl || !out_tool) return TURBO_TOOL_INVALID_ARGUMENT;
+  if (index >= wasm_impl->tool_count) return TURBO_TOOL_NOT_FOUND;
+  tool = &wasm_impl->tools[index];
+  memset(out_tool, 0, sizeof(*out_tool));
+  out_tool->struct_size = sizeof(*out_tool);
+  out_tool->abi_version = TURBO_TOOL_RUNTIME_TOOL_V3_ABI_VERSION;
+  if (turbo_tool_runtime_wasm_get_tool_v2(
+          impl, index, &out_tool->base) != TURBO_TOOL_OK)
+    return TURBO_TOOL_ERROR;
+  out_tool->effect_flags = tool->effect_flags;
+  return TURBO_TOOL_OK;
+}
+
 static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_with_context(
     void *impl,
     const char *name,
@@ -687,23 +753,28 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_invoke_json_value(
       impl, name, arguments, NULL, out_result);
 }
 
-static const turbo_tool_runtime_vtable_v3_t turbo_tool_runtime_wasm_vtable = {
-    sizeof(turbo_tool_runtime_vtable_v3_t),
-    TURBO_TOOL_RUNTIME_VTABLE_V3_ABI_VERSION,
+static const turbo_tool_runtime_vtable_v4_t turbo_tool_runtime_wasm_vtable = {
+    sizeof(turbo_tool_runtime_vtable_v4_t),
+    TURBO_TOOL_RUNTIME_VTABLE_V4_ABI_VERSION,
     {
-        sizeof(turbo_tool_runtime_vtable_v2_t),
-        TURBO_TOOL_RUNTIME_VTABLE_V2_ABI_VERSION,
+        sizeof(turbo_tool_runtime_vtable_v3_t),
+        TURBO_TOOL_RUNTIME_VTABLE_V3_ABI_VERSION,
         {
-            turbo_tool_runtime_wasm_destroy_impl,
-            turbo_tool_runtime_wasm_tool_count,
-            turbo_tool_runtime_wasm_get_tool,
-            turbo_tool_runtime_wasm_invoke,
-            turbo_tool_runtime_wasm_invoke_json_value,
+            sizeof(turbo_tool_runtime_vtable_v2_t),
+            TURBO_TOOL_RUNTIME_VTABLE_V2_ABI_VERSION,
+            {
+                turbo_tool_runtime_wasm_destroy_impl,
+                turbo_tool_runtime_wasm_tool_count,
+                turbo_tool_runtime_wasm_get_tool,
+                turbo_tool_runtime_wasm_invoke,
+                turbo_tool_runtime_wasm_invoke_json_value,
+            },
+            turbo_tool_runtime_wasm_invoke_with_context,
+            turbo_tool_runtime_wasm_invoke_json_value_with_context,
         },
-        turbo_tool_runtime_wasm_invoke_with_context,
-        turbo_tool_runtime_wasm_invoke_json_value_with_context,
+        turbo_tool_runtime_wasm_get_tool_v2,
     },
-    turbo_tool_runtime_wasm_get_tool_v2,
+    turbo_tool_runtime_wasm_get_tool_v3,
 };
 
 static int turbo_tool_runtime_wasm_load_tool(
@@ -745,6 +816,9 @@ static int turbo_tool_runtime_wasm_load_tool(
   if (result_schema && json_type(result_schema) != JSON_OBJECT) goto cleanup;
   if (strict_result && json_type(strict_result) != JSON_BOOL) goto cleanup;
   if (strict_result && !result_schema) goto cleanup;
+  if (turbo_tool_runtime_wasm_parse_effects(
+          metadata, &tool->effect_flags) != 0)
+    goto cleanup;
 
   parameters_json = json_serialize(parameters, NULL);
   if (!parameters_json) goto cleanup;
@@ -954,7 +1028,7 @@ turbo_tool_runtime_wasm_create_with_metadata(
       if (turbo_tool_runtime_wasm_load_tool(impl, i) != 0) goto fail;
   }
 
-  runtime = turbo_tool_runtime_create_v3(&turbo_tool_runtime_wasm_vtable, impl);
+  runtime = turbo_tool_runtime_create_v4(&turbo_tool_runtime_wasm_vtable, impl);
   if (!runtime) goto fail;
 
   if (out_execution_metadata) {

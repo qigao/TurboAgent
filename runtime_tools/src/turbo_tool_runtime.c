@@ -148,6 +148,39 @@ static turbo_tool_status_t turbo_tool_runtime_native_get_tool(const void *impl, 
   return TURBO_TOOL_OK;
 }
 
+static turbo_tool_status_t turbo_tool_runtime_native_get_tool_v2(
+    const void *impl, size_t index, turbo_tool_runtime_tool_v2_t *out_tool) {
+  const turbo_tool_runtime_native_impl_t *native_impl =
+      (const turbo_tool_runtime_native_impl_t *)impl;
+  turbo_tool_definition_t definition = {0};
+  const char *result_schema_json = NULL;
+  const json_value_t *result_schema = NULL;
+  int strict_result = 0;
+  turbo_tool_status_t status;
+
+  if (!native_impl || !out_tool) return TURBO_TOOL_INVALID_ARGUMENT;
+  status = turbo_tool_registry_get_definition(
+      native_impl->registry, index, &definition);
+  if (status != TURBO_TOOL_OK) return status;
+  status = turbo_tool_registry_get_result_contract(
+      native_impl->registry, definition.name,
+      &result_schema_json, &result_schema, &strict_result);
+  if (status != TURBO_TOOL_OK) return status;
+  (void)result_schema;
+
+  memset(out_tool, 0, sizeof(*out_tool));
+  out_tool->struct_size = sizeof(*out_tool);
+  out_tool->abi_version = TURBO_TOOL_RUNTIME_TOOL_V2_ABI_VERSION;
+  out_tool->base.name = definition.name;
+  out_tool->base.description = definition.description;
+  out_tool->base.parameters_json = definition.parameters_json;
+  out_tool->base.parameters_schema = definition.parameters_schema;
+  out_tool->base.strict = definition.strict;
+  out_tool->result_schema_json = result_schema_json;
+  out_tool->strict_result = strict_result;
+  return TURBO_TOOL_OK;
+}
+
 static turbo_tool_status_t turbo_tool_runtime_native_invoke(void *impl, const char *name,
                                                             const char *arguments_json,
                                                             char **out_output) {
@@ -321,6 +354,24 @@ turbo_tool_status_t turbo_tool_runtime_get_tool(const turbo_tool_runtime_t *runt
   return runtime->vtable->get_tool(runtime->impl, index, out_tool);
 }
 
+turbo_tool_status_t turbo_tool_runtime_get_tool_v2(
+    const turbo_tool_runtime_t *runtime, size_t index,
+    turbo_tool_runtime_tool_v2_t *out_tool) {
+  turbo_tool_status_t status;
+  if (!runtime || !out_tool) return TURBO_TOOL_INVALID_ARGUMENT;
+  memset(out_tool, 0, sizeof(*out_tool));
+  out_tool->struct_size = sizeof(*out_tool);
+  out_tool->abi_version = TURBO_TOOL_RUNTIME_TOOL_V2_ABI_VERSION;
+  if (runtime->vtable_v3) {
+    return runtime->vtable_v3->get_tool_v2(runtime->impl, index, out_tool);
+  }
+  status = runtime->vtable->get_tool(runtime->impl, index, &out_tool->base);
+  if (status != TURBO_TOOL_OK) return status;
+  out_tool->result_schema_json = NULL;
+  out_tool->strict_result = 0;
+  return TURBO_TOOL_OK;
+}
+
 turbo_tool_status_t turbo_tool_runtime_invoke(turbo_tool_runtime_t *runtime, const char *name,
                                               const char *arguments_json, char **out_output) {
   if (!runtime || !name || !out_output) {
@@ -459,8 +510,10 @@ turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_reg
     definition.required_capabilities = turbo_tool_runtime_required_capabilities;
     definition.required_capability_count = sizeof(turbo_tool_runtime_required_capabilities) /
                                            sizeof(turbo_tool_runtime_required_capabilities[0]);
+    definition.result_schema_json = tool.result_schema_json;
+    definition.strict_result = tool.strict_result;
 
-    status = turbo_tool_registry_add_v4(registry, &definition);
+    status = turbo_tool_registry_add_v5(registry, &definition);
     if (status != TURBO_TOOL_OK) {
       turbo_tool_runtime_bridge_entry_destroy(entry);
       turbo_tool_runtime_rollback_registry(runtime, registry, index);

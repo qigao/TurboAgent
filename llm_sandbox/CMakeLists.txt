@@ -59,6 +59,8 @@ if(BUILD_TESTS)
         "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_bad_metadata_test.wasm")
     set(LLM_SANDBOX_WASM_BAD_SCHEMA_WASM
         "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_bad_schema_test.wasm")
+    set(LLM_SANDBOX_WASM_BAD_EFFECTS_WASM
+        "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_bad_effects_test.wasm")
     set(LLM_SANDBOX_WASM_CONTROL_WASM
         "${CMAKE_CURRENT_BINARY_DIR}/guest_tool_runtime_control_test.wasm")
     set(LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM
@@ -94,6 +96,9 @@ if(BUILD_TESTS)
     llm_sandbox_add_guest(
       "${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_wasm3_bad_schema.c" 131072)
+    llm_sandbox_add_guest(
+      "${LLM_SANDBOX_WASM_BAD_EFFECTS_WASM}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_bad_effects.c" 131072)
     llm_sandbox_add_guest(
       "${LLM_SANDBOX_WASM_CONTROL_WASM}"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/guest_tool_runtime_control.c" 131072)
@@ -139,6 +144,7 @@ if(BUILD_TESTS)
                 ${LLM_SANDBOX_WASM_ZERO_TOOLS_WASM}
                 ${LLM_SANDBOX_WASM_BAD_METADATA_WASM}
                 ${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}
+                ${LLM_SANDBOX_WASM_BAD_EFFECTS_WASM}
                 ${LLM_SANDBOX_WASM_CONTROL_WASM}
                 ${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}
                 ${LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM})
@@ -156,6 +162,7 @@ if(BUILD_TESTS)
           LLM_SANDBOX_WASM_ZERO_TOOLS_WASM_PATH="${LLM_SANDBOX_WASM_ZERO_TOOLS_WASM}"
           LLM_SANDBOX_WASM_BAD_METADATA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_METADATA_WASM}"
           LLM_SANDBOX_WASM_BAD_SCHEMA_WASM_PATH="${LLM_SANDBOX_WASM_BAD_SCHEMA_WASM}"
+          LLM_SANDBOX_WASM_BAD_EFFECTS_WASM_PATH="${LLM_SANDBOX_WASM_BAD_EFFECTS_WASM}"
           LLM_SANDBOX_WASM_CONTROL_WASM_PATH="${LLM_SANDBOX_WASM_CONTROL_WASM}"
           LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM_PATH="${LLM_SANDBOX_WASM_FORBIDDEN_IMPORT_WASM}"
           LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM_PATH="${LLM_SANDBOX_WASM_EMBEDDED_NUL_WASM}")

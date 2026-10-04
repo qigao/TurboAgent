@@ -57,7 +57,8 @@ typedef enum turbo_agent_compile_status_e {
   TURBO_AGENT_COMPILE_PLAN_LIMIT = -10,
   TURBO_AGENT_COMPILE_DUPLICATE_STEP = -11,
   TURBO_AGENT_COMPILE_MISSING_DEPENDENCY = -12,
-  TURBO_AGENT_COMPILE_CYCLE = -13
+  TURBO_AGENT_COMPILE_CYCLE = -13,
+  TURBO_AGENT_COMPILE_RETRY_UNSAFE = -14
 } turbo_agent_compile_status_t;
 
 typedef struct turbo_agent_compile_diagnostic_s {

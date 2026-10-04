@@ -10,6 +10,7 @@ on:
       - "CMakeLists.txt"
       - "vcpkg.json"
       - "cmake/TurboAgentConfig.cmake.in"
+      - "praktor_tools/**"
   push:
     tags:
       - "v*"

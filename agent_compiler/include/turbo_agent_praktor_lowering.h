@@ -14,6 +14,10 @@ typedef enum turbo_agent_praktor_lowering_status_e {
   TURBO_AGENT_PRAKTOR_LOWERING_INVALID_ARGUMENT = -1,
   TURBO_AGENT_PRAKTOR_LOWERING_INVALID_PLAN = -2,
   TURBO_AGENT_PRAKTOR_LOWERING_OUT_OF_MEMORY = -3,
+  /**
+   * Reserved for source compatibility with the pre-Praktor-0.4.5 lowering
+   * slice. Current lowering no longer returns this status.
+   */
   TURBO_AGENT_PRAKTOR_LOWERING_UNSUPPORTED_RETRY = -4
 } turbo_agent_praktor_lowering_status_t;
 
@@ -33,9 +37,10 @@ typedef struct turbo_agent_praktor_inline_source_s
  * from frozen compiler facts. The returned source can later be passed to the
  * released Praktor inline WorkflowPlan ABI.
  *
- * Current Phase-3 lowering fails closed when any DAG step has retry_limit > 0,
- * because released Praktor does not yet implement the documented task retry
- * policy. See qigao/praktor#68.
+ * Admitted finite retry_limit values are encoded as Praktor HostTool
+ * retries.count. This layer does not link Praktor and therefore does not own
+ * the backend hard cap; the released-ABI execution bridge must validate the
+ * emitted count against PRAKTOR_HOST_TOOL_MAX_RETRIES before execution.
  */
 CXX_C_API turbo_agent_praktor_lowering_status_t
 turbo_agent_template_lower_praktor_inline(

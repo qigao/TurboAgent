@@ -320,7 +320,7 @@ turbo_agent_template_verify_status_from_praktor_result(
   const char *workflow_status;
   const json_value_t *outputs;
   const json_value_t *verify_result;
-  const json_value_t *passed;
+  const json_value_t *verified;
 
   if (!praktor_result || json_type(praktor_result) != JSON_OBJECT) {
     return TURBO_AGENT_VERIFY_EXECUTION_FAILURE;
@@ -337,11 +337,11 @@ turbo_agent_template_verify_status_from_praktor_result(
   if (!verify_result || json_type(verify_result) != JSON_OBJECT) {
     return TURBO_AGENT_VERIFY_EXECUTION_FAILURE;
   }
-  passed = json_object_get(verify_result, "passed");
-  if (!passed || json_type(passed) != JSON_BOOL) {
+  verified = json_object_get(verify_result, "verified");
+  if (!verified || json_type(verified) != JSON_BOOL) {
     return TURBO_AGENT_VERIFY_EXECUTION_FAILURE;
   }
-  return json_bool(passed)
+  return json_bool(verified)
              ? TURBO_AGENT_VERIFY_PASSED
              : TURBO_AGENT_VERIFY_SEMANTIC_FAILURE;
 }

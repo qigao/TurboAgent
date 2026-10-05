@@ -72,7 +72,7 @@ TurboAgent harness-native Praktor WorkflowPlan 集成包括：
 - generated workflow schema
 - conservative effect → policy capability mapping
 - workflow-config ABI v3 的 borrowed `approved_host_tools` projection
-- Praktor HostTool ABI 2.5 plan-wide preflight
+- Praktor HostTool capability-based plan-wide preflight
 - resolved HostTool arguments 的 RuntimeTools canonical schema validation
 - HostTool capability union；非 HostTool unknown effect 继续 fail-closed
 - cancellation/deadline + thread/run/turn/tool-call lineage
@@ -82,8 +82,8 @@ TurboAgent harness-native Praktor WorkflowPlan 集成包括：
 
 HostTool execution始终通过 approved RuntimeTools projection；Praktor 不持有完整
 registry，也不知道实际 backend 是 Native、WasmToolPack/TurboWasm 或 MCP。
-PraktorTools 需要 latest released Praktor SDK 提供 ABI 2.5+
-`PRAKTOR_CAPABILITY_HOST_TOOL`，不存在旧 SDK/source/SHA fallback。
+PraktorTools 始终消费 latest released Praktor SDK，并要求其提供
+`PRAKTOR_CAPABILITY_HOST_TOOL` 及所需 WorkflowPlan/inline-plan capability；不按 package/ABI minor 版本号做门槛判断，也不存在旧 SDK/source/SHA fallback。
 
 PR 只做 qualification。正式 package / GitHub Release 只由与项目版本一致的
 `v*` tag 发布。

@@ -24,13 +24,13 @@
 #define TURBO_PRAKTOR_HAS_EXECUTION_EVENTS 0
 #endif
 
-#if defined(PRAKTOR_CAPABILITY_HOST_TOOL) && PRAKTOR_ABI_MINOR >= 5
+#if defined(PRAKTOR_CAPABILITY_HOST_TOOL)
 #define TURBO_PRAKTOR_HAS_HOST_TOOL 1
 #else
 #define TURBO_PRAKTOR_HAS_HOST_TOOL 0
 #endif
 
-#if defined(PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) && PRAKTOR_ABI_MINOR >= 6
+#if defined(PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN)
 #define TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN 1
 #else
 #define TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN 0
@@ -77,7 +77,6 @@ struct turbo_praktor_inline_plan_s {
 static int turbo_praktor_api_valid(const praktor_api *api) {
   return api && api->struct_size >= sizeof(*api) &&
          api->abi_major == PRAKTOR_ABI_MAJOR &&
-         api->abi_minor >= 6u &&
          (api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0 &&
          (api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0 &&
          (api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
@@ -1680,7 +1679,7 @@ turbo_praktor_tool_pack_supports_host_tools(
     const turbo_praktor_tool_pack_t *pack) {
 #if TURBO_PRAKTOR_HAS_HOST_TOOL
   const praktor_api *api = pack ? pack->api : NULL;
-  return api && api->abi_minor >= 5u &&
+  return api &&
          (api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0 &&
          api->execute_workflow_plan_host_tools != NULL;
 #else
@@ -1693,7 +1692,7 @@ int turbo_praktor_tool_pack_supports_inline_workflow_plan(
     const turbo_praktor_tool_pack_t *pack) {
 #if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
   const praktor_api *api = pack ? pack->api : NULL;
-  return api && api->abi_minor >= 6u &&
+  return api &&
          (api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) != 0 &&
          api->compile_workflow_inline != NULL &&
          api->describe_workflow_plan != NULL &&

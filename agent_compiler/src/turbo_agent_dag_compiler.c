@@ -893,6 +893,72 @@ size_t turbo_agent_executable_dag_step_count(
   return plan ? plan->step_count : 0u;
 }
 
+turbo_agent_compile_status_t turbo_agent_executable_dag_step_view(
+    const turbo_agent_executable_dag_t *plan,
+    size_t index,
+    turbo_agent_dag_step_view_t *out_view) {
+  const turbo_agent_executable_dag_step_t *step;
+  if (!plan || !out_view || index >= plan->step_count) {
+    return TURBO_AGENT_COMPILE_INVALID_ARGUMENT;
+  }
+  memset(out_view, 0, sizeof(*out_view));
+  step = &plan->steps[index];
+  out_view->struct_size = sizeof(*out_view);
+  out_view->abi_version = TURBO_AGENT_DAG_STEP_VIEW_ABI_VERSION;
+  out_view->step_id = step->step_id;
+  out_view->tool_name = step->tool_name;
+  out_view->arguments = step->arguments;
+  out_view->retry_limit = step->retry_limit;
+  out_view->flags = step->flags;
+  out_view->execution_policy = step->execution_policy;
+  out_view->effect_flags = step->effect_flags;
+  out_view->dependency_count = step->dependency_count;
+  return TURBO_AGENT_COMPILE_OK;
+}
+
+turbo_agent_compile_status_t turbo_agent_executable_dag_find_step(
+    const turbo_agent_executable_dag_t *plan,
+    const char *step_id,
+    size_t *out_index) {
+  size_t index;
+  if (!plan || !step_id || !step_id[0] || !out_index) {
+    return TURBO_AGENT_COMPILE_INVALID_ARGUMENT;
+  }
+  *out_index = 0u;
+  for (index = 0; index < plan->step_count; ++index) {
+    if (plan->steps[index].step_id &&
+        strcmp(plan->steps[index].step_id, step_id) == 0) {
+      *out_index = index;
+      return TURBO_AGENT_COMPILE_OK;
+    }
+  }
+  return TURBO_AGENT_COMPILE_MISSING_DEPENDENCY;
+}
+
+turbo_agent_compile_status_t turbo_agent_executable_dag_dependency_step_id(
+    const turbo_agent_executable_dag_t *plan,
+    size_t step_index,
+    size_t dependency_index,
+    const char **out_step_id) {
+  const turbo_agent_executable_dag_step_t *step;
+  size_t dependency_step_index;
+  if (!plan || !out_step_id || step_index >= plan->step_count) {
+    return TURBO_AGENT_COMPILE_INVALID_ARGUMENT;
+  }
+  *out_step_id = NULL;
+  step = &plan->steps[step_index];
+  if (dependency_index >= step->dependency_count) {
+    return TURBO_AGENT_COMPILE_INVALID_ARGUMENT;
+  }
+  dependency_step_index = step->dependency_indices[dependency_index];
+  if (dependency_step_index >= plan->step_count) {
+    return TURBO_AGENT_COMPILE_SOURCE_INVALID;
+  }
+  *out_step_id = plan->steps[dependency_step_index].step_id;
+  return *out_step_id ? TURBO_AGENT_COMPILE_OK
+                      : TURBO_AGENT_COMPILE_SOURCE_INVALID;
+}
+
 turbo_agent_dag_template_kind_t turbo_agent_executable_dag_template_kind(
     const turbo_agent_executable_dag_t *plan) {
   return plan ? plan->template_kind : TURBO_AGENT_DAG_TEMPLATE_GENERIC;

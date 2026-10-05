@@ -47,7 +47,6 @@ include(CMakeOptions.cmake)
 include(Sanitizers)
 include(CmakeUtils)
 
-find_package(OpenSSL REQUIRED)
 if(DEFINED SALTS_ROOT AND NOT "${SALTS_ROOT}" STREQUAL "")
   set(ENV{SALTS_ROOT} "${SALTS_ROOT}")
 endif()

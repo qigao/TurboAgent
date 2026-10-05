@@ -81,8 +81,9 @@ CXX_C_API void turbo_agent_cflow_optimizer_options_init(
  * inference. Only runs containing at least one eligible edge (two DAG steps)
  * become CFlow regions.
  *
- * The result owns compiled region plans but borrows the same provider/
- * descriptor/code lifetime as the input DAG.
+ * The result owns compiled region plans but borrows the input DAG and the same
+ * provider/descriptor/code lifetime as that DAG. Destroy the optimizer result
+ * before the DAG and before any borrowed provider lifetime ends.
  */
 CXX_C_API turbo_agent_cflow_optimizer_status_t
 turbo_agent_cflow_optimizer_discover(

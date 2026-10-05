@@ -13,6 +13,7 @@ typedef struct wasm_gate_waiter_s {
   const turbo_tool_execution_context_t *context;
   atomic_int entered;
   atomic_int acquired;
+  atomic_int finished;
   turbo_tool_status_t status;
 } wasm_gate_waiter_t;
 
@@ -25,12 +26,23 @@ static void wasm_gate_waiter_run(void *arg) {
     atomic_store_explicit(&waiter->acquired, 1, memory_order_release);
     turbo_wasm_invoke_gate_release(waiter->gate);
   }
+  atomic_store_explicit(&waiter->finished, 1, memory_order_release);
 }
 
 static void wasm_gate_wait_until_entered(wasm_gate_waiter_t *waiter) {
   while (!atomic_load_explicit(&waiter->entered, memory_order_acquire)) {
     salts_thread_yield();
   }
+}
+
+static int wasm_gate_wait_until_finished(
+    wasm_gate_waiter_t *waiter, uint64_t timeout_ms) {
+  uint64_t deadline = salts_monotonic_ms() + timeout_ms;
+  while (!atomic_load_explicit(&waiter->finished, memory_order_acquire)) {
+    if (salts_monotonic_ms() >= deadline) return 0;
+    salts_thread_yield();
+  }
+  return 1;
 }
 
 spec("TurboWasm single-owner invocation gate") {
@@ -54,6 +66,7 @@ spec("TurboWasm single-owner invocation gate") {
     waiter.status = TURBO_TOOL_ERROR;
     atomic_init(&waiter.entered, 0);
     atomic_init(&waiter.acquired, 0);
+    atomic_init(&waiter.finished, 0);
 
     check_equal(
         salts_thread_create(&thread, wasm_gate_waiter_run, &waiter),
@@ -61,15 +74,21 @@ spec("TurboWasm single-owner invocation gate") {
     wasm_gate_wait_until_entered(&waiter);
 
     /*
-     * Keep the gate owned while joining. The waiter can finish only by
-     * observing its absolute deadline; a lock-only implementation would hang.
+     * Keep the gate owned while waiting for completion. The waiter must finish
+     * from its absolute deadline before owner release. Bound the test itself so
+     * a regression cannot hang CI indefinitely.
      */
-    check_equal(salts_thread_join(&thread), SALTS_OK);
+    {
+      int finished_before_release =
+          wasm_gate_wait_until_finished(&waiter, UINT64_C(1000));
+      turbo_wasm_invoke_gate_release(&gate);
+      check_equal(salts_thread_join(&thread), SALTS_OK);
+      check_true(finished_before_release);
+    }
     check_equal(waiter.status, TURBO_TOOL_DEADLINE_EXCEEDED);
     check_false(atomic_load_explicit(
         &waiter.acquired, memory_order_acquire));
 
-    turbo_wasm_invoke_gate_release(&gate);
     salts_thread_destroy(&thread);
     turbo_wasm_invoke_gate_destroy(&gate);
   }
@@ -98,6 +117,7 @@ spec("TurboWasm single-owner invocation gate") {
     waiter.status = TURBO_TOOL_ERROR;
     atomic_init(&waiter.entered, 0);
     atomic_init(&waiter.acquired, 0);
+    atomic_init(&waiter.finished, 0);
 
     check_equal(
         salts_thread_create(&thread, wasm_gate_waiter_run, &waiter),
@@ -108,17 +128,22 @@ spec("TurboWasm single-owner invocation gate") {
         SALTS_OK);
 
     /*
-     * The owner remains active through join. Cancellation must therefore wake
-     * through the bounded condition-variable polling path, not owner release.
+     * The owner remains active while the waiter must observe cancellation
+     * through the bounded condition-variable polling path.
      */
-    check_equal(salts_thread_join(&thread), SALTS_OK);
+    {
+      int finished_before_release =
+          wasm_gate_wait_until_finished(&waiter, UINT64_C(1000));
+      turbo_wasm_invoke_gate_release(&gate);
+      check_equal(salts_thread_join(&thread), SALTS_OK);
+      check_true(finished_before_release);
+    }
     check_equal(waiter.status, TURBO_TOOL_CANCELLED);
     check_false(atomic_load_explicit(
         &waiter.acquired, memory_order_acquire));
 
     turbo_cancel_token_release(token);
     turbo_cancel_source_destroy(source);
-    turbo_wasm_invoke_gate_release(&gate);
     salts_thread_destroy(&thread);
     turbo_wasm_invoke_gate_destroy(&gate);
   }
@@ -139,6 +164,7 @@ spec("TurboWasm single-owner invocation gate") {
     waiter.status = TURBO_TOOL_ERROR;
     atomic_init(&waiter.entered, 0);
     atomic_init(&waiter.acquired, 0);
+    atomic_init(&waiter.finished, 0);
 
     check_equal(
         salts_thread_create(&thread, wasm_gate_waiter_run, &waiter),

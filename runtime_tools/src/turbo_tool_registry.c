@@ -63,6 +63,8 @@ typedef struct {
   json_value_t *result_schema;
   int strict_result;
   turbo_tool_effect_flags_t effect_flags;
+  int has_native_projection;
+  turbo_tool_native_projection_t native_projection;
   json_value_t *execution_metadata;
 } turbo_tool_entry_t;
 
@@ -132,6 +134,11 @@ static const turbo_tool_entry_t *turbo_tool_registry_find(const turbo_tool_regis
   }
 
   return compatible_matches == 1 ? compatible_match : NULL;
+}
+
+static turbo_tool_entry_t *turbo_tool_registry_find_mutable(
+    turbo_tool_registry_t *registry, const char *name) {
+  return (turbo_tool_entry_t *)turbo_tool_registry_find(registry, name);
 }
 
 static turbo_tool_status_t turbo_tool_registry_reserve(turbo_tool_registry_t *registry) {
@@ -227,6 +234,51 @@ static int turbo_tool_effect_flags_valid(turbo_tool_effect_flags_t flags) {
 static turbo_tool_effect_flags_t turbo_tool_effect_flags_normalize(
     turbo_tool_effect_flags_t flags) {
   return flags == 0 ? TURBO_TOOL_EFFECT_UNKNOWN : flags;
+}
+
+static int turbo_tool_native_projection_bind(
+    const turbo_tool_native_projection_t *projection,
+    turbo_tool_native_projection_t *out_bound) {
+  cmeta_callable bound;
+  const cmeta_sig_desc *signature;
+  size_t parameter;
+
+  if (!projection || !out_bound ||
+      projection->struct_size < sizeof(*projection) ||
+      projection->abi_version != TURBO_TOOL_NATIVE_PROJECTION_ABI_VERSION ||
+      !cmeta_function_desc_valid(projection->function) ||
+      !cmeta_function_abi_desc_valid(projection->abi) ||
+      !cmeta_function_desc_equal(projection->function,
+                                 projection->abi->function) ||
+      !cmeta_callable_bind(projection->callable, &bound)) {
+    return 0;
+  }
+
+  signature = cmeta_fn_signature(bound.meta);
+  if (!signature || signature->protocol != CMETA_FN_PROTOCOL_VALUE ||
+      signature->param_count != projection->function->param_count ||
+      !cmeta_type_equal(signature->return_type,
+                        projection->function->return_type) ||
+      bound.meta.effects != projection->function->effects ||
+      bound.meta.properties != projection->function->properties) {
+    return 0;
+  }
+
+  for (parameter = 0; parameter < projection->function->param_count;
+       ++parameter) {
+    const cmeta_param_desc *param =
+        cmeta_function_param(projection->function, parameter);
+    if (!param ||
+        !cmeta_type_equal(signature->params[parameter], param->type)) {
+      return 0;
+    }
+  }
+
+  *out_bound = *projection;
+  out_bound->struct_size = sizeof(*out_bound);
+  out_bound->abi_version = TURBO_TOOL_NATIVE_PROJECTION_ABI_VERSION;
+  out_bound->callable = bound;
+  return 1;
 }
 
 static turbo_tool_status_t turbo_tool_registry_add_with_policy(
@@ -535,6 +587,48 @@ turbo_tool_status_t turbo_tool_registry_get_effects(
   return TURBO_TOOL_OK;
 }
 
+turbo_tool_status_t turbo_tool_registry_publish_native_projection(
+    turbo_tool_registry_t *registry, const char *name,
+    const turbo_tool_native_projection_t *projection) {
+  turbo_tool_entry_t *entry;
+  turbo_tool_native_projection_t bound = {0};
+
+  if (!registry || !name || !name[0] || !projection) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  entry = turbo_tool_registry_find_mutable(registry, name);
+  if (!entry) return TURBO_TOOL_NOT_FOUND;
+  if (entry->has_native_projection) return TURBO_TOOL_DUPLICATE;
+  if (!turbo_tool_native_projection_bind(projection, &bound)) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+  if (entry->effect_flags == TURBO_TOOL_EFFECT_PURE &&
+      !cmeta_effects_are_pure(bound.function->effects)) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+  entry->native_projection = bound;
+  entry->has_native_projection = 1;
+  return TURBO_TOOL_OK;
+}
+
+turbo_tool_status_t turbo_tool_registry_get_native_projection(
+    const turbo_tool_registry_t *registry, const char *name,
+    turbo_tool_native_projection_t *out_projection) {
+  const turbo_tool_entry_t *entry;
+  if (!registry || !name || !out_projection) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  memset(out_projection, 0, sizeof(*out_projection));
+  entry = turbo_tool_registry_find(registry, name);
+  if (!entry || !entry->has_native_projection) {
+    return TURBO_TOOL_NOT_FOUND;
+  }
+  *out_projection = entry->native_projection;
+  return TURBO_TOOL_OK;
+}
+
 turbo_tool_status_t turbo_tool_registry_require_capability(turbo_tool_registry_t *registry,
                                                            const char *name,
                                                            const char *capability) {
@@ -666,6 +760,10 @@ turbo_tool_status_t turbo_tool_registry_project(const turbo_tool_registry_t *sou
       status = turbo_tool_registry_set_execution_metadata(
           projection, entry->name, entry->execution_metadata);
     }
+    if (status == TURBO_TOOL_OK && entry->has_native_projection) {
+      status = turbo_tool_registry_publish_native_projection(
+          projection, entry->name, &entry->native_projection);
+    }
     if (status != TURBO_TOOL_OK) {
       turbo_tool_registry_destroy(projection);
       return status;
@@ -721,6 +819,10 @@ turbo_tool_status_t turbo_tool_registry_compose(const turbo_tool_registry_t *con
       if (status == TURBO_TOOL_OK && entry->execution_metadata) {
         status = turbo_tool_registry_set_execution_metadata(
             composite, entry->name, entry->execution_metadata);
+      }
+      if (status == TURBO_TOOL_OK && entry->has_native_projection) {
+        status = turbo_tool_registry_publish_native_projection(
+            composite, entry->name, &entry->native_projection);
       }
       if (status != TURBO_TOOL_OK) {
         turbo_tool_registry_destroy(composite);

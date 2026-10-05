@@ -36,4 +36,9 @@ if(BUILD_TESTS)
     include
     FOLDER
     "MCP Tools/tests")
+  if(TARGET test_turbo_mcp_tool_pack)
+    # This suite uses only the injected in-memory transport. A wait longer than
+    # one minute is a deadlock/regression, not legitimate network latency.
+    set_tests_properties(test_turbo_mcp_tool_pack PROPERTIES TIMEOUT 60)
+  endif()
 endif()

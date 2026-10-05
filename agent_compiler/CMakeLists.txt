@@ -13,7 +13,8 @@ target_include_directories(
                         $<INSTALL_INTERFACE:include>)
 target_link_libraries(
   agent_compiler
-  PUBLIC TurboAgent::RuntimeTools TurboAgent::RuntimeData Salts::DataBind)
+  PUBLIC TurboAgent::RuntimeTools TurboAgent::RuntimeData Salts::DataBind
+         Salts::CFlow)
 
 cmake_config_target(agent_compiler FOLDER "Agent Compiler" EXPORT_NAME AgentCompiler
                     ALIAS TurboAgent::AgentCompiler)

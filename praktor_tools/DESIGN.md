@@ -31,9 +31,9 @@ flowchart LR
 ```
 
 The workflow path is host registration state and never appears in model
-arguments. PraktorTools now requires the released Praktor HostTool baseline
-(ABI 2.5+); older SDKs fail fast instead of selecting a source/compatibility
-fallback. Workflow-config v1 callers retain their reviewed path execution
+arguments. PraktorTools always consumes the latest released Praktor SDK and requires
+its HostTool/WorkflowPlan capability contract; missing capabilities fail fast
+instead of selecting a source/compatibility fallback. Workflow-config v1 callers retain their reviewed path execution
 semantics inside that modern SDK baseline.
 
 ## Alternatives
@@ -192,8 +192,8 @@ message. Plan mismatch is detected before workflow side effects.
 - Tool Execution Context ABI v1 remains accepted; v2 adds observation sinks.
 - Workflow config ABI v1 remains accepted; v2 adds harness-safe admission; v3
   adds borrowed approved HostTool authority.
-- Praktor ABI 2.5+ / `PRAKTOR_CAPABILITY_HOST_TOOL` is the fail-fast baseline
-  for PraktorTools.
-- No older-SDK, source-checkout, SHA, or package-version fallback is used.
+- The latest released Praktor SDK must expose `PRAKTOR_CAPABILITY_HOST_TOOL`
+  and the required WorkflowPlan/inline-plan entry points; capability absence fails fast.
+- No package-version comparison, older-SDK, source-checkout, SHA, or package-version fallback is used.
 
 The module remains optional behind `ENABLE_PRAKTOR_TOOLS`.

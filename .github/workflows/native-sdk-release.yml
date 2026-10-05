@@ -135,6 +135,7 @@ jobs:
           EOF
           cat > "$consumer/main.c" <<'EOF'
           #include <turbo_praktor_tool_pack.h>
+          #include <turbo_agent_cflow_optimizer.h>
           #include <turbo_agent_contracts.h>
           #include <turbo_tool_registry.h>
           #include <turbo_tool_runtime.h>
@@ -149,7 +150,11 @@ jobs:
             int strict_result = 0;
             turbo_tool_effect_flags_t effect_flags = 0;
             turbo_tool_native_projection_t native_projection = {0};
+            turbo_agent_cflow_optimizer_options_t optimizer_options;
+            turbo_agent_cflow_composition_source_t composition;
             turbo_praktor_tool_pack_config_init(&config);
+            turbo_agent_cflow_optimizer_options_init(&optimizer_options);
+            turbo_agent_cflow_composition_source_init(&composition);
             turbo_praktor_workflow_config_init(&workflow);
             context.struct_size = sizeof(context);
             context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
@@ -173,6 +178,12 @@ jobs:
                 turbo_agent_tool_result_slot_compatibility(
                     NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
               return 2;
+            }
+            if (optimizer_options.abi_version !=
+                    TURBO_AGENT_CFLOW_OPTIMIZER_OPTIONS_ABI_VERSION ||
+                composition.abi_version !=
+                    TURBO_AGENT_CFLOW_COMPOSITION_ABI_VERSION) {
+              return 3;
             }
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
                            workflow.abi_version ==
@@ -263,6 +274,7 @@ jobs:
           EOF
           cat > "$consumer/main.c" <<'EOF'
           #include <turbo_praktor_tool_pack.h>
+          #include <turbo_agent_cflow_optimizer.h>
           #include <turbo_agent_contracts.h>
           #include <turbo_tool_registry.h>
           #include <turbo_tool_runtime.h>
@@ -276,7 +288,11 @@ jobs:
             int strict_result = 0;
             turbo_tool_effect_flags_t effect_flags = 0;
             turbo_tool_native_projection_t native_projection = {0};
+            turbo_agent_cflow_optimizer_options_t optimizer_options;
+            turbo_agent_cflow_composition_source_t composition;
             turbo_praktor_tool_pack_config_init(&config);
+            turbo_agent_cflow_optimizer_options_init(&optimizer_options);
+            turbo_agent_cflow_composition_source_init(&composition);
             turbo_praktor_workflow_config_init(&workflow);
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
             if (turbo_tool_registry_add_v6(NULL, &definition) !=
@@ -298,6 +314,12 @@ jobs:
                 turbo_agent_tool_result_slot_compatibility(
                     NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
               return 2;
+            }
+            if (optimizer_options.abi_version !=
+                    TURBO_AGENT_CFLOW_OPTIMIZER_OPTIONS_ABI_VERSION ||
+                composition.abi_version !=
+                    TURBO_AGENT_CFLOW_COMPOSITION_ABI_VERSION) {
+              return 3;
             }
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
                            workflow.abi_version ==
@@ -557,6 +579,7 @@ jobs:
           EOF
           cat > "$consumer/main.c" <<'EOF'
           #include <turbo_praktor_tool_pack.h>
+          #include <turbo_agent_cflow_optimizer.h>
           #include <turbo_agent_contracts.h>
           #include <turbo_tool_registry.h>
           #include <turbo_tool_runtime.h>
@@ -570,7 +593,11 @@ jobs:
             int strict_result = 0;
             turbo_tool_effect_flags_t effect_flags = 0;
             turbo_tool_native_projection_t native_projection = {0};
+            turbo_agent_cflow_optimizer_options_t optimizer_options;
+            turbo_agent_cflow_composition_source_t composition;
             turbo_praktor_tool_pack_config_init(&config);
+            turbo_agent_cflow_optimizer_options_init(&optimizer_options);
+            turbo_agent_cflow_composition_source_init(&composition);
             turbo_praktor_workflow_config_init(&workflow);
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
             if (turbo_tool_registry_add_v6(NULL, &definition) !=
@@ -592,6 +619,12 @@ jobs:
                 turbo_agent_tool_result_slot_compatibility(
                     NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
               return 2;
+            }
+            if (optimizer_options.abi_version !=
+                    TURBO_AGENT_CFLOW_OPTIMIZER_OPTIONS_ABI_VERSION ||
+                composition.abi_version !=
+                    TURBO_AGENT_CFLOW_COMPOSITION_ABI_VERSION) {
+              return 3;
             }
             return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
                            workflow.abi_version ==

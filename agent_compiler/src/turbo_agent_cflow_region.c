@@ -16,6 +16,13 @@ struct turbo_agent_cflow_region_plan_s {
   size_t step_count;
 };
 
+typedef struct turbo_agent_cflow_region_prepared_s {
+  const turbo_tool_registry_t *registry;
+  cflow_function_projection *projections;
+  const char **tool_names;
+  size_t step_count;
+} turbo_agent_cflow_region_prepared_t;
+
 static int region_source_valid(const turbo_agent_cflow_region_source_t *source) {
   size_t i;
   if (!source ||
@@ -100,6 +107,87 @@ static turbo_agent_cflow_region_status_t region_admit_native_map(
   return TURBO_AGENT_CFLOW_REGION_OK;
 }
 
+static void region_prepared_clear(
+    turbo_agent_cflow_region_prepared_t *prepared) {
+  if (!prepared) return;
+  free(prepared->tool_names);
+  free(prepared->projections);
+  memset(prepared, 0, sizeof(*prepared));
+}
+
+static turbo_agent_cflow_region_status_t region_prepare(
+    const turbo_agent_executable_dag_t *dag,
+    const turbo_agent_cflow_region_source_t *source,
+    turbo_agent_cflow_region_prepared_t *prepared) {
+  turbo_agent_cflow_region_status_t status =
+      TURBO_AGENT_CFLOW_REGION_INVALID_ARGUMENT;
+  size_t i;
+
+  if (!prepared) return TURBO_AGENT_CFLOW_REGION_INVALID_ARGUMENT;
+  memset(prepared, 0, sizeof(*prepared));
+
+  if (!dag || !region_source_valid(source)) {
+    return TURBO_AGENT_CFLOW_REGION_INVALID_ARGUMENT;
+  }
+
+  prepared->registry = turbo_agent_executable_dag_approved_tools(dag);
+  if (!prepared->registry) return TURBO_AGENT_CFLOW_REGION_NOT_APPROVED;
+
+  prepared->projections = (cflow_function_projection *)calloc(
+      source->step_count, sizeof(*prepared->projections));
+  prepared->tool_names = (const char **)calloc(
+      source->step_count, sizeof(*prepared->tool_names));
+  if (!prepared->projections || !prepared->tool_names) {
+    status = TURBO_AGENT_CFLOW_REGION_OUT_OF_MEMORY;
+    goto fail;
+  }
+  prepared->step_count = source->step_count;
+
+  for (i = 0; i < source->step_count; ++i) {
+    size_t prior;
+    const turbo_agent_cflow_region_step_t *step = &source->steps[i];
+    const char *tool_name =
+        turbo_agent_executable_dag_step_tool_name(dag, step->dag_step_index);
+
+    if (!tool_name || !tool_name[0]) {
+      status = TURBO_AGENT_CFLOW_REGION_NOT_APPROVED;
+      goto fail;
+    }
+    for (prior = 0; prior < i; ++prior) {
+      if (source->steps[prior].dag_step_index == step->dag_step_index) {
+        status = TURBO_AGENT_CFLOW_REGION_INVALID_ARGUMENT;
+        goto fail;
+      }
+    }
+
+    prepared->tool_names[i] = tool_name;
+    status = region_admit_native_map(
+        prepared->registry, tool_name, &prepared->projections[i]);
+    if (status != TURBO_AGENT_CFLOW_REGION_OK) goto fail;
+
+    if (i > 0u) {
+      if (turbo_agent_tool_result_slot_compatibility(
+              prepared->registry, prepared->tool_names[i - 1u], tool_name,
+              step->consumer_property) != TURBO_AGENT_CONTRACT_COMPATIBLE) {
+        status = TURBO_AGENT_CFLOW_REGION_LOGICAL_CONTRACT_BARRIER;
+        goto fail;
+      }
+      if (!cmeta_type_equal(
+              prepared->projections[i - 1u].output_type,
+              prepared->projections[i].input_type)) {
+        status = TURBO_AGENT_CFLOW_REGION_TYPE_BARRIER;
+        goto fail;
+      }
+    }
+  }
+
+  return TURBO_AGENT_CFLOW_REGION_OK;
+
+fail:
+  region_prepared_clear(prepared);
+  return status;
+}
+
 void turbo_agent_cflow_region_step_init(
     turbo_agent_cflow_region_step_t *step) {
   if (!step) return;
@@ -117,83 +205,43 @@ void turbo_agent_cflow_region_source_init(
   source->abi_version = TURBO_AGENT_CFLOW_REGION_SOURCE_ABI_VERSION;
 }
 
+turbo_agent_cflow_region_status_t turbo_agent_cflow_region_admit(
+    const turbo_agent_executable_dag_t *dag,
+    const turbo_agent_cflow_region_source_t *source) {
+  turbo_agent_cflow_region_prepared_t prepared;
+  turbo_agent_cflow_region_status_t status =
+      region_prepare(dag, source, &prepared);
+  region_prepared_clear(&prepared);
+  return status;
+}
+
 turbo_agent_cflow_region_status_t turbo_agent_compile_cflow_region(
     const turbo_agent_executable_dag_t *dag,
     const turbo_agent_cflow_region_source_t *source,
     turbo_agent_cflow_region_plan_t **out_plan) {
-  const turbo_tool_registry_t *registry;
-  cflow_function_projection *projections = NULL;
-  const char **tool_names = NULL;
+  turbo_agent_cflow_region_prepared_t prepared;
   cflow_graph graph = {0};
   turbo_agent_cflow_region_plan_t *region = NULL;
-  turbo_agent_cflow_region_status_t status =
-      TURBO_AGENT_CFLOW_REGION_INVALID_ARGUMENT;
+  turbo_agent_cflow_region_status_t status;
   size_t i;
   int graph_initialized = 0;
 
   if (out_plan) *out_plan = NULL;
-  if (!dag || !out_plan || !region_source_valid(source)) {
-    return TURBO_AGENT_CFLOW_REGION_INVALID_ARGUMENT;
-  }
+  if (!out_plan) return TURBO_AGENT_CFLOW_REGION_INVALID_ARGUMENT;
 
-  registry = turbo_agent_executable_dag_approved_tools(dag);
-  if (!registry) return TURBO_AGENT_CFLOW_REGION_NOT_APPROVED;
+  status = region_prepare(dag, source, &prepared);
+  if (status != TURBO_AGENT_CFLOW_REGION_OK) return status;
 
-  projections = (cflow_function_projection *)calloc(
-      source->step_count, sizeof(*projections));
-  tool_names = (const char **)calloc(source->step_count, sizeof(*tool_names));
-  if (!projections || !tool_names) {
-    status = TURBO_AGENT_CFLOW_REGION_OUT_OF_MEMORY;
-    goto done;
-  }
-
-  for (i = 0; i < source->step_count; ++i) {
-    size_t prior;
-    const turbo_agent_cflow_region_step_t *step = &source->steps[i];
-    const char *tool_name =
-        turbo_agent_executable_dag_step_tool_name(dag, step->dag_step_index);
-
-    if (!tool_name || !tool_name[0]) {
-      status = TURBO_AGENT_CFLOW_REGION_NOT_APPROVED;
-      goto done;
-    }
-    for (prior = 0; prior < i; ++prior) {
-      if (source->steps[prior].dag_step_index == step->dag_step_index) {
-        status = TURBO_AGENT_CFLOW_REGION_INVALID_ARGUMENT;
-        goto done;
-      }
-    }
-
-    tool_names[i] = tool_name;
-    status = region_admit_native_map(
-        registry, tool_name, &projections[i]);
-    if (status != TURBO_AGENT_CFLOW_REGION_OK) goto done;
-
-    if (i > 0u) {
-      if (turbo_agent_tool_result_slot_compatibility(
-              registry, tool_names[i - 1u], tool_name,
-              step->consumer_property) != TURBO_AGENT_CONTRACT_COMPATIBLE) {
-        status = TURBO_AGENT_CFLOW_REGION_LOGICAL_CONTRACT_BARRIER;
-        goto done;
-      }
-      if (!cmeta_type_equal(
-              projections[i - 1u].output_type,
-              projections[i].input_type)) {
-        status = TURBO_AGENT_CFLOW_REGION_TYPE_BARRIER;
-        goto done;
-      }
-    }
-  }
-
-  cflow_graph_init(&graph, projections[0].input_type);
+  cflow_graph_init(&graph, prepared.projections[0].input_type);
   graph_initialized = 1;
   if (graph.error) {
     status = TURBO_AGENT_CFLOW_REGION_CFLOW_REJECTED;
     goto done;
   }
 
-  for (i = 0; i < source->step_count; ++i) {
-    if (!cflow_graph_add_function_projection(&graph, &projections[i])) {
+  for (i = 0; i < prepared.step_count; ++i) {
+    if (!cflow_graph_add_function_projection(
+            &graph, &prepared.projections[i])) {
       status = TURBO_AGENT_CFLOW_REGION_CFLOW_REJECTED;
       goto done;
     }
@@ -208,9 +256,10 @@ turbo_agent_cflow_region_status_t turbo_agent_compile_cflow_region(
     status = TURBO_AGENT_CFLOW_REGION_CFLOW_REJECTED;
     goto done;
   }
-  region->input_type = projections[0].input_type;
-  region->output_type = projections[source->step_count - 1u].output_type;
-  region->step_count = source->step_count;
+  region->input_type = prepared.projections[0].input_type;
+  region->output_type =
+      prepared.projections[prepared.step_count - 1u].output_type;
+  region->step_count = prepared.step_count;
 
   *out_plan = region;
   region = NULL;
@@ -222,8 +271,7 @@ done:
     free(region);
   }
   if (graph_initialized) cflow_graph_destroy(&graph);
-  free(tool_names);
-  free(projections);
+  region_prepared_clear(&prepared);
   return status;
 }
 

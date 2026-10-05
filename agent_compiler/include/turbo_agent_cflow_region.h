@@ -68,6 +68,17 @@ CXX_C_API void turbo_agent_cflow_region_source_init(
     turbo_agent_cflow_region_source_t *source);
 
 /**
+ * Check one explicit linear MAP-only region without constructing a Graph/Plan.
+ *
+ * This is the canonical Phase-4 eligibility query used by optimizer-owned
+ * region discovery. It applies the same RuntimeTools/CMeta contract as
+ * turbo_agent_compile_cflow_region().
+ */
+CXX_C_API turbo_agent_cflow_region_status_t turbo_agent_cflow_region_admit(
+    const turbo_agent_executable_dag_t *dag,
+    const turbo_agent_cflow_region_source_t *source);
+
+/**
  * Compile one explicit linear MAP-only region from an already admitted DAG.
  *
  * The returned plan borrows the same native provider/descriptor/code lifetime

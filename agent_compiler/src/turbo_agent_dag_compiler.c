@@ -893,6 +893,12 @@ size_t turbo_agent_executable_dag_step_count(
   return plan ? plan->step_count : 0u;
 }
 
+const char *turbo_agent_executable_dag_step_tool_name(
+    const turbo_agent_executable_dag_t *plan, size_t step_index) {
+  if (!plan || step_index >= plan->step_count) return NULL;
+  return plan->steps[step_index].tool_name;
+}
+
 turbo_agent_dag_template_kind_t turbo_agent_executable_dag_template_kind(
     const turbo_agent_executable_dag_t *plan) {
   return plan ? plan->template_kind : TURBO_AGENT_DAG_TEMPLATE_GENERIC;

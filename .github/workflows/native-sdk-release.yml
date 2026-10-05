@@ -12,6 +12,7 @@ on:
       - "cmake/TurboAgentConfig.cmake.in"
       - "praktor_tools/**"
       - "agent_compiler/**"
+      - "llm_sandbox/**"
   push:
     tags:
       - "v*"

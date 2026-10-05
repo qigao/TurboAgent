@@ -114,6 +114,20 @@ if(BUILD_TESTS)
       LIBS wasm_tools Salts::TinyTest
       FOLDER "Wasm Tools/tests")
 
+    # Internal gate qualification compiles the gate implementation directly.
+    # The gate is intentionally not part of the public WasmTools DLL ABI.
+    cmake_add_test(
+      SOURCES
+        tests/test_turbo_wasm_invoke_gate.c
+        src/turbo_wasm_invoke_gate.c
+      LIBS
+        TurboAgent::RuntimeTools
+        Salts::Platform
+        Salts::TinyTest
+      INCLUDES
+        src
+      FOLDER "Wasm Tools/tests")
+
     cmake_add_test(
       SOURCES tests/test_turbo_wasm_tool_pack.c
       LIBS wasm_tools agent_compiler Salts::TinyTest

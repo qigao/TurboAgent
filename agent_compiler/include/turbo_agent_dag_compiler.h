@@ -107,6 +107,10 @@ turbo_agent_executable_dag_hash(const turbo_agent_executable_dag_t *plan);
 CXX_C_API size_t
 turbo_agent_executable_dag_step_count(const turbo_agent_executable_dag_t *plan);
 
+/** Borrow the canonical RuntimeTools identity frozen for one admitted step. */
+CXX_C_API const char *turbo_agent_executable_dag_step_tool_name(
+    const turbo_agent_executable_dag_t *plan, size_t step_index);
+
 CXX_C_API turbo_agent_dag_template_kind_t
 turbo_agent_executable_dag_template_kind(
     const turbo_agent_executable_dag_t *plan);

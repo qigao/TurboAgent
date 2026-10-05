@@ -40,8 +40,7 @@ target_link_libraries(
          Salts::Core
          Salts::Mustache
          unofficial::sqlite3::sqlite3
-  PRIVATE OpenSSL::Crypto
-          Salts::CYamlJsonAdapter)
+  PRIVATE Salts::CYamlJsonAdapter)
 
 # Use the utility to configure common settings (Folder, Version, etc.)
 cmake_config_target(langchain FOLDER "LangChain" EXPORT_NAME LangChain

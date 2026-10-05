@@ -148,6 +148,7 @@ jobs:
             const json_value_t *schema = NULL;
             int strict_result = 0;
             turbo_tool_effect_flags_t effect_flags = 0;
+            turbo_tool_native_projection_t native_projection = {0};
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             context.struct_size = sizeof(context);
@@ -160,6 +161,12 @@ jobs:
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_registry_get_effects(
                     NULL, "missing", &effect_flags) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_native_projection(
+                    NULL, "missing", &native_projection) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_native_get_native_projection(
+                    NULL, "missing", &native_projection) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_runtime_get_tool_v3(NULL, 0, &runtime_tool) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
@@ -268,6 +275,7 @@ jobs:
             const json_value_t *schema = NULL;
             int strict_result = 0;
             turbo_tool_effect_flags_t effect_flags = 0;
+            turbo_tool_native_projection_t native_projection = {0};
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
@@ -278,6 +286,12 @@ jobs:
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_registry_get_effects(
                     NULL, "missing", &effect_flags) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_native_projection(
+                    NULL, "missing", &native_projection) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_native_get_native_projection(
+                    NULL, "missing", &native_projection) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_runtime_get_tool_v3(NULL, 0, &runtime_tool) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
@@ -555,6 +569,7 @@ jobs:
             const json_value_t *schema = NULL;
             int strict_result = 0;
             turbo_tool_effect_flags_t effect_flags = 0;
+            turbo_tool_native_projection_t native_projection = {0};
             turbo_praktor_tool_pack_config_init(&config);
             turbo_praktor_workflow_config_init(&workflow);
             (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
@@ -565,6 +580,12 @@ jobs:
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_registry_get_effects(
                     NULL, "missing", &effect_flags) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_native_projection(
+                    NULL, "missing", &native_projection) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_native_get_native_projection(
+                    NULL, "missing", &native_projection) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||
                 turbo_tool_runtime_get_tool_v3(NULL, 0, &runtime_tool) !=
                     TURBO_TOOL_INVALID_ARGUMENT ||

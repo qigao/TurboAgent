@@ -40,5 +40,23 @@ if(BUILD_TESTS)
     # This suite uses only the injected in-memory transport. A wait longer than
     # one minute is a deadlock/regression, not legitimate network latency.
     set_tests_properties(test_turbo_mcp_tool_pack PROPERTIES TIMEOUT 60)
+    if(WIN32)
+      set(_mcp_diag_filters
+        "validates its bounded"
+        "discovers tools"
+        "accepts request-scoped SSE"
+        "keeps the previous registry")
+      set(_mcp_diag_index 0)
+      foreach(_mcp_filter IN LISTS _mcp_diag_filters)
+        math(EXPR _mcp_diag_index "${_mcp_diag_index} + 1")
+        set(_mcp_diag_name "diag_turbo_mcp_${_mcp_diag_index}")
+        add_test(NAME ${_mcp_diag_name}
+                 COMMAND $<TARGET_FILE:test_turbo_mcp_tool_pack>
+                         --filter "${_mcp_filter}")
+        set_tests_properties(${_mcp_diag_name} PROPERTIES TIMEOUT 15)
+      endforeach()
+      unset(_mcp_diag_filters)
+      unset(_mcp_diag_index)
+    endif()
   endif()
 endif()

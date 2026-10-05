@@ -144,6 +144,31 @@ CXX_C_API turbo_tool_status_t turbo_tool_registry_get_effects(
     turbo_tool_effect_flags_t *out_effect_flags);
 
 /**
+ * Publish one optional borrowed canonical CMeta native execution projection.
+ *
+ * The registry validates FunctionDesc/FunctionAbi/callable consistency and
+ * copies the callable value (including inline capture bytes). Descriptor,
+ * provider and code lifetime remains external and must outlive every registry
+ * projection/composite/compiled plan that borrows this authority.
+ *
+ * A projection may be published at most once for one registered tool.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_publish_native_projection(
+    turbo_tool_registry_t *registry, const char *name,
+    const turbo_tool_native_projection_t *projection);
+
+/**
+ * Read one native execution projection.
+ *
+ * The returned struct is copied, but every descriptor/provider/code dependency
+ * remains borrowed. TURBO_TOOL_NOT_FOUND means either the tool does not exist
+ * or it has no native projection and therefore is not native-CFlow-lowerable.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_registry_get_native_projection(
+    const turbo_tool_registry_t *registry, const char *name,
+    turbo_tool_native_projection_t *out_projection);
+
+/**
  * @brief Add one required capability to an existing tool.
  *
  * This control-plane operation copies `capability`. Adding an existing value

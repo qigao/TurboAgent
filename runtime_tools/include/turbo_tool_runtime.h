@@ -260,6 +260,20 @@ CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_add_tool_v5(
 CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_add_tool_v6(
     turbo_tool_runtime_t *runtime, const turbo_tool_definition_v6_t *definition);
 
+/**
+ * Publish one borrowed canonical CMeta execution projection for a native tool.
+ *
+ * The native runtime does not retain descriptor/provider/module lifetime.
+ */
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_publish_native_projection(
+    turbo_tool_runtime_t *runtime, const char *name,
+    const turbo_tool_native_projection_t *projection);
+
+/** Read one native projection from a native runtime. */
+CXX_C_API turbo_tool_status_t turbo_tool_runtime_native_get_native_projection(
+    const turbo_tool_runtime_t *runtime, const char *name,
+    turbo_tool_native_projection_t *out_projection);
+
 #ifdef __cplusplus
 }
 #endif

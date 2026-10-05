@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <cmeta/cmeta.h>
+#include <cmeta/function.h>
 #include <platform.h>
 
 #include "turbo_runtime_json.h"
@@ -233,6 +235,28 @@ typedef struct turbo_tool_definition_v6_s {
   int strict_result;
   turbo_tool_effect_flags_t effect_flags;
 } turbo_tool_definition_v6_t;
+
+#define TURBO_TOOL_NATIVE_PROJECTION_ABI_VERSION 1u
+
+/**
+ * Optional canonical native execution authority for one RuntimeTool.
+ *
+ * FunctionDesc/FunctionAbi and every descriptor/provider/code pointer reachable
+ * from them are borrowed. The callable value is copied by value; only its inline
+ * capture bytes are owned by the receiving registry. Any transitive resource
+ * referenced by the capture remains borrowed exactly as defined by CMeta.
+ *
+ * This projection does not define ownership/lifecycle semantics: FunctionDesc
+ * result/parameter flags and DataDesc/type traits remain the canonical source.
+ * A dynamic provider must be kept alive by an explicit outer owner/Plugin lease.
+ */
+typedef struct turbo_tool_native_projection_s {
+  size_t struct_size;
+  uint32_t abi_version;
+  const cmeta_function_desc *function;
+  const cmeta_function_abi_desc *abi;
+  cmeta_callable callable;
+} turbo_tool_native_projection_t;
 
 #ifdef __cplusplus
 }

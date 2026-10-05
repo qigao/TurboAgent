@@ -629,6 +629,23 @@ turbo_tool_runtime_add_to_registry(turbo_tool_runtime_t *runtime, turbo_tool_reg
       turbo_tool_runtime_rollback_registry(runtime, registry, index);
       return status;
     }
+
+    if (runtime->vtable_v4 == &turbo_tool_runtime_native_vtable) {
+      turbo_tool_native_projection_t native_projection = {0};
+      turbo_tool_status_t projection_status =
+          turbo_tool_runtime_native_get_native_projection(
+              runtime, tool.base.base.name, &native_projection);
+      if (projection_status == TURBO_TOOL_OK) {
+        projection_status = turbo_tool_registry_publish_native_projection(
+            registry, tool.base.base.name, &native_projection);
+      }
+      if (projection_status != TURBO_TOOL_OK &&
+          projection_status != TURBO_TOOL_NOT_FOUND) {
+        (void)turbo_tool_registry_remove(registry, tool.base.base.name);
+        turbo_tool_runtime_rollback_registry(runtime, registry, index);
+        return projection_status;
+      }
+    }
   }
 
   return TURBO_TOOL_OK;
@@ -709,4 +726,30 @@ turbo_tool_status_t turbo_tool_runtime_native_add_tool_v6(
   impl = (turbo_tool_runtime_native_impl_t *)runtime->impl;
   if (!impl) return TURBO_TOOL_INVALID_ARGUMENT;
   return turbo_tool_registry_add_v6(impl->registry, definition);
+}
+
+turbo_tool_status_t turbo_tool_runtime_native_publish_native_projection(
+    turbo_tool_runtime_t *runtime, const char *name,
+    const turbo_tool_native_projection_t *projection) {
+  turbo_tool_runtime_native_impl_t *impl;
+  if (!runtime || runtime->vtable_v4 != &turbo_tool_runtime_native_vtable) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  impl = (turbo_tool_runtime_native_impl_t *)runtime->impl;
+  if (!impl) return TURBO_TOOL_INVALID_ARGUMENT;
+  return turbo_tool_registry_publish_native_projection(
+      impl->registry, name, projection);
+}
+
+turbo_tool_status_t turbo_tool_runtime_native_get_native_projection(
+    const turbo_tool_runtime_t *runtime, const char *name,
+    turbo_tool_native_projection_t *out_projection) {
+  const turbo_tool_runtime_native_impl_t *impl;
+  if (!runtime || runtime->vtable_v4 != &turbo_tool_runtime_native_vtable) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  impl = (const turbo_tool_runtime_native_impl_t *)runtime->impl;
+  if (!impl) return TURBO_TOOL_INVALID_ARGUMENT;
+  return turbo_tool_registry_get_native_projection(
+      impl->registry, name, out_projection);
 }

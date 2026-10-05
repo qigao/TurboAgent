@@ -83,6 +83,27 @@ static turbo_tool_registry_t *make_dag_registry(
   return registry;
 }
 
+FunctionDeclResult(
+    value, int, CMETA_RESULT_VALUE, dag_native_increment,
+    (int, value, CMETA_PARAM_IN));
+
+int dag_native_increment(int value) {
+  return value + 1;
+}
+
+static cmeta_callable dag_native_increment_callable(void) {
+  const cmeta_function_desc *function = FunctionMeta(dag_native_increment);
+  cmeta_callable callable = {0};
+  callable.meta = CMETA_WRAP_TYPED_ANY(dag_native_increment);
+  callable.meta.effects =
+      function ? function->effects : CMETA_EFFECT_UNKNOWN;
+  callable.meta.properties =
+      function ? function->properties : CMETA_PROP_NONE;
+  callable.invoke = CMETA_TYPED_INVOKER_ANY(dag_native_increment);
+  callable.dispatch = CMETA_CALLABLE_DISPATCH_CANONICAL_RAW;
+  return callable;
+}
+
 static turbo_tool_registry_t *make_effect_registry(
     turbo_tool_effect_flags_t effects,
     dag_probe_t *probe) {
@@ -107,6 +128,26 @@ static turbo_tool_registry_t *make_effect_registry(
   definition.result_schema_json = "{\"type\":\"object\"}";
   definition.effect_flags = effects;
   if (turbo_tool_registry_add_v6(registry, &definition) != TURBO_TOOL_OK) {
+    turbo_tool_registry_destroy(registry);
+    return NULL;
+  }
+  return registry;
+}
+
+static turbo_tool_registry_t *make_native_projection_registry(
+    dag_probe_t *probe) {
+  turbo_tool_registry_t *registry =
+      make_effect_registry(TURBO_TOOL_EFFECT_PURE, probe);
+  turbo_tool_native_projection_t projection = {0};
+
+  if (!registry) return NULL;
+  projection.struct_size = sizeof(projection);
+  projection.abi_version = TURBO_TOOL_NATIVE_PROJECTION_ABI_VERSION;
+  projection.function = FunctionMeta(dag_native_increment);
+  projection.abi = FunctionAbi(dag_native_increment);
+  projection.callable = dag_native_increment_callable();
+  if (turbo_tool_registry_publish_native_projection(
+          registry, "math.project", &projection) != TURBO_TOOL_OK) {
     turbo_tool_registry_destroy(registry);
     return NULL;
   }
@@ -616,6 +657,44 @@ spec("AgentCompiler Phase 3 DAG admission") {
     turbo_tool_registry_destroy(registry);
   }
 
+
+  it("freezes borrowed CMeta native authority into the approved tool projection") {
+    dag_probe_t probe = {0};
+    turbo_tool_registry_t *registry = make_native_projection_registry(&probe);
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t step;
+    turbo_agent_executable_dag_t *plan = NULL;
+    turbo_tool_native_projection_t observed = {0};
+    json_value_t *args = dag_args("native");
+    const char *allowed[] = {"runtime_tools"};
+    const turbo_tool_registry_t *approved;
+
+    check_not_null(registry);
+    check_not_null(args);
+    dag_config(&config, allowed, 1u);
+    dag_step(&step, "native", "math.project", args, NULL, 0u);
+    dag_source(&source, &step, 1u);
+
+    check_equal(turbo_agent_compile_dag(
+                    &config, registry, &source, &plan, NULL),
+                TURBO_AGENT_COMPILE_OK);
+    check_not_null(plan);
+    approved = turbo_agent_executable_dag_approved_tools(plan);
+    check_not_null(approved);
+    check_equal(turbo_tool_registry_get_native_projection(
+                    approved, "math.project", &observed),
+                TURBO_TOOL_OK);
+    check_equal(observed.function, FunctionMeta(dag_native_increment));
+    check_equal(observed.abi, FunctionAbi(dag_native_increment));
+    check_true(cmeta_callable_same(
+        observed.callable, dag_native_increment_callable()));
+    check_equal(probe.calls, 0);
+
+    turbo_agent_executable_dag_destroy(plan);
+    turbo_runtime_json_destroy(args);
+    turbo_tool_registry_destroy(registry);
+  }
 
   it("freezes PURE effects into DAG identity and admits a pure optimizer region") {
     dag_probe_t probe = {0};

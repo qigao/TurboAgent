@@ -97,6 +97,26 @@ underlying callback implementation state from the source registry. Therefore the
 source registry/provider lifetime must outlive the plan. This is a provider
 lifetime dependency, **not source-plan semantic authority**.
 
+Phase 4 extends the same rule to optional native CMeta execution authority:
+
+```text
+plan-owned RuntimeTools projection
+        |
+        +-- copied logical schema/effect/capability facts
+        |
+        '-- copied cmeta_callable value/capture bytes
+                 |
+                 +-- borrowed FunctionDesc / FunctionAbi
+                 +-- borrowed provider/type/lifecycle callbacks
+                 '-- borrowed native code/module
+```
+
+CMeta remains the native ownership/lifecycle authority. The Agent Compiler may
+record that a provider must stay alive, but it does not invent destroy/retain
+semantics and does not embed a Plugin lease in RuntimeTools/CMeta descriptors.
+For a future dynamic provider, all provider-backed values, active CFlow runs and
+plans must drain before the explicit outer Plugin lease is released.
+
 ## Phase-1 qualification matrix
 
 The dedicated AgentCompiler tests must keep these properties true:

@@ -62,6 +62,25 @@ static int contract_type_only_scalar(
   return 1;
 }
 
+static turbo_agent_contract_type_t contract_native_scalar_type(
+    const cmeta_type_desc *type) {
+  if (!type || !cmeta_type_desc_valid(type)) {
+    return TURBO_AGENT_CONTRACT_TYPE_UNKNOWN;
+  }
+  if (cmeta_type_equal(type, &cmeta_type_bool)) {
+    return TURBO_AGENT_CONTRACT_TYPE_BOOLEAN;
+  }
+  if (cmeta_type_equal(type, &cmeta_type_int) ||
+      cmeta_type_equal(type, &cmeta_type_long)) {
+    return TURBO_AGENT_CONTRACT_TYPE_INTEGER;
+  }
+  if (cmeta_type_equal(type, &cmeta_type_float) ||
+      cmeta_type_equal(type, &cmeta_type_double)) {
+    return TURBO_AGENT_CONTRACT_TYPE_NUMBER;
+  }
+  return TURBO_AGENT_CONTRACT_TYPE_UNKNOWN;
+}
+
 static int contract_definition_by_name(
     const turbo_tool_registry_t *registry,
     const char *name,
@@ -156,6 +175,96 @@ turbo_agent_tool_result_slot_compatibility(
   if ((producer_type == TURBO_AGENT_CONTRACT_TYPE_NUMBER &&
        consumer_type == TURBO_AGENT_CONTRACT_TYPE_INTEGER)) {
     return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
+  return TURBO_AGENT_CONTRACT_INCOMPATIBLE;
+}
+
+
+turbo_agent_contract_compatibility_t
+turbo_agent_tool_input_slot_native_compatibility(
+    const turbo_tool_registry_t *registry,
+    const char *consumer_tool,
+    const char *consumer_property,
+    const cmeta_type_desc *native_type) {
+  turbo_tool_definition_t consumer = {0};
+  json_value_t *owned_parameters = NULL;
+  const json_value_t *parameters;
+  const json_value_t *properties;
+  const json_value_t *slot;
+  turbo_agent_contract_type_t logical_type;
+  turbo_agent_contract_type_t native_scalar;
+
+  if (!registry || !consumer_tool || !consumer_property ||
+      !consumer_property[0] || !native_type) {
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
+  if (!contract_definition_by_name(registry, consumer_tool, &consumer)) {
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
+
+  if (consumer.parameters_schema) {
+    parameters = consumer.parameters_schema;
+  } else {
+    owned_parameters = turbo_tool_schema_parse_parameters_json_value(
+        consumer.parameters_json, consumer.strict);
+    parameters = owned_parameters;
+  }
+
+  properties =
+      parameters && json_type(parameters) == JSON_OBJECT
+          ? json_object_get(parameters, "properties")
+          : NULL;
+  slot =
+      properties && json_type(properties) == JSON_OBJECT
+          ? json_object_get(properties, consumer_property)
+          : NULL;
+
+  native_scalar = contract_native_scalar_type(native_type);
+  if (!contract_type_only_scalar(slot, &logical_type) ||
+      native_scalar == TURBO_AGENT_CONTRACT_TYPE_UNKNOWN) {
+    turbo_runtime_json_destroy(owned_parameters);
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
+  turbo_runtime_json_destroy(owned_parameters);
+
+  return logical_type == native_scalar
+             ? TURBO_AGENT_CONTRACT_COMPATIBLE
+             : TURBO_AGENT_CONTRACT_INCOMPATIBLE;
+}
+
+turbo_agent_contract_compatibility_t
+turbo_agent_tool_result_native_compatibility(
+    const turbo_tool_registry_t *registry,
+    const char *tool,
+    const cmeta_type_desc *native_type) {
+  const char *schema_json = NULL;
+  const json_value_t *schema = NULL;
+  int strict_result = 0;
+  turbo_agent_contract_type_t logical_type;
+  turbo_agent_contract_type_t native_scalar;
+
+  if (!registry || !tool || !native_type) {
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
+  if (turbo_tool_registry_get_result_contract(
+          registry, tool, &schema_json, &schema, &strict_result) !=
+          TURBO_TOOL_OK ||
+      !schema_json || !schema) {
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
+  (void)strict_result;
+
+  if (!contract_type_only_scalar(schema, &logical_type)) {
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
+  native_scalar = contract_native_scalar_type(native_type);
+  if (native_scalar == TURBO_AGENT_CONTRACT_TYPE_UNKNOWN) {
+    return TURBO_AGENT_CONTRACT_UNKNOWN;
+  }
+  if (native_scalar == logical_type ||
+      (native_scalar == TURBO_AGENT_CONTRACT_TYPE_INTEGER &&
+       logical_type == TURBO_AGENT_CONTRACT_TYPE_NUMBER)) {
+    return TURBO_AGENT_CONTRACT_COMPATIBLE;
   }
   return TURBO_AGENT_CONTRACT_INCOMPATIBLE;
 }

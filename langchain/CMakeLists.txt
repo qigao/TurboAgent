@@ -82,4 +82,30 @@ if(BUILD_TESTS)
     tests
     FOLDER
     "LangChain/tests")
+
+  if(TARGET test_turbo_action_tool)
+    # This suite is synchronous and contains no legitimate long-running work.
+    set_tests_properties(test_turbo_action_tool PROPERTIES TIMEOUT 60)
+    if(WIN32)
+      set(_action_diag_filters
+        "register and execute"
+        "reject malformed"
+        "serialize canonical failure"
+        "serialize action tools"
+        "bridge action tools into legacy"
+        "keep bridged tools usable"
+        "bridge action tools into TurboParser")
+      set(_action_diag_index 0)
+      foreach(_action_filter IN LISTS _action_diag_filters)
+        math(EXPR _action_diag_index "${_action_diag_index} + 1")
+        set(_action_diag_name "diag_turbo_action_${_action_diag_index}")
+        add_test(NAME ${_action_diag_name}
+                 COMMAND $<TARGET_FILE:test_turbo_action_tool>
+                         --filter "${_action_filter}")
+        set_tests_properties(${_action_diag_name} PROPERTIES TIMEOUT 15)
+      endforeach()
+      unset(_action_diag_filters)
+      unset(_action_diag_index)
+    endif()
+  endif()
 endif()

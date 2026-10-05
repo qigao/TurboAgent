@@ -178,7 +178,7 @@ static int region_baseline(
     turbo_runtime_json_destroy(args);
     return 0;
   }
-  first = (int)json_int64(result1);
+  first = (int)turbo_runtime_json_value_as_int64(result1, 0);
 
   turbo_runtime_json_destroy(args);
   args = json_create_object();
@@ -193,7 +193,7 @@ static int region_baseline(
     turbo_runtime_json_destroy(args);
     return 0;
   }
-  second = (int)json_int64(result2);
+  second = (int)turbo_runtime_json_value_as_int64(result2, 0);
   turbo_runtime_json_destroy(result2);
   turbo_runtime_json_destroy(result1);
   turbo_runtime_json_destroy(args);

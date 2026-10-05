@@ -14,7 +14,6 @@ if("@ENABLE_PRAKTOR_TOOLS@" STREQUAL "ON")
   find_dependency(Praktor CONFIG)
 endif()
 if("@ENABLE_LANGCHAIN@" STREQUAL "ON")
-  find_dependency(OpenSSL)
   find_dependency(unofficial-sqlite3 CONFIG)
 endif()
 

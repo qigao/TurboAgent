@@ -444,6 +444,720 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64 -WithWasm
 
+      - name: Verify provider-neutral CHttp runtime closure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:CHTTP_ROOT)) {
+            throw "CHTTP_ROOT is unavailable"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:VSINSTALL)) {
+            throw "VSINSTALL is unavailable"
+          }
+
+          $msvcRoot = Join-Path $env:VSINSTALL "VC\Tools\MSVC"
+          $dumpbin = Get-ChildItem -Path $msvcRoot -File -Filter dumpbin.exe -Recurse |
+            Where-Object { $_.FullName -match 'Hostx64\\x64\\dumpbin\.exe        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "TOOLCHAIN=%QIGAO_VCPKG_TOOLCHAIN_FILE%"
+          if not defined TOOLCHAIN set "TOOLCHAIN=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+          set "WIN_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET%"
+          if not defined WIN_TRIPLET exit /b 1
+          set "PREFIX=%GITHUB_WORKSPACE%\stage\sdk\windows-x64"
+          set "INSTALLED=%GITHUB_WORKSPACE%\vcpkg_installed\release-windows"
+
+          cmake -S . -B build\release-windows -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^
+            -DVCPKG_TARGET_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET% ^
+            -DVCPKG_HOST_TRIPLET=%QIGAO_VCPKG_WINDOWS_HOST_TRIPLET% ^
+            -DVCPKG_MANIFEST_MODE=OFF ^
+            -DVCPKG_INSTALLED_DIR="%INSTALLED%" ^
+            -DCMAKE_PREFIX_PATH="%TURBOWASM_ROOT%;%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
+            -DSALTS_ROOT="%SALTS_ROOT%" ^
+            -DSALTS_UTILS_ROOT="%SALTS_UTILS_ROOT%" ^
+            -DCHTTP_ROOT="%CHTTP_ROOT%" ^
+            -DTURBOWASM_ROOT="%TURBOWASM_ROOT%" ^
+            -DENABLE_PRAKTOR_TOOLS=OFF ^
+            -DENABLE_WASM_TOOLS=ON ^
+            -DBUILD_EXAMPLES=OFF ^
+            -DBUILD_BENCHMARKS=OFF ^
+            -DENABLE_ASAN=OFF
+          if errorlevel 1 exit /b 1
+
+          cmake --build build\release-windows --parallel 2
+          if errorlevel 1 exit /b 1
+
+          set "PATH=%GITHUB_WORKSPACE%\build\release-windows\bin;%TURBOWASM_ROOT%\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%INSTALLED%\%QIGAO_VCPKG_WINDOWS_TRIPLET%\bin;%PATH%"
+          ctest --test-dir build\release-windows --no-tests=error --output-on-failure
+          if errorlevel 1 exit /b 1
+
+          cmake --install build\release-windows --prefix "%PREFIX%"
+          if errorlevel 1 exit /b 1
+
+          if not exist "%PREFIX%\lib\cmake\TurboAgent\TurboAgentConfig.cmake" exit /b 1
+          if not exist "%PREFIX%\include\turbo_wasm_tools.h" exit /b 1
+          findstr /C:"WasmTools" "%PREFIX%\lib\cmake\TurboAgent\TurboAgentTargets.cmake" >nul
+          if errorlevel 1 exit /b 1
+          if exist "%PREFIX%\include\turbo_praktor_tool_pack.h" exit /b 1
+
+      - name: Write SDK manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "stage\sdk\windows-x64"
+          @"
+          version=${{ needs.metadata.outputs.version }}
+          commit=$env:GITHUB_SHA
+          rid=windows-x64
+          praktor_tools=off
+          "@ | Set-Content -Path (Join-Path $prefix "turboagent-sdk-manifest.txt")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-sdk-windows-x64
+          path: stage/sdk
+          if-no-files-found: error
+          compression-level: 9
+
+  android:
+    name: Android arm64-v8a
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Prepare Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm
+          test -n "${VCPKG_ROOT:-}"
+          test -n "${ANDROID_NDK_HOME:-}"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+
+      - name: Restore released native SDK graph
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash cmake/ci/restore-native-sdk.sh android-arm64-v8a 1 1
+
+      - name: Build, install and qualify SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          prefix="$GITHUB_WORKSPACE/stage/sdk/android-arm64-v8a"
+          installed="$GITHUB_WORKSPACE/vcpkg_installed/release-android"
+
+          cmake -S . -B build/release-android -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DTURBOWASM_ROOT="$TURBOWASM_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts"             -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils"             -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp"             -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm"             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor"             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DENABLE_CODEX_BRIDGE=OFF             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DCMAKE_INSTALL_PREFIX="$prefix"
+
+          cmake --build build/release-android --parallel 2
+          cmake --install build/release-android
+
+          test -f "$prefix/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+          test -f "$prefix/include/turbo_wasm_tools.h"
+          grep -F "WasmTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+          test -f "$prefix/include/turbo_praktor_tool_pack.h"
+          grep -F "PraktorTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+
+          consumer="$RUNNER_TEMP/turboagent-release-consumer-android"
+          mkdir -p "$consumer"
+          cat > "$consumer/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(turboagent_release_consumer LANGUAGES C)
+          find_package(TurboAgent CONFIG REQUIRED)
+          add_library(turboagent_release_consumer SHARED main.c)
+          target_link_libraries(turboagent_release_consumer PRIVATE
+            TurboAgent::RuntimeTools
+            TurboAgent::AgentCompiler
+            TurboAgent::PraktorTools)
+          EOF
+          cat > "$consumer/main.c" <<'EOF'
+          #include <turbo_praktor_tool_pack.h>
+          #include <turbo_agent_cflow_optimizer.h>
+          #include <turbo_agent_contracts.h>
+          #include <turbo_tool_registry.h>
+          #include <turbo_tool_runtime.h>
+          int turboagent_release_consumer_probe(void) {
+            turbo_praktor_tool_pack_config_t config;
+            turbo_praktor_workflow_config_t workflow;
+            turbo_tool_definition_v6_t definition = {0};
+            turbo_tool_runtime_tool_v3_t runtime_tool = {0};
+            const char *schema_json = NULL;
+            const json_value_t *schema = NULL;
+            int strict_result = 0;
+            turbo_tool_effect_flags_t effect_flags = 0;
+            turbo_tool_native_projection_t native_projection = {0};
+            turbo_agent_cflow_optimizer_options_t optimizer_options;
+            turbo_agent_cflow_composition_source_t composition;
+            turbo_praktor_tool_pack_config_init(&config);
+            turbo_agent_cflow_optimizer_options_init(&optimizer_options);
+            turbo_agent_cflow_composition_source_init(&composition);
+            turbo_praktor_workflow_config_init(&workflow);
+            (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
+            if (turbo_tool_registry_add_v6(NULL, &definition) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_result_contract(
+                    NULL, "missing", &schema_json, &schema, &strict_result) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_effects(
+                    NULL, "missing", &effect_flags) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_native_projection(
+                    NULL, "missing", &native_projection) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_native_get_native_projection(
+                    NULL, "missing", &native_projection) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_get_tool_v3(NULL, 0, &runtime_tool) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_agent_tool_result_slot_compatibility(
+                    NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
+              return 2;
+            }
+            if (optimizer_options.abi_version !=
+                    TURBO_AGENT_CFLOW_OPTIMIZER_OPTIONS_ABI_VERSION ||
+                composition.abi_version !=
+                    TURBO_AGENT_CFLOW_COMPOSITION_ABI_VERSION) {
+              return 3;
+            }
+            return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
+                           workflow.abi_version ==
+                               TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+                           workflow.struct_size == sizeof(workflow)
+                       ? 0
+                       : 1;
+          }
+          EOF
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DTurboAgent_DIR="$prefix/lib/cmake/TurboAgent"             -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts"             -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils"             -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp"             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript"             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor"             -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm"             -DCMAKE_PREFIX_PATH="$prefix;$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
+          cmake --build "$consumer/build" --parallel 2
+
+          cat > "$prefix/turboagent-sdk-manifest.txt" <<EOF
+          version=${{ needs.metadata.outputs.version }}
+          commit=$GITHUB_SHA
+          rid=android-arm64-v8a
+          praktor_tools=on
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-sdk-android-arm64-v8a
+          path: stage/sdk
+          if-no-files-found: error
+          compression-level: 9
+
+  pack:
+    name: Pack TurboAgent.Native
+    needs: [metadata, linux, macos, windows, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: turboagent-sdk-*
+          path: package/sdk
+          merge-multiple: true
+
+      - name: Verify package payload
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for rid in linux-x64 windows-x64 macos-arm64 android-arm64-v8a; do
+            test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+            test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+            test -f "package/sdk/$rid/include/turbo_tool.h"
+            test -f "package/sdk/$rid/include/turbo_tool_registry.h"
+            test -f "package/sdk/$rid/include/turbo_tool_runtime.h"
+            test -f "package/sdk/$rid/include/turbo_agent_compiler.h"
+            test -f "package/sdk/$rid/include/turbo_agent_contracts.h"
+            test -f "package/sdk/$rid/include/turbo_agent_dag_compiler.h"
+            test -f "package/sdk/$rid/include/turbo_agent_templates.h"
+            test -f "package/sdk/$rid/include/turbo_agent_praktor_lowering.h"
+            test -f "package/sdk/$rid/include/turbo_wasm_tools.h"
+            grep -F "AgentCompiler" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+            grep -F "WasmTools" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+            test -f "package/sdk/$rid/turboagent-sdk-manifest.txt"
+          done
+          for rid in linux-x64 macos-arm64 android-arm64-v8a; do
+            test -f "package/sdk/$rid/include/turbo_praktor_tool_pack.h"
+            grep -F "PraktorTools" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+          done
+          test ! -f package/sdk/windows-x64/include/turbo_praktor_tool_pack.h
+          if grep -Fq "PraktorTools" package/sdk/windows-x64/lib/cmake/TurboAgent/TurboAgentTargets.cmake; then
+            echo "Windows package must not export PraktorTools until Praktor publishes a Windows SDK" >&2
+            exit 1
+          fi
+          test "$(find package/sdk -maxdepth 2 -name turboagent-sdk-manifest.txt | wc -l | tr -d ' ')" -eq 4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Configure GitHub Packages source
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/nuget.config"
+          printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text --configfile "$config"
+          echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
+
+      - name: Create NuGet package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dotnet restore packaging/nuget/TurboAgent.Native.csproj             --configfile "$NUGET_CONFIG"             --packages "$RUNNER_TEMP/pack-nuget"
+          dotnet pack packaging/nuget/TurboAgent.Native.csproj             --no-restore             --configuration Release             --output dist             -p:PackageVersion=${{ needs.metadata.outputs.package_version }}             -p:PackageRoot="$GITHUB_WORKSPACE/package"             -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"
+
+          nupkg="dist/TurboAgent.Native.${{ needs.metadata.outputs.package_version }}.nupkg"
+          test -f "$nupkg"
+          unzip -Z1 "$nupkg" | sort | tee "$RUNNER_TEMP/turboagent-nupkg.txt"
+          for rid in linux-x64 windows-x64 macos-arm64 android-arm64-v8a; do
+            grep -Fx "sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_tool.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_tool_registry.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_tool_runtime.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_contracts.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_dag_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_templates.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_praktor_lowering.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_wasm_tools.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+          done
+          unzip -p "$nupkg" '*.nuspec' > "$RUNNER_TEMP/turboagent.nuspec"
+          if grep -q '<dependencies' "$RUNNER_TEMP/turboagent.nuspec"; then
+            echo "TurboAgent.Native must not publish dependency metadata" >&2
+            cat "$RUNNER_TEMP/turboagent.nuspec" >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: dist/*.nupkg
+          if-no-files-found: error
+
+  publish:
+    name: Publish package and GitHub Release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [metadata, pack]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: dist
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish to GitHub Packages
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text
+          dotnet nuget push "dist/TurboAgent.Native.${{ needs.metadata.outputs.version }}.nupkg"             --source github --api-key "$GITHUB_TOKEN" --skip-duplicate
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          pkg="dist/TurboAgent.Native.$VERSION.nupkg"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$pkg" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" "$pkg" --repo "$GITHUB_REPOSITORY"               --verify-tag --title "TurboAgent $VERSION" --generate-notes
+          fi
+ } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            throw "dumpbin.exe not found under $msvcRoot"
+          }
+
+          $bin = Join-Path $env:CHTTP_ROOT "bin"
+          $dlls = @(Get-ChildItem -Path $bin -File -Filter *.dll)
+          if ($dlls.Count -eq 0) {
+            throw "latest released CHttp SDK contains no Windows DLLs under $bin"
+          }
+
+          $providerPattern = '(?im)^\s*(?:crypto|ssl|gmssl|libcrypto[^\s]*|libssl[^\s]*)\.dll\s*        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "TOOLCHAIN=%QIGAO_VCPKG_TOOLCHAIN_FILE%"
+          if not defined TOOLCHAIN set "TOOLCHAIN=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+          set "WIN_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET%"
+          if not defined WIN_TRIPLET exit /b 1
+          set "PREFIX=%GITHUB_WORKSPACE%\stage\sdk\windows-x64"
+          set "INSTALLED=%GITHUB_WORKSPACE%\vcpkg_installed\release-windows"
+
+          cmake -S . -B build\release-windows -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^
+            -DVCPKG_TARGET_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET% ^
+            -DVCPKG_HOST_TRIPLET=%QIGAO_VCPKG_WINDOWS_HOST_TRIPLET% ^
+            -DVCPKG_MANIFEST_MODE=OFF ^
+            -DVCPKG_INSTALLED_DIR="%INSTALLED%" ^
+            -DCMAKE_PREFIX_PATH="%TURBOWASM_ROOT%;%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
+            -DSALTS_ROOT="%SALTS_ROOT%" ^
+            -DSALTS_UTILS_ROOT="%SALTS_UTILS_ROOT%" ^
+            -DCHTTP_ROOT="%CHTTP_ROOT%" ^
+            -DTURBOWASM_ROOT="%TURBOWASM_ROOT%" ^
+            -DENABLE_PRAKTOR_TOOLS=OFF ^
+            -DENABLE_WASM_TOOLS=ON ^
+            -DBUILD_EXAMPLES=OFF ^
+            -DBUILD_BENCHMARKS=OFF ^
+            -DENABLE_ASAN=OFF
+          if errorlevel 1 exit /b 1
+
+          cmake --build build\release-windows --parallel 2
+          if errorlevel 1 exit /b 1
+
+          set "PATH=%GITHUB_WORKSPACE%\build\release-windows\bin;%TURBOWASM_ROOT%\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%INSTALLED%\%QIGAO_VCPKG_WINDOWS_TRIPLET%\bin;%PATH%"
+          ctest --test-dir build\release-windows --no-tests=error --output-on-failure
+          if errorlevel 1 exit /b 1
+
+          cmake --install build\release-windows --prefix "%PREFIX%"
+          if errorlevel 1 exit /b 1
+
+          if not exist "%PREFIX%\lib\cmake\TurboAgent\TurboAgentConfig.cmake" exit /b 1
+          if not exist "%PREFIX%\include\turbo_wasm_tools.h" exit /b 1
+          findstr /C:"WasmTools" "%PREFIX%\lib\cmake\TurboAgent\TurboAgentTargets.cmake" >nul
+          if errorlevel 1 exit /b 1
+          if exist "%PREFIX%\include\turbo_praktor_tool_pack.h" exit /b 1
+
+      - name: Write SDK manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "stage\sdk\windows-x64"
+          @"
+          version=${{ needs.metadata.outputs.version }}
+          commit=$env:GITHUB_SHA
+          rid=windows-x64
+          praktor_tools=off
+          "@ | Set-Content -Path (Join-Path $prefix "turboagent-sdk-manifest.txt")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-sdk-windows-x64
+          path: stage/sdk
+          if-no-files-found: error
+          compression-level: 9
+
+  android:
+    name: Android arm64-v8a
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Prepare Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm
+          test -n "${VCPKG_ROOT:-}"
+          test -n "${ANDROID_NDK_HOME:-}"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+
+      - name: Restore released native SDK graph
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash cmake/ci/restore-native-sdk.sh android-arm64-v8a 1 1
+
+      - name: Build, install and qualify SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          prefix="$GITHUB_WORKSPACE/stage/sdk/android-arm64-v8a"
+          installed="$GITHUB_WORKSPACE/vcpkg_installed/release-android"
+
+          cmake -S . -B build/release-android -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=ON             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DCMAKE_PREFIX_PATH="$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"             -DSALTS_ROOT="$SALTS_ROOT"             -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT"             -DCHTTP_ROOT="$CHTTP_ROOT"             -DTURBOWASM_ROOT="$TURBOWASM_ROOT"             -DPRAKTOR_ROOT="$PRAKTOR_ROOT"             -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts"             -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils"             -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp"             -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm"             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor"             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript"             -DENABLE_PRAKTOR_TOOLS=ON             -DENABLE_WASM_TOOLS=ON             -DENABLE_CODEX_BRIDGE=OFF             -DENABLE_TESTS=OFF             -DBUILD_TESTS=OFF             -DBUILD_EXAMPLES=OFF             -DBUILD_BENCHMARKS=OFF             -DCMAKE_INSTALL_PREFIX="$prefix"
+
+          cmake --build build/release-android --parallel 2
+          cmake --install build/release-android
+
+          test -f "$prefix/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+          test -f "$prefix/include/turbo_wasm_tools.h"
+          grep -F "WasmTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+          test -f "$prefix/include/turbo_praktor_tool_pack.h"
+          grep -F "PraktorTools" "$prefix/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+
+          consumer="$RUNNER_TEMP/turboagent-release-consumer-android"
+          mkdir -p "$consumer"
+          cat > "$consumer/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(turboagent_release_consumer LANGUAGES C)
+          find_package(TurboAgent CONFIG REQUIRED)
+          add_library(turboagent_release_consumer SHARED main.c)
+          target_link_libraries(turboagent_release_consumer PRIVATE
+            TurboAgent::RuntimeTools
+            TurboAgent::AgentCompiler
+            TurboAgent::PraktorTools)
+          EOF
+          cat > "$consumer/main.c" <<'EOF'
+          #include <turbo_praktor_tool_pack.h>
+          #include <turbo_agent_cflow_optimizer.h>
+          #include <turbo_agent_contracts.h>
+          #include <turbo_tool_registry.h>
+          #include <turbo_tool_runtime.h>
+          int turboagent_release_consumer_probe(void) {
+            turbo_praktor_tool_pack_config_t config;
+            turbo_praktor_workflow_config_t workflow;
+            turbo_tool_definition_v6_t definition = {0};
+            turbo_tool_runtime_tool_v3_t runtime_tool = {0};
+            const char *schema_json = NULL;
+            const json_value_t *schema = NULL;
+            int strict_result = 0;
+            turbo_tool_effect_flags_t effect_flags = 0;
+            turbo_tool_native_projection_t native_projection = {0};
+            turbo_agent_cflow_optimizer_options_t optimizer_options;
+            turbo_agent_cflow_composition_source_t composition;
+            turbo_praktor_tool_pack_config_init(&config);
+            turbo_agent_cflow_optimizer_options_init(&optimizer_options);
+            turbo_agent_cflow_composition_source_init(&composition);
+            turbo_praktor_workflow_config_init(&workflow);
+            (void)turbo_praktor_tool_pack_supports_host_tools(NULL);
+            if (turbo_tool_registry_add_v6(NULL, &definition) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_result_contract(
+                    NULL, "missing", &schema_json, &schema, &strict_result) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_effects(
+                    NULL, "missing", &effect_flags) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_registry_get_native_projection(
+                    NULL, "missing", &native_projection) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_native_get_native_projection(
+                    NULL, "missing", &native_projection) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_tool_runtime_get_tool_v3(NULL, 0, &runtime_tool) !=
+                    TURBO_TOOL_INVALID_ARGUMENT ||
+                turbo_agent_tool_result_slot_compatibility(
+                    NULL, NULL, NULL, NULL) != TURBO_AGENT_CONTRACT_UNKNOWN) {
+              return 2;
+            }
+            if (optimizer_options.abi_version !=
+                    TURBO_AGENT_CFLOW_OPTIMIZER_OPTIONS_ABI_VERSION ||
+                composition.abi_version !=
+                    TURBO_AGENT_CFLOW_COMPOSITION_ABI_VERSION) {
+              return 3;
+            }
+            return config.abi_version == TURBO_PRAKTOR_TOOL_PACK_ABI_VERSION &&
+                           workflow.abi_version ==
+                               TURBO_PRAKTOR_WORKFLOW_CONFIG_ABI_VERSION &&
+                           workflow.struct_size == sizeof(workflow)
+                       ? 0
+                       : 1;
+          }
+          EOF
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$toolchain"             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DVCPKG_TARGET_TRIPLET=arm64-android             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$installed"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DTurboAgent_DIR="$prefix/lib/cmake/TurboAgent"             -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts"             -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils"             -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp"             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript"             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor"             -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm"             -DCMAKE_PREFIX_PATH="$prefix;$TURBOWASM_ROOT;$PRAKTOR_ROOT;$TURBOSCRIPT_ROOT;$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT"
+          cmake --build "$consumer/build" --parallel 2
+
+          cat > "$prefix/turboagent-sdk-manifest.txt" <<EOF
+          version=${{ needs.metadata.outputs.version }}
+          commit=$GITHUB_SHA
+          rid=android-arm64-v8a
+          praktor_tools=on
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-sdk-android-arm64-v8a
+          path: stage/sdk
+          if-no-files-found: error
+          compression-level: 9
+
+  pack:
+    name: Pack TurboAgent.Native
+    needs: [metadata, linux, macos, windows, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: turboagent-sdk-*
+          path: package/sdk
+          merge-multiple: true
+
+      - name: Verify package payload
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for rid in linux-x64 windows-x64 macos-arm64 android-arm64-v8a; do
+            test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+            test -f "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+            test -f "package/sdk/$rid/include/turbo_tool.h"
+            test -f "package/sdk/$rid/include/turbo_tool_registry.h"
+            test -f "package/sdk/$rid/include/turbo_tool_runtime.h"
+            test -f "package/sdk/$rid/include/turbo_agent_compiler.h"
+            test -f "package/sdk/$rid/include/turbo_agent_contracts.h"
+            test -f "package/sdk/$rid/include/turbo_agent_dag_compiler.h"
+            test -f "package/sdk/$rid/include/turbo_agent_templates.h"
+            test -f "package/sdk/$rid/include/turbo_agent_praktor_lowering.h"
+            test -f "package/sdk/$rid/include/turbo_wasm_tools.h"
+            grep -F "AgentCompiler" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+            grep -F "WasmTools" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+            test -f "package/sdk/$rid/turboagent-sdk-manifest.txt"
+          done
+          for rid in linux-x64 macos-arm64 android-arm64-v8a; do
+            test -f "package/sdk/$rid/include/turbo_praktor_tool_pack.h"
+            grep -F "PraktorTools" "package/sdk/$rid/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+          done
+          test ! -f package/sdk/windows-x64/include/turbo_praktor_tool_pack.h
+          if grep -Fq "PraktorTools" package/sdk/windows-x64/lib/cmake/TurboAgent/TurboAgentTargets.cmake; then
+            echo "Windows package must not export PraktorTools until Praktor publishes a Windows SDK" >&2
+            exit 1
+          fi
+          test "$(find package/sdk -maxdepth 2 -name turboagent-sdk-manifest.txt | wc -l | tr -d ' ')" -eq 4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Configure GitHub Packages source
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/nuget.config"
+          printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text --configfile "$config"
+          echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
+
+      - name: Create NuGet package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dotnet restore packaging/nuget/TurboAgent.Native.csproj             --configfile "$NUGET_CONFIG"             --packages "$RUNNER_TEMP/pack-nuget"
+          dotnet pack packaging/nuget/TurboAgent.Native.csproj             --no-restore             --configuration Release             --output dist             -p:PackageVersion=${{ needs.metadata.outputs.package_version }}             -p:PackageRoot="$GITHUB_WORKSPACE/package"             -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"
+
+          nupkg="dist/TurboAgent.Native.${{ needs.metadata.outputs.package_version }}.nupkg"
+          test -f "$nupkg"
+          unzip -Z1 "$nupkg" | sort | tee "$RUNNER_TEMP/turboagent-nupkg.txt"
+          for rid in linux-x64 windows-x64 macos-arm64 android-arm64-v8a; do
+            grep -Fx "sdk/$rid/lib/cmake/TurboAgent/TurboAgentConfig.cmake" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_tool.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_tool_registry.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_tool_runtime.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_contracts.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_dag_compiler.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_templates.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_agent_praktor_lowering.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+            grep -Fx "sdk/$rid/include/turbo_wasm_tools.h" "$RUNNER_TEMP/turboagent-nupkg.txt"
+          done
+          unzip -p "$nupkg" '*.nuspec' > "$RUNNER_TEMP/turboagent.nuspec"
+          if grep -q '<dependencies' "$RUNNER_TEMP/turboagent.nuspec"; then
+            echo "TurboAgent.Native must not publish dependency metadata" >&2
+            cat "$RUNNER_TEMP/turboagent.nuspec" >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: dist/*.nupkg
+          if-no-files-found: error
+
+  publish:
+    name: Publish package and GitHub Release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [metadata, pack]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: dist
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish to GitHub Packages
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text
+          dotnet nuget push "dist/TurboAgent.Native.${{ needs.metadata.outputs.version }}.nupkg"             --source github --api-key "$GITHUB_TOKEN" --skip-duplicate
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          pkg="dist/TurboAgent.Native.$VERSION.nupkg"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$pkg" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" "$pkg" --repo "$GITHUB_REPOSITORY"               --verify-tag --title "TurboAgent $VERSION" --generate-notes
+          fi
+
+          foreach ($dll in $dlls) {
+            $deps = (& $dumpbin.FullName /dependents $dll.FullName 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) {
+              throw "dumpbin failed for $($dll.FullName)"
+            }
+            if ($deps -match $providerPattern) {
+              Write-Host $deps
+              throw "latest released CHttp is not provider-neutral: $($dll.Name) imports a crypto provider DLL; publish the provider-neutral CHttp release instead of restoring a TurboAgent provider fallback"
+            }
+          }
+
       - name: Build, test, install and qualify SDK
         shell: cmd
         run: |

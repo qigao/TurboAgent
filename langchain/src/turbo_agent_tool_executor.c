@@ -132,7 +132,7 @@ static char *turbo_agent_tool_sha256_parts(const char *first, const char *second
     return NULL;
   }
   if (salts_sha256_stream_update(sha, first, strlen(first) + 1) != SALTS_OK ||
-      salts_sha256_stream_update(sha, second, strlen(second) + 1) != SALTS_OK ||
+      salts_sha256_stream_update(sha, second, strlen(second)) != SALTS_OK ||
       salts_sha256_stream_finish(sha, digest) != SALTS_OK) {
     salts_sha256_stream_destroy(sha);
     return NULL;

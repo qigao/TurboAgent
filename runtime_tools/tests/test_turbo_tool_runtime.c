@@ -56,6 +56,29 @@ typedef struct test_tool_context_probe_s {
   int calls;
 } test_tool_context_probe_t;
 
+FunctionDeclResult(
+    value, int, CMETA_RESULT_VALUE, test_native_increment,
+    (int, value, CMETA_PARAM_IN));
+
+int test_native_increment(int value) {
+  return value + 1;
+}
+
+static cmeta_callable test_native_increment_callable(void) {
+  const cmeta_function_desc *function = FunctionMeta(test_native_increment);
+  cmeta_callable callable = {0};
+  callable.meta = CMETA_WRAP_TYPED_ANY(test_native_increment);
+  callable.meta.effects =
+      function ? function->effects : CMETA_EFFECT_UNKNOWN;
+  callable.meta.properties =
+      function ? function->properties : CMETA_PROP_NONE;
+  callable.invoke = CMETA_TYPED_INVOKER_ANY(test_native_increment);
+  callable.generate = NULL;
+  callable.dispatch = CMETA_CALLABLE_DISPATCH_CANONICAL_RAW;
+  callable.capture_size = 0u;
+  return callable;
+}
+
 static turbo_tool_status_t test_context_echo_tool(
     const char *arguments_json, const turbo_tool_execution_context_t *context,
     char **out_output, void *user_data) {
@@ -75,6 +98,161 @@ static turbo_tool_status_t test_context_echo_tool(
 }
 
 spec("turbo tool runtime") {
+  it("should publish and preserve a borrowed canonical CMeta native projection") {
+    turbo_tool_registry_t *source = turbo_tool_registry_create();
+    turbo_tool_registry_t *projected = NULL;
+    turbo_tool_registry_t *composite = NULL;
+    const turbo_tool_registry_t *sources[1];
+    const char *names[] = {"native_increment"};
+    turbo_tool_definition_v6_t definition = {0};
+    turbo_tool_native_projection_t native = {0};
+    turbo_tool_native_projection_t observed = {0};
+
+    check_not_null(source);
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+    definition.definition.name = "native_increment";
+    definition.definition.description = "Reflected native increment";
+    definition.definition.parameters_json =
+        "{\"type\":\"object\",\"additionalProperties\":true}";
+    definition.definition.json_value_handler = test_echo_tool_json_value;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    definition.result_schema_json = "{\"type\":\"integer\"}";
+    definition.effect_flags = TURBO_TOOL_EFFECT_PURE;
+    check_equal(turbo_tool_registry_add_v6(source, &definition), TURBO_TOOL_OK);
+
+    native.struct_size = sizeof(native);
+    native.abi_version = TURBO_TOOL_NATIVE_PROJECTION_ABI_VERSION;
+    native.function = FunctionMeta(test_native_increment);
+    native.abi = FunctionAbi(test_native_increment);
+    native.callable = test_native_increment_callable();
+
+    check_equal(turbo_tool_registry_publish_native_projection(
+                    source, "native_increment", &native),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_publish_native_projection(
+                    source, "native_increment", &native),
+                TURBO_TOOL_DUPLICATE);
+    check_equal(turbo_tool_registry_get_native_projection(
+                    source, "native_increment", &observed),
+                TURBO_TOOL_OK);
+    check_equal(observed.function, native.function);
+    check_equal(observed.abi, native.abi);
+    check_true(cmeta_callable_same(observed.callable, native.callable));
+
+    check_equal(turbo_tool_registry_project(
+                    source, names, 1u, &projected),
+                TURBO_TOOL_OK);
+    memset(&observed, 0, sizeof(observed));
+    check_equal(turbo_tool_registry_get_native_projection(
+                    projected, "native_increment", &observed),
+                TURBO_TOOL_OK);
+    check_equal(observed.function, native.function);
+    check_true(cmeta_callable_same(observed.callable, native.callable));
+
+    sources[0] = projected;
+    check_equal(turbo_tool_registry_compose(sources, 1u, &composite),
+                TURBO_TOOL_OK);
+    memset(&observed, 0, sizeof(observed));
+    check_equal(turbo_tool_registry_get_native_projection(
+                    composite, "native_increment", &observed),
+                TURBO_TOOL_OK);
+    check_equal(observed.abi, native.abi);
+    check_true(cmeta_callable_same(observed.callable, native.callable));
+
+    turbo_tool_registry_destroy(composite);
+    turbo_tool_registry_destroy(projected);
+    turbo_tool_registry_destroy(source);
+  }
+
+  it("should fail closed for missing or inconsistent native projection authority") {
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_v6_t definition = {0};
+    turbo_tool_native_projection_t native = {0};
+    turbo_tool_native_projection_t observed = {0};
+
+    check_not_null(registry);
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+    definition.definition.name = "legacy_json_only";
+    definition.definition.description = "No native authority";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.json_value_handler = test_echo_tool_json_value;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    definition.effect_flags = TURBO_TOOL_EFFECT_PURE;
+    check_equal(turbo_tool_registry_add_v6(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_tool_registry_get_native_projection(
+                    registry, "legacy_json_only", &observed),
+                TURBO_TOOL_NOT_FOUND);
+
+    native.struct_size = sizeof(native);
+    native.abi_version = TURBO_TOOL_NATIVE_PROJECTION_ABI_VERSION;
+    native.function = FunctionMeta(test_native_increment);
+    native.abi = NULL;
+    native.callable = test_native_increment_callable();
+    check_equal(turbo_tool_registry_publish_native_projection(
+                    registry, "legacy_json_only", &native),
+                TURBO_TOOL_INVALID_ARGUMENT);
+
+    native.abi = FunctionAbi(test_native_increment);
+    native.callable.meta.effects = CMETA_EFFECT_STATEFUL;
+    check_equal(turbo_tool_registry_publish_native_projection(
+                    registry, "legacy_json_only", &native),
+                TURBO_TOOL_INVALID_ARGUMENT);
+
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("should preserve native projection through the native runtime registry bridge") {
+    turbo_tool_runtime_t *runtime = turbo_tool_runtime_native_create();
+    turbo_tool_registry_t *bridge = NULL;
+    turbo_tool_definition_v6_t definition = {0};
+    turbo_tool_native_projection_t native = {0};
+    turbo_tool_native_projection_t observed = {0};
+
+    check_not_null(runtime);
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+    definition.definition.name = "native_runtime_increment";
+    definition.definition.description = "Runtime reflected native increment";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.json_value_handler = test_echo_tool_json_value;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_PARALLEL_SAFE;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+    definition.result_schema_json = "{\"type\":\"integer\"}";
+    definition.effect_flags = TURBO_TOOL_EFFECT_PURE;
+    check_equal(turbo_tool_runtime_native_add_tool_v6(runtime, &definition),
+                TURBO_TOOL_OK);
+
+    native.struct_size = sizeof(native);
+    native.abi_version = TURBO_TOOL_NATIVE_PROJECTION_ABI_VERSION;
+    native.function = FunctionMeta(test_native_increment);
+    native.abi = FunctionAbi(test_native_increment);
+    native.callable = test_native_increment_callable();
+    check_equal(turbo_tool_runtime_native_publish_native_projection(
+                    runtime, "native_runtime_increment", &native),
+                TURBO_TOOL_OK);
+    check_equal(turbo_tool_runtime_native_get_native_projection(
+                    runtime, "native_runtime_increment", &observed),
+                TURBO_TOOL_OK);
+    check_true(cmeta_callable_same(observed.callable, native.callable));
+
+    bridge = turbo_tool_runtime_build_registry_bridge(runtime);
+    check_not_null(bridge);
+    memset(&observed, 0, sizeof(observed));
+    check_equal(turbo_tool_registry_get_native_projection(
+                    bridge, "native_runtime_increment", &observed),
+                TURBO_TOOL_OK);
+    check_equal(observed.function, native.function);
+    check_equal(observed.abi, native.abi);
+    check_true(cmeta_callable_same(observed.callable, native.callable));
+
+    turbo_tool_registry_destroy(bridge);
+    turbo_tool_runtime_destroy(runtime);
+  }
+
   it("should own and preserve execution metadata through projection and composition") {
     turbo_tool_registry_t *source = turbo_tool_registry_create();
     turbo_tool_registry_t *projection = NULL;

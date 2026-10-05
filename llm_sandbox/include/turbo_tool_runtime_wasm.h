@@ -64,9 +64,11 @@ CXX_C_API void turbo_tool_runtime_wasm_config_init(turbo_tool_runtime_wasm_confi
  * result through tool_output_write. Both return zero on success.
  *
  * RuntimeTools v2 cancellation/deadline is projected into
- * turbowasm_execution_options.should_interrupt. A queued invocation is checked
- * again after acquiring the backend single-owner mutex, so an expired/cancelled
- * call never starts guest execution after waiting behind an earlier call.
+ * turbowasm_execution_options.should_interrupt. The backend single-owner gate
+ * includes queue wait in the absolute invocation deadline and keeps
+ * cancellation observable while queued. Its mutex protects gate state only and
+ * is not held across guest execution. An expired/cancelled queued call returns
+ * before acquiring instance ownership and never enters the guest.
  * TurboWasm Runtime owns Wasm validation, traps, fuel and resource enforcement.
  */
 CXX_C_API turbo_tool_runtime_t *

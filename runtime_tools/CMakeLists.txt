@@ -33,4 +33,12 @@ if(BUILD_TESTS)
     include
     FOLDER
     "Runtime Tools/tests")
+
+  cmake_add_test(
+    SOURCES
+    tests/test_turbo_tool_native_header_cpp.cpp
+    LIBS
+    runtime_tools
+    FOLDER
+    "Runtime Tools/tests")
 endif()

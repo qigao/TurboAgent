@@ -38,6 +38,29 @@ turbo_agent_tool_result_slot_compatibility(
     const char *consumer_tool,
     const char *consumer_property);
 
+/**
+ * Prove one logical consumer input slot is compatible with a canonical native
+ * CMeta scalar parameter type. The initial subset is deliberately narrow:
+ * integer -> CMeta int/long, number -> float/double, boolean -> bool.
+ */
+CXX_C_API turbo_agent_contract_compatibility_t
+turbo_agent_tool_input_slot_native_compatibility(
+    const turbo_tool_registry_t *registry,
+    const char *consumer_tool,
+    const char *consumer_property,
+    const cmeta_type_desc *native_type);
+
+/**
+ * Prove one canonical native CMeta scalar result type satisfies the tool's
+ * logical RuntimeTools result contract. CMeta integer results may satisfy
+ * integer or number; floating results satisfy number; bool satisfies boolean.
+ */
+CXX_C_API turbo_agent_contract_compatibility_t
+turbo_agent_tool_result_native_compatibility(
+    const turbo_tool_registry_t *registry,
+    const char *tool,
+    const cmeta_type_desc *native_type);
+
 #ifdef __cplusplus
 }
 #endif

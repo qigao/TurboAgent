@@ -392,6 +392,298 @@ jobs:
           "SALTS_UTILS_ROOT=$utilsRoot" >> $env:GITHUB_ENV
           "CHTTP_ROOT=$chttpRoot" >> $env:GITHUB_ENV
 
+      - name: Verify provider-neutral CHttp runtime closure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:CHTTP_ROOT)) {
+            throw "CHTTP_ROOT is unavailable"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:VSINSTALL)) {
+            throw "VSINSTALL is unavailable"
+          }
+
+          $msvcRoot = Join-Path $env:VSINSTALL "VC\Tools\MSVC"
+          $dumpbin = Get-ChildItem -Path $msvcRoot -File -Filter dumpbin.exe -Recurse |
+            Where-Object { $_.FullName -match 'Hostx64\\x64\\dumpbin\.exe        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "TOOLCHAIN=%QIGAO_VCPKG_TOOLCHAIN_FILE%"
+          if not defined TOOLCHAIN set "TOOLCHAIN=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+          set "WIN_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET%"
+          if not defined WIN_TRIPLET exit /b 1
+          cmake -S . -B build\windows -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^
+            -DVCPKG_TARGET_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET% ^
+            -DVCPKG_HOST_TRIPLET=%QIGAO_VCPKG_WINDOWS_HOST_TRIPLET% ^
+            -DVCPKG_MANIFEST_MODE=OFF ^
+            -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed\windows" ^
+            -DCMAKE_PREFIX_PATH="%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
+            -DSALTS_ROOT="%SALTS_ROOT%" ^
+            -DSALTS_UTILS_ROOT="%SALTS_UTILS_ROOT%" ^
+            -DCHTTP_ROOT="%CHTTP_ROOT%" ^
+            -DENABLE_WASM_TOOLS=OFF ^
+            -DBUILD_EXAMPLES=OFF ^
+            -DBUILD_BENCHMARKS=OFF ^
+            -DENABLE_ASAN=OFF
+          if errorlevel 1 exit /b 1
+
+          cmake --build build\windows --parallel 2
+          if errorlevel 1 exit /b 1
+
+          set "PATH=%GITHUB_WORKSPACE%\build\windows\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%GITHUB_WORKSPACE%\vcpkg_installed\windows\%QIGAO_VCPKG_WINDOWS_TRIPLET%\bin;%PATH%"
+          ctest --test-dir build\windows --output-on-failure
+          if errorlevel 1 exit /b 1
+
+          cmake --install build\windows --prefix "%GITHUB_WORKSPACE%\stage\windows-x64"
+          if errorlevel 1 exit /b 1
+
+  android:
+    name: Android arm64-v8a
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Prepare Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm
+          test -n "${VCPKG_ROOT:-}"
+          test -n "${ANDROID_NDK_HOME:-}"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+
+      - name: Restore current target SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sdk_root="$RUNNER_TEMP/turboagent-native-sdks"
+          mkdir -p "$sdk_root"
+
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local config_rel="$4"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+              --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/android-arm64-v8a"
+            test -f "$root/$config_rel"
+            printf '%s\n' "$root"
+          }
+
+          {
+            echo "SALTS_ROOT=$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake')"
+            echo "SALTS_UTILS_ROOT=$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
+            echo "CHTTP_ROOT=$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake')"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure, build and install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          prefix="$GITHUB_WORKSPACE/stage/android-arm64-v8a"
+          cmake -S . -B build/android -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-android \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/android" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_PREFIX_PATH="$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            -DSALTS_ROOT="$SALTS_ROOT" \
+            -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT" \
+            -DCHTTP_ROOT="$CHTTP_ROOT" \
+            -DENABLE_WASM_TOOLS=OFF \
+            -DENABLE_CODEX_BRIDGE=OFF \
+            -DENABLE_TESTS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BENCHMARKS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$prefix"
+          cmake --build build/android --parallel 2
+          cmake --install build/android
+          test -f "$prefix/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+ } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            throw "dumpbin.exe not found under $msvcRoot"
+          }
+
+          $bin = Join-Path $env:CHTTP_ROOT "bin"
+          $dlls = @(Get-ChildItem -Path $bin -File -Filter *.dll)
+          if ($dlls.Count -eq 0) {
+            throw "latest released CHttp SDK contains no Windows DLLs under $bin"
+          }
+
+          $providerPattern = '(?im)^\s*(?:crypto|ssl|gmssl|libcrypto[^\s]*|libssl[^\s]*)\.dll\s*        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "TOOLCHAIN=%QIGAO_VCPKG_TOOLCHAIN_FILE%"
+          if not defined TOOLCHAIN set "TOOLCHAIN=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+          set "WIN_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET%"
+          if not defined WIN_TRIPLET exit /b 1
+          cmake -S . -B build\windows -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%TOOLCHAIN%" ^
+            -DVCPKG_TARGET_TRIPLET=%QIGAO_VCPKG_WINDOWS_TRIPLET% ^
+            -DVCPKG_HOST_TRIPLET=%QIGAO_VCPKG_WINDOWS_HOST_TRIPLET% ^
+            -DVCPKG_MANIFEST_MODE=OFF ^
+            -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed\windows" ^
+            -DCMAKE_PREFIX_PATH="%CHTTP_ROOT%;%SALTS_UTILS_ROOT%;%SALTS_ROOT%" ^
+            -DSALTS_ROOT="%SALTS_ROOT%" ^
+            -DSALTS_UTILS_ROOT="%SALTS_UTILS_ROOT%" ^
+            -DCHTTP_ROOT="%CHTTP_ROOT%" ^
+            -DENABLE_WASM_TOOLS=OFF ^
+            -DBUILD_EXAMPLES=OFF ^
+            -DBUILD_BENCHMARKS=OFF ^
+            -DENABLE_ASAN=OFF
+          if errorlevel 1 exit /b 1
+
+          cmake --build build\windows --parallel 2
+          if errorlevel 1 exit /b 1
+
+          set "PATH=%GITHUB_WORKSPACE%\build\windows\bin;%CHTTP_ROOT%\bin;%SALTS_UTILS_ROOT%\bin;%SALTS_ROOT%\bin;%GITHUB_WORKSPACE%\vcpkg_installed\windows\%QIGAO_VCPKG_WINDOWS_TRIPLET%\bin;%PATH%"
+          ctest --test-dir build\windows --output-on-failure
+          if errorlevel 1 exit /b 1
+
+          cmake --install build\windows --prefix "%GITHUB_WORKSPACE%\stage\windows-x64"
+          if errorlevel 1 exit /b 1
+
+  android:
+    name: Android arm64-v8a
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Prepare Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm
+          test -n "${VCPKG_ROOT:-}"
+          test -n "${ANDROID_NDK_HOME:-}"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+
+      - name: Restore current target SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sdk_root="$RUNNER_TEMP/turboagent-native-sdks"
+          mkdir -p "$sdk_root"
+
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local config_rel="$4"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+              --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/android-arm64-v8a"
+            test -f "$root/$config_rel"
+            printf '%s\n' "$root"
+          }
+
+          {
+            echo "SALTS_ROOT=$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake')"
+            echo "SALTS_UTILS_ROOT=$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
+            echo "CHTTP_ROOT=$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake')"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure, build and install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          toolchain="${QIGAO_VCPKG_TOOLCHAIN_FILE:-$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake}"
+          prefix="$GITHUB_WORKSPACE/stage/android-arm64-v8a"
+          cmake -S . -B build/android -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-android \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/android" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_PREFIX_PATH="$CHTTP_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT" \
+            -DSALTS_ROOT="$SALTS_ROOT" \
+            -DSALTS_UTILS_ROOT="$SALTS_UTILS_ROOT" \
+            -DCHTTP_ROOT="$CHTTP_ROOT" \
+            -DENABLE_WASM_TOOLS=OFF \
+            -DENABLE_CODEX_BRIDGE=OFF \
+            -DENABLE_TESTS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BENCHMARKS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$prefix"
+          cmake --build build/android --parallel 2
+          cmake --install build/android
+          test -f "$prefix/lib/cmake/TurboAgent/TurboAgentConfig.cmake"
+
+          foreach ($dll in $dlls) {
+            $deps = (& $dumpbin.FullName /dependents $dll.FullName 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) {
+              throw "dumpbin failed for $($dll.FullName)"
+            }
+            if ($deps -match $providerPattern) {
+              Write-Host $deps
+              throw "latest released CHttp is not provider-neutral: $($dll.Name) imports a crypto provider DLL; publish the provider-neutral CHttp release instead of restoring a TurboAgent provider fallback"
+            }
+          }
+
       - name: Configure, build, test and install
         shell: cmd
         run: |

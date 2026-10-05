@@ -4,7 +4,7 @@
 #include "turbo_agent_runtime_internal.h"
 #include "turbo_agent_runtime_v1_internal.h"
 
-#include <openssl/sha.h>
+#include <salts_crypto.h>
 #include <salts/thread.h>
 #include <salts/thread_pool.h>
 
@@ -122,21 +122,30 @@ int turbo_agent_tool_executor_configure(turbo_agent_t *agent,
 
 static char *turbo_agent_tool_sha256_parts(const char *first, const char *second) {
   static const char hex[] = "0123456789abcdef";
-  SHA256_CTX sha;
-  unsigned char digest[SHA256_DIGEST_LENGTH];
+  salts_sha256_stream *sha = NULL;
+  uint8_t digest[SALTS_SHA256_DIGEST_BYTES];
   char *id;
   size_t index;
-  if (!first || !second || SHA256_Init(&sha) != 1 ||
-      SHA256_Update(&sha, first, strlen(first) + 1) != 1 ||
-      SHA256_Update(&sha, second, strlen(second)) != 1 || SHA256_Final(digest, &sha) != 1)
+
+  if (!first || !second ||
+      salts_sha256_stream_create(&sha) != SALTS_OK) {
     return NULL;
-  id = (char *)malloc(SHA256_DIGEST_LENGTH * 2 + 1);
+  }
+  if (salts_sha256_stream_update(sha, first, strlen(first) + 1) != SALTS_OK ||
+      salts_sha256_stream_update(sha, second, strlen(second) + 1) != SALTS_OK ||
+      salts_sha256_stream_finish(sha, digest) != SALTS_OK) {
+    salts_sha256_stream_destroy(sha);
+    return NULL;
+  }
+  salts_sha256_stream_destroy(sha);
+
+  id = (char *)malloc(SALTS_SHA256_DIGEST_BYTES * 2 + 1);
   if (!id) return NULL;
-  for (index = 0; index < SHA256_DIGEST_LENGTH; ++index) {
+  for (index = 0; index < SALTS_SHA256_DIGEST_BYTES; ++index) {
     id[index * 2] = hex[digest[index] >> 4];
     id[index * 2 + 1] = hex[digest[index] & 0x0f];
   }
-  id[SHA256_DIGEST_LENGTH * 2] = '\0';
+  id[SALTS_SHA256_DIGEST_BYTES * 2] = '\0';
   return id;
 }
 

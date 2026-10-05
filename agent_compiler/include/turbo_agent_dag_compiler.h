@@ -78,6 +78,28 @@ typedef struct turbo_agent_dag_source_s {
 
 typedef struct turbo_agent_executable_dag_s turbo_agent_executable_dag_t;
 
+#define TURBO_AGENT_DAG_STEP_VIEW_ABI_VERSION 1u
+
+/**
+ * Borrowed read-only view of one compiled DAG step.
+ *
+ * Strings/arguments remain owned by the DAG and are valid only until plan
+ * destruction. dependency_count is ordering topology only; no dataflow
+ * semantics are implied.
+ */
+typedef struct turbo_agent_dag_step_view_s {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  const char *step_id;
+  const char *tool_name;
+  const json_value_t *arguments;
+  uint32_t retry_limit;
+  uint32_t flags;
+  turbo_tool_execution_policy_t execution_policy;
+  turbo_tool_effect_flags_t effect_flags;
+  size_t dependency_count;
+} turbo_agent_dag_step_view_t;
+
 CXX_C_API void
 turbo_agent_dag_step_source_init(turbo_agent_dag_step_source_t *step);
 
@@ -106,6 +128,30 @@ turbo_agent_executable_dag_hash(const turbo_agent_executable_dag_t *plan);
 
 CXX_C_API size_t
 turbo_agent_executable_dag_step_count(const turbo_agent_executable_dag_t *plan);
+
+/** Read one borrowed compiled-step view by stable plan index. */
+CXX_C_API turbo_agent_compile_status_t
+turbo_agent_executable_dag_step_view(
+    const turbo_agent_executable_dag_t *plan,
+    size_t index,
+    turbo_agent_dag_step_view_t *out_view);
+
+/** Resolve one step ID to its stable compiled-plan index. */
+CXX_C_API turbo_agent_compile_status_t
+turbo_agent_executable_dag_find_step(
+    const turbo_agent_executable_dag_t *plan,
+    const char *step_id,
+    size_t *out_index);
+
+/**
+ * Read one ordering dependency step ID. This never implies a value/data edge.
+ */
+CXX_C_API turbo_agent_compile_status_t
+turbo_agent_executable_dag_dependency_step_id(
+    const turbo_agent_executable_dag_t *plan,
+    size_t step_index,
+    size_t dependency_index,
+    const char **out_step_id);
 
 CXX_C_API turbo_agent_dag_template_kind_t
 turbo_agent_executable_dag_template_kind(

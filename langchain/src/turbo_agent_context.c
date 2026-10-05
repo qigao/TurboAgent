@@ -6,7 +6,7 @@
 #include "turbo_agent_runtime_v1_internal.h"
 #include "turbo_agent_util_internal.h"
 
-#include <openssl/sha.h>
+#include <salts_crypto.h>
 #include <salts_uuid.h>
 
 #include <stdlib.h>
@@ -411,7 +411,7 @@ static int turbo_agent_context_limit_source(turbo_agent_context_t *context,
 
 static char *turbo_agent_context_source_hash(const json_value_t *source) {
   static const char hex[] = "0123456789abcdef";
-  unsigned char digest[SHA256_DIGEST_LENGTH];
+  unsigned char digest[SALTS_SHA256_DIGEST_BYTES];
   char *serialized;
   char *hash_text;
   size_t length = 0;
@@ -419,18 +419,18 @@ static char *turbo_agent_context_source_hash(const json_value_t *source) {
 
   serialized = json_serialize(source, &length);
   if (!serialized) return NULL;
-  if (!SHA256((const unsigned char *)serialized, length, digest)) {
+  if (salts_sha256(serialized, length, digest) != SALTS_OK) {
     json_serialize_free(serialized);
     return NULL;
   }
   json_serialize_free(serialized);
-  hash_text = (char *)malloc(SHA256_DIGEST_LENGTH * 2 + 1);
+  hash_text = (char *)malloc(SALTS_SHA256_DIGEST_BYTES * 2 + 1);
   if (!hash_text) return NULL;
-  for (index = 0; index < SHA256_DIGEST_LENGTH; ++index) {
+  for (index = 0; index < SALTS_SHA256_DIGEST_BYTES; ++index) {
     hash_text[index * 2] = hex[digest[index] >> 4];
     hash_text[index * 2 + 1] = hex[digest[index] & 0x0f];
   }
-  hash_text[SHA256_DIGEST_LENGTH * 2] = '\0';
+  hash_text[SALTS_SHA256_DIGEST_BYTES * 2] = '\0';
   return hash_text;
 }
 

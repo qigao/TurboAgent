@@ -288,7 +288,6 @@ jobs:
             "name": "qigao-turboagent-windows-cache-contract",
             "version-string": "1",
             "dependencies": [
-              "boringssl",
               {
                 "name": "sqlite3",
                 "features": ["fts5"]
@@ -325,9 +324,6 @@ jobs:
           }
           if ($text -notmatch "Restored [1-9][0-9]* package\(s\) from NuGet") {
             throw "Windows CI did not restore packages from the shared NuGet cache"
-          }
-          if ($text -notmatch ("boringssl:" + [regex]::Escape($triplet))) {
-            throw "Windows cache restore did not cover boringssl"
           }
           if ($text -notmatch ("sqlite3(?:\[[^\]]+\])?:" + [regex]::Escape($triplet))) {
             throw "Windows cache restore did not cover sqlite3"

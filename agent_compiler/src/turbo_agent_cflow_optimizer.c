@@ -41,6 +41,7 @@ static int optimizer_source_valid(
   }
 
   dag_steps = turbo_agent_executable_dag_step_count(dag);
+  if (source->edge_count > (dag_steps ? dag_steps - 1u : 0u)) return 0;
   for (i = 0; i < source->edge_count; ++i) {
     const turbo_agent_cflow_value_edge_t *edge = &source->edges[i];
     size_t prior;

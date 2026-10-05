@@ -25,8 +25,11 @@ The model never supplies a workflow path.
 -DPRAKTOR_ROOT=/path/to/praktor/install
 ```
 
-Praktor support is optional. When enabled, `find_package(Praktor CONFIG REQUIRED)`
-must resolve the installed SDK and its transitive native dependencies.
+Praktor support is optional. When enabled, CI and release qualification restore
+the **latest released** Praktor/TurboScript SDKs, and `find_package(Praktor CONFIG REQUIRED)`
+resolves that installed SDK without a package version argument. Required runtime
+features are admitted by capability/function contract, not by package or ABI-minor
+version comparisons.
 
 ## Register a workflow
 
@@ -69,7 +72,8 @@ workflow.workflow_path = "/opt/workflows/build.yml";
 turbo_praktor_tool_pack_add_workflow(pack, &workflow);
 ```
 
-With a WorkflowPlan-capable Praktor SDK the adapter:
+With the latest released Praktor SDK, the adapter requires the WorkflowPlan /
+HostTool / inline-plan capability contract and:
 
 1. compiles and owns the reviewed WorkflowPlan;
 2. registers the generated input schema;
@@ -77,7 +81,8 @@ With a WorkflowPlan-capable Praktor SDK the adapter:
 4. derives policy capabilities from the effect manifest;
 5. executes the bound plan rather than re-selecting a path.
 
-Older Praktor SDKs automatically use the legacy reviewed-path behavior.
+If the latest released SDK does not expose the required capability/function
+contract, PraktorTools fails fast; there is no older-SDK/source/SHA fallback.
 
 ## Policy
 
@@ -130,8 +135,8 @@ The model therefore receives only declared public outputs (or a compact
 structured failure) while full execution evidence remains available to the
 harness.
 
-If an older Praktor result has no `agent_output`, the adapter returns the
-canonical result for backward compatibility.
+The adapter consumes the canonical result contract exposed by the latest
+released Praktor SDK; package-version fallback is not used.
 
 ## Immutable review
 

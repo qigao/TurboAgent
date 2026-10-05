@@ -109,6 +109,12 @@ CXX_C_API size_t turbo_agent_cflow_optimizer_region_dag_step_index(
     size_t region_index,
     size_t position);
 
+/** Borrow the canonical RuntimeTools identity frozen in the source DAG. */
+CXX_C_API const char *turbo_agent_cflow_optimizer_region_tool_name(
+    const turbo_agent_cflow_optimizer_result_t *result,
+    size_t region_index,
+    size_t position);
+
 /** Borrow one compiled #63 region plan owned by the optimizer result. */
 CXX_C_API const turbo_agent_cflow_region_plan_t *
 turbo_agent_cflow_optimizer_region_plan(

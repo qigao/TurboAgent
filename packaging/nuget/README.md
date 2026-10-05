@@ -6,8 +6,9 @@ TurboAgent.Native **不发布 NuGet dependency metadata**，因此 package 本�
 Salts / SaltsUtils / CHttp / TurboWasm / Praktor 的任何版本号。发布 CI 与仓库 CI 始终从各依赖仓库
 恢复当前 latest released SDK，再通过 CMake `find_dependency(... CONFIG)` 验证兼容性。
 
-TurboAgent 自身的第三方 C/C++ 依赖（例如 OpenSSL / sqlite）仍由项目的
-vcpkg manifest/toolchain 解析，也不写入 Native package 的版本依赖元数据。
+TurboAgent 自身仍需要的第三方 C/C++ 依赖（当前例如 sqlite）由项目的
+vcpkg manifest/toolchain 解析，也不写入 Native package 的版本依赖元数据。加密哈希通过
+Salts provider-neutral crypto API 消费，TurboAgent 不直接依赖 OpenSSL/BoringSSL provider。
 
 ## SDK platforms
 

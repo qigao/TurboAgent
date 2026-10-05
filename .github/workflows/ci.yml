@@ -288,7 +288,6 @@ jobs:
             "name": "qigao-turboagent-windows-cache-contract",
             "version-string": "1",
             "dependencies": [
-              "boringssl",
               {
                 "name": "sqlite3",
                 "features": ["fts5"]
@@ -325,9 +324,6 @@ jobs:
           }
           if ($text -notmatch "Restored [1-9][0-9]* package\(s\) from NuGet") {
             throw "Windows CI did not restore packages from the shared NuGet cache"
-          }
-          if ($text -notmatch ("boringssl:" + [regex]::Escape($triplet))) {
-            throw "Windows cache restore did not cover boringssl"
           }
           if ($text -notmatch ("sqlite3(?:\[[^\]]+\])?:" + [regex]::Escape($triplet))) {
             throw "Windows cache restore did not cover sqlite3"
@@ -395,6 +391,44 @@ jobs:
           "SALTS_ROOT=$saltsRoot" >> $env:GITHUB_ENV
           "SALTS_UTILS_ROOT=$utilsRoot" >> $env:GITHUB_ENV
           "CHTTP_ROOT=$chttpRoot" >> $env:GITHUB_ENV
+
+      - name: Verify provider-neutral CHttp runtime closure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:CHTTP_ROOT)) {
+            throw "CHTTP_ROOT is unavailable"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:VSINSTALL)) {
+            throw "VSINSTALL is unavailable"
+          }
+
+          $msvcRoot = Join-Path $env:VSINSTALL "VC\Tools\MSVC"
+          $dumpbin = Get-ChildItem -Path $msvcRoot -File -Filter dumpbin.exe -Recurse |
+            Where-Object { $_.FullName -match 'Hostx64\\x64\\dumpbin\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            throw "dumpbin.exe not found under $msvcRoot"
+          }
+
+          $bin = Join-Path $env:CHTTP_ROOT "bin"
+          $dlls = @(Get-ChildItem -Path $bin -File -Filter *.dll)
+          if ($dlls.Count -eq 0) {
+            throw "latest released CHttp SDK contains no Windows DLLs under $bin"
+          }
+
+          $providerPattern = '(?im)^\s*(?:crypto|ssl|gmssl|libcrypto[^\s]*|libssl[^\s]*)\.dll\s*$'
+          foreach ($dll in $dlls) {
+            $deps = (& $dumpbin.FullName /dependents $dll.FullName 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) {
+              throw "dumpbin failed for $($dll.FullName)"
+            }
+            if ($deps -match $providerPattern) {
+              Write-Host $deps
+              throw "latest released CHttp is not provider-neutral: $($dll.Name) imports a crypto provider DLL; publish the provider-neutral CHttp release instead of restoring a TurboAgent provider fallback"
+            }
+          }
 
       - name: Configure, build, test and install
         shell: cmd

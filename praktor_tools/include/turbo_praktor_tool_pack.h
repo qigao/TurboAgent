@@ -117,8 +117,8 @@ turbo_praktor_inline_plan_config_init(
     turbo_praktor_inline_plan_config_t *config);
 
 /**
- * Compile one compiler-owned deterministic inline source through released
- * Praktor ABI 2.6 and retain exactly one immutable WorkflowPlan.
+ * Compile one compiler-owned deterministic inline source through the latest
+ * released Praktor capability contract and retain exactly one immutable WorkflowPlan.
  *
  * Compilation validates source_kind/source_id, HostTool plan metadata, exact
  * approved RuntimeTools identities, and the released HostTool retry bound.
@@ -188,12 +188,12 @@ CXX_C_API int
 turbo_praktor_tool_pack_supports_execution_events(
     const turbo_praktor_tool_pack_t *pack);
 
-/** Return whether the linked Praktor exposes reviewed HostTool ABI 2.5+. */
+/** Return whether the linked latest Praktor exposes reviewed HostTool capability. */
 CXX_C_API int
 turbo_praktor_tool_pack_supports_host_tools(
     const turbo_praktor_tool_pack_t *pack);
 
-/** Return whether the linked released Praktor exposes ABI 2.6 inline plans. */
+/** Return whether the linked latest Praktor exposes inline WorkflowPlan capability. */
 CXX_C_API int
 turbo_praktor_tool_pack_supports_inline_workflow_plan(
     const turbo_praktor_tool_pack_t *pack);

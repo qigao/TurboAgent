@@ -713,4 +713,70 @@ spec("turbo agent tool executor") {
     turbo_agent_runtime_destroy(runtime);
     salts_mutex_destroy(&probe.mutex);
   }
+
+  it("preserves legacy persisted journal SHA-256 framing") {
+    static const char expected_journal_id[] =
+        "5725bca02643d34e59e4b5a8a7084ba9098130ffd4a81be0e2dbb157c01cc12a";
+    static const char expected_arguments_hash[] =
+        "b9e5f63e08a68618bf4b89403082a7ea9c57563c1014c9cd82c7d7b1ffb33680";
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {
+        "probe", "Probe", "{\"type\":\"object\"}",
+        NULL, 1, tool_executor_probe_handler, NULL, &probe, NULL};
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_agent_tool_execution_t call = {
+        "call-golden",
+        "probe",
+        "{\"value\":1}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    char *records_text = NULL;
+    json_value_t *records = NULL;
+    const json_value_t *record;
+
+    call.turn_key = "turn-golden";
+    salts_mutex_init(&probe.mutex);
+    check_not_null(registry);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+
+    check_equal(
+        turbo_agent_tool_executor_execute(
+            executor, runtime, NULL,
+            "thread-golden", "run-golden",
+            NULL, NULL, registry, NULL, &call, 1),
+        SALTS_OK);
+    check_equal(call.status, TURBO_TOOL_OK);
+    check_equal(probe.calls, 1);
+
+    check_not_null(store.list);
+    check_equal(
+        store.list(
+            store.user_data, "agent_tool_journal",
+            NULL, NULL, &records_text),
+        0);
+    check_not_null(records_text);
+    records = json_parse(records_text, strlen(records_text));
+    json_serialize_free(records_text);
+    records_text = NULL;
+    check_not_null(records);
+    check_equal(json_array_size(records), (size_t)1u);
+    record = json_array_get(records, 0u);
+    check_not_null(record);
+    check_equal(json_get_string(record, "journal_id"), expected_journal_id);
+    check_equal(
+        json_get_string(record, "arguments_hash"),
+        expected_arguments_hash);
+
+    turbo_runtime_json_destroy(records);
+    free(call.output);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
+    salts_mutex_destroy(&probe.mutex);
+  }
+
 }

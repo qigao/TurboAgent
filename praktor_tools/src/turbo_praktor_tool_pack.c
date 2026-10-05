@@ -24,13 +24,13 @@
 #define TURBO_PRAKTOR_HAS_EXECUTION_EVENTS 0
 #endif
 
-#if defined(PRAKTOR_CAPABILITY_HOST_TOOL) && PRAKTOR_ABI_MINOR >= 5
+#if defined(PRAKTOR_CAPABILITY_HOST_TOOL)
 #define TURBO_PRAKTOR_HAS_HOST_TOOL 1
 #else
 #define TURBO_PRAKTOR_HAS_HOST_TOOL 0
 #endif
 
-#if defined(PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) && PRAKTOR_ABI_MINOR >= 6
+#if defined(PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN)
 #define TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN 1
 #else
 #define TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN 0
@@ -77,7 +77,6 @@ struct turbo_praktor_inline_plan_s {
 static int turbo_praktor_api_valid(const praktor_api *api) {
   return api && api->struct_size >= sizeof(*api) &&
          api->abi_major == PRAKTOR_ABI_MAJOR &&
-         api->abi_minor >= 6u &&
          (api->capabilities & PRAKTOR_CAPABILITY_JSON_WORKFLOW) != 0 &&
          (api->capabilities & PRAKTOR_CAPABILITY_EXECUTION_CONTROL) != 0 &&
          (api->capabilities & PRAKTOR_CAPABILITY_WORKFLOW_PLAN) != 0 &&
@@ -595,7 +594,6 @@ static turbo_tool_status_t turbo_praktor_compile_inline_plan(
   if (out_plan) *out_plan = NULL;
   if (!api || !source_id || !source_id[0] ||
       !workflow_yaml || !workflow_yaml_size || !out_plan ||
-      api->abi_minor < 6u ||
       (api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) == 0 ||
       !api->compile_workflow_inline || !api->describe_workflow_plan ||
       !api->release_workflow_plan) {
@@ -663,18 +661,12 @@ static const char *turbo_praktor_error_phase_name(praktor_error_phase phase) {
       return "execution";
     case PRAKTOR_ERROR_PHASE_RESULT_JSON:
       return "result_json";
-#if PRAKTOR_ABI_MINOR >= 2
     case PRAKTOR_ERROR_PHASE_PLAN:
       return "plan";
-#endif
-#if PRAKTOR_ABI_MINOR >= 3
     case PRAKTOR_ERROR_PHASE_INPUT_CONTRACT:
       return "input_contract";
-#endif
-#if PRAKTOR_ABI_MINOR >= 5
     case PRAKTOR_ERROR_PHASE_HOST_TOOL:
       return "host_tool";
-#endif
     case PRAKTOR_ERROR_PHASE_NONE:
     default:
       return "none";
@@ -1155,12 +1147,10 @@ static turbo_tool_status_t turbo_praktor_execute_text(
     tool_status = TURBO_TOOL_DEADLINE_EXCEEDED;
     goto cleanup;
   }
-#if PRAKTOR_ABI_MINOR >= 5
   if (status == PRAKTOR_RESULT_HOST_TOOL_REJECTED) {
     tool_status = TURBO_TOOL_ERROR;
     goto cleanup;
   }
-#endif
   if (output.size > binding->max_result_bytes) {
     tool_status = TURBO_TOOL_ERROR;
     goto cleanup;
@@ -1680,7 +1670,7 @@ turbo_praktor_tool_pack_supports_host_tools(
     const turbo_praktor_tool_pack_t *pack) {
 #if TURBO_PRAKTOR_HAS_HOST_TOOL
   const praktor_api *api = pack ? pack->api : NULL;
-  return api && api->abi_minor >= 5u &&
+  return api &&
          (api->capabilities & PRAKTOR_CAPABILITY_HOST_TOOL) != 0 &&
          api->execute_workflow_plan_host_tools != NULL;
 #else
@@ -1693,7 +1683,7 @@ int turbo_praktor_tool_pack_supports_inline_workflow_plan(
     const turbo_praktor_tool_pack_t *pack) {
 #if TURBO_PRAKTOR_HAS_INLINE_WORKFLOW_PLAN
   const praktor_api *api = pack ? pack->api : NULL;
-  return api && api->abi_minor >= 6u &&
+  return api &&
          (api->capabilities & PRAKTOR_CAPABILITY_INLINE_WORKFLOW_PLAN) != 0 &&
          api->compile_workflow_inline != NULL &&
          api->describe_workflow_plan != NULL &&

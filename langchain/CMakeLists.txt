@@ -40,8 +40,7 @@ target_link_libraries(
          Salts::Core
          Salts::Mustache
          unofficial::sqlite3::sqlite3
-  PRIVATE OpenSSL::Crypto
-          Salts::CYamlJsonAdapter)
+  PRIVATE Salts::CYamlJsonAdapter)
 
 # Use the utility to configure common settings (Folder, Version, etc.)
 cmake_config_target(langchain FOLDER "LangChain" EXPORT_NAME LangChain
@@ -83,4 +82,9 @@ if(BUILD_TESTS)
     tests
     FOLDER
     "LangChain/tests")
+
+  if(TARGET test_turbo_action_tool)
+    # This suite is synchronous and contains no legitimate long-running work.
+    set_tests_properties(test_turbo_action_tool PROPERTIES TIMEOUT 60)
+  endif()
 endif()

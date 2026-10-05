@@ -218,7 +218,7 @@
 1. **TurboUtils**（仓库 `utils/` 模块；构建时优先通过 CMake target `TurboUtils::Core` 使用）— 最优先
 2. **项目内模块**（`exprtk/`、`plugins/` 等）
 3. **vendor/ 库**（sds、croar、mir、monocypher、sha2、miniblas）
-4. **vcpkg 依赖**（xxhash、sqlite3、zstd、openssl、c-ares、aklomp-base64、simde）
+4. **vcpkg 依赖**（仅保留项目直接需要的依赖，例如 sqlite3；加密 provider 不由 TurboAgent 直接依赖）
 5. **C 标准库**（libc：`string.h`、`stdlib.h`、`stdio.h`）
 6. **底层系统 API**（仅允许封装在 TurboUtils 平台/协程适配层或项目适配层之后使用）
 
@@ -389,7 +389,7 @@
   - 沙箱隔离：不可信代码运行在主程序统一配置的受限环境中
   - 资源隔离：CPU、内存、文件句柄配额
 - 加密与密钥管理：
-  - 使用成熟加密库（OpenSSL、libsodium），不自行实现加密算法
+  - 使用 Salts provider-neutral crypto API，不直接绑定 OpenSSL/BoringSSL/GmSSL provider，也不自行实现加密算法
   - 密钥不硬编码、不记录日志、不在错误消息中泄露
   - 密钥存储：密钥链、环境变量、加密配置文件
   - 传输加密：TLS 1.2+，禁用弱密码套件

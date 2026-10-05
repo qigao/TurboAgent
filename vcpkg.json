@@ -3,11 +3,7 @@
   "version-semver": "1.2.0",
   "dependencies": [
     {
-      "name": "boringssl"
-    },
-    {
       "name": "sqlite3",
-      "version>=": "3.49.0",
       "features": [
         "fts5"
       ]

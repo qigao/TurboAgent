@@ -1,6 +1,7 @@
 #include "turbo_tool_runtime_wasm.h"
 
 #include "turbo_runtime_json.h"
+#include "turbo_wasm_invoke_gate.h"
 #include "turbo_tool_schema.h"
 
 #include <salts/clock.h>
@@ -62,7 +63,7 @@ typedef struct turbo_tool_runtime_wasm_control_s {
 } turbo_tool_runtime_wasm_control_t;
 
 typedef struct turbo_tool_runtime_wasm_impl_s {
-  salts_mutex_t invoke_mutex;
+  turbo_wasm_invoke_gate_t invoke_gate;
   salts_fs_buf_t module_bytes;
   turbowasm_module module;
   turbowasm_instance instance;
@@ -267,7 +268,7 @@ static void turbo_tool_runtime_wasm_destroy_impl(void *impl) {
   free(wasm_impl->module_bytes.base);
   wasm_impl->module_bytes.base = NULL;
   wasm_impl->module_bytes.len = 0u;
-  salts_mutex_destroy(&wasm_impl->invoke_mutex);
+  turbo_wasm_invoke_gate_destroy(&wasm_impl->invoke_gate);
   free(wasm_impl);
 }
 
@@ -576,25 +577,24 @@ static turbo_tool_status_t turbo_tool_runtime_wasm_call(
 
   /*
    * TurboWasm instances are single-owner and RuntimeTools registry execution
-   * does not enforce execution_policy locks. Serialize at the backend boundary
-   * so direct compiled-plan/registry calls cannot race active_io or enter the
-   * same instance concurrently.
+   * does not enforce execution_policy locks. The backend gate serializes
+   * ownership without holding its mutex across guest execution. Queue time is
+   * part of the invocation deadline and cancellation remains observable while
+   * waiting.
    */
-  salts_mutex_lock(&impl->invoke_mutex);
-  if (context && turbo_tool_runtime_wasm_should_interrupt(&control)) {
-    salts_mutex_unlock(&impl->invoke_mutex);
-    status = turbo_tool_runtime_wasm_map_status(
-        TURBOWASM_INTERRUPTED, &control, 0);
+  status = turbo_wasm_invoke_gate_acquire(&impl->invoke_gate, context);
+  if (status != TURBO_TOOL_OK) {
     free(io.output);
     return status;
   }
+
   impl->active_io = &io;
   wasm_status = turbowasm_instance_invoke_with_options(
       &impl->instance, function_index,
       has_index ? &argument : NULL, has_index ? 1u : 0u,
       &result, 1u, &result_count, &trap, &options);
   impl->active_io = NULL;
-  salts_mutex_unlock(&impl->invoke_mutex);
+  turbo_wasm_invoke_gate_release(&impl->invoke_gate);
 
   status = turbo_tool_runtime_wasm_map_status(
       wasm_status, &control, io.output_overflow);
@@ -954,8 +954,7 @@ turbo_tool_runtime_wasm_create_with_metadata(
 
   impl = (turbo_tool_runtime_wasm_impl_t *)calloc(1, sizeof(*impl));
   if (!impl) return NULL;
-  salts_mutex_init(&impl->invoke_mutex);
-  if (!impl->invoke_mutex) {
+  if (turbo_wasm_invoke_gate_init(&impl->invoke_gate) != 0) {
     free(impl);
     return NULL;
   }

@@ -2,6 +2,7 @@
   "name": "turbo-agent",
   "version-semver": "1.2.0",
   "dependencies": [
+    "gmssl",
     {
       "name": "sqlite3",
       "version>=": "3.49.0",

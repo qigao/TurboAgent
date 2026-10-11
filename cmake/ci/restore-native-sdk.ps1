@@ -4,7 +4,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$versions = Get-Content -LiteralPath (Join-Path $PSScriptRoot "native-sdk-versions.json") -Raw | ConvertFrom-Json
 if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { throw "RUNNER_TEMP is required" }
 $sdkRoot = [System.IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP "turboagent-release-sdks"))
 New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null
@@ -15,14 +14,19 @@ function Restore-Sdk(
   [string]$Name,
   [string]$ConfigRelative
 ) {
-  $tag = $versions.$Repo
-  if ([string]::IsNullOrWhiteSpace($tag)) { throw "missing SDK release selection for $Repo" }
-  if ($tag -eq "latest") {
-    $tag = (& gh release view --repo $Repo --json tagName --jq .tagName).Trim()
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tag)) {
-      throw "failed to resolve latest release for $Repo"
-    }
+  # Include prereleases and select by publication time across all pages.
+  $releaseJson = & gh api "repos/$Repo/releases?per_page=100" --paginate --slurp
+  if ($LASTEXITCODE -ne 0) {
+    throw "failed to query releases for $Repo"
   }
+  $releases = foreach ($page in (($releaseJson -join "`n") | ConvertFrom-Json)) { $page }
+  $tag = ($releases | Where-Object { $_.draft -eq $false -and $_.published_at } |
+    Sort-Object published_at | Select-Object -Last 1).tag_name
+  if ([string]::IsNullOrWhiteSpace($tag)) {
+    throw "failed to resolve latest published release for $Repo"
+  }
+  $tag = $tag.Trim()
+  [Console]::Error.WriteLine("Restoring $Repo@$tag ($Rid)")
 
   $dir = [System.IO.Path]::GetFullPath((Join-Path $sdkRoot $Name))
   if ([System.IO.Path]::GetDirectoryName($dir) -ne $sdkRoot) {

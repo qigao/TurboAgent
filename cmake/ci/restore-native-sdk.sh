@@ -4,7 +4,6 @@ set -euo pipefail
 rid="${1:?usage: restore-native-sdk.sh <rid> <with-praktor:0|1> [with-wasm:0|1]}"
 with_praktor="${2:-0}"
 with_wasm="${3:-0}"
-versions="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/native-sdk-versions.json"
 if [[ "$with_praktor" != "0" && "$with_praktor" != "1" ]]; then
   echo "with-praktor must be 0 or 1" >&2
   exit 2
@@ -25,19 +24,28 @@ restore_sdk() {
   local tag
   local nupkg
 
-  tag="$(jq -er --arg repo "$repo" '.[$repo]' "$versions")"
-  if [[ "$tag" == "latest" ]]; then
-    tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+  # Include prereleases and select by publication time across all pages.
+  if ! tag="$(gh api "repos/$repo/releases?per_page=100" --paginate --slurp |
+      jq -er '[.[][] | select(.draft == false and .published_at != null)] | max_by(.published_at) | .tag_name // empty')"; then
+    echo "failed to resolve latest published release for $repo" >&2
+    return 1
   fi
-  test -n "$tag"
-  rm -rf "$dir"
-  mkdir -p "$dir/download" "$dir/package"
-  gh release download "$tag" --repo "$repo" --pattern "$pattern"     --dir "$dir/download" --clobber
-  nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
-  test -n "$nupkg"
-  unzip -q "$nupkg" -d "$dir/package"
+  printf 'Restoring %s@%s (%s)\n' "$repo" "$tag" "$rid" >&2
+  rm -rf "$dir" || return 1
+  mkdir -p "$dir/download" "$dir/package" || return 1
+  gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+    --dir "$dir/download" --clobber || return 1
+  nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)" || return 1
+  if [[ -z "$nupkg" ]]; then
+    echo "missing downloaded Native package for $repo@$tag" >&2
+    return 1
+  fi
+  unzip -q "$nupkg" -d "$dir/package" || return 1
   local root="$dir/package/sdk/$rid"
-  test -f "$root/$config_rel"
+  if [[ ! -f "$root/$config_rel" ]]; then
+    echo "missing restored SDK config: $root/$config_rel" >&2
+    return 1
+  fi
   printf '%s\n' "$root"
 }
 

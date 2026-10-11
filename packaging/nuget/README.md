@@ -3,12 +3,16 @@
 TurboAgent 的 native SDK package，由 `qigao/TurboAgent` 自己构建、验证和发布。
 
 TurboAgent.Native **不发布 NuGet dependency metadata**，因此 package 本身不保留
-Salts / SaltsUtils / CHttp / TurboWasm / Praktor 的任何版本号。发布 CI 与仓库 CI 从
-[`native-sdk-versions.json`](../../cmake/ci/native-sdk-versions.json) 选择发布包，
-再通过正式构建和 CTest 验证兼容性。该清单固定本次指定的六个版本；未纳入本次升级的
-TurboScript / Praktor 保持显式 `latest` 策略。缺失清单项或指定发布包时直接失败。
+Salts / SaltsUtils / CHttp / TurboWasm / Praktor 的任何版本号。发布 CI 与仓库 CI 通过
+[`Windows`](../../cmake/ci/restore-native-sdk.ps1) 和
+[`Unix`](../../cmake/ci/restore-native-sdk.sh) SDK restore 脚本，每轮重新查询各依赖
+的全部 GitHub Releases，按 `published_at` 选择最新已发布版本，包含 prerelease，
+排除草稿。日志记录本轮选中的 tag，不作为后续构建的版本锁定；无已发布版本、
+缺少 Native package 或目标平台 SDK 时直接失败，不回退旧包。
+该解析使用 [GitHub Releases API](https://docs.github.com/en/rest/releases/releases#list-releases)，
+兼容性由正式构建和 CTest 验证。
 
-TurboAgent 自身的第三方 C/C++ 依赖（sqlite）仍由项目的
+第三方 C/C++ 依赖（SQLite、Chttp Crypto 组件所需的 GmSSL）仍由项目的
 vcpkg manifest/toolchain 解析，也不写入 Native package 的版本依赖元数据。
 
 ## CI 与发布构建入口
@@ -56,12 +60,19 @@ consumer 工程和 CMake 导出文本断言。迁移不改变 SDK 格式；回�
 提交即可恢复先前流程，Agent 重构单独提交。本地和远端的验证范围分别记录，
 本地通过不代表所有 runner 已通过。
 
-本轮本地验证：`ci-windows-release` configure、全量 build、同名 CTest 和
+此前本地验证：`ci-windows-release` configure、全量 build、同名 CTest 和
 `install-ci-windows-release` 均通过；95 项离线测试通过，1 项 live 默认跳过
-（10.99 秒）。使用本机 MSVC 与 `x64-windows` target/host triplet、清单选定
+（10.99 秒）。使用本机 MSVC 与 `x64-windows` target/host triplet、当轮选定
 SDK；未执行托管 runner 的 `qigao-x64-windows-v145` 配置。
 三个 workflow 的 `actionlint` 通过。Linux、macOS、Android、远端 Actions、
 完整四平台 NuGet 打包与真实模型调用尚未在本轮执行。
+
+2026-10-11 浮动恢复验证：Windows 脚本解析并恢复当时最新发布的 SDK，补齐
+GmSSL manifest 依赖后，`ci-windows-release` configure、完整 build、CTest 和
+`install-ci-windows-release` 通过；103 项通过、1 项 live 默认跳过、零失败
+（20.31 秒），本机 target/host triplet 为 `x64-windows`。Unix 脚本在 Git Bash
+成功恢复 Android 的六个 SDK 及 Linux host IDLC。未执行其他平台构建、远端 CI、
+完整 NuGet 打包或真实模型调用。
 
 ## SDK platforms
 
@@ -72,7 +83,7 @@ SDK；未执行托管 runner 的 `qigao-x64-windows-v145` 配置。
 
 TurboWasm-backed `TurboAgent::WasmTools` 当前在四个平台的 Native SDK 中都发布。
 因此使用当前完整 TurboAgent package 执行 `find_package(TurboAgent CONFIG REQUIRED)`
-时，需要让清单选定、对应平台的 TurboWasm SDK 可发现。
+时，需要让对应平台的 TurboWasm SDK 可发现。
 
 Praktor 当前不发布 Windows SDK，因此：
 
@@ -82,7 +93,7 @@ Praktor 当前不发布 Windows SDK，因此：
 
 ## Consume
 
-按版本清单还原 native SDK graph 后，为目标平台设置环境变量：
+从最新发布包还原 native SDK graph 后，为目标平台设置环境变量：
 
 - `SALTS_ROOT`
 - `SALTS_UTILS_ROOT`
@@ -143,6 +154,8 @@ PR 只做 qualification。正式 package / GitHub Release 只由与项目版本�
 `v*` tag 发布。
 
 ## 2026-10-10 SDK migration
+
+以下为当时迁移的历史记录，不用于当前 SDK restore 的版本选择。
 
 | SDK | Selected release |
 | --- | --- |

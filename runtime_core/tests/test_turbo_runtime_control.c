@@ -114,25 +114,25 @@ spec("runtime cancellation control") {
     enum { WAITER_COUNT = 2 };
     turbo_cancel_source_t *source = NULL;
     cancel_waiter_t waiters[WAITER_COUNT] = {0};
-    salts_thread_t threads[WAITER_COUNT] = {0};
+    cmeta_thread_t threads[WAITER_COUNT] = {0};
     int i;
 
     check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
     for (i = 0; i < WAITER_COUNT; ++i) {
       check_equal(turbo_cancel_source_token(source, &waiters[i].token), SALTS_OK);
       atomic_init(&waiters[i].entered, 0);
-      check_equal(salts_thread_create(&threads[i], cancel_waiter_run, &waiters[i]), SALTS_OK);
+      check_equal(cmeta_thread_create(&threads[i], cancel_waiter_run, &waiters[i]), SALTS_OK);
     }
 
     for (i = 0; i < WAITER_COUNT; ++i) {
       while (!atomic_load_explicit(&waiters[i].entered, memory_order_acquire)) {
-        salts_thread_yield();
+        cmeta_thread_yield();
       }
     }
     check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_SHUTDOWN), SALTS_OK);
 
     for (i = 0; i < WAITER_COUNT; ++i) {
-      check_equal(salts_thread_join(&threads[i]), SALTS_OK);
+      check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
       check_equal(waiters[i].wait_status, TURBO_CANCEL_WAIT_SIGNALED);
       check_equal(waiters[i].reason, TURBO_CANCEL_SHUTDOWN);
       turbo_cancel_token_release(waiters[i].token);

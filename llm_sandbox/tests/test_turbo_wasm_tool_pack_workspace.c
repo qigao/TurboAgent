@@ -1,6 +1,6 @@
 #include "tinytest.h"
 #include "turbo_agent_workspace.h"
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include "turbo_wasm_tool_pack.h"
 
 #include <stdlib.h>
@@ -11,8 +11,8 @@
 #endif
 
 static int pack_workspace_write_text(const char *path, const char *text) {
-  salts_fs_buf_t buffer = salts_fs_buf_init((void *)text, strlen(text));
-  return salts_fs_write_file(path, &buffer);
+  cmeta_fs_buf_t buffer = cmeta_fs_buf_init((void *)text, strlen(text));
+  return cmeta_fs_write_file(path, &buffer);
 }
 
 spec("TurboWasm tool pack workspace integration") {
@@ -41,11 +41,11 @@ spec("TurboWasm tool pack workspace integration") {
     char *output = NULL;
 
     check_not_null(root);
-    check_equal(salts_fs_path_join(skills, sizeof(skills), root, "skills"), 0);
-    check_equal(salts_fs_path_join(skill_dir, sizeof(skill_dir), skills, "wasm-echo"), 0);
-    check_equal(salts_fs_mkdir(skills, 0700), 0);
-    check_equal(salts_fs_mkdir(skill_dir, 0700), 0);
-    check_equal(salts_fs_path_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
+    check_equal(cmeta_fs_path_join(skills, sizeof(skills), root, "skills"), 0);
+    check_equal(cmeta_fs_path_join(skill_dir, sizeof(skill_dir), skills, "wasm-echo"), 0);
+    check_equal(cmeta_fs_mkdir(skills, 0700), 0);
+    check_equal(cmeta_fs_mkdir(skill_dir, 0700), 0);
+    check_equal(cmeta_fs_path_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
     check_equal(pack_workspace_write_text(skill_path, skill_text), 0);
 
     turbo_wasm_tool_pack_config_init(&pack_config);

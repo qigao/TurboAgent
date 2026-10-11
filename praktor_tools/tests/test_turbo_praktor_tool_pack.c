@@ -2,7 +2,7 @@
 #include "turbo_praktor_tool_pack.h"
 #include "turbo_runtime_control.h"
 
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include <salts/clock.h>
 #include <json_parser.h>
 
@@ -29,7 +29,7 @@ static char *praktor_test_workspace(void) {
   char temp[SALTS_FS_MAX_PATH];
   char path[SALTS_FS_MAX_PATH];
   unsigned int counter = ++praktor_test_counter;
-  if (salts_fs_get_tmpdir(temp, sizeof(temp)) != 0) return NULL;
+  if (cmeta_fs_get_tmpdir(temp, sizeof(temp)) != 0) return NULL;
 #ifdef _WIN32
   snprintf(path, sizeof(path), "%s/turbo_praktor_%lu_%u", temp,
            (unsigned long)GetCurrentProcessId(), counter);
@@ -37,7 +37,7 @@ static char *praktor_test_workspace(void) {
   snprintf(path, sizeof(path), "%s/turbo_praktor_%lu_%u", temp,
            (unsigned long)getpid(), counter);
 #endif
-  if (salts_fs_mkdir(path, 0700) != 0) return NULL;
+  if (cmeta_fs_mkdir(path, 0700) != 0) return NULL;
   return praktor_test_strdup(path);
 }
 
@@ -50,9 +50,9 @@ static int praktor_test_write_workflow(const char *workspace, char *out_path,
       "      if (ctx.get(\"payload.name\") != \"demo\") fail(\"bad name\");\n"
       "      if (ctx.get(\"payload.count\") != 7) fail(\"bad count\");\n"
       "      ctx.output(\"count\", ctx.get(\"payload.count\"));\n";
-  salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
-  if (salts_fs_path_join(out_path, out_size, workspace, "workflow.yml") != 0) return -1;
-  return salts_fs_write_file(out_path, &buffer);
+  cmeta_fs_buf_t buffer = cmeta_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (cmeta_fs_path_join(out_path, out_size, workspace, "workflow.yml") != 0) return -1;
+  return cmeta_fs_write_file(out_path, &buffer);
 }
 
 static int praktor_test_write_failing_workflow(const char *workspace, char *out_path,
@@ -62,9 +62,9 @@ static int praktor_test_write_failing_workflow(const char *workspace, char *out_
       "  - name: fail_expected\n"
       "    script: |\n"
       "      fail(\"expected failure\");\n";
-  salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
-  if (salts_fs_path_join(out_path, out_size, workspace, "failure.yml") != 0) return -1;
-  return salts_fs_write_file(out_path, &buffer);
+  cmeta_fs_buf_t buffer = cmeta_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (cmeta_fs_path_join(out_path, out_size, workspace, "failure.yml") != 0) return -1;
+  return cmeta_fs_write_file(out_path, &buffer);
 }
 
 static int praktor_test_write_named_workflow(const char *workspace, const char *name,
@@ -74,14 +74,14 @@ static int praktor_test_write_named_workflow(const char *workspace, const char *
       "  - name: ok\n"
       "    script: |\n"
       "      ctx.output(\"ok\", true);\n";
-  salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
-  if (salts_fs_path_join(out_path, out_size, workspace, name) != 0) return -1;
-  return salts_fs_write_file(out_path, &buffer);
+  cmeta_fs_buf_t buffer = cmeta_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (cmeta_fs_path_join(out_path, out_size, workspace, name) != 0) return -1;
+  return cmeta_fs_write_file(out_path, &buffer);
 }
 
 static void praktor_test_cleanup(const char *workspace, const char *workflow_path) {
-  if (workflow_path && workflow_path[0]) salts_fs_unlink(workflow_path);
-  if (workspace) salts_fs_rmdir(workspace);
+  if (workflow_path && workflow_path[0]) cmeta_fs_unlink(workflow_path);
+  if (workspace) cmeta_fs_rmdir(workspace);
 }
 
 static void praktor_test_legacy_workflow_config_init(
@@ -107,9 +107,9 @@ static int praktor_test_write_harness_safe_workflow(
       "  - name: inspect\n"
       "    script: |\n"
       "      ctx.output(\"count\", ctx.get(\"payload.count\"));\n";
-  salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
-  if (salts_fs_path_join(out_path, out_size, workspace, "harness-safe.yml") != 0) return -1;
-  return salts_fs_write_file(out_path, &buffer);
+  cmeta_fs_buf_t buffer = cmeta_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (cmeta_fs_path_join(out_path, out_size, workspace, "harness-safe.yml") != 0) return -1;
+  return cmeta_fs_write_file(out_path, &buffer);
 }
 
 static int praktor_test_write_host_tool_workflow(
@@ -131,10 +131,10 @@ static int praktor_test_write_host_tool_workflow(
       "    with:\n"
       "      path: \"{{ variables.path }}\"\n"
       "      limit: 2\n";
-  salts_fs_buf_t buffer = salts_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
-  if (salts_fs_path_join(out_path, out_size, workspace, "host-tool.yml") != 0)
+  cmeta_fs_buf_t buffer = cmeta_fs_buf_init((void *)yaml, sizeof(yaml) - 1);
+  if (cmeta_fs_path_join(out_path, out_size, workspace, "host-tool.yml") != 0)
     return -1;
-  return salts_fs_write_file(out_path, &buffer);
+  return cmeta_fs_write_file(out_path, &buffer);
 }
 
 typedef struct praktor_test_host_capture_s {
@@ -545,7 +545,7 @@ spec("Praktor workflow tool pack") {
 
     {
       char missing_path[SALTS_FS_MAX_PATH] = {0};
-      check_equal(salts_fs_path_join(missing_path, sizeof(missing_path), workspace, "missing.yml"),
+      check_equal(cmeta_fs_path_join(missing_path, sizeof(missing_path), workspace, "missing.yml"),
                    0);
       workflow_config.workflow_path = missing_path;
       check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
@@ -570,8 +570,8 @@ spec("Praktor workflow tool pack") {
     check_equal(turbo_praktor_tool_pack_add_workflow(pack, &workflow_config),
                  TURBO_TOOL_DUPLICATE);
     turbo_praktor_tool_pack_destroy(pack);
-    salts_fs_unlink(first_path);
-    salts_fs_unlink(second_path);
+    cmeta_fs_unlink(first_path);
+    cmeta_fs_unlink(second_path);
     praktor_test_cleanup(workspace, NULL);
     free(workspace);
   }
@@ -793,9 +793,9 @@ spec("Praktor workflow tool pack") {
           "  - name: inspect\n"
           "    script: |\n"
           "      ctx.output(\"count\", 99);\n";
-      salts_fs_buf_t buffer =
-          salts_fs_buf_init((void *)changed, sizeof(changed) - 1);
-      check_equal(salts_fs_write_file(workflow_path, &buffer), 0);
+      cmeta_fs_buf_t buffer =
+          cmeta_fs_buf_init((void *)changed, sizeof(changed) - 1);
+      check_equal(cmeta_fs_write_file(workflow_path, &buffer), 0);
     }
 
     check_equal(turbo_tool_registry_execute_json_value_with_context(
@@ -911,7 +911,7 @@ spec("Praktor workflow tool pack") {
     check_not_null(arguments);
     context.struct_size = sizeof(context);
     context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
-    context.deadline_mono_ms = salts_monotonic_ms() + 5000u;
+    context.deadline_mono_ms = cmeta_monotonic_ms() + 5000u;
     context.thread_id = "thread-host";
     context.run_id = "run-host";
     context.turn_id = "turn-host";

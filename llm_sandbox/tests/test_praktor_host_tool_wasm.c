@@ -4,7 +4,7 @@
 #include "turbo_wasm_tool_pack.h"
 #include "turbo_runtime_json.h"
 
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include <json_parser.h>
 
 #include <stdio.h>
@@ -35,7 +35,7 @@ static char *praktor_wasm_workspace(void) {
   char path[SALTS_FS_MAX_PATH];
   char leaf[80];
   unsigned int counter = ++praktor_wasm_test_counter;
-  if (salts_fs_get_tmpdir(temp, sizeof(temp)) != 0) return NULL;
+  if (cmeta_fs_get_tmpdir(temp, sizeof(temp)) != 0) return NULL;
 #ifdef _WIN32
   snprintf(leaf, sizeof(leaf), "turbo_praktor_wasm_%lu_%u",
            (unsigned long)GetCurrentProcessId(), counter);
@@ -43,8 +43,8 @@ static char *praktor_wasm_workspace(void) {
   snprintf(leaf, sizeof(leaf), "turbo_praktor_wasm_%lu_%u",
            (unsigned long)getpid(), counter);
 #endif
-  if (salts_fs_path_join(path, sizeof(path), temp, leaf) != 0 ||
-      salts_fs_mkdir(path, 0700) != 0)
+  if (cmeta_fs_path_join(path, sizeof(path), temp, leaf) != 0 ||
+      cmeta_fs_mkdir(path, 0700) != 0)
     return NULL;
   return praktor_wasm_strdup(path);
 }
@@ -63,12 +63,12 @@ static const char praktor_wasm_inline_yaml[] =
 
 static int praktor_wasm_write_workflow(
     const char *workspace, char *out_path, size_t out_size) {
-  salts_fs_buf_t buffer =
-      salts_fs_buf_init((void *)praktor_wasm_inline_yaml,
+  cmeta_fs_buf_t buffer =
+      cmeta_fs_buf_init((void *)praktor_wasm_inline_yaml,
                         sizeof(praktor_wasm_inline_yaml) - 1u);
-  if (salts_fs_path_join(out_path, out_size, workspace, "wasm-host-tool.yml") != 0)
+  if (cmeta_fs_path_join(out_path, out_size, workspace, "wasm-host-tool.yml") != 0)
     return -1;
-  return salts_fs_write_file(out_path, &buffer);
+  return cmeta_fs_write_file(out_path, &buffer);
 }
 
 spec("Praktor HostTool TurboWasm bridge") {
@@ -142,8 +142,8 @@ spec("Praktor HostTool TurboWasm bridge") {
     turbo_praktor_tool_pack_destroy(praktor_pack);
     turbo_tool_registry_destroy(projection);
     turbo_wasm_tool_pack_destroy(wasm_pack);
-    salts_fs_unlink(workflow_path);
-    salts_fs_rmdir(workspace);
+    cmeta_fs_unlink(workflow_path);
+    cmeta_fs_rmdir(workspace);
     free(workspace);
   }
 

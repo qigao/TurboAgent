@@ -52,6 +52,61 @@ spec("runtime json") {
     turbo_runtime_json_destroy(value);
   }
 
+  it("copies borrowed members and preserves exact integers on replacement") {
+    json_value_t *root = json_create_object();
+    json_value_t *source = json_create_object();
+    char name[] = "worker";
+
+    check_not_null(root);
+    check_not_null(source);
+    check_equal(turbo_runtime_json_object_set_string(source, "name", name),
+                TURBO_RUNTIME_JSON_OK);
+    name[0] = 'X';
+    check_equal(turbo_runtime_json_object_set_clone(root, "worker", source),
+                TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_runtime_json_object_set_string(source, "name", "changed"),
+                TURBO_RUNTIME_JSON_OK);
+    turbo_runtime_json_destroy(source);
+    check_equal(turbo_runtime_json_value_as_string(json_object_get(
+                    json_object_get(root, "worker"), "name")), "worker");
+    check_equal(turbo_runtime_json_object_set_int64(root, "worker", INT64_MAX),
+                TURBO_RUNTIME_JSON_OK);
+    check_equal(json_object_size(root), 1);
+    check_true(turbo_runtime_json_value_as_int64(
+                   json_object_get(root, "worker"), 0) == INT64_MAX);
+    turbo_runtime_json_destroy(root);
+  }
+
+  it("rejects invalid member receivers without consuming borrowed values") {
+    json_value_t *array = json_create_array();
+    json_value_t *source = json_create_string("borrowed");
+    json_value_t *root = json_create_object();
+
+    check_not_null(array);
+    check_not_null(source);
+    check_not_null(root);
+    check_equal(turbo_runtime_json_object_set_string(array, "key", "text"),
+                TURBO_RUNTIME_JSON_TYPE_MISMATCH);
+    check_equal(turbo_runtime_json_object_set_int64(array, "key", 1),
+                TURBO_RUNTIME_JSON_TYPE_MISMATCH);
+    check_equal(turbo_runtime_json_object_set_clone(array, "key", source),
+                TURBO_RUNTIME_JSON_TYPE_MISMATCH);
+    check_equal(turbo_runtime_json_object_set_string(root, "key", NULL),
+                TURBO_RUNTIME_JSON_INVALID_ARGUMENT);
+    check_equal(turbo_runtime_json_object_set_int64(root, NULL, 1),
+                TURBO_RUNTIME_JSON_INVALID_ARGUMENT);
+    check_equal(turbo_runtime_json_object_set_clone(NULL, "key", source),
+                TURBO_RUNTIME_JSON_INVALID_ARGUMENT);
+    check_equal(turbo_runtime_json_object_set_clone(root, "key", NULL),
+                TURBO_RUNTIME_JSON_INVALID_ARGUMENT);
+    check_equal(json_object_size(root), 0);
+    check_equal(json_array_size(array), 0);
+    check_equal(turbo_runtime_json_value_as_string(source), "borrowed");
+    turbo_runtime_json_destroy(root);
+    turbo_runtime_json_destroy(source);
+    turbo_runtime_json_destroy(array);
+  }
+
   it("uses direct Salts YAML and XML parsers") {
     static const char yaml[] = "name: agent\ncount: 2\n";
     static const char xml[] = "<root><name>agent</name></root>";

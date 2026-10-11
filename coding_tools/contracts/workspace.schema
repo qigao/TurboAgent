@@ -1,0 +1,25 @@
+schema TurboWorkspace [version(1)];
+
+message WorkspacePath {
+    string path;
+}
+
+message WorkspaceSearch {
+    string path;
+    string pattern;
+}
+
+message WorkspaceWrite {
+    string path;
+    string content;
+}
+
+message WorkspaceEdit {
+    string path;
+    string old_text;
+    string new_text;
+}
+
+message WorkspaceCommand {
+    string command;
+}

@@ -4,7 +4,7 @@
 #include <json_parser.h>
 #include <turbo_runtime_json.h>
 #include <turbo_tool_schema.h>
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include <salts/clock.h>
 #include <tstr.h>
 
@@ -730,7 +730,7 @@ static turbo_tool_status_t turbo_praktor_context_status(
                  : TURBO_TOOL_CANCELLED;
     }
   }
-  if (context->deadline_mono_ms && salts_monotonic_ms() >= context->deadline_mono_ms) {
+  if (context->deadline_mono_ms && cmeta_monotonic_ms() >= context->deadline_mono_ms) {
     return TURBO_TOOL_DEADLINE_EXCEEDED;
   }
   return TURBO_TOOL_OK;
@@ -751,7 +751,7 @@ static void turbo_praktor_control_from_context(
     deadline = turbo_cancel_token_deadline_mono_ms(context->cancel_token);
   }
   if (!deadline) return;
-  now = salts_monotonic_ms();
+  now = cmeta_monotonic_ms();
   control->timeout_ms = deadline > now ? deadline - now : 1u;
 }
 
@@ -924,7 +924,7 @@ static void turbo_praktor_host_context(
   if (control &&
       control->struct_size >= sizeof(praktor_execution_control) &&
       control->timeout_ms) {
-    uint64_t now = salts_monotonic_ms();
+    uint64_t now = cmeta_monotonic_ms();
     uint64_t candidate =
         control->timeout_ms > UINT64_MAX - now
             ? UINT64_MAX
@@ -1508,7 +1508,7 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
     const turbo_praktor_workflow_config_t *config) {
   turbo_praktor_binding_t *binding = NULL;
   turbo_tool_definition_v4_t definition;
-  salts_fs_stat_t metadata;
+  cmeta_fs_stat_t metadata;
   turbo_praktor_capability_list_t capabilities;
   turbo_tool_status_t status;
   const char *parameters_json;
@@ -1523,8 +1523,8 @@ turbo_tool_status_t turbo_praktor_tool_pack_add_workflow(
       !turbo_praktor_tool_name_valid(config->tool_name) ||
       !config->description || !config->description[0] ||
       !config->workflow_path || !config->workflow_path[0] ||
-      !salts_fs_path_is_absolute(config->workflow_path) ||
-      salts_fs_lstat(config->workflow_path, &metadata) != 0 ||
+      !cmeta_fs_path_is_absolute(config->workflow_path) ||
+      cmeta_fs_lstat(config->workflow_path, &metadata) != 0 ||
       metadata.is_symlink || !metadata.is_file ||
       !turbo_praktor_schema_valid(config->parameters_json) ||
       (config->strict != 0 && config->strict != 1) ||

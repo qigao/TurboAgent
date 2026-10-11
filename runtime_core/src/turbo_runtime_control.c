@@ -12,8 +12,8 @@
 
 typedef struct turbo_cancel_state_s {
   atomic_size_t ref_count;
-  salts_mutex_t mutex;
-  salts_cond_t cond;
+  cmeta_mutex_t mutex;
+  cmeta_cond_t cond;
   turbo_cancel_reason_t reason;
   uint64_t deadline_mono_ms;
   turbo_runtime_monotonic_ms_fn monotonic_ms;
@@ -33,7 +33,7 @@ static uint64_t turbo_cancel_state_now_ms(const turbo_cancel_state_t *state) {
   if (state && state->monotonic_ms) {
     return state->monotonic_ms(state->clock_user_data);
   }
-  return salts_monotonic_ms();
+  return cmeta_monotonic_ms();
 }
 
 static int turbo_cancel_config_valid(const turbo_cancel_source_config_t *config) {
@@ -72,8 +72,8 @@ static void turbo_cancel_state_release(turbo_cancel_state_t *state) {
   }
 
   atomic_thread_fence(memory_order_acquire);
-  salts_cond_destroy(&state->cond);
-  salts_mutex_destroy(&state->mutex);
+  cmeta_cond_destroy(&state->cond);
+  cmeta_mutex_destroy(&state->mutex);
   free(state);
 }
 
@@ -86,7 +86,7 @@ static turbo_cancel_reason_t turbo_cancel_state_refresh_deadline_locked(turbo_ca
   if (state->reason == TURBO_CANCEL_NONE && state->deadline_mono_ms != 0 &&
       now_ms >= state->deadline_mono_ms) {
     state->reason = TURBO_CANCEL_DEADLINE;
-    salts_cond_broadcast(&state->cond);
+    cmeta_cond_broadcast(&state->cond);
   }
   return state->reason;
 }
@@ -129,11 +129,11 @@ int turbo_cancel_source_create(const turbo_cancel_source_config_t *config,
     return SALTS_ENOMEM;
   }
 
-  salts_mutex_init(&state->mutex);
-  salts_cond_init(&state->cond);
+  cmeta_mutex_init(&state->mutex);
+  cmeta_cond_init(&state->cond);
   if (!state->mutex || !state->cond) {
-    salts_cond_destroy(&state->cond);
-    salts_mutex_destroy(&state->mutex);
+    cmeta_cond_destroy(&state->cond);
+    cmeta_mutex_destroy(&state->mutex);
     free(state);
     free(source);
     return SALTS_ENOMEM;
@@ -192,16 +192,16 @@ int turbo_cancel_source_cancel(turbo_cancel_source_t *source, turbo_cancel_reaso
     return SALTS_EINVAL;
   }
 
-  salts_mutex_lock(&source->state->mutex);
+  cmeta_mutex_lock(&source->state->mutex);
   turbo_cancel_state_refresh_deadline_locked(source->state,
                                              turbo_cancel_state_now_ms(source->state));
   if (source->state->reason != TURBO_CANCEL_NONE) {
     status = SALTS_EALREADY;
   } else {
     source->state->reason = reason;
-    salts_cond_broadcast(&source->state->cond);
+    cmeta_cond_broadcast(&source->state->cond);
   }
-  salts_mutex_unlock(&source->state->mutex);
+  cmeta_mutex_unlock(&source->state->mutex);
   return status;
 }
 
@@ -211,10 +211,10 @@ turbo_cancel_reason_t turbo_cancel_source_reason(const turbo_cancel_source_t *so
   if (!source || !source->state) {
     return TURBO_CANCEL_NONE;
   }
-  salts_mutex_lock(&source->state->mutex);
+  cmeta_mutex_lock(&source->state->mutex);
   reason = turbo_cancel_state_refresh_deadline_locked(source->state,
                                                       turbo_cancel_state_now_ms(source->state));
-  salts_mutex_unlock(&source->state->mutex);
+  cmeta_mutex_unlock(&source->state->mutex);
   return reason;
 }
 
@@ -254,10 +254,10 @@ int turbo_cancel_token_check(const turbo_cancel_token_t *token) {
   if (!token || !token->state) {
     return SALTS_EINVAL;
   }
-  salts_mutex_lock(&token->state->mutex);
+  cmeta_mutex_lock(&token->state->mutex);
   reason = turbo_cancel_state_refresh_deadline_locked(token->state,
                                                       turbo_cancel_state_now_ms(token->state));
-  salts_mutex_unlock(&token->state->mutex);
+  cmeta_mutex_unlock(&token->state->mutex);
   return turbo_cancel_reason_status(reason);
 }
 
@@ -267,10 +267,10 @@ turbo_cancel_reason_t turbo_cancel_token_reason(const turbo_cancel_token_t *toke
   if (!token || !token->state) {
     return TURBO_CANCEL_NONE;
   }
-  salts_mutex_lock(&token->state->mutex);
+  cmeta_mutex_lock(&token->state->mutex);
   reason = turbo_cancel_state_refresh_deadline_locked(token->state,
                                                       turbo_cancel_state_now_ms(token->state));
-  salts_mutex_unlock(&token->state->mutex);
+  cmeta_mutex_unlock(&token->state->mutex);
   return reason;
 }
 
@@ -298,7 +298,7 @@ turbo_cancel_wait_status_t turbo_cancel_token_wait(const turbo_cancel_token_t *t
     caller_deadline_ms = turbo_cancel_saturating_add_ms(now_ms, timeout_ms);
   }
 
-  salts_mutex_lock(&state->mutex);
+  cmeta_mutex_lock(&state->mutex);
   for (;;) {
     uint64_t wake_deadline_ms = UINT64_MAX;
     uint64_t wait_ms;
@@ -321,7 +321,7 @@ turbo_cancel_wait_status_t turbo_cancel_token_wait(const turbo_cancel_token_t *t
     }
 
     if (wake_deadline_ms == UINT64_MAX) {
-      salts_cond_wait(&state->cond, &state->mutex);
+      cmeta_cond_wait(&state->cond, &state->mutex);
       continue;
     }
 
@@ -329,9 +329,9 @@ turbo_cancel_wait_status_t turbo_cancel_token_wait(const turbo_cancel_token_t *t
     if (wait_ms > TURBO_CANCEL_MAX_WAIT_SLICE_MS) {
       wait_ms = TURBO_CANCEL_MAX_WAIT_SLICE_MS;
     }
-    (void)salts_cond_timedwait(&state->cond, &state->mutex,
+    (void)cmeta_cond_timedwait(&state->cond, &state->mutex,
                                wait_ms * TURBO_MILLISECONDS_TO_NANOSECONDS);
   }
-  salts_mutex_unlock(&state->mutex);
+  cmeta_mutex_unlock(&state->mutex);
   return status;
 }

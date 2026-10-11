@@ -229,7 +229,7 @@ spec("TurboWasm tool sandbox") {
     check_null(output);
 
     context.cancel_token = NULL;
-    context.deadline_mono_ms = salts_monotonic_ms();
+    context.deadline_mono_ms = cmeta_monotonic_ms();
     check_equal(
         turbo_tool_runtime_invoke_with_context(runtime, "spin", "{}", &context, &output),
         TURBO_TOOL_DEADLINE_EXCEEDED);

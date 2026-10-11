@@ -16,8 +16,8 @@ extern "C" {
  * A caller that acquires the gate owns the instance until release.
  */
 typedef struct turbo_wasm_invoke_gate_s {
-  salts_mutex_t mutex;
-  salts_cond_t changed;
+  cmeta_mutex_t mutex;
+  cmeta_cond_t changed;
   int active;
 } turbo_wasm_invoke_gate_t;
 

@@ -31,16 +31,16 @@ static void wasm_gate_waiter_run(void *arg) {
 
 static void wasm_gate_wait_until_entered(wasm_gate_waiter_t *waiter) {
   while (!atomic_load_explicit(&waiter->entered, memory_order_acquire)) {
-    salts_thread_yield();
+    cmeta_thread_yield();
   }
 }
 
 static int wasm_gate_wait_until_finished(
     wasm_gate_waiter_t *waiter, uint64_t timeout_ms) {
-  uint64_t deadline = salts_monotonic_ms() + timeout_ms;
+  uint64_t deadline = cmeta_monotonic_ms() + timeout_ms;
   while (!atomic_load_explicit(&waiter->finished, memory_order_acquire)) {
-    if (salts_monotonic_ms() >= deadline) return 0;
-    salts_thread_yield();
+    if (cmeta_monotonic_ms() >= deadline) return 0;
+    cmeta_thread_yield();
   }
   return 1;
 }
@@ -50,7 +50,7 @@ spec("TurboWasm single-owner invocation gate") {
     turbo_wasm_invoke_gate_t gate = {0};
     turbo_tool_execution_context_t context = {0};
     wasm_gate_waiter_t waiter;
-    salts_thread_t thread = NULL;
+    cmeta_thread_t thread = NULL;
 
     check_equal(turbo_wasm_invoke_gate_init(&gate), 0);
     check_equal(
@@ -61,7 +61,7 @@ spec("TurboWasm single-owner invocation gate") {
     waiter.gate = &gate;
     context.struct_size = sizeof(context);
     context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
-    context.deadline_mono_ms = salts_monotonic_ms() + UINT64_C(100);
+    context.deadline_mono_ms = cmeta_monotonic_ms() + UINT64_C(100);
     waiter.context = &context;
     waiter.status = TURBO_TOOL_ERROR;
     atomic_init(&waiter.entered, 0);
@@ -69,7 +69,7 @@ spec("TurboWasm single-owner invocation gate") {
     atomic_init(&waiter.finished, 0);
 
     check_equal(
-        salts_thread_create(&thread, wasm_gate_waiter_run, &waiter),
+        cmeta_thread_create(&thread, wasm_gate_waiter_run, &waiter),
         SALTS_OK);
     wasm_gate_wait_until_entered(&waiter);
 
@@ -82,14 +82,14 @@ spec("TurboWasm single-owner invocation gate") {
       int finished_before_release =
           wasm_gate_wait_until_finished(&waiter, UINT64_C(1000));
       turbo_wasm_invoke_gate_release(&gate);
-      check_equal(salts_thread_join(&thread), SALTS_OK);
+      check_equal(cmeta_thread_join(&thread), SALTS_OK);
       check_true(finished_before_release);
     }
     check_equal(waiter.status, TURBO_TOOL_DEADLINE_EXCEEDED);
     check_false(atomic_load_explicit(
         &waiter.acquired, memory_order_acquire));
 
-    salts_thread_destroy(&thread);
+    cmeta_thread_destroy(&thread);
     turbo_wasm_invoke_gate_destroy(&gate);
   }
 
@@ -99,7 +99,7 @@ spec("TurboWasm single-owner invocation gate") {
     turbo_cancel_token_t *token = NULL;
     turbo_tool_execution_context_t context = {0};
     wasm_gate_waiter_t waiter;
-    salts_thread_t thread = NULL;
+    cmeta_thread_t thread = NULL;
 
     check_equal(turbo_wasm_invoke_gate_init(&gate), 0);
     check_equal(
@@ -120,7 +120,7 @@ spec("TurboWasm single-owner invocation gate") {
     atomic_init(&waiter.finished, 0);
 
     check_equal(
-        salts_thread_create(&thread, wasm_gate_waiter_run, &waiter),
+        cmeta_thread_create(&thread, wasm_gate_waiter_run, &waiter),
         SALTS_OK);
     wasm_gate_wait_until_entered(&waiter);
     check_equal(
@@ -135,7 +135,7 @@ spec("TurboWasm single-owner invocation gate") {
       int finished_before_release =
           wasm_gate_wait_until_finished(&waiter, UINT64_C(1000));
       turbo_wasm_invoke_gate_release(&gate);
-      check_equal(salts_thread_join(&thread), SALTS_OK);
+      check_equal(cmeta_thread_join(&thread), SALTS_OK);
       check_true(finished_before_release);
     }
     check_equal(waiter.status, TURBO_TOOL_CANCELLED);
@@ -144,14 +144,14 @@ spec("TurboWasm single-owner invocation gate") {
 
     turbo_cancel_token_release(token);
     turbo_cancel_source_destroy(source);
-    salts_thread_destroy(&thread);
+    cmeta_thread_destroy(&thread);
     turbo_wasm_invoke_gate_destroy(&gate);
   }
 
   it("transfers single ownership only after the active owner releases") {
     turbo_wasm_invoke_gate_t gate = {0};
     wasm_gate_waiter_t waiter;
-    salts_thread_t thread = NULL;
+    cmeta_thread_t thread = NULL;
 
     check_equal(turbo_wasm_invoke_gate_init(&gate), 0);
     check_equal(
@@ -167,7 +167,7 @@ spec("TurboWasm single-owner invocation gate") {
     atomic_init(&waiter.finished, 0);
 
     check_equal(
-        salts_thread_create(&thread, wasm_gate_waiter_run, &waiter),
+        cmeta_thread_create(&thread, wasm_gate_waiter_run, &waiter),
         SALTS_OK);
     wasm_gate_wait_until_entered(&waiter);
 
@@ -175,12 +175,12 @@ spec("TurboWasm single-owner invocation gate") {
         &waiter.acquired, memory_order_acquire));
 
     turbo_wasm_invoke_gate_release(&gate);
-    check_equal(salts_thread_join(&thread), SALTS_OK);
+    check_equal(cmeta_thread_join(&thread), SALTS_OK);
     check_equal(waiter.status, TURBO_TOOL_OK);
     check_true(atomic_load_explicit(
         &waiter.acquired, memory_order_acquire));
 
-    salts_thread_destroy(&thread);
+    cmeta_thread_destroy(&thread);
     turbo_wasm_invoke_gate_destroy(&gate);
   }
 }

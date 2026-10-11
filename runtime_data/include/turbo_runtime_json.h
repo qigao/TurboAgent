@@ -28,6 +28,21 @@ CXX_C_API void turbo_runtime_json_destroy(json_value_t *value);
 CXX_C_API turbo_runtime_json_status_t turbo_runtime_json_object_set(
     json_value_t *object, const char *key, json_value_t *field_value);
 
+/**
+ * Set or replace an object member with an owned copy of a borrowed value.
+ * String and clone inputs remain owned by the caller on success and failure.
+ * Return INVALID_ARGUMENT for NULL inputs, TYPE_MISMATCH for a non-object
+ * receiver, or OUT_OF_MEMORY if construction/insertion fails. Failed calls
+ * release temporary values. The int64 variant preserves exact integer tokens.
+ * Example: turbo_runtime_json_object_set_string(object, "name", "worker").
+ */
+CXX_C_API turbo_runtime_json_status_t turbo_runtime_json_object_set_string(
+    json_value_t *object, const char *key, const char *value);
+CXX_C_API turbo_runtime_json_status_t turbo_runtime_json_object_set_int64(
+    json_value_t *object, const char *key, int64_t value);
+CXX_C_API turbo_runtime_json_status_t turbo_runtime_json_object_set_clone(
+    json_value_t *object, const char *key, const json_value_t *value);
+
 /** Append an array element. Ownership transfers only on success. */
 CXX_C_API turbo_runtime_json_status_t turbo_runtime_json_array_append(
     json_value_t *array, json_value_t *element_value);

@@ -146,10 +146,10 @@ if(BUILD_TESTS)
         FOLDER "Wasm Tools/tests")
     endif()
 
-    if(TARGET langchain)
+    if(TARGET TurboAgent::Agent)
       cmake_add_test(
         SOURCES tests/test_turbo_wasm_tool_pack_workspace.c
-        LIBS wasm_tools langchain Salts::TinyTest
+        LIBS wasm_tools TurboAgent::Agent Salts::TinyTest
         FOLDER "Wasm Tools/tests")
     endif()
 

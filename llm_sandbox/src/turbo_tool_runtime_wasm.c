@@ -6,7 +6,7 @@
 
 #include <salts/clock.h>
 #include <salts/thread.h>
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include <tstr.h>
 
 #include <limits.h>
@@ -64,7 +64,7 @@ typedef struct turbo_tool_runtime_wasm_control_s {
 
 typedef struct turbo_tool_runtime_wasm_impl_s {
   turbo_wasm_invoke_gate_t invoke_gate;
-  salts_fs_buf_t module_bytes;
+  cmeta_fs_buf_t module_bytes;
   turbowasm_module module;
   turbowasm_instance instance;
 
@@ -499,7 +499,7 @@ static bool turbo_tool_runtime_wasm_should_interrupt(void *user_data) {
     return 1;
   }
   if (context->deadline_mono_ms &&
-      salts_monotonic_ms() >= context->deadline_mono_ms) {
+      cmeta_monotonic_ms() >= context->deadline_mono_ms) {
     control->reason = TURBO_TOOL_WASM_INTERRUPT_DEADLINE;
     return 1;
   }
@@ -858,8 +858,8 @@ cleanup:
 }
 
 static int turbo_tool_runtime_wasm_read_module_bounded(
-    const char *path, size_t limit, salts_fs_buf_t *out) {
-  salts_file_t file = SALTS_INVALID_FILE;
+    const char *path, size_t limit, cmeta_fs_buf_t *out) {
+  cmeta_file_t file = SALTS_INVALID_FILE;
   char *buffer = NULL;
   size_t used = 0u;
   int read_status;
@@ -869,7 +869,7 @@ static int turbo_tool_runtime_wasm_read_module_bounded(
   out->base = NULL;
   out->len = 0u;
 
-  file = salts_fs_open(path, SALTS_FS_O_RDONLY, 0);
+  file = cmeta_fs_open(path, SALTS_FS_O_RDONLY, 0);
   if (file == SALTS_INVALID_FILE) return -1;
 
   buffer = (char *)malloc(limit);
@@ -878,18 +878,18 @@ static int turbo_tool_runtime_wasm_read_module_bounded(
   while (used < limit) {
     size_t remaining = limit - used;
     size_t chunk = remaining > (size_t)INT_MAX ? (size_t)INT_MAX : remaining;
-    read_status = salts_fs_read(file, buffer + used, chunk);
+    read_status = cmeta_fs_read(file, buffer + used, chunk);
     if (read_status < 0) goto fail;
     if (read_status == 0) break;
     used += (size_t)read_status;
   }
 
   if (used == limit) {
-    read_status = salts_fs_read(file, &overflow_probe, 1u);
+    read_status = cmeta_fs_read(file, &overflow_probe, 1u);
     if (read_status != 0) goto fail;
   }
 
-  if (salts_fs_close(file) != 0) {
+  if (cmeta_fs_close(file) != 0) {
     file = SALTS_INVALID_FILE;
     goto fail;
   }
@@ -900,7 +900,7 @@ static int turbo_tool_runtime_wasm_read_module_bounded(
   return 0;
 
 fail:
-  if (file != SALTS_INVALID_FILE) (void)salts_fs_close(file);
+  if (file != SALTS_INVALID_FILE) (void)cmeta_fs_close(file);
   free(buffer);
   return -1;
 }

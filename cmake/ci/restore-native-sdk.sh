@@ -4,6 +4,7 @@ set -euo pipefail
 rid="${1:?usage: restore-native-sdk.sh <rid> <with-praktor:0|1> [with-wasm:0|1]}"
 with_praktor="${2:-0}"
 with_wasm="${3:-0}"
+versions="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/native-sdk-versions.json"
 if [[ "$with_wasm" != "0" && "$with_wasm" != "1" ]]; then
   echo "with-wasm must be 0 or 1" >&2
   exit 2
@@ -20,7 +21,10 @@ restore_sdk() {
   local tag
   local nupkg
 
-  tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+  tag="$(jq -er --arg repo "$repo" '.[$repo]' "$versions")"
+  if [[ "$tag" == "latest" ]]; then
+    tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+  fi
   test -n "$tag"
   rm -rf "$dir"
   mkdir -p "$dir/download" "$dir/package"
@@ -43,6 +47,19 @@ chttp_root="$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Ch
   echo "SALTS_UTILS_ROOT=$utils_root"
   echo "CHTTP_ROOT=$chttp_root"
 } >> "$GITHUB_ENV"
+
+if [[ "$rid" == android-* ]]; then
+  # Native packages carry the Linux host tools beside the Android target SDK.
+  host_salts_root="$(dirname -- "$salts_root")/linux-x64"
+  host_utils_root="$(dirname -- "$utils_root")/linux-x64"
+  test -f "$host_salts_root/lib/cmake/Salts/SaltsConfig.cmake"
+  test -f "$host_utils_root/bin/salts-idlc"
+  chmod +x "$host_utils_root/bin/salts-idlc"
+  {
+    echo "TURBOAGENT_HOST_IDLC=$host_utils_root/bin/salts-idlc"
+    echo "TURBOAGENT_HOST_SALTS_ROOT=$host_salts_root"
+  } >> "$GITHUB_ENV"
+fi
 
 if [[ "$with_praktor" == "1" ]]; then
   turboscript_root="$(restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript 'lib/cmake/TurboScript/TurboScriptConfig.cmake')"

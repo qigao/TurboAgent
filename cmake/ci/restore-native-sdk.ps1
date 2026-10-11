@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$versions = Get-Content -LiteralPath (Join-Path $PSScriptRoot "native-sdk-versions.json") -Raw | ConvertFrom-Json
 $sdkRoot = Join-Path $env:RUNNER_TEMP "turboagent-release-sdks"
 New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null
 
@@ -13,9 +14,13 @@ function Restore-Sdk(
   [string]$Name,
   [string]$ConfigRelative
 ) {
-  $tag = (& gh release view --repo $Repo --json tagName --jq .tagName).Trim()
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tag)) {
-    throw "failed to resolve latest release for $Repo"
+  $tag = $versions.$Repo
+  if ([string]::IsNullOrWhiteSpace($tag)) { throw "missing SDK release selection for $Repo" }
+  if ($tag -eq "latest") {
+    $tag = (& gh release view --repo $Repo --json tagName --jq .tagName).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tag)) {
+      throw "failed to resolve latest release for $Repo"
+    }
   }
 
   $dir = Join-Path $sdkRoot $Name

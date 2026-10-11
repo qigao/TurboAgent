@@ -1,0 +1,782 @@
+#include "tinytest.h"
+#include <json_parser.h>
+#include "turbo_agent_graph.h"
+#include "turbo_agent_state.h"
+#include "turbo_agent_tool_executor.h"
+#include "turbo_runtime_control.h"
+#include "turbo_tool_registry.h"
+
+#include "../src/turbo_agent_tool_executor_internal.h"
+
+#include <salts/thread.h>
+#include <salts/clock.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct tool_executor_probe_s {
+  cmeta_mutex_t mutex;
+  int calls;
+  int active;
+  int max_active;
+} tool_executor_probe_t;
+
+typedef struct tool_executor_context_probe_s {
+  int calls;
+  const turbo_cancel_token_t *cancel_token;
+  uint64_t deadline_mono_ms;
+  const char *thread_id;
+  const char *run_id;
+  const char *turn_id;
+  const char *tool_call_id;
+  int has_event_sink;
+  int has_detail_sink;
+} tool_executor_context_probe_t;
+
+typedef struct tool_executor_fault_store_s {
+  turbo_agent_runtime_store_t inner;
+  int fail_committed_once;
+  int puts;
+  int committed_seen;
+} tool_executor_fault_store_t;
+
+static int tool_executor_fault_put(void *user_data, const char *collection, const char *id,
+                                   const char *record_json) {
+  tool_executor_fault_store_t *fault = (tool_executor_fault_store_t *)user_data;
+  ++fault->puts;
+  if (fault->fail_committed_once && strstr(record_json, "committed")) {
+    fault->fail_committed_once = 0;
+    fault->committed_seen = 1;
+    return -1;
+  }
+  return fault->inner.put(fault->inner.user_data, collection, id, record_json);
+}
+
+static int tool_executor_fault_get(void *user_data, const char *collection, const char *id,
+                                   char **out_record_json) {
+  tool_executor_fault_store_t *fault = (tool_executor_fault_store_t *)user_data;
+  return fault->inner.get(fault->inner.user_data, collection, id, out_record_json);
+}
+
+static int tool_executor_fault_list(void *user_data, const char *collection, const char *filter_key,
+                                    const char *filter_value, char **out_records_json) {
+  tool_executor_fault_store_t *fault = (tool_executor_fault_store_t *)user_data;
+  return fault->inner.list(fault->inner.user_data, collection, filter_key, filter_value,
+                           out_records_json);
+}
+
+static void tool_executor_fault_destroy(void *user_data) {
+  tool_executor_fault_store_t *fault = (tool_executor_fault_store_t *)user_data;
+  if (!fault) return;
+  if (fault->inner.user_data_free) fault->inner.user_data_free(fault->inner.user_data);
+  free(fault);
+}
+
+static int tool_executor_transport(const char *request_json, char **out_response_json,
+                                   void *user_data) {
+  (void)request_json;
+  (void)out_response_json;
+  (void)user_data;
+  return -1;
+}
+
+static char *tool_executor_strdup(const char *text) {
+  size_t length = strlen(text) + 1;
+  char *copy = (char *)malloc(length);
+  if (copy) memcpy(copy, text, length);
+  return copy;
+}
+
+static int tool_executor_probe_handler(const char *arguments_json, char **out_output,
+                                       void *user_data) {
+  tool_executor_probe_t *probe = (tool_executor_probe_t *)user_data;
+  cmeta_mutex_lock(&probe->mutex);
+  ++probe->calls;
+  ++probe->active;
+  if (probe->active > probe->max_active) probe->max_active = probe->active;
+  cmeta_mutex_unlock(&probe->mutex);
+  cmeta_sleep_ms(20);
+  *out_output = tool_executor_strdup(arguments_json);
+  cmeta_mutex_lock(&probe->mutex);
+  --probe->active;
+  cmeta_mutex_unlock(&probe->mutex);
+  return *out_output ? 0 : -1;
+}
+
+static turbo_tool_status_t tool_executor_context_handler(
+    const char *arguments_json, const turbo_tool_execution_context_t *context,
+    char **out_output, void *user_data) {
+  tool_executor_context_probe_t *probe = (tool_executor_context_probe_t *)user_data;
+  if (!probe || !context || !out_output) return TURBO_TOOL_INVALID_ARGUMENT;
+  ++probe->calls;
+  probe->cancel_token = context->cancel_token;
+  probe->deadline_mono_ms = context->deadline_mono_ms;
+  probe->thread_id = context->thread_id;
+  probe->run_id = context->run_id;
+  probe->turn_id = context->turn_id;
+  probe->tool_call_id = context->tool_call_id;
+  probe->has_event_sink = context->event_sink != NULL;
+  probe->has_detail_sink = context->detail_sink != NULL;
+  *out_output = tool_executor_strdup(arguments_json ? arguments_json : "{}");
+  return *out_output ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
+}
+
+typedef struct tool_executor_observation_capture_s {
+  int events;
+  char last_kind[32];
+} tool_executor_observation_capture_t;
+
+static void tool_executor_event_capture(const json_value_t *event, void *user_data) {
+  tool_executor_observation_capture_t *capture =
+      (tool_executor_observation_capture_t *)user_data;
+  if (!capture || !event) return;
+  {
+    const char *kind = json_get_string(event, "kind");
+    ++capture->events;
+    if (kind) {
+      snprintf(capture->last_kind, sizeof(capture->last_kind), "%s", kind);
+    } else {
+      capture->last_kind[0] = '\0';
+    }
+  }
+}
+
+static turbo_tool_status_t tool_executor_observation_handler(
+    const char *arguments_json, const turbo_tool_execution_context_t *context,
+    char **out_output, void *user_data) {
+  json_value_t *event;
+  json_value_t *detail;
+  (void)arguments_json;
+  (void)user_data;
+  if (!context || !out_output || !context->detail_sink) {
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+
+  event = json_create_object();
+  detail = json_create_object();
+  if (!event || !detail) {
+    turbo_runtime_json_destroy(event);
+    turbo_runtime_json_destroy(detail);
+    return TURBO_TOOL_OUT_OF_MEMORY;
+  }
+
+  json_object_set_string(event, "kind", "trace");
+  json_object_set_string(event, "name", "backend-progress");
+  if (context->event_sink) {
+    context->event_sink(event, context->event_sink_user_data);
+  }
+
+  json_object_set_string(detail, "secret", "full-detail");
+  context->detail_sink(detail, context->detail_sink_user_data);
+
+  turbo_runtime_json_destroy(event);
+  turbo_runtime_json_destroy(detail);
+  *out_output = tool_executor_strdup("{\"ok\":true}");
+  return *out_output ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
+}
+
+static json_value_t *tool_executor_state(const char *const *call_ids, const char *const *names,
+                                         const char *const *arguments, size_t count,
+                                         int malformed_last) {
+  json_value_t *state = turbo_agent_state_create();
+  json_value_t *events = json_object_get(state, "events");
+  json_value_t *event = json_create_object();
+  json_value_t *calls = json_create_array();
+  size_t index;
+  if (!state || !events || !event || !calls) goto fail;
+  json_object_set_string(event, "kind", "model");
+  json_object_set_string(event, "output_text", "");
+  for (index = 0; index < count; ++index) {
+    json_value_t *call = json_create_object();
+    if (!call) goto fail;
+    json_object_set_string(call, "call_id", call_ids[index]);
+    if (!(malformed_last && index + 1 == count)) {
+      json_object_set_string(call, "name", names[index]);
+      json_object_set_string(call, "arguments", arguments[index]);
+    }
+    json_array_add(calls, call);
+  }
+  json_object_add(event, "tool_calls", calls);
+  json_array_add(events, event);
+  return state;
+fail:
+  turbo_runtime_json_destroy(calls);
+  turbo_runtime_json_destroy(event);
+  turbo_runtime_json_destroy(state);
+  return NULL;
+}
+
+static turbo_agent_t *tool_executor_agent(turbo_tool_registry_t *registry) {
+  turbo_agent_config_t config = {0};
+  config.model = "gpt-5.4";
+  config.transport_fn = tool_executor_transport;
+  config.tool_registry = registry;
+  return turbo_agent_create(&config);
+}
+
+spec("turbo agent tool executor") {
+
+  it("should validate a complete batch before the first side effect") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+                                          NULL,    1,       tool_executor_probe_handler,
+                                          NULL,    &probe,  NULL};
+    turbo_agent_t *agent;
+    const char *ids[] = {"one", "two"};
+    const char *names[] = {"probe", "probe"};
+    const char *args[] = {"{\"n\":1}", "{\"n\":2}"};
+    json_value_t *state;
+    turbo_graph_exec_ctx_t ctx = {0};
+
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(registry);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    agent = tool_executor_agent(registry);
+    check_not_null(agent);
+    state = tool_executor_state(ids, names, args, 2, 1);
+    check_not_null(state);
+    ctx.state = state;
+    check_not_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 0);
+    check_equal(turbo_agent_state_model_error_phase(state), "tool");
+
+    turbo_runtime_json_destroy(state);
+    turbo_agent_destroy(agent);
+    turbo_tool_registry_destroy(registry);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  it("should overlap parallel-safe callbacks and commit outputs in call order") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_v2_t definition = {
+        sizeof(turbo_tool_definition_v2_t),
+        TURBO_TOOL_DEFINITION_V2_ABI_VERSION,
+        {"probe", "Probe", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+         &probe, NULL},
+        {TURBO_TOOL_EXECUTION_PARALLEL_SAFE, TURBO_TOOL_IDEMPOTENCY_READ_ONLY}};
+    turbo_agent_tool_executor_config_t executor_config;
+    turbo_agent_t *agent;
+    const char *ids[] = {"one", "two", "three"};
+    const char *names[] = {"probe", "probe", "probe"};
+    const char *args[] = {"{\"n\":1}", "{\"n\":2}", "{\"n\":3}"};
+    json_value_t *state;
+    const json_value_t *events;
+    const json_value_t *results;
+    const json_value_t *outputs;
+    turbo_graph_exec_ctx_t ctx = {0};
+
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(registry);
+    check_equal(turbo_tool_registry_add_v2(registry, &definition), TURBO_TOOL_OK);
+    agent = tool_executor_agent(registry);
+    check_not_null(agent);
+    turbo_agent_tool_executor_config_init(&executor_config);
+    executor_config.max_workers = 3;
+    executor_config.queue_capacity = 3;
+    check_equal(turbo_agent_tool_executor_configure(agent, &executor_config), SALTS_OK);
+    state = tool_executor_state(ids, names, args, 3, 0);
+    check_not_null(state);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 3);
+    check_true(probe.max_active >= 2);
+    events = json_object_get(state, "events");
+    results = json_array_get(events, json_array_size(events) - 1);
+    outputs = json_object_get(results, "outputs");
+    check_equal(json_array_size(outputs), 3);
+    check_equal(json_get_string(json_array_get(outputs, 0), "call_id"), "one");
+    check_equal(json_get_string(json_array_get(outputs, 1), "call_id"), "two");
+    check_equal(json_get_string(json_array_get(outputs, 2), "call_id"), "three");
+
+    turbo_runtime_json_destroy(state);
+    turbo_agent_destroy(agent);
+    turbo_tool_registry_destroy(registry);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  it("should enforce output bounds without committing oversized output") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+                                          NULL,    1,       tool_executor_probe_handler,
+                                          NULL,    &probe,  NULL};
+    turbo_agent_tool_executor_config_t executor_config;
+    turbo_agent_t *agent;
+    const char *ids[] = {"one"};
+    const char *names[] = {"probe"};
+    const char *args[] = {"{\"value\":\"long\"}"};
+    json_value_t *state;
+    const json_value_t *events;
+    const json_value_t *result;
+    const char *output;
+    turbo_graph_exec_ctx_t ctx = {0};
+
+    cmeta_mutex_init(&probe.mutex);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    agent = tool_executor_agent(registry);
+    check_not_null(agent);
+    turbo_agent_tool_executor_config_init(&executor_config);
+    executor_config.max_output_bytes = 4;
+    check_equal(turbo_agent_tool_executor_configure(agent, &executor_config), SALTS_OK);
+    state = tool_executor_state(ids, names, args, 1, 0);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    events = json_object_get(state, "events");
+    result =
+        json_array_get(json_object_get(json_array_get(events, 1), "outputs"), 0);
+    output = json_get_string(result, "output");
+    check_not_null(output);
+    check_not_null(strstr(output, "tool_output_limit_exceeded"));
+
+    turbo_runtime_json_destroy(state);
+    turbo_agent_destroy(agent);
+    turbo_tool_registry_destroy(registry);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  it("should reject denied capabilities before the first tool side effect") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    const char *required[] = {"runtime_tools", "network"};
+    turbo_tool_definition_v3_t definition = {
+        sizeof(turbo_tool_definition_v3_t),
+        TURBO_TOOL_DEFINITION_V3_ABI_VERSION,
+        {"remote", "Remote", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+         &probe, NULL},
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE},
+        required,
+        2};
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_t *agent;
+    const char *ids[] = {"one"};
+    const char *names[] = {"remote"};
+    const char *args[] = {"{}"};
+    json_value_t *state;
+    const json_value_t *events;
+    const json_value_t *result;
+    const char *output;
+    turbo_graph_exec_ctx_t ctx = {0};
+
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(registry);
+    check_equal(turbo_tool_registry_add_v3(registry, &definition), TURBO_TOOL_OK);
+    agent = tool_executor_agent(registry);
+    check_not_null(agent);
+    policy.allow_network = 0;
+    check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
+    state = tool_executor_state(ids, names, args, 1, 0);
+    check_not_null(state);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 0);
+    check_equal(turbo_agent_state_guardrail_rejection_phase(state), "tool_policy");
+    check_equal(turbo_agent_state_guardrail_rejection_reason(state), "network_disabled");
+    events = json_object_get(state, "events");
+    result =
+        json_array_get(json_object_get(json_array_get(events, 1), "outputs"), 0);
+    output = json_get_string(result, "output");
+    check_not_null(output);
+    check_not_null(strstr(output, "network_disabled"));
+
+    turbo_runtime_json_destroy(state);
+    turbo_agent_destroy(agent);
+    turbo_tool_registry_destroy(registry);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  it("should enforce capability policy inside the executor without a workflow precheck") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_tool_executor_t *executor = NULL;
+    const char *required[] = {"network"};
+    turbo_tool_definition_v3_t definition = {
+        sizeof(turbo_tool_definition_v3_t),
+        TURBO_TOOL_DEFINITION_V3_ABI_VERSION,
+        {"remote", "Remote", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+         &probe, NULL},
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE},
+        required,
+        1};
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_tool_execution_t call = {
+        "direct-policy-call",
+        "remote",
+        "{}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    call.turn_key = "0";
+
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(registry);
+    check_equal(turbo_tool_registry_add_v3(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    policy.allow_network = 0;
+    check_equal(turbo_agent_tool_executor_execute(executor, NULL, NULL, NULL, NULL, NULL, NULL, registry,
+                                                   &policy, &call, 1),
+                 SALTS_OK);
+    check_equal(probe.calls, 0);
+    check_equal(call.status, TURBO_TOOL_ERROR);
+    check_equal(call.policy_reason, "network_disabled");
+
+    free(call.output);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  it("should propagate execution context into a context-aware callback") {
+    tool_executor_context_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_v4_t definition = {0};
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    turbo_cancel_source_config_t cancel_config = {0};
+    turbo_cancel_source_t *source = NULL;
+    turbo_cancel_token_t *token = NULL;
+    turbo_agent_tool_execution_t call = {
+        "context-call",
+        "context_probe",
+        "{\"value\":1}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    uint64_t deadline = cmeta_monotonic_ms() + 5000u;
+    call.turn_key = "turn-42";
+
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+    definition.definition.name = "context_probe";
+    definition.definition.description = "Observe execution context.";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.strict = 1;
+    definition.definition.user_data = &probe;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    definition.context_handler = tool_executor_context_handler;
+
+    cancel_config.struct_size = sizeof(cancel_config);
+    cancel_config.abi_version = TURBO_RUNTIME_CONTROL_ABI_VERSION;
+    cancel_config.deadline_mono_ms = deadline;
+
+    check_not_null(registry);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add_v4(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    check_equal(turbo_cancel_source_create(&cancel_config, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, token, "thread-7", "run-8",
+                                                   NULL, NULL, registry, NULL, &call, 1),
+                SALTS_OK);
+    check_equal(call.status, TURBO_TOOL_OK);
+    check_equal(probe.calls, 1);
+    check_true(probe.cancel_token == token);
+    check_equal((long long)probe.deadline_mono_ms, (long long)deadline);
+    check_equal(probe.thread_id, "thread-7");
+    check_equal(probe.run_id, "run-8");
+    check_equal(probe.turn_id, "turn-42");
+    check_equal(probe.tool_call_id, "context-call");
+    check_equal(probe.has_event_sink, 0);
+    check_equal(probe.has_detail_sink, 1);
+
+    free(call.output);
+    turbo_cancel_token_release(token);
+    turbo_cancel_source_destroy(source);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
+  }
+
+  it("should forward backend events and replay journaled full detail") {
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_v4_t definition = {0};
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    turbo_agent_tool_execution_t first = {
+        "observe-call",
+        "observe",
+        "{}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    turbo_agent_tool_execution_t replay = {
+        "observe-call",
+        "observe",
+        "{}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    tool_executor_observation_capture_t capture = {0};
+
+    first.turn_key = "turn-observe";
+    replay.turn_key = "turn-observe";
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+    definition.definition.name = "observe";
+    definition.definition.description = "Observed tool";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.strict = 1;
+    definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+    definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+    definition.context_handler = tool_executor_observation_handler;
+
+    check_not_null(registry);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add_v4(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+
+    check_equal(turbo_agent_tool_executor_execute(
+                    executor, runtime, NULL, "thread-observe", "run-observe",
+                    tool_executor_event_capture, &capture,
+                    registry, NULL, &first, 1),
+                SALTS_OK);
+    check_equal(first.status, TURBO_TOOL_OK);
+    check_equal(first.output, "{\"ok\":true}");
+    check_equal(capture.events, 1);
+    check_equal(capture.last_kind, "trace");
+    check_not_null(first.detail);
+    check_equal(json_get_string(first.detail, "secret"), "full-detail");
+
+    check_equal(turbo_agent_tool_executor_execute(
+                    executor, runtime, NULL, "thread-observe", "run-observe",
+                    tool_executor_event_capture, &capture,
+                    registry, NULL, &replay, 1),
+                SALTS_OK);
+    check_true(replay.replayed != 0);
+    check_equal(capture.events, 1);
+    check_equal(replay.output, "{\"ok\":true}");
+    check_not_null(replay.detail);
+    check_equal(json_get_string(replay.detail, "secret"), "full-detail");
+
+    free(first.output);
+    free(replay.output);
+    turbo_runtime_json_destroy(first.detail);
+    turbo_runtime_json_destroy(replay.detail);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
+  }
+
+  it("should observe cancellation before invoking a synchronous callback") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+                                          NULL,    1,       tool_executor_probe_handler,
+                                          NULL,    &probe,  NULL};
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_cancel_source_t *source = NULL;
+    turbo_cancel_token_t *token = NULL;
+    turbo_agent_tool_execution_t call = {
+        "cancel-call",
+        "probe",
+        "{}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    call.turn_key = "0";
+
+    cmeta_mutex_init(&probe.mutex);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
+    check_equal(turbo_agent_tool_executor_execute(executor, NULL, token, NULL, NULL, NULL, NULL, registry,
+                                                   NULL, &call, 1),
+                 SALTS_OK);
+    check_equal(call.status, TURBO_TOOL_CANCELLED);
+    check_equal(probe.calls, 0);
+
+    free(call.output);
+    turbo_cancel_token_release(token);
+    turbo_cancel_source_destroy(source);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  it("should not retry a callback after a started journal loses its commit") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+                                          NULL,    1,       tool_executor_probe_handler,
+                                          NULL,    &probe,  NULL};
+    turbo_agent_tool_executor_t *executor = NULL;
+    tool_executor_fault_store_t *fault = (tool_executor_fault_store_t *)calloc(1, sizeof(*fault));
+    turbo_agent_runtime_store_t store = {0};
+    turbo_agent_runtime_t *runtime;
+    turbo_agent_tool_execution_t first = {
+        "journal-call",
+        "probe",
+        "{}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    turbo_agent_tool_execution_t recovered = {
+        "journal-call",
+        "probe",
+        "{}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    first.turn_key = "0";
+    recovered.turn_key = "0";
+
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(fault);
+    fault->inner = turbo_agent_runtime_store_memory_create();
+    fault->fail_committed_once = 1;
+    store.put = tool_executor_fault_put;
+    store.get = tool_executor_fault_get;
+    store.list = tool_executor_fault_list;
+    store.user_data = fault;
+    store.user_data_free = tool_executor_fault_destroy;
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
+                                                   NULL, NULL, registry, NULL, &first, 1),
+                 SALTS_OK);
+    check_equal(fault->puts, 3);
+    check_equal(fault->committed_seen, 1);
+    check_equal(first.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_equal(probe.calls, 1);
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
+                                                   NULL, NULL, registry, NULL, &recovered, 1),
+                 SALTS_OK);
+    check_equal(recovered.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_equal(probe.calls, 1);
+
+    free(first.output);
+    free(recovered.output);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  it("should replay committed output and reject a changed call identity") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+                                          NULL,    1,       tool_executor_probe_handler,
+                                          NULL,    &probe,  NULL};
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_agent_tool_execution_t first = {
+        "replay-call",
+        "probe",
+        "{\"value\":1}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    turbo_agent_tool_execution_t replay = {
+        "replay-call",
+        "probe",
+        "{\"value\":1}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    turbo_agent_tool_execution_t changed = {
+        "replay-call",
+        "probe",
+        "{\"value\":2}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    turbo_agent_tool_execution_t next_turn = {
+        "replay-call",
+        "probe",
+        "{\"value\":1}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    first.turn_key = "0";
+    replay.turn_key = "0";
+    changed.turn_key = "0";
+    next_turn.turn_key = "1";
+
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
+                                                   NULL, NULL, registry, NULL, &first, 1),
+                 SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
+                                                   NULL, NULL, registry, NULL, &replay, 1),
+                 SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_true(replay.replayed != 0);
+    check_equal(replay.output, "{\"value\":1}");
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
+                                                   NULL, NULL, registry, NULL, &next_turn, 1),
+                 SALTS_OK);
+    check_equal(probe.calls, 2);
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
+                                                   NULL, NULL, registry, NULL, &changed, 1),
+                 SALTS_EPROTO);
+    check_equal(probe.calls, 2);
+
+    free(first.output);
+    free(replay.output);
+    free(changed.output);
+    free(next_turn.output);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  it("preserves legacy persisted journal SHA-256 framing") {
+    static const char expected_journal_id[] =
+        "5725bca02643d34e59e4b5a8a7084ba9098130ffd4a81be0e2dbb157c01cc12a";
+    static const char expected_arguments_hash[] =
+        "b9e5f63e08a68618bf4b89403082a7ea9c57563c1014c9cd82c7d7b1ffb33680";
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {
+        "probe", "Probe", "{\"type\":\"object\"}",
+        NULL, 1, tool_executor_probe_handler, NULL, &probe, NULL};
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_agent_tool_execution_t call = {
+        "call-golden",
+        "probe",
+        "{\"value\":1}",
+        {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+    char *records_text = NULL;
+    json_value_t *records = NULL;
+    const json_value_t *record;
+
+    call.turn_key = "turn-golden";
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(registry);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+
+    check_equal(
+        turbo_agent_tool_executor_execute(
+            executor, runtime, NULL,
+            "thread-golden", "run-golden",
+            NULL, NULL, registry, NULL, &call, 1),
+        SALTS_OK);
+    check_equal(call.status, TURBO_TOOL_OK);
+    check_equal(probe.calls, 1);
+
+    check_not_null(store.list);
+    check_equal(
+        store.list(
+            store.user_data, "agent_tool_journal",
+            NULL, NULL, &records_text),
+        0);
+    check_not_null(records_text);
+    records = json_parse(records_text, strlen(records_text));
+    json_serialize_free(records_text);
+    records_text = NULL;
+    check_not_null(records);
+    check_equal(json_array_size(records), (size_t)1u);
+    record = json_array_get(records, 0u);
+    check_not_null(record);
+    check_equal(json_get_string(record, "journal_id"), expected_journal_id);
+    check_equal(
+        json_get_string(record, "arguments_hash"),
+        expected_arguments_hash);
+
+    turbo_runtime_json_destroy(records);
+    free(call.output);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
+}

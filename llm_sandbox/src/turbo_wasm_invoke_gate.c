@@ -22,7 +22,7 @@ static turbo_tool_status_t gate_context_status(
   }
 
   if (context->deadline_mono_ms &&
-      salts_monotonic_ms() >= context->deadline_mono_ms) {
+      cmeta_monotonic_ms() >= context->deadline_mono_ms) {
     return TURBO_TOOL_DEADLINE_EXCEEDED;
   }
 
@@ -34,7 +34,7 @@ static uint64_t gate_wait_ns(
   uint64_t wait_ms = TURBO_WASM_INVOKE_GATE_POLL_MS;
 
   if (context && context->deadline_mono_ms) {
-    uint64_t now_ms = salts_monotonic_ms();
+    uint64_t now_ms = cmeta_monotonic_ms();
     uint64_t remaining_ms;
     if (now_ms >= context->deadline_mono_ms) return 0u;
     remaining_ms = context->deadline_mono_ms - now_ms;
@@ -48,12 +48,12 @@ int turbo_wasm_invoke_gate_init(turbo_wasm_invoke_gate_t *gate) {
   if (!gate) return -1;
   memset(gate, 0, sizeof(*gate));
 
-  salts_mutex_init(&gate->mutex);
+  cmeta_mutex_init(&gate->mutex);
   if (!gate->mutex) return -1;
 
-  salts_cond_init(&gate->changed);
+  cmeta_cond_init(&gate->changed);
   if (!gate->changed) {
-    salts_mutex_destroy(&gate->mutex);
+    cmeta_mutex_destroy(&gate->mutex);
     return -1;
   }
 
@@ -62,8 +62,8 @@ int turbo_wasm_invoke_gate_init(turbo_wasm_invoke_gate_t *gate) {
 
 void turbo_wasm_invoke_gate_destroy(turbo_wasm_invoke_gate_t *gate) {
   if (!gate) return;
-  salts_cond_destroy(&gate->changed);
-  salts_mutex_destroy(&gate->mutex);
+  cmeta_cond_destroy(&gate->changed);
+  cmeta_mutex_destroy(&gate->mutex);
   memset(gate, 0, sizeof(*gate));
 }
 
@@ -76,29 +76,29 @@ turbo_tool_status_t turbo_wasm_invoke_gate_acquire(
     return TURBO_TOOL_INVALID_ARGUMENT;
   }
 
-  salts_mutex_lock(&gate->mutex);
+  cmeta_mutex_lock(&gate->mutex);
   for (;;) {
     status = gate_context_status(context);
     if (status != TURBO_TOOL_OK) {
-      salts_mutex_unlock(&gate->mutex);
+      cmeta_mutex_unlock(&gate->mutex);
       return status;
     }
 
     if (!gate->active) {
       gate->active = 1;
-      salts_mutex_unlock(&gate->mutex);
+      cmeta_mutex_unlock(&gate->mutex);
       return TURBO_TOOL_OK;
     }
 
     if (!context) {
-      salts_cond_wait(&gate->changed, &gate->mutex);
+      cmeta_cond_wait(&gate->changed, &gate->mutex);
       continue;
     }
 
     {
       uint64_t wait_ns = gate_wait_ns(context);
       if (wait_ns == 0u) continue;
-      (void)salts_cond_timedwait(&gate->changed, &gate->mutex, wait_ns);
+      (void)cmeta_cond_timedwait(&gate->changed, &gate->mutex, wait_ns);
     }
   }
 }
@@ -106,8 +106,8 @@ turbo_tool_status_t turbo_wasm_invoke_gate_acquire(
 void turbo_wasm_invoke_gate_release(turbo_wasm_invoke_gate_t *gate) {
   if (!gate || !gate->mutex || !gate->changed) return;
 
-  salts_mutex_lock(&gate->mutex);
+  cmeta_mutex_lock(&gate->mutex);
   gate->active = 0;
-  salts_cond_signal(&gate->changed);
-  salts_mutex_unlock(&gate->mutex);
+  cmeta_cond_signal(&gate->changed);
+  cmeta_mutex_unlock(&gate->mutex);
 }

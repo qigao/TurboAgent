@@ -1,0 +1,90 @@
+/* Generated from workspace.schema by salts-idlc. Do not edit. */
+#ifndef TURBO_CODING_GENERATED_SCHEMAS_H
+#define TURBO_CODING_GENERATED_SCHEMAS_H
+
+#include "turbo_runtime_json.h"
+#include "workspace_native.h"
+
+/* This projection admits required string fields only. New field kinds need
+ * an explicit projection and tests; unsupported kinds fail compilation. */
+{{#messages}}
+enum { {{name}}_tool_field_count = 0
+{{#fields}}
+  + 1
+{{/fields}}
+};
+
+static inline int {{name}}_tool_arguments_valid(const json_value_t *arguments) {
+  if (!arguments || json_type(arguments) != JSON_OBJECT ||
+      json_object_size(arguments) != {{name}}_tool_field_count) return 0;
+{{#fields}}
+  if (json_type(json_object_get(arguments, "{{name}}")) != JSON_STRING) return 0;
+{{/fields}}
+  return 1;
+}
+
+/* DataBind permits NULL as the native representation of an empty string.
+ * Tool implementations need owned, addressable strings, including empties. */
+static inline DataBindStatus {{name}}_tool_normalize_empty({{name}}_t *request) {
+{{#fields}}
+  if (!request->{{name}}) {
+    request->{{name}} = tstr_new();
+    if (!request->{{name}}) return DATA_BIND_ERR_OOM;
+  }
+{{/fields}}
+  return DATA_BIND_OK;
+}
+
+static inline json_value_t *{{name}}_tool_schema(void) {
+  json_value_t *schema = json_create_object();
+  json_value_t *properties = json_create_object();
+  json_value_t *required = json_create_array();
+  json_value_t *additional = json_create_bool(0);
+  if (!schema || !properties || !required || !additional) goto fail;
+{{#fields}}
+{{^is_string}}
+#error Unsupported field kind in workspace tool schema projection
+{{/is_string}}
+{{#is_optional}}
+#error Optional fields need an explicit workspace tool schema projection
+{{/is_optional}}
+  {
+    json_value_t *field = json_create_object();
+    json_value_t *name = json_create_string("{{name}}");
+    if (!field || !name) {
+      json_free(field);
+      json_free(name);
+      goto fail;
+    }
+    if (turbo_runtime_json_object_set_string(field, "type", "string") != 0) {
+      json_free(field);
+      json_free(name);
+      goto fail;
+    }
+    if (!json_object_add_checked(properties, "{{name}}", field)) {
+      json_free(field);
+      json_free(name);
+      goto fail;
+    }
+    if (!json_array_add_checked(required, name)) {
+      json_free(name);
+      goto fail;
+    }
+  }
+{{/fields}}
+  if (turbo_runtime_json_object_set_string(schema, "type", "object") != 0 ||
+      !json_object_add_checked(schema, "additionalProperties", additional)) goto fail;
+  additional = NULL;
+  if (!json_object_add_checked(schema, "properties", properties)) goto fail;
+  properties = NULL;
+  if (!json_object_add_checked(schema, "required", required)) goto fail;
+  return schema;
+fail:
+  json_free(additional);
+  json_free(required);
+  json_free(properties);
+  json_free(schema);
+  return NULL;
+}
+{{/messages}}
+#endif

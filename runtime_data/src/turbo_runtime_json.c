@@ -24,6 +24,53 @@ turbo_runtime_json_status_t turbo_runtime_json_object_set(
              : TURBO_RUNTIME_JSON_OUT_OF_MEMORY;
 }
 
+/* These constructors own the temporary value even when insertion fails. */
+static turbo_runtime_json_status_t turbo_runtime_json_object_set_owned(
+    json_value_t *object, const char *key, json_value_t *value) {
+  turbo_runtime_json_status_t status;
+  if (!value) {
+    return TURBO_RUNTIME_JSON_OUT_OF_MEMORY;
+  }
+  status = turbo_runtime_json_object_set(object, key, value);
+  if (status != TURBO_RUNTIME_JSON_OK) {
+    turbo_runtime_json_destroy(value);
+  }
+  return status;
+}
+
+turbo_runtime_json_status_t turbo_runtime_json_object_set_string(
+    json_value_t *object, const char *key, const char *value) {
+  if (!object || !key || !value) {
+    return TURBO_RUNTIME_JSON_INVALID_ARGUMENT;
+  }
+  if (json_type(object) != JSON_OBJECT) {
+    return TURBO_RUNTIME_JSON_TYPE_MISMATCH;
+  }
+  return turbo_runtime_json_object_set_owned(object, key, json_create_string(value));
+}
+
+turbo_runtime_json_status_t turbo_runtime_json_object_set_int64(
+    json_value_t *object, const char *key, int64_t value) {
+  if (!object || !key) {
+    return TURBO_RUNTIME_JSON_INVALID_ARGUMENT;
+  }
+  if (json_type(object) != JSON_OBJECT) {
+    return TURBO_RUNTIME_JSON_TYPE_MISMATCH;
+  }
+  return turbo_runtime_json_object_set_owned(object, key, json_create_int64(value));
+}
+
+turbo_runtime_json_status_t turbo_runtime_json_object_set_clone(
+    json_value_t *object, const char *key, const json_value_t *value) {
+  if (!object || !key || !value) {
+    return TURBO_RUNTIME_JSON_INVALID_ARGUMENT;
+  }
+  if (json_type(object) != JSON_OBJECT) {
+    return TURBO_RUNTIME_JSON_TYPE_MISMATCH;
+  }
+  return turbo_runtime_json_object_set_owned(object, key, json_clone(value));
+}
+
 turbo_runtime_json_status_t turbo_runtime_json_array_append(
     json_value_t *array, json_value_t *element_value) {
   if (!array || !element_value) {

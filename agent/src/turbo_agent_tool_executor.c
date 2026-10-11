@@ -1,4 +1,5 @@
 #include "turbo_agent_tool_executor_internal.h"
+#include "turbo_agent_tool_journal_internal.h"
 
 #include "turbo_agent_core_internal.h"
 #include "turbo_agent_runtime_internal.h"
@@ -13,8 +14,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define TURBO_AGENT_TOOL_JOURNAL_COLLECTION "agent_tool_journal"
-#define TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION 1
 #define TURBO_AGENT_TOOL_DEFAULT_WORKERS 4u
 #define TURBO_AGENT_TOOL_DEFAULT_QUEUE_CAPACITY 8u
 #define TURBO_AGENT_TOOL_DEFAULT_MAX_BATCH_CALLS 64u
@@ -215,27 +214,6 @@ static int turbo_agent_tool_journal_string_equals(const json_value_t *record, co
          memcmp(json_string(value), expected, length) == 0;
 }
 
-static int turbo_agent_tool_journal_status_valid(int64_t status) {
-  switch (status) {
-  case TURBO_TOOL_OK:
-  case TURBO_TOOL_ERROR:
-  case TURBO_TOOL_INVALID_ARGUMENT:
-  case TURBO_TOOL_DUPLICATE:
-  case TURBO_TOOL_NOT_FOUND:
-  case TURBO_TOOL_OUT_OF_MEMORY:
-  case TURBO_TOOL_CANCELLED:
-  case TURBO_TOOL_DEADLINE_EXCEEDED:
-  case TURBO_TOOL_OUTPUT_LIMIT:
-  case TURBO_TOOL_UNKNOWN_SIDE_EFFECT:
-  case TURBO_TOOL_BACKPRESSURE:
-  case TURBO_TOOL_FUEL_EXHAUSTED:
-  case TURBO_TOOL_TRAPPED:
-    return 1;
-  default:
-    return 0;
-  }
-}
-
 static int turbo_agent_tool_journal_load(turbo_agent_runtime_t *runtime, const char *journal_id,
                                          const char *thread_id, const char *run_id,
                                          const turbo_agent_tool_execution_t *call,
@@ -249,10 +227,13 @@ static int turbo_agent_tool_journal_load(turbo_agent_runtime_t *runtime, const c
   if (!runtime) return SALTS_ENOENT;
   /* The store key is authoritative. Filtering only by an embedded identity
    * would mistake a damaged existing record for a never-started invocation. */
-  if (turbo_agent_runtime_store_get_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION, journal_id,
-                                         &record) != 0) {
-    /* The legacy get ABI conflates absence and I/O failure. Only a successful
-     * empty listing admits a new call; a listed but unreadable record fails. */
+  rc = turbo_agent_runtime_store_get_json_status(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
+                                                 journal_id, &record);
+  if (rc == SALTS_ENOENT) return rc;
+  if (rc != SALTS_OK && rc != -1) return rc;
+  if (rc == -1) {
+    /* Only legacy callbacks with unclassified errors need this compatibility
+     * query. Typed I/O/corruption failures must never be treated as absence. */
     if (turbo_agent_runtime_store_list_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
                                             "journal_id", journal_id, &records) != 0)
       return SALTS_EIO;
@@ -313,6 +294,19 @@ static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executo
   journal_id = turbo_agent_tool_journal_id(run_id, call->turn_key, call->call_id);
   if (!journal_id) return SALTS_ENOMEM;
   rc = turbo_agent_tool_journal_load(runtime, journal_id, thread_id, run_id, call, &record);
+  if (rc == SALTS_ENOENT && call->legacy_turn_key) {
+    turbo_agent_tool_execution_t legacy_call = *call;
+    char *legacy_id;
+    legacy_call.turn_key = call->legacy_turn_key;
+    legacy_id = turbo_agent_tool_journal_id(run_id, legacy_call.turn_key, call->call_id);
+    if (!legacy_id) { free(journal_id); return SALTS_ENOMEM; }
+    rc = turbo_agent_tool_journal_load(runtime, legacy_id, thread_id, run_id, &legacy_call, &record);
+    free(legacy_id);
+    /* A local event offset cannot establish which nested state produced an old
+     * record. Never migrate/replay it into a guessed scope or repeat its effects. */
+    if (rc == SALTS_OK) rc = SALTS_EBUSY;
+    turbo_runtime_json_destroy(record); record = NULL;
+  }
   if (rc == SALTS_ENOENT) {
     call->status = TURBO_TOOL_OK;
     rc = turbo_agent_tool_journal_write(runtime, journal_id, thread_id, run_id, call, "planned");

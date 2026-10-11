@@ -1,6 +1,8 @@
 #include "tinytest.h"
 #include "turbo_runtime_segment.h"
 #include "turbo_runtime_control.h"
+#include "turbo_runtime_history.h"
+#include "turbo_runtime_diagram.h"
 #include <tstr.h>
 #include <salts/error_codes.h>
 #include <string.h>
@@ -20,16 +22,21 @@ typedef struct segment_probe_s {
   int summary_calls;
   int fail_node;
   int fail_snapshot;
+  int reject_published_head;
+  int head_read_error;
 } segment_probe_t;
 
 static int segment_put(void *data, const char *collection, const char *id, const char *text) {
   segment_probe_t *probe = data;
   ++probe->writes;
+  if (probe->reject_published_head && strcmp(collection, "thread_heads") == 0 &&
+      strstr(text, "\"state_snapshot\"")) return SALTS_EIO;
   if (probe->reject_collection && strcmp(probe->reject_collection, collection) == 0) return -1;
   return probe->backend.put(probe->backend.user_data, collection, id, text);
 }
 static int segment_get(void *data, const char *collection, const char *id, char **text) {
   segment_probe_t *probe = data;
+  if (probe->head_read_error && strcmp(collection, "thread_heads") == 0) return probe->head_read_error;
   return probe->backend.get(probe->backend.user_data, collection, id, text);
 }
 static int segment_list(void *data, const char *collection, const char *key,
@@ -186,6 +193,9 @@ spec("Durable graph segments without Agent") {
     check_null(json_object_get(summary, "available_commands"));
     checkpoint_id = tstr_dup(json_get_string(summary, "checkpoint_id"));
     check_not_null(checkpoint_id);
+    check_equal(turbo_agent_runtime_thread_diagram(runtime, "thread", &records), SALTS_OK);
+    check_equal(json_array_size(json_object_get(records, "nodes")), 2);
+    json_free(records); records = NULL;
     check_equal(turbo_agent_runtime_store_get_json(runtime, "checkpoints", checkpoint_id, &record), 0);
     check_equal(json_get_string(json_object_get(record, "control_snapshot"), "owner"), "host");
     check_equal(json_get_string(record, "parent_agent_run_id"), "caller-run");
@@ -305,7 +315,78 @@ spec("Durable graph segments without Agent") {
     check_equal(probe.snapshot_calls, 1);
     check_equal(probe.left, 1);
     check_equal(probe.depth, 0);
-    check_equal(probe.writes, 1); /* Only the initial thread upsert. */
+    check_equal(probe.writes, 2); /* Thread upsert and initial head marker. */
+  }
+
+  for (int fail_run = 0; fail_run < 2; ++fail_run) {
+  it("keeps the published snapshot when a same-run update fails at %s", fail_run ? "run" : "head") {
+    check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), 0);
+    json_free(summary); summary = NULL;
+    json_free(state); state = NULL;
+    check_equal(turbo_runtime_json_object_set_int64(input, "count", 10), 0);
+    probe.reject_published_head = !fail_run;
+    probe.reject_collection = fail_run ? "runs" : NULL;
+    check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), -1);
+    check_null(summary); check_null(state);
+    check_equal(turbo_agent_runtime_get_run_state_json_value(runtime, "run", &record), 0);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(record, "count"), 0), fail_run ? 2 : 12);
+    json_free(record); record = NULL;
+    check_equal(turbo_agent_runtime_get_thread_head_state_json_value(runtime, "thread", &record), 0);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(record, "count"), 0), 2);
+  }
+  }
+
+  it("excludes unpublished checkpoints from thread history and checkpoint selection") {
+    check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), 0);
+    json_free(summary); summary = NULL;
+    json_free(state); state = NULL;
+    options.interrupt_before_nodes = interrupt_before;
+    options.interrupt_before_count = 1;
+    probe.reject_published_head = 1;
+    check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), -1);
+    check_equal(turbo_agent_runtime_store_list_json(runtime, "checkpoints", NULL, NULL, &records), 0);
+    check_equal(json_array_size(records), 1);
+    check_equal(turbo_agent_runtime_current_checkpoint_id_for_thread(runtime, "thread", &serialized), -1);
+    check_null(serialized);
+    check_equal(turbo_agent_runtime_load_thread_history_events_json_value(runtime, "thread", &record), 0);
+    check_equal(json_array_size(record), 0);
+    json_free(record); record = NULL;
+    check_equal(turbo_agent_runtime_thread_diagram(runtime, "thread", &record), SALTS_OK);
+    check_equal(json_array_size(json_object_get(record, "nodes")), 1);
+    check_equal(json_array_size(json_object_get(record, "edges")), 0);
+  }
+
+  it("does not select an unpublished first run through legacy fallback") {
+    probe.reject_published_head = 1;
+    check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), -1);
+    check_equal(turbo_agent_runtime_get_published_thread_head(runtime, "thread", &record), SALTS_EBUSY);
+    check_null(record);
+    check_equal(turbo_agent_runtime_get_thread_head_state_json_value(runtime, "thread", &record), -1);
+    check_null(record);
+  }
+
+  it("does not confuse a busy backend with a confirmed empty head marker") {
+    probe.head_read_error = SALTS_EBUSY;
+    check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), -1);
+    check_equal(probe.nodes, 0);
+    check_equal(probe.entered, 0);
+    check_equal(turbo_agent_runtime_store_list_json(runtime, "runs", NULL, NULL, &records), 0);
+    check_equal(json_array_size(records), 0);
+  }
+
+  it("does not enter execution when head adoption fails") {
+    probe.reject_collection = "thread_heads";
+    check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), -1);
+    check_equal(probe.nodes, 0);
+    check_equal(probe.entered, 0);
+  }
+
+  it("rejects a corrupt head instead of selecting an older run") {
+    check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), 0);
+    check_equal(probe.backend.put(probe.backend.user_data, "thread_heads", "thread", "{}"), 0);
+    check_equal(turbo_agent_runtime_get_published_thread_head(runtime, "thread", &record), SALTS_EPROTO);
+    check_equal(turbo_agent_runtime_get_thread_head_state_json_value(runtime, "thread", &record), -1);
+    check_null(record);
   }
 
   it("does not enter execution when the initial thread write fails") {

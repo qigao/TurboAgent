@@ -89,6 +89,18 @@ CXX_C_API int turbo_agent_runtime_store_get_json(
     turbo_agent_runtime_t *runtime, const char *collection, const char *id,
     json_value_t **out_record_json);
 
+/** Status-preserving read. Ownership/output clearing match get_json.
+ * Return SALTS_OK, SALTS_EINVAL for invalid arguments, SALTS_EPROTO for missing
+ * success output or invalid JSON, or the backend's nonzero status unchanged.
+ * Builtin get callbacks distinguish SALTS_ENOENT from I/O/allocation failures.
+ * A legacy callback may return -1 for an unclassified failure; do not equate it
+ * with absence. This entry performs no list query or implicit fallback.
+ * Example: get_json_status(runtime, "items", "id", &value) == SALTS_ENOENT.
+ * The old get_json entry continues mapping all failures to -1. */
+CXX_C_API int turbo_agent_runtime_store_get_json_status(
+    turbo_agent_runtime_t *runtime, const char *collection, const char *id,
+    json_value_t **out_record_json);
+
 /**
  * List records as an independently owned array; errors/output ownership match
  * get_json. Builtin backends match a string member exactly when both filter

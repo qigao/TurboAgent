@@ -149,6 +149,17 @@ CXX_C_API json_value_t *
 turbo_agent_executable_dag_certificate_json_value(
     const turbo_agent_executable_dag_t *plan);
 
+/** Build an owned turbo_diagram.h view of this immutable plan's dependencies.
+ * No tool calls or argument payloads are emitted. Labels show tool, approval/
+ * checkpoint boundaries and retry limits; these describe intent, not completion.
+ * Borrow plan until return; clear out_view on entry, release with json_free().
+ * Returns SALTS_OK, EINVAL, ENOMEM, ENOSPC (diagram bounds), or EPROTO.
+ * Example: turbo_agent_executable_dag_diagram(plan, &view);
+ * then turbo_diagram_mermaid(view, &text), checking each return value.
+ */
+CXX_C_API int turbo_agent_executable_dag_diagram(
+    const turbo_agent_executable_dag_t *plan, json_value_t **out_view);
+
 #ifdef __cplusplus
 }
 #endif

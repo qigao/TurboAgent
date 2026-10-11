@@ -90,33 +90,33 @@ static int turbo_runtime_store_read_text_file(const char *path, char **out_conte
   *out_content = NULL;
   fp = fopen(path, "rb");
   if (!fp) {
-    return -1;
+    return errno == ENOENT ? SALTS_ENOENT : SALTS_EIO;
   }
   if (fseek(fp, 0, SEEK_END) != 0) {
     fclose(fp);
-    return -1;
+    return SALTS_EIO;
   }
   size = ftell(fp);
   if (size < 0) {
     fclose(fp);
-    return -1;
+    return SALTS_EIO;
   }
   if (fseek(fp, 0, SEEK_SET) != 0) {
     fclose(fp);
-    return -1;
+    return SALTS_EIO;
   }
   buffer = (char *)malloc((size_t)size + 1);
   if (!buffer) {
     fclose(fp);
-    return -1;
+    return SALTS_ENOMEM;
   }
   if (size > 0 && fread(buffer, 1, (size_t)size, fp) != (size_t)size) {
     free(buffer);
     fclose(fp);
-    return -1;
+    return SALTS_EIO;
   }
   buffer[size] = '\0';
-  fclose(fp);
+  if (fclose(fp) != 0) { free(buffer); return SALTS_EIO; }
   *out_content = buffer;
   return 0;
 }
@@ -226,7 +226,7 @@ int turbo_agent_runtime_store_put_json(turbo_agent_runtime_t *runtime, const cha
   return rc;
 }
 
-int turbo_agent_runtime_store_get_json(turbo_agent_runtime_t *runtime, const char *collection,
+int turbo_agent_runtime_store_get_json_status(turbo_agent_runtime_t *runtime, const char *collection,
                                        const char *id, json_value_t **out_record_json) {
   char *serialized = NULL;
   int rc;
@@ -235,7 +235,7 @@ int turbo_agent_runtime_store_get_json(turbo_agent_runtime_t *runtime, const cha
     *out_record_json = NULL;
   }
   if (!runtime || !collection || !id || !out_record_json || !runtime->store.get) {
-    return -1;
+    return SALTS_EINVAL;
   }
 
   cmeta_mutex_lock(&runtime->store_mutex);
@@ -243,11 +243,17 @@ int turbo_agent_runtime_store_get_json(turbo_agent_runtime_t *runtime, const cha
   cmeta_mutex_unlock(&runtime->store_mutex);
   if (rc != 0 || !serialized) {
     free(serialized);
-    return -1;
+    return rc != 0 ? rc : SALTS_EPROTO;
   }
   rc = turbo_runtime_store_parse_json_string(serialized, out_record_json);
   free(serialized);
-  return rc;
+  return rc == 0 ? SALTS_OK : SALTS_EPROTO;
+}
+
+int turbo_agent_runtime_store_get_json(turbo_agent_runtime_t *runtime, const char *collection,
+                                       const char *id, json_value_t **out_record_json) {
+  return turbo_agent_runtime_store_get_json_status(runtime, collection, id, out_record_json) == 0
+             ? 0 : -1;
 }
 
 int turbo_agent_runtime_store_list_json(turbo_agent_runtime_t *runtime, const char *collection,
@@ -347,16 +353,16 @@ static int turbo_agent_runtime_memory_store_get(void *user_data, const char *col
   turbo_agent_runtime_memory_record_t *record;
 
   if (!store || !collection || !id || !out_record_json) {
-    return -1;
+    return SALTS_EINVAL;
   }
   *out_record_json = NULL;
   for (record = store->head; record; record = record->next) {
     if (strcmp(record->collection, collection) == 0 && strcmp(record->id, id) == 0) {
       *out_record_json = turbo_runtime_store_strdup(record->record_json);
-      return *out_record_json ? 0 : -1;
+      return *out_record_json ? SALTS_OK : SALTS_ENOMEM;
     }
   }
-  return -1;
+  return SALTS_ENOENT;
 }
 
 static int turbo_runtime_store_json_matches_filter(const json_value_t *record, const char *filter_key,
@@ -454,12 +460,13 @@ static int turbo_agent_runtime_file_store_get(void *user_data, const char *colle
   char *path;
   int rc;
 
-  if (!store || !store->root_dir || !out_record_json) {
-    return -1;
+  if (out_record_json) *out_record_json = NULL;
+  if (!store || !store->root_dir || !collection || !id || !out_record_json) {
+    return SALTS_EINVAL;
   }
   path = turbo_runtime_store_record_path(store->root_dir, collection, id);
   if (!path) {
-    return -1;
+    return SALTS_ENOMEM;
   }
   rc = turbo_runtime_store_read_text_file(path, out_record_json);
   free(path);
@@ -527,6 +534,7 @@ static int turbo_agent_runtime_file_store_list(void *user_data, const char *coll
       return -1;
     }
     handle = FindFirstFileA(pattern, &find_data);
+    DWORD find_error = handle == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
     free(pattern);
     if (handle != INVALID_HANDLE_VALUE) {
       do {
@@ -543,7 +551,20 @@ static int turbo_agent_runtime_file_store_list(void *user_data, const char *coll
         }
         free(path);
       } while (FindNextFileA(handle, &find_data));
-      FindClose(handle);
+      if (rc == 0 && GetLastError() != ERROR_NO_MORE_FILES) rc = -1;
+      if (!FindClose(handle)) rc = -1;
+    } else if (find_error != ERROR_FILE_NOT_FOUND && find_error != ERROR_PATH_NOT_FOUND) {
+      rc = -1;
+    } else {
+      /* PATH_NOT_FOUND can also mean a collection is a regular file. Do not
+       * publish an empty list for a damaged layout or an inaccessible path. */
+      DWORD attributes = GetFileAttributesA(directory);
+      if (attributes != INVALID_FILE_ATTRIBUTES) {
+        if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) rc = -1;
+      } else {
+        DWORD error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) rc = -1;
+      }
     }
   }
 #else
@@ -558,9 +579,13 @@ static int turbo_agent_runtime_file_store_list(void *user_data, const char *coll
         return -1;
       }
     } else {
-      while ((entry = readdir(dir)) != NULL) {
+      for (;;) {
         char *path;
-        size_t len = strlen(entry->d_name);
+        size_t len;
+        errno = 0;
+        entry = readdir(dir);
+        if (!entry) { if (errno != 0) rc = -1; break; }
+        len = strlen(entry->d_name);
         if (len < 6 || strcmp(entry->d_name + len - 5, ".json") != 0) {
           continue;
         }
@@ -573,7 +598,7 @@ static int turbo_agent_runtime_file_store_list(void *user_data, const char *coll
         }
         free(path);
       }
-      closedir(dir);
+      if (closedir(dir) != 0) rc = -1;
     }
   }
 #endif

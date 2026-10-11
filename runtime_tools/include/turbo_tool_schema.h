@@ -44,6 +44,9 @@ turbo_tool_schema_validate_arguments_json_value(
 
 /**
  * @brief Serialize registry tools into OpenAI Responses API shape.
+ * Names use the same wire aliases as compatible Chat (for example fs.read ->
+ * fs_read). The registry retains canonical names and resolves these aliases.
+ * Colliding aliases fail export instead of exposing ambiguous tool calls.
  * @param registry Tool registry.
  * @return JSON array owned by caller, or NULL on failure.
  */

@@ -732,27 +732,39 @@ json_value_t *turbo_tool_schema_build_openai_tools(const turbo_tool_registry_t *
     turbo_tool_definition_t definition = {0};
     json_value_t *tool;
     json_value_t *parameters;
+    char *compatible_name;
 
     if (turbo_tool_registry_get_definition(registry, i, &definition) != TURBO_TOOL_OK) {
       json_free(tools);
       return NULL;
     }
 
+    compatible_name = turbo_tool_schema_openai_compatible_name(definition.name);
+    if (!compatible_name ||
+        turbo_tool_schema_openai_compatible_name_seen(registry, i, compatible_name)) {
+      free(compatible_name);
+      json_free(tools);
+      return NULL;
+    }
+
     parameters = turbo_tool_schema_parse_parameters(&definition);
     if (!parameters) {
+      free(compatible_name);
       json_free(tools);
       return NULL;
     }
 
     tool = json_create_object();
     if (!tool) {
+      free(compatible_name);
       json_free(parameters);
       json_free(tools);
       return NULL;
     }
 
     json_object_set_string(tool, "type", "function");
-    json_object_set_string(tool, "name", definition.name);
+    json_object_set_string(tool, "name", compatible_name);
+    free(compatible_name);
     json_object_set_string(tool, "description", definition.description);
     json_object_set_bool(tool, "strict", definition.strict ? true : false);
     json_object_add(tool, "parameters", parameters);

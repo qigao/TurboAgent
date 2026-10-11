@@ -87,7 +87,7 @@ its assigned registry:
 | Role | Tool-call state | Availability |
 | --- | --- | --- |
 | Loop agent | Root `events` | Yes |
-| Initial planner | Root `events` | Yes |
+| Initial planner | Root `events`, or an explicitly seeded `planner_state_versions` entry | Yes |
 | Replanner | Current `planner_state_versions` entry | Yes |
 | Plan executor | Current `executor_state_versions` entry | Yes |
 | Subagent | Child session state | Yes, when the child is explicitly assigned a registry |
@@ -100,6 +100,47 @@ without a new start/resume operation.
 Child sessions do not implicitly inherit the parent's registry or capability
 policy. Hosts must project and assign the child registry explicitly so that
 delegation does not broaden authority.
+
+## CLI skills and workflow composition
+
+Both CLI modes prepare the workspace catalog on the input thread for each new
+user turn. General mode uses an empty registry; it can select instruction-only
+skills but cannot satisfy a skill's coding-tool requirements. Coding mode keeps
+its existing tool registry and read-only policy. Catalog selection never grants
+additional authority. General-mode workspace instructions are an intentional
+behavior extension; callers wanting unrelated instructions should select a
+separate workspace with `-C`.
+
+The CLI's `--workflow loop|review|engineering` chooses an existing Session
+preset, with `loop` remaining the default. Rather than applying a planner JSON
+instruction to every model call, the CLI seeds the existing JSON-native
+`planner_state_versions` array with a separate initial input. Executor input
+and subsequent conversation replay do not inherit that planning instruction.
+This uses the current state schema and adds no public C ABI or database format.
+
+Instruction context has one source of truth on the current turn's root state.
+New executor and replan substates clone its `memory_context` before publication.
+The CLI also copies context into
+its initial planner substate. These are owned snapshots, not borrowed references
+to a temporary workspace selection. Allocation failure prevents publication and
+propagates to the run. Existing persisted substates remain their recorded snapshots.
+Substate copies increase retained context bytes; the CLI's context bounds, graph
+step limit, three-replan limit, and per-turn deadline bound this work. No memory
+or performance improvement is claimed.
+
+FTS/vector retrieval continues before submission on the input thread. Selecting
+SDK knowledge/retriever graph presets instead would move backend access into the
+worker and duplicate CLI retrieval; those presets remain SDK-only. The worker
+owns execution state until completion, and the next catalog refresh occurs only
+after it drains. Completed-turn resume projects conversation history into a
+fresh state and seeds a new plan, not an interrupted checkpoint continuation.
+Review gates remain enforced; the CLI has no approval UI or implicit approval.
+
+No stored-data migration is required. Returning to `--workflow loop` restores
+the original execution topology for subsequent completed-conversation turns.
+The workspace tests cover both modes, FTS/context propagation, replanning and
+persisted-history continuation; live tests cover skill adherence under all three
+choices and coding repair through loop and engineering execution.
 
 ## WasmToolPack composition
 

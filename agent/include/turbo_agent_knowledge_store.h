@@ -9,6 +9,7 @@
 #include "turbo_agent_graph.h"
 #include <json_parser.h>
 #include "turbo_tool_registry.h"
+#include "turbo_diagram.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -87,6 +88,60 @@ CXX_C_API int turbo_agent_knowledge_store_list_documents(
 CXX_C_API int turbo_agent_knowledge_store_get_document(
     turbo_agent_knowledge_store_t *store, const char *document_id,
     json_value_t **out_document_json);
+
+#define TURBO_KNOWLEDGE_DIAGRAM_MAX_DOCUMENTS 32u
+#define TURBO_KNOWLEDGE_DIAGRAM_MAX_FIELD_BYTES 1024u
+#define TURBO_KNOWLEDGE_DIAGRAM_URI_MENTIONS 1u
+#define TURBO_KNOWLEDGE_DIAGRAM_MAX_DOCUMENT_BYTES (256u * 1024u)
+#define TURBO_KNOWLEDGE_DIAGRAM_MAX_SELECTION_BYTES (1024u * 1024u)
+
+/** Project selected indexed documents and all their chunks into a knowledge view.
+ * document_ids contains 1..MAX_DOCUMENTS unique nonempty UTF-8 IDs; selected text
+ * fields are bounded to MAX_FIELD_BYTES. Total nodes/edges obey turbo_diagram.h.
+ * Document order follows input, chunks follow ascending nonnegative ordinal.
+ * IDs are document:<id>/chunk:<id>; contains edges carry relation="contains".
+ * Nodes preserve collection, record_id and stored document content_hash. Chunk
+ * identity is revision-relative: retain its document_id and content_hash too.
+ * freshness="indexed_snapshot" does not assert that external source files are
+ * current. No text/metadata payload, inferred cross-document relation or source
+ * file access is included. Empty documents still produce a document node.
+ *
+ * Borrow store and IDs only during the synchronous call. Serialize all uses of
+ * this store, including close; independent connections may write concurrently.
+ * Own a read transaction across the selection; reject an already active one.
+ * Clear out_view on entry; publish an independent owned JSON tree only after
+ * success, release with json_free. Failure rolls back and returns no view.
+ * Return OK, EINVAL for bad input (including selection count)/duplicates, ENOENT for an unknown document,
+ * EPROTO for invalid stored records/schema, ENOSPC for bounds, EBUSY for locking
+ * or active transaction, ENOMEM for allocation, EIO for other SQLite failures.
+ * Output bounds do not cap SQLite database size or execution time.
+ * Example: const char *ids[] = {"readme"};
+ * turbo_agent_knowledge_store_diagram(store, ids, 1, &view); check status;
+ * turbo_diagram_mermaid(view, &text); check status; tstr_free(text); json_free(view).
+ */
+CXX_C_API int turbo_agent_knowledge_store_diagram(turbo_agent_knowledge_store_t *store,
+    const char *const *document_ids, size_t document_count, json_value_t **out_view);
+
+/** Same ownership, snapshot and error contract as diagram; flags=0 is identical.
+ * URI_MENTIONS additionally reads bounded indexed text and adds mentions_uri
+ * edges for literal case-sensitive occurrences of selected document URIs.
+ * Require boundaries at start/end, ASCII whitespace, quotes, backticks, angle,
+ * square or curly brackets, or parentheses. No relative path/escape/fragment
+ * resolution, Markdown semantics, code dependency inference or external I/O.
+ * Unknown flag bits return EINVAL. Text is copied one document at a time, up to
+ * MAX_DOCUMENT_BYTES per document and MAX_SELECTION_BYTES overall; bounds or
+ * edge overflow return ENOSPC. Contiguous ordinals from zero and exact stored
+ * byte size are required; invalid UTF-8/NUL or inconsistent records return EPROTO.
+ * Each occurrence retains source/target hashes and source byte offset/length,
+ * starting source_chunk_id/source_chunk_byte_offset, ending end_chunk_id and
+ * end_chunk_byte_offset_exclusive. These refer to the indexed revision only.
+ * Root uri_mention_scope="selected_document_uris" states the search boundary.
+ * Text is never returned. Default diagram does not read text or impose these
+ * extra reconstruction requirements. Example: use URI_MENTIONS here, then an
+ * incoming neighborhood around a code document to inspect indexed mentions.
+ */
+CXX_C_API int turbo_agent_knowledge_store_diagram_ex(turbo_agent_knowledge_store_t *store,
+    const char *const *document_ids, size_t document_count, unsigned flags, json_value_t **out_view);
 
 CXX_C_API int turbo_agent_knowledge_store_load_context(
     turbo_agent_knowledge_store_t *store, json_value_t *state, const char *query,

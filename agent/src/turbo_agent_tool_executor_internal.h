@@ -26,6 +26,9 @@ typedef struct turbo_agent_tool_execution_s {
   int arguments_owned;
   const char *turn_key;
   const char *policy_reason;
+  /* Nested calls only: legacy identity is checked before admitting a new key.
+   * Borrowed with turn_key through synchronous dispatch and worker drain. */
+  const char *legacy_turn_key;
 } turbo_agent_tool_execution_t;
 
 CXX_C_API int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *config,

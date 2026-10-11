@@ -100,6 +100,52 @@ static int vector_store_test_upsert2(turbo_vector_store_t *store,
   return rc;
 }
 
+spec("vector indexed chunk ownership") {
+  static char *directory, *path;
+  static turbo_vector_store_t *store;
+  static turbo_embedding_model_t *model;
+  static json_value_t *query, *results;
+
+  before_each() {
+    directory = tt_make_temp_dir("vector-chunk-owner"); check_not_null(directory);
+    path = vector_store_test_path(directory, "vectors.db"); check_not_null(path);
+    model = turbo_embedding_model_create_hashing(16); check_not_null(model);
+    check_equal(turbo_embedding_model_embed_text(model, "retained", &query), 0);
+  }
+  after_each() {
+    json_free(query); query = NULL; json_free(results); results = NULL;
+    turbo_vector_store_destroy(store); store = NULL;
+    turbo_embedding_model_destroy(model); model = NULL;
+    free(path); path = NULL;
+    if (directory) tt_remove_tree(directory);
+    free(directory); directory = NULL;
+  }
+  for (int sqlite = 0; sqlite <= 1; ++sqlite) {
+    it("preserves another document whose identity contains the chunk prefix in backend %d", sqlite) {
+      store = sqlite ? turbo_vector_store_sqlite_open(path) : turbo_vector_store_create_memory();
+      check_not_null(store);
+      turbo_text_splitter_options_t splitter = {.chunk_size = 16};
+      turbo_vector_store_document_t document = {.id = "资料.md", .uri = "资料.md", .text = "original"};
+      turbo_vector_store_document_t neighbor = {.id = "资料.md#chunk-0.md", .uri = "资料.md#chunk-0.md",
+          .text = "retained"};
+      check_equal(turbo_vector_store_index_text(store, model, &document, &splitter, NULL), 0);
+      check_equal(turbo_vector_store_index_text(store, model, &neighbor, &splitter, NULL), 0);
+      document.text = "replacement";
+      check_equal(turbo_vector_store_index_text(store, model, &document, &splitter, NULL), 0);
+      check_equal(turbo_vector_store_count(store), 2u);
+      document.text = "";
+      check_equal(turbo_vector_store_index_text(store, model, &document, &splitter, NULL), 0);
+      if (sqlite) {
+        turbo_vector_store_destroy(store); store = turbo_vector_store_sqlite_open(path); check_not_null(store);
+      }
+      check_equal(turbo_vector_store_query(store, query, NULL, &results), 0);
+      check_equal(json_array_size(results), 1u);
+      check_equal(json_get_string(json_array_get(results, 0), "uri"), neighbor.uri);
+      check_equal(json_get_string(json_array_get(results, 0), "text"), "retained");
+    }
+  }
+}
+
 spec("turbo vector store api") {
   it("should rank and filter in-memory vector documents") {
     turbo_vector_store_t *store = turbo_vector_store_create_memory();
@@ -368,6 +414,14 @@ spec("turbo vector store api") {
     check_equal(json_get_string(first, "text"),
                  "replacement retrieval only");
 
+    document.text = "summary omitted replacement";
+    check_equal(turbo_vector_store_index_text(store, embedding_model, &document,
+                                               &splitter_options, NULL), 0);
+    json_free(results); results = NULL;
+    check_equal(turbo_retriever_query(retriever, "replacement", &query_options, &results), 0);
+    check_equal(json_array_size(results), 1);
+    check_equal(json_get_string(json_array_get(results, 0), "text"), document.text);
+
     json_free(results); results = NULL;
     turbo_retriever_destroy(retriever);
     json_free(summary); summary = NULL;
@@ -429,6 +483,16 @@ spec("turbo vector store api") {
                  "sqlite-local-doc#chunk-0");
     check_equal(json_get_string(first, "text"),
                  "sqlite replacement retrieval only");
+
+    document.text = "persisted replacement without summary";
+    check_equal(turbo_vector_store_index_text(store, embedding_model, &document,
+                                               &splitter_options, NULL), 0);
+    turbo_vector_store_destroy(store);
+    store = turbo_vector_store_sqlite_open(db_path); check_not_null(store);
+    json_free(results); results = NULL;
+    check_equal(turbo_vector_store_query(store, query_embedding, &query_options, &results), 0);
+    check_equal(json_array_size(results), 1);
+    check_equal(json_get_string(json_array_get(results, 0), "text"), document.text);
 
     json_free(results); results = NULL;
     json_free(query_embedding); query_embedding = NULL;

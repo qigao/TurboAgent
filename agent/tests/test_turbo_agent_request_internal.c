@@ -322,7 +322,7 @@ spec("turbo agent request internals") {
     turbo_agent_destroy(agent);
   }
 
-  it("should reuse tool outputs when previous response id is available") {
+  it("should replay tool calls with their outputs without relying on a stored response") {
     turbo_agent_config_t config = {0};
     turbo_agent_t *agent;
     json_value_t *state;
@@ -352,6 +352,8 @@ spec("turbo agent request internals") {
     check_not_null(model_event);
     json_object_set_string(model_event, "kind", "model");
     json_object_set_string(model_event, "response_id", "resp_123");
+    const char calls[] = "[{\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{}\"}]";
+    json_object_add(model_event, "tool_calls", json_parse(calls, strlen(calls)));
     json_array_add(events, model_event);
 
     tool_results_event = json_create_object();
@@ -370,11 +372,15 @@ spec("turbo agent request internals") {
 
     check_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
     request = parse_request_json_or_fail(request_json);
-    check_equal(json_get_string(request, "previous_response_id"), "resp_123");
+    check_null(json_object_get(request, "previous_response_id"));
     input = json_object_get(request, "input");
     check_not_null(input);
-    check_equal(json_array_size(input), 1);
-    check_equal(json_get_string(json_array_get(input, 0), "type"),
+    check_equal(json_array_size(input), 3);
+    check_equal(json_get_string(json_array_get(input, 0), "role"), "user");
+    check_equal(json_get_string(json_array_get(input, 1), "type"), "function_call");
+    check_equal(json_get_string(json_array_get(input, 1), "call_id"), "call_1");
+    check_equal(json_get_string(json_array_get(input, 2), "call_id"), "call_1");
+    check_equal(json_get_string(json_array_get(input, 2), "type"),
                  "function_call_output");
     check_true((json_object_get(request, "messages")) == (NULL));
 
@@ -384,7 +390,7 @@ spec("turbo agent request internals") {
     turbo_agent_destroy(agent);
   }
 
-  it("should fall back to canonical input when cached outputs are malformed") {
+  it("should reject malformed Responses tool history before sending a request") {
     turbo_agent_config_t config = {0};
     turbo_agent_t *agent;
     json_value_t *state;
@@ -392,8 +398,6 @@ spec("turbo agent request internals") {
     json_value_t *model_event;
     json_value_t *tool_results_event;
     char *request_json = NULL;
-    json_value_t *request = NULL;
-    const json_value_t *input;
 
     config.model = "gpt-5.4";
     config.transport_fn = dummy_transport;
@@ -420,21 +424,14 @@ spec("turbo agent request internals") {
     json_object_set_string(tool_results_event, "outputs", "bad");
     json_array_add(events, tool_results_event);
 
-    check_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
-    request = parse_request_json_or_fail(request_json);
-    check_true((json_object_get(request, "previous_response_id")) == (NULL));
-    input = json_object_get(request, "input");
-    check_not_null(input);
-    check_equal(json_array_size(input), 1);
-    check_equal(json_get_string(json_array_get(input, 0), "role"), "user");
-
-    json_free(request); request = NULL;
+    check_not_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
+    check_null(request_json);
     free(request_json);
     json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
 
-  it("should fall back to canonical input when cached outputs have no response id") {
+  it("should retain tool history when the provider returns no response id") {
     turbo_agent_config_t config = {0};
     turbo_agent_t *agent;
     json_value_t *state;
@@ -459,6 +456,11 @@ spec("turbo agent request internals") {
     events = json_object_get(state, "events");
     check_not_null(events);
 
+    const char model[] = "{\"kind\":\"model\",\"tool_calls\":[{\"call_id\":\"call_1\","
+        "\"name\":\"read\",\"arguments\":\"{}\"}]}";
+    json_value_t *model_event = json_parse(model, strlen(model));
+    check_not_null(model_event);
+    json_array_add(events, model_event);
     tool_results_event = json_create_object();
     outputs = json_create_array();
     output_item = json_create_object();
@@ -478,8 +480,10 @@ spec("turbo agent request internals") {
     check_true((json_object_get(request, "previous_response_id")) == (NULL));
     input = json_object_get(request, "input");
     check_not_null(input);
-    check_equal(json_array_size(input), 1);
+    check_equal(json_array_size(input), 3);
     check_equal(json_get_string(json_array_get(input, 0), "role"), "user");
+    check_equal(json_get_string(json_array_get(input, 1), "type"), "function_call");
+    check_equal(json_get_string(json_array_get(input, 2), "type"), "function_call_output");
 
     json_free(request); request = NULL;
     free(request_json);

@@ -5,16 +5,22 @@
 #include <stdlib.h>
 #endif
 
-static volatile sig_atomic_t interrupted;
+/* Signal delivery may run on another thread (notably on Windows). */
+static atomic_int interrupted;
 static void interrupt_handler(int signal_number) {
   (void)signal_number;
-  interrupted = 1;
+  atomic_store_explicit(&interrupted, 1, memory_order_relaxed);
 }
 
 static int cli_main(int argc, char **argv) {
   turbo_cli_options_t options;
   turbo_cli_parse_options(argc, argv, &options);
-  signal(SIGINT, interrupt_handler);
+  /* Some implementations advertise only sometimes-lock-free atomics. Verify
+   * this actual object before allowing signal-context access to it. */
+  if (!atomic_is_lock_free(&interrupted) || signal(SIGINT, interrupt_handler) == SIG_ERR) {
+    fputs("Cannot initialize lock-free signal cancellation.\n", stderr);
+    return 1;
+  }
   return turbo_cli_run(&options, stdin, stdout, stderr, NULL, &interrupted);
 }
 

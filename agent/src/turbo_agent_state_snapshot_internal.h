@@ -18,6 +18,9 @@ CXX_C_API json_value_t *turbo_agent_state_workflow_snapshot_impl(
 CXX_C_API json_value_t *
 turbo_agent_state_workflow_snapshot_json_value_impl(const json_value_t *state);
 CXX_C_API json_value_t *turbo_agent_substate_create(json_value_t *input, json_value_t *events);
+/* Copy the parent's instruction layers into a newly created substate. The
+ * parent remains authoritative; the child owns its snapshot through teardown. */
+CXX_C_API int turbo_agent_substate_copy_memory(json_value_t *substate, const json_value_t *parent);
 CXX_C_API int turbo_agent_append_last_substate_event(json_value_t *root_state,
                                                      const char *event_versions_key,
                                                      const json_value_t *substate);

@@ -5,6 +5,7 @@
 #include <cmeta_process.h>
 #include <cmeta_uuid.h>
 #include <tstr.h>
+#include <fmt.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,8 +26,8 @@ static int cli_model(const char *request, char **out, void *data) {
   model->model_overridden = strstr(request, "cli-model-override") != NULL;
   if (model->read_only) {
     if (!model->calls)
-      model->chronological = strstr(request, "fs.read") && strstr(request, "fs.search") &&
-                             !strstr(request, "fs.write") && !strstr(request, "shell.exec");
+      model->chronological = strstr(request, "fs_read") && strstr(request, "fs_search") &&
+                             !strstr(request, "fs_write") && !strstr(request, "shell_exec");
     else
       model->chronological = model->chronological && strstr(request, "needle_marker");
   } else if (model->calls == 5) {
@@ -64,6 +65,69 @@ static int cli_model(const char *request, char **out, void *data) {
   return *out ? 0 : -1;
 }
 
+spec("CLI discovery of executor-produced tool journals") {
+  static char *directory;
+  static tstr database;
+  static FILE *input, *output, *diagnostics;
+  static json_value_t *view;
+  static cmeta_fs_buf_t file;
+  before_each() {
+    directory = tt_make_temp_dir("cli-journal-discovery"); check_not_null(directory);
+    database = tstr_format("{}/session.db", directory); check_not_null(database);
+    input = tmpfile(); output = tmpfile(); diagnostics = tmpfile();
+    check_not_null(input); check_not_null(output); check_not_null(diagnostics);
+  }
+  after_each() {
+    json_free(view); view = NULL;
+    cmeta_fs_buf_free(&file); file = (cmeta_fs_buf_t){0};
+    if (input) fclose(input);
+    if (output) fclose(output);
+    if (diagnostics) fclose(diagnostics);
+    input = output = diagnostics = NULL;
+    tstr_free(database); database = NULL;
+    if (directory) tt_remove_tree(directory);
+    free(directory); directory = NULL;
+  }
+  it("discovers write edit read and shell evidence without another model or tool run") {
+    turbo_cli_options_t options = {directory, "initial_task", NULL, 0, database};
+    turbo_agent_config_t config = {0};
+    cli_model_t model = {0};
+    char buffer[32768], path[SALTS_FS_MAX_PATH];
+    size_t bytes, count = 0;
+    const json_value_t *nodes;
+    config.model = "test-model"; config.transport_fn = cli_model; config.transport_user_data = &model;
+    check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 0);
+    check_equal(model.calls, 5u);
+    fclose(output); output = tmpfile(); check_not_null(output);
+    options.prompt = NULL; options.diagram = "json"; options.diagram_journals = "all";
+    check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 0);
+    check_equal(model.calls, 5u);
+    rewind(output); bytes = fread(buffer, 1, sizeof(buffer) - 1, output); buffer[bytes] = 0;
+    check_less(bytes, sizeof(buffer) - 1);
+    view = json_parse(buffer, bytes); check_not_null(view);
+    check_equal(json_get_int(view, "journal_count", -1), 4);
+    check_equal(json_get_string(view, "session_phase"), "ready");
+    check_equal(json_get_string(view, "journal_scope"), "published_run_records");
+    nodes = json_object_get(view, "nodes");
+    for (size_t i = 0; i < json_array_size(nodes); ++i) {
+      const json_value_t *node = json_array_get(nodes, i);
+      if (strcmp(json_get_string(node, "collection"), "agent_tool_journal")) continue;
+      ++count;
+      check_equal(json_get_string(node, "phase"), "committed");
+      check_equal(json_get_int(node, "status", -1), 0);
+      check_equal(json_get_string(node, "freshness"), "current_record");
+      check_null(json_object_get(node, "arguments")); check_null(json_object_get(node, "output"));
+      check_null(json_object_get(node, "detail"));
+    }
+    check_equal(count, 4u);
+    check_contains(buffer, "write_call"); check_contains(buffer, "edit_call");
+    check_contains(buffer, "read_call"); check_contains(buffer, "exec_call");
+    check_equal(cmeta_fs_path_join(path, sizeof(path), directory, "note.txt"), 0);
+    check_equal(cmeta_fs_read_file(path, &file), 0);
+    check_equal(file.len, 4u); check_equal(memcmp(file.base, "beta", 4), 0);
+  }
+}
+
 static tstr cli_workspace(void) {
   char temp[SALTS_FS_MAX_PATH], path[SALTS_FS_MAX_PATH], uuid[SALTS_UUID_STRING_SIZE];
   cmeta_uuid_t id;
@@ -85,7 +149,8 @@ spec("coding agent CLI") {
       {"--help", "usage:"}, {"-h", "usage:"},
       {"--prompt", "requires a value"}, {"-p", "requires a value"},
       {"--workspace", "requires a value"}, {"-C", "requires a value"},
-      {"--model", "requires a value"}, {"--unknown", "unsupported option"},
+      {"--model", "requires a value"}, {"--workflow", "requires a value"}, {"--unknown", "unsupported option"},
+      {"--session-db", "requires a value"}, {"--resume=true", "cannot take a value"},
       {"unexpected", "unexpected positional argument"},
       {"--read-only=true", "cannot take a value"}
     };
@@ -118,15 +183,58 @@ spec("coding agent CLI") {
   it("should parse defaults and long equals options through CmdParser") {
     char *defaults[] = {"turboagent", NULL};
     char *arguments[] = {"turboagent", "--workspace=space directory", "--prompt=检查 tests",
-                         "--model=cli-model", "--read-only", NULL};
+                         "--model=cli-model", "--read-only", "--session-db=session.db", "--resume", NULL};
     turbo_cli_options_t options;
     turbo_cli_parse_options(1, defaults, &options);
     check_equal(options.workspace, "."); check_null(options.prompt);
     check_null(options.model); check_false(options.read_only);
-    turbo_cli_parse_options(5, arguments, &options);
+    check_null(options.session_db); check_false(options.resume);
+    check_null(options.diagram);
+    check_null(options.diagram_focus); check_null(options.diagram_direction); check_null(options.diagram_depth);
+    check_null(options.diagram_journals);
+    check_false(options.diagram_origins);
+    check_null(options.diagram_to);
+    check_false(options.diagram_plan_steps);
+    check_null(options.workflow);
+    turbo_cli_parse_options(7, arguments, &options);
+    check_equal(options.session_db, "session.db"); check_true(options.resume);
     check_equal(options.workspace, "space directory");
     check_equal(options.prompt, "检查 tests");
     check_equal(options.model, "cli-model"); check_true(options.read_only);
+    {
+      char *workflow_args[] = {"turboagent", "--mode=general", "--workflow=engineering", NULL};
+      turbo_cli_parse_options(3, workflow_args, &options);
+      check_equal(options.mode, "general"); check_equal(options.workflow, "engineering");
+    }
+    {
+      char *diagram_args[] = {"turboagent", "--session-db=session.db", "--diagram=json", NULL};
+      turbo_cli_parse_options(3, diagram_args, &options);
+      check_equal(options.diagram, "json"); check_equal(options.session_db, "session.db");
+    }
+    {
+      char *path_args[] = {"turboagent", "--diagram=mermaid", "--diagram-focus=run:r",
+          "--diagram-to=journal:j", "--diagram-depth=4", "--diagram-plan-steps", NULL};
+      turbo_cli_parse_options(6, path_args, &options);
+      check_true(options.diagram_plan_steps);
+      check_equal(options.diagram_focus, "run:r"); check_equal(options.diagram_to, "journal:j");
+      check_equal(options.diagram_depth, "4");
+    }
+    {
+      char *focus_args[] = {"turboagent", "--session-db=session.db", "--diagram=mermaid",
+          "--diagram-focus=checkpoint:c1", "--diagram-direction=incoming", "--diagram-depth=2",
+          "--diagram-journals=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", NULL};
+      turbo_cli_parse_options(7, focus_args, &options);
+      check_equal(options.diagram_focus, "checkpoint:c1");
+      check_equal(options.diagram_direction, "incoming"); check_equal(options.diagram_depth, "2");
+      check_equal(options.diagram_journals, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    }
+    {
+      char *discover_args[] = {"turboagent", "--session-db=session.db", "--diagram=json", "--diagram-journals", "all", "--diagram-origins", NULL};
+      turbo_cli_parse_options(6, discover_args, &options);
+      check_true(options.diagram_origins);
+      check_equal(options.diagram_journals, "all");
+      check_equal(options.diagram, "json"); check_equal(options.session_db, "session.db");
+    }
   }
 
   it("should run generated tools and preserve chronological conversation across prompts") {
@@ -138,7 +246,7 @@ spec("coding agent CLI") {
     FILE *input = tmpfile(), *output = tmpfile(), *diagnostics = tmpfile();
     char path[SALTS_FS_MAX_PATH];
     cmeta_fs_buf_t file = {0};
-    volatile sig_atomic_t interrupted = 0;
+    atomic_int interrupted = 0;
     check_not_null(root); check_not_null(input); check_not_null(output); check_not_null(diagnostics);
     config.model = "test-model"; config.transport_fn = cli_model; config.transport_user_data = &model;
     fputs("initial_task\nfollowup_task\n/quit\n", input); rewind(input);

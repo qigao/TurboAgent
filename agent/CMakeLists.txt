@@ -15,7 +15,7 @@ target_link_libraries(turbo_agent
          Salts::JsonParser Salts::UriParser Salts::DotEnvParser
          CHttp::Client CHttp::Server Salts::Core
          unofficial::sqlite3::sqlite3
-  PRIVATE Salts::CYamlJsonAdapter)
+  PRIVATE Salts::CYamlJsonAdapter Salts::CMeta)
 cmake_config_target(turbo_agent FOLDER "Agent" EXPORT_NAME Agent
                     ALIAS TurboAgent::Agent)
 cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/

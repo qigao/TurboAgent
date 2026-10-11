@@ -760,9 +760,106 @@ json_value_t *turbo_prompt_messages_to_openai_chat_json(
   return json_messages;
 }
 
+static int turbo_prompt_responses_text(json_value_t *items, const char *role,
+                                        const char *text) {
+  json_value_t *item = json_create_object();
+  if (!item || !text ||
+      turbo_prompt_schema_object_put(item, "role", json_create_string(role)) != 0 ||
+      turbo_prompt_schema_object_put(item, "content", json_create_string(text)) != 0) {
+    json_free(item);
+    return -1;
+  }
+  return turbo_prompt_schema_array_append(items, item);
+}
+
+static int turbo_prompt_responses_call(json_value_t *items, const char *id,
+    const char *name, const json_value_t *arguments) {
+  json_value_t *item = NULL;
+  char *serialized = NULL;
+  const char *text;
+  int rc = -1;
+  if (!id || !id[0] || !name || !name[0] ||
+      (json_type(arguments) != JSON_STRING && json_type(arguments) != JSON_OBJECT)) return -1;
+  if (json_type(arguments) == JSON_OBJECT) serialized = json_serialize(arguments, NULL);
+  text = json_type(arguments) == JSON_STRING ? json_string(arguments) : serialized;
+  item = json_create_object();
+  if (!item || !text ||
+      turbo_prompt_schema_object_put(item, "type", json_create_string("function_call")) != 0 ||
+      turbo_prompt_schema_object_put(item, "call_id", json_create_string(id)) != 0 ||
+      turbo_prompt_schema_object_put(item, "name", json_create_string(name)) != 0 ||
+      turbo_prompt_schema_object_put(item, "arguments", json_create_string(text)) != 0) goto done;
+  rc = turbo_prompt_schema_array_append(items, item);
+  item = NULL;
+done:
+  json_free(item);
+  json_serialize_free(serialized);
+  return rc;
+}
+
+static int turbo_prompt_responses_result(json_value_t *items, const char *id,
+                                          const char *output) {
+  json_value_t *item = json_create_object();
+  if (!item || !id || !id[0] || !output ||
+      turbo_prompt_schema_object_put(item, "type", json_create_string("function_call_output")) != 0 ||
+      turbo_prompt_schema_object_put(item, "call_id", json_create_string(id)) != 0 ||
+      turbo_prompt_schema_object_put(item, "output", json_create_string(output)) != 0) {
+    json_free(item);
+    return -1;
+  }
+  return turbo_prompt_schema_array_append(items, item);
+}
+
 json_value_t *turbo_prompt_messages_to_openai_responses_json(
     const json_value_t *messages) {
-  return turbo_prompt_messages_to_openai_chat_json(messages);
+  json_value_t *items;
+  if (json_type(messages) != JSON_ARRAY) return NULL;
+  items = json_create_array();
+  if (!items) return NULL;
+  for (size_t i = 0; i < json_array_size(messages); ++i) {
+    const json_value_t *message = json_array_get(messages, i);
+    if (turbo_prompt_message_validate_json_value(message) != TURBO_PROMPT_OK) goto fail;
+    const char *role = json_get_string(message, "role");
+    const json_value_t *content = json_object_get(message, "content");
+    const json_value_t *calls = json_object_get(message, "tool_calls");
+    if (!strcmp(role, "tool")) {
+      if (calls || turbo_prompt_responses_result(items,
+          json_get_string(message, "tool_call_id"), json_string(content)) != 0) goto fail;
+      continue;
+    }
+    if (strcmp(role, "user") && strcmp(role, "assistant") &&
+        strcmp(role, "system") && strcmp(role, "developer")) goto fail;
+    if (calls && strcmp(role, "assistant")) goto fail;
+    if (json_type(content) == JSON_STRING) {
+      /* Assistant tool-only turns have no text message in Responses. */
+      if ((!calls || json_string_len(content)) &&
+          turbo_prompt_responses_text(items, role, json_string(content)) != 0) goto fail;
+    } else if (json_type(content) == JSON_ARRAY) {
+      for (size_t j = 0; j < json_array_size(content); ++j) {
+        const json_value_t *part = json_array_get(content, j);
+        const char *type = json_get_string(part, "type");
+        if (!strcmp(type, "text")) {
+          if (turbo_prompt_responses_text(items, role, json_get_string(part, "text")) != 0) goto fail;
+        } else if (!strcmp(type, "tool_use")) {
+          if (strcmp(role, "assistant") || turbo_prompt_responses_call(items,
+              json_get_string(part, "id"), json_get_string(part, "name"),
+              json_object_get(part, "input")) != 0) goto fail;
+        } else if (turbo_prompt_responses_result(items, json_get_string(part, "tool_use_id"),
+            json_get_string(part, "content")) != 0) goto fail;
+      }
+    }
+    for (size_t j = 0; j < json_array_size(calls); ++j) {
+      const json_value_t *call = json_array_get(calls, j);
+      const json_value_t *function = json_object_get(call, "function");
+      const char *type = json_get_string(call, "type");
+      if (!type || strcmp(type, "function") || turbo_prompt_responses_call(items,
+          json_get_string(call, "id"), json_get_string(function, "name"),
+          json_object_get(function, "arguments")) != 0) goto fail;
+    }
+  }
+  return items;
+fail:
+  json_free(items);
+  return NULL;
 }
 
 turbo_prompt_status_t

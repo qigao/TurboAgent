@@ -77,6 +77,8 @@ CXX_C_API const char *turbo_agent_state_current_version_string_field_impl(
 CXX_C_API int turbo_agent_state_current_version_bool_field_impl(
     const json_value_t *state, const char *version_key, const char *field_key,
     int default_value);
+/* Transfer the version only on success; on failure the caller still owns it.
+ * Creating an empty destination array may precede a failed append. */
 CXX_C_API int turbo_agent_state_append_array_version(json_value_t *state, const char *key,
                                                      json_value_t *array);
 CXX_C_API int turbo_agent_state_append_object_version(json_value_t *state, const char *key,

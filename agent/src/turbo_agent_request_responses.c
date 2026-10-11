@@ -14,7 +14,6 @@ int turbo_agent_build_responses_turn_request(const turbo_agent_t *agent,
   json_value_t *input = NULL;
   json_value_t *canonical_messages = NULL;
   json_value_t *tools = NULL;
-  const json_value_t *input_source;
   char *instructions = NULL;
   int rc = -1;
   if (!agent || !state || !out_request_json) return -1;
@@ -22,16 +21,11 @@ int turbo_agent_build_responses_turn_request(const turbo_agent_t *agent,
   turbo_agent_request_config(agent, &config);
   config.format = TURBO_PROVIDER_RESPONSES;
 
-  if (agent->context_projection_active) {
-    canonical_messages = turbo_agent_request_build_canonical_messages_with_options(agent, state, 0);
-    if (!canonical_messages) goto done;
-    input = turbo_provider_messages_to_wire_json(TURBO_PROVIDER_RESPONSES, canonical_messages, NULL);
-  } else {
-    input_source = turbo_agent_request_responses_input_source(state, &config.previous_response_id);
-    if (!input_source) goto done;
-    input = config.previous_response_id ? json_clone(input_source)
-                                       : turbo_agent_request_build_responses_input_messages(input_source);
-  }
+  /* The local event log owns conversation history. Rebuild calls and results
+   * together: a response id alone does not promise server-side storage. */
+  canonical_messages = turbo_agent_request_build_canonical_messages_with_options(agent, state, 0);
+  if (!canonical_messages) goto done;
+  input = turbo_provider_messages_to_wire_json(TURBO_PROVIDER_RESPONSES, canonical_messages, NULL);
   if (!input) goto done;
   instructions = turbo_agent_build_effective_instructions(agent, state);
   if ((agent->instructions || turbo_agent_state_memory_layer_count(state) > 0) && !instructions)

@@ -4,6 +4,7 @@
 #include <cmeta_uuid.h>
 #include <fmt.h>
 #include <salts/thread.h>
+#include <salts/error_codes.h>
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -114,6 +115,36 @@ done:
   json_free(record);
 }
 
+spec("File store enumeration failure") {
+  static char *directory;
+  static tstr path;
+  static turbo_agent_runtime_store_t store;
+  static char *text;
+  after_each() {
+    if (store.user_data_free) store.user_data_free(store.user_data);
+    store = (turbo_agent_runtime_store_t){0};
+    free(text); text = NULL;
+    tstr_free(path); path = NULL;
+    if (directory) tt_remove_tree(directory);
+    free(directory); directory = NULL;
+  }
+  it("distinguishes an empty collection from a non-directory collection") {
+    cmeta_fs_buf_t bytes = {"{}", 2};
+    directory = tt_make_temp_dir("turbo-file-errors");
+    check_not_null(directory);
+    store = turbo_agent_runtime_store_file_create(directory);
+    check_not_null(store.list);
+    check_equal(store.list(store.user_data, "missing", NULL, NULL, &text), 0);
+    check_equal(text, "[]");
+    free(text); text = NULL;
+    path = tstr_format("{}/items", directory);
+    check_not_null(path);
+    check_equal(cmeta_fs_write_file(path, &bytes), 0);
+    check_equal(store.list(store.user_data, "items", NULL, NULL, &text), -1);
+    check_null(text);
+  }
+}
+
 spec("Runtime record store without Agent") {
   static turbo_agent_runtime_t *runtime;
   static json_value_t *record;
@@ -165,6 +196,22 @@ spec("Runtime record store without Agent") {
       cmeta_fs_rmdir(root);
       tstr_free(root);
     }
+  }
+
+  it("preserves typed read errors while the legacy getter retains its contract") {
+    turbo_agent_runtime_store_t backend = store_test_callbacks(&probe);
+    runtime = turbo_agent_runtime_create(&backend);
+    check_not_null(runtime);
+    probe.get_result = SALTS_ENOENT;
+    check_equal(turbo_agent_runtime_store_get_json_status(runtime, "items", "one", &output), SALTS_ENOENT);
+    check_null(output);
+    check_equal(turbo_agent_runtime_store_get_json(runtime, "items", "one", &output), -1);
+    probe.get_result = SALTS_EIO;
+    check_equal(turbo_agent_runtime_store_get_json_status(runtime, "items", "one", &output), SALTS_EIO);
+    check_null(output);
+    probe.get_result = 0; probe.get_text = "{";
+    check_equal(turbo_agent_runtime_store_get_json_status(runtime, "items", "one", &output), SALTS_EPROTO);
+    check_null(output);
   }
 
   it("keeps independent values and isolates collections, replacements, and filters") {

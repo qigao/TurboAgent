@@ -1,6 +1,7 @@
 #include "turbo_agent_graph.h"
 #include <json_parser.h>
 #include "turbo_agent_workflow_graph_internal.h"
+#include "turbo_agent_plan_step_origin_internal.h"
 #define TURBO_AGENT_INTERNAL_STATE_IMPL_REMAP 1
 #include "turbo_agent_state_flow_domain_internal.h"
 #include "turbo_agent_state_snapshot_internal.h"
@@ -9,6 +10,7 @@
 #include "turbo_agent_util_internal.h"
 
 #include "turbo_prompt.h"
+#include <fmt.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,44 +85,67 @@ static json_value_t *turbo_agent_planner_loop_build_step_input(const json_value_
 }
 
 int turbo_agent_plan_step_prepare_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
-  json_value_t *step_input;
-  json_value_t *step_events;
-  json_value_t *step_history;
-  json_value_t *executor_state;
+  json_value_t *step_input = NULL, *step_events = NULL, *step_history = NULL;
+  json_value_t *executor_state = NULL, *origin = NULL;
+  const json_value_t *plans, *progress_versions, *progress, *steps;
+  size_t plan_version, step_index;
+  int rc = -1;
 
   (void)user_data;
   if (!ctx || !ctx->state || turbo_agent_state_plan_complete(ctx->state)) {
     return -1;
   }
 
+  plans = json_object_get(ctx->state, "plan_versions");
+  progress_versions = json_object_get(ctx->state, "plan_progress_versions");
+  if (json_type(plans) != JSON_ARRAY || !json_array_size(plans) ||
+      json_type(progress_versions) != JSON_ARRAY ||
+      json_array_size(progress_versions) != json_array_size(plans)) return -1;
+  plan_version = json_array_size(plans) - 1;
+  progress = json_array_get(progress_versions, plan_version);
+  steps = json_object_get(json_array_get(plans, plan_version), "steps");
+  if (json_type(progress) != JSON_ARRAY || json_type(steps) != JSON_ARRAY) return -1;
+  step_index = json_array_size(progress);
+  if (step_index >= json_array_size(steps) || plan_version > INT64_MAX || step_index > INT64_MAX) return -1;
+  origin = json_create_object();
+  if (!origin || turbo_runtime_json_object_set_int64(origin, "schema_version",
+      TURBO_AGENT_PLAN_STEP_ORIGIN_VERSION) != 0) goto done;
+#define WRITE_ORIGIN_OFFSET(key) \
+  if (turbo_runtime_json_object_set_int64(origin, #key, (int64_t)key) != 0) goto done;
+  Replay(TURBO_AGENT_PLAN_STEP_ORIGIN_FIELDS, WRITE_ORIGIN_OFFSET)
+#undef WRITE_ORIGIN_OFFSET
+
   step_input = turbo_agent_planner_loop_build_step_input(ctx->state);
   step_events = json_create_array();
   step_history = json_create_array();
   if (!step_input || !step_events || !step_history) {
-    json_free(step_input); step_input = NULL;
-    json_free(step_events); step_events = NULL;
-    json_free(step_history); step_history = NULL;
-    return -1;
+    goto done;
   }
+
+  executor_state = json_create_object();
+  if (!executor_state || turbo_runtime_json_object_set(executor_state, "input", step_input) != 0) goto done;
+  step_input = NULL;
+  if (turbo_runtime_json_object_set(executor_state, "events", step_events) != 0) goto done;
+  step_events = NULL;
+  if (turbo_runtime_json_object_set(executor_state, TURBO_AGENT_PLAN_STEP_ORIGIN_KEY, origin) != 0) goto done;
+  origin = NULL;
+
+  if (turbo_agent_substate_copy_memory(executor_state, ctx->state) != 0) goto done;
 
   if (turbo_agent_state_append_array_version(ctx->state, "executor_event_versions", step_history) !=
       0) {
-    json_free(step_input); step_input = NULL;
-    json_free(step_events); step_events = NULL;
-    json_free(step_history); step_history = NULL;
-    return -1;
+    goto done;
   }
-
-  executor_state = turbo_agent_substate_create(step_input, step_events);
-  if (!executor_state ||
-      turbo_agent_state_append_object_version(ctx->state, "executor_state_versions",
-                                              executor_state) != 0) {
-    json_free(step_input); step_input = NULL;
-    json_free(step_events); step_events = NULL;
-    return -1;
+  step_history = NULL;
+  if (turbo_agent_state_append_object_version(ctx->state, "executor_state_versions", executor_state) != 0) {
+    goto done;
   }
-
-  return 0;
+  executor_state = NULL;
+  rc = 0;
+done:
+  json_free(step_input); json_free(step_events); json_free(step_history);
+  json_free(executor_state); json_free(origin);
+  return rc;
 }
 
 int turbo_agent_executor_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
@@ -154,13 +179,20 @@ int turbo_agent_executor_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data
 
 static int turbo_agent_nested_tool_node(turbo_graph_exec_ctx_t *ctx, turbo_agent_t *agent,
                                         json_value_t *nested_state,
-                                        const char *event_versions_key) {
+                                        const char *event_versions_key,
+                                        const char *state_versions_key, const char *journal_domain) {
   turbo_graph_exec_ctx_t temp_ctx = {0};
+  const json_value_t *versions;
+  tstr journal_scope;
   int rc;
 
-  if (!ctx || !ctx->state || !agent || !nested_state || !event_versions_key) {
+  if (!ctx || !ctx->state || !agent || !nested_state || !event_versions_key ||
+      !state_versions_key || !journal_domain) {
     return -1;
   }
+  versions = json_object_get(ctx->state, state_versions_key);
+  if (json_type(versions) != JSON_ARRAY || !json_array_size(versions) ||
+      json_array_get(versions, json_array_size(versions) - 1) != nested_state) return -1;
 
   temp_ctx.graph = ctx->graph;
   temp_ctx.state = nested_state;
@@ -179,7 +211,10 @@ static int turbo_agent_nested_tool_node(turbo_graph_exec_ctx_t *ctx, turbo_agent
     }
   }
 
-  rc = turbo_agent_tool_node(&temp_ctx, agent);
+  journal_scope = tstr_format("{}:{}", journal_domain, json_array_size(versions) - 1);
+  if (!journal_scope) return -1;
+  rc = turbo_agent_tool_node_scoped(&temp_ctx, agent, journal_scope);
+  tstr_free(journal_scope);
   if (temp_ctx.stop) {
     const char *note = turbo_agent_state_review_note(nested_state);
     if (turbo_agent_state_review_required(nested_state) &&
@@ -219,7 +254,8 @@ int turbo_agent_executor_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data)
     return 0;
   }
 
-  return turbo_agent_nested_tool_node(ctx, agent, executor_state, "executor_event_versions");
+  return turbo_agent_nested_tool_node(ctx, agent, executor_state, "executor_event_versions",
+      "executor_state_versions", "executor");
 }
 
 int turbo_agent_planner_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
@@ -233,10 +269,13 @@ int turbo_agent_planner_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) 
   planner_state = turbo_agent_state_ensure_versioned_substate(
       ctx->state, "planner_state_versions", "planner_input_versions", "planner_event_versions");
   if (!planner_state) {
-    return turbo_agent_tool_node(ctx, agent);
+    /* Initial planning uses the root event stream before a replanner substate
+     * exists. Give that producer its own identity, separate from root tool loops. */
+    return turbo_agent_tool_node_scoped(ctx, agent, "planner:root");
   }
 
-  return turbo_agent_nested_tool_node(ctx, agent, planner_state, "planner_event_versions");
+  return turbo_agent_nested_tool_node(ctx, agent, planner_state, "planner_event_versions",
+      "planner_state_versions", "planner");
 }
 
 int turbo_agent_plan_advance_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {

@@ -1,6 +1,7 @@
 # TurboAgent kernel
 
-For an executable coding agent, see the [TurboAgent CLI](../cli/README.md).
+For an executable coding or general assistant with persistent sessions and FTS5
+or vector retrieval, see the [TurboAgent CLI](../cli/README.md).
 
 `TurboAgent::Agent` is the reusable Agent kernel for graph-driven LLM workflows.
 It composes Runtime, Provider and RuntimeTools with Agent policy and state for
@@ -816,6 +817,140 @@ filters. With
 `TURBO_AGENT_SESSION_WORKFLOW_KNOWLEDGE_ENGINEERING`, the session preset adds a
 knowledge-context node before the engineering planner, so retrieved SQLite/FTS5
 context is part of the same graph run and checkpoint history.
+
+Hosts registering `turbo_agent_knowledge_store_add_tools` or
+`turbo_agent_knowledge_store_add_action_tools` also expose
+`agent.knowledge.diagram`. First select document IDs with
+`agent.knowledge.search` or `agent.knowledge.list_documents`, then request:
+
+```json
+{
+  "document_ids": ["readme", "src/worker.c"],
+  "format": "mermaid",
+  "focus_id": "document:readme",
+  "direction": "outgoing",
+  "max_hops": 1
+}
+```
+
+Replace those IDs with exact IDs from your knowledge index. `format` defaults
+to `json`, returning `{ "ok": true, "diagram": ... }`; `mermaid` returns the
+flowchart body in `mermaid`. Omit focus/direction/hops to show all selected
+documents and their chunks. Direction defaults to `both` and hops to 1 when a
+focus is provided; direction/hops without a focus are errors. The graph shows
+stored `contains` relationships and source references, not inferred code calls
+or cross-document dependencies. It includes no document text, arbitrary source
+metadata or automatic links that open local files.
+
+Set `"include_uri_mentions": true` to add literal, case-sensitive mentions of
+the selected documents' stored URIs. For example, select a README and code file,
+then use `"focus_id": "document:src/worker.c"` with `"direction": "incoming"`
+to find selected documents mentioning that code file's URI. This requires the
+URI itself to occur between whitespace, quotes/brackets or similar delimiters;
+relative-path resolution, Markdown parsing, URI decoding and code-call analysis
+are not included. Mentions in code and examples count as literal evidence too.
+
+Each `mentions_uri` edge preserves source/target content hashes, source byte
+offset/length, and starting/ending chunk locations (end offset exclusive).
+These refer to indexed bytes; the text itself is not returned. Opt-in reads
+require contiguous chunks, valid UTF-8 and exact stored byte size, bounded to
+256 KiB per document, 1 MiB across the selection, and 512 total edges including
+`contains`. Overflow or inconsistent content fails the whole request before
+focus filtering. Omitted/false retains metadata-only reads. The SDK entry is
+`turbo_agent_knowledge_store_diagram_ex(store, ids, count,
+TURBO_KNOWLEDGE_DIAGRAM_URI_MENTIONS, &view)`; zero flags match the default API.
+
+The SDK equivalent is `turbo_agent_knowledge_store_diagram(store, ids, count,
+&view)`, followed by `turbo_diagram_neighborhood` and/or `turbo_diagram_mermaid`.
+Check each return value; free views with `json_free` and Mermaid text with
+`tstr_free`. Serialize calls and destruction on one KnowledgeStore. The API
+reads a single SQLite snapshot across selected records, copying output so it
+remains valid after store close. It rejects an existing transaction instead of
+committing or rolling back a caller's work.
+
+Limits are 32 unique selected documents, 1024 UTF-8 bytes per selected text field
+and 128 total document/chunk nodes. Unknown IDs, malformed data and bounds fail
+without partial output; an oversized document must be handled outside this
+whole-document view. `freshness: "indexed_snapshot"` and stored `content_hash`
+identify indexed revisions; they do not verify current filesystem contents.
+Reindexing may reuse chunk IDs, so retain the document ID and hash with each
+chunk reference. Both knowledge stores and Runtime session stores keep their
+existing schemas; CLI `--session-db --diagram` still exports execution lineage.
+
+Hosts can also combine a published run's lineage with selected tool-journal
+records through `turbo_agent_thread_tool_diagram` from
+[`turbo_agent_evidence_diagram.h`](include/turbo_agent_evidence_diagram.h):
+
+```c
+const char *journal_ids[] = {selected_journal_id};
+json_value_t *view = NULL;
+int rc = turbo_agent_thread_tool_diagram(runtime, thread_id, journal_ids, 1, &view);
+if (rc == SALTS_OK) {
+    tstr mermaid = NULL;
+    rc = turbo_diagram_mermaid(view, &mermaid);
+    if (rc == SALTS_OK) { /* consume mermaid */ }
+    tstr_free(mermaid);
+}
+json_free(view);
+```
+
+Select 1..32 journal record keys from the host's existing RuntimeStore history;
+the adapter uses point reads and emits only identity, hash, phase, status, policy
+and timestamp metadata. Keep Runtime and all store writers quiescent during
+the call. `same_run` edges establish matching thread/run IDs, not membership in
+the published checkpoint or a compiled plan step. Journals are explicitly marked
+as current observations; a `started` record has unknown side effects, and a
+`committed` record can contain a failed status. No tools execute, no records
+change, and output/detail payloads are excluded. Combined graph bounds and
+neighborhood filtering remain the same. The CLI can opt into this projection
+with `--diagram-journals ID1,ID2`, or discover up to 32 matching records for the
+published run using `--diagram-journals all`; its default lineage export remains unchanged.
+See [CLI diagram export](../cli/README.md#diagram-export) for selection syntax.
+
+`turbo_agent_thread_tool_diagram_ex(..., TURBO_AGENT_DIAGRAM_CALL_ORIGINS, &view)`
+optionally links scoped journals to published model events after checking the
+call ID and tool name. JSON includes exact source pointers and per-journal
+`origin_status` (`matched`, `not_in_snapshot`, `unresolved_identity`). Shared
+request nodes are deduplicated; legacy/unscoped keys never infer an owner.
+Malformed identities, conflicting names and duplicate matching calls fail the
+entire export. Selected events admit at most 64 calls under the existing graph
+bounds. This adds no stored schema, execution authority, argument comparison or
+compiled plan-step claim. The CLI exposes it through `--diagram-origins`.
+
+New engineering executor substates also retain explicit `plan_step_origin`
+metadata captured when preparing a workflow step: the persisted plan-version
+and step offsets. It survives checkpoint replay and distinguishes replans.
+Pass `TURBO_AGENT_DIAGRAM_CALL_ORIGINS | TURBO_AGENT_DIAGRAM_WORKFLOW_STEPS` to
+export `workflow-step:<version>:<index>` nodes and `prepared_for_step` edges to
+verified model requests. CLI `--diagram-plan-steps` enables both projections.
+Old substates without bindings remain `unrecorded`; planner requests are
+`not_applicable`. Present invalid bindings fail export. No step text is exported,
+old data is not backfilled, and this relation is not an AgentCompiler DAG step,
+approval or success claim. See [workflow provenance](docs/module-separation.md#prepared-workflow-step-provenance).
+
+For a precise connection within any supplied plan/execution/knowledge view,
+`turbo_diagram_shortest_path(view, from_id, to_id, direction, max_hops, &path)`
+returns one minimum-hop path while preserving source evidence and edge
+directions. It shares neighborhood budgets, independent output ownership and
+whole-input validation. No path within the supplied view/hop limit returns
+`SALTS_ENOENT`; it does not establish absence in the underlying sources.
+The CLI selects this query with `--diagram-focus ID --diagram-to ID` and retains
+the existing direction/depth defaults. See [CLI diagram export](../cli/README.md#diagram-export).
+
+Nested planner/executor journals now distinguish the owning substate version in
+their opaque `turn_key`: `planner:<version>:<event>` or
+`executor:<version>:<event>`, with `planner:root:<event>` for initial planning.
+The version is a persisted substate-array index, not a compiled DAG step ID.
+This prevents two steps that reuse a model call ID from replaying each other's
+results. Ordinary top-level tool-loop identities and journal JSON schema remain
+unchanged. Checkpoint replay regenerates the same scoped identities.
+
+If a scoped record is absent but its old unscoped key exists, automatic nested
+continuation fails rather than guessing its owner or repeating side effects.
+No old records are migrated or rewritten. Existing scoped records retain normal
+replay behavior, including unknown effects for `started`. Do not resume newly
+scoped in-progress workflows using an older binary: it does not understand these
+keys. See [identity and compatibility](docs/module-separation.md#nested-tool-journal-identity-correction).
 
 For hosts that already own a retrieval layer, the same preset surface can borrow
 one generic `turbo_retriever_t` via `retriever`, `retriever_query`,

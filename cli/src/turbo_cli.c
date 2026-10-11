@@ -1,4 +1,7 @@
 #include "turbo_cli.h"
+#include "turbo_cli_storage.h"
+#include "turbo_cli_knowledge.h"
+#include "turbo_cli_vector.h"
 #include "turbo_agent_harness.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_workspace.h"
@@ -20,7 +23,7 @@
 #endif
 
 enum { CLI_MAX_PROMPT_BYTES = 64 * 1024, CLI_MAX_HISTORY_BYTES = 1024 * 1024,
-       CLI_MAX_TURNS = 64, CLI_MAX_STEPS = 128, CLI_WAIT_MS = 50 };
+       CLI_MAX_STEPS = 128, CLI_MAX_REPLANS = 3, CLI_WAIT_MS = 50 };
 #define CLI_EXECUTION_TIMEOUT_MS UINT64_C(600000)
 
 /* State is extensible and may contain arbitrary provider text. Only fixed phase
@@ -97,9 +100,10 @@ static void cli_report_failure(FILE *diagnostics, const json_value_t *state,
   tlog_destroy(logger);
 }
 
-int turbo_cli_complete_execution(turbo_agent_harness_execution_t *execution,
+static int cli_complete_execution(turbo_agent_harness_execution_t *execution,
                                  int wait_status, int interrupted, FILE *output,
-                                 FILE *diagnostics, json_value_t **out_state) {
+                                 FILE *diagnostics, json_value_t **out_state,
+                                 turbo_cli_storage_t *storage, turbo_agent_session_t *session) {
   turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_FAILED;
   json_value_t *summary = NULL, *state = NULL;
   const char *answer;
@@ -112,10 +116,12 @@ int turbo_cli_complete_execution(turbo_agent_harness_execution_t *execution,
   take_rc = turbo_agent_harness_execution_take_result(execution, &summary, &state);
   json_free(summary);
   /* Runtime return 0 also describes persisted cancellation/timeout results.
-   * Retained model text alone does not prove the turn completed. */
+   * A stopped engineering graph can report completed after exhausting replans;
+   * publishing its failure text must not commit an unfinished CLI turn. */
   if (wait_status != SALTS_OK || status_rc != SALTS_OK || result_rc != SALTS_OK ||
       take_rc != SALTS_OK || run_rc != 0 || !state || interrupted ||
-      status != TURBO_AGENT_EXECUTION_COMPLETED) {
+      status != TURBO_AGENT_EXECUTION_COMPLETED ||
+      (turbo_agent_state_plan(state) && !turbo_agent_state_plan_complete(state))) {
     fputs("Agent run failed or was interrupted.\n", diagnostics);
     cli_report_failure(diagnostics, state, run_rc, status, interrupted);
     json_free(state);
@@ -128,11 +134,23 @@ int turbo_cli_complete_execution(turbo_agent_harness_execution_t *execution,
     fputs("Agent ended without a text answer.\n", diagnostics);
     return 1;
   }
+  if (storage && turbo_cli_storage_complete(storage, session) != SALTS_OK) {
+    json_free(state);
+    fputs("Cannot commit completed session; its unfinished marker is retained.\n", diagnostics);
+    return 1;
+  }
   fputs(answer, output);
   fputc('\n', output);
   fflush(output);
   *out_state = state;
   return 0;
+}
+
+int turbo_cli_complete_execution(turbo_agent_harness_execution_t *execution,
+                                 int wait_status, int interrupted, FILE *output,
+                                 FILE *diagnostics, json_value_t **out_state) {
+  return cli_complete_execution(execution, wait_status, interrupted, output, diagnostics,
+                                out_state, NULL, NULL);
 }
 
 /* Host-path conversion belongs to this platform adapter, not the tool pack. */
@@ -228,12 +246,45 @@ failed:
   return -1;
 }
 
+/* Seed the existing JSON-native planner substate without adding planning
+ * instructions to conversation history or to executor inputs. Each fresh turn
+ * gets a new planner; completed-turn resume deliberately follows this path. */
+static int cli_prepare_workflow(json_value_t *state,
+                                turbo_agent_session_workflow_kind_t kind) {
+  json_value_t *planner = NULL, *versions = NULL, *context = NULL;
+  const json_value_t *memory;
+  if (kind == TURBO_AGENT_SESSION_WORKFLOW_LOOP) return 0;
+  planner = turbo_agent_session_create_input_messages_state_json_value(json_object_get(state, "input"));
+  if (!planner || turbo_agent_state_add_user_message(planner,
+      "Plan the latest user task. Return only a JSON object with a nonempty steps array "
+      "of concise strings, for example {\"steps\":[\"Answer the question\"]}. "
+      "Use at most 8 steps. Do not execute the plan yet. "
+      "The final step must produce the complete user-facing answer using earlier results.") != 0) goto failed;
+  memory = turbo_agent_state_memory_context(state);
+  if (memory) {
+    context = json_clone(memory);
+    if (!context || turbo_runtime_json_object_set(planner, "memory_context", context) != 0) goto failed;
+    context = NULL;
+  }
+  versions = json_create_array();
+  if (!versions || turbo_runtime_json_array_append(versions, planner) != 0) goto failed;
+  planner = NULL;
+  if (turbo_runtime_json_object_set(state, "planner_state_versions", versions) != 0) goto failed;
+  versions = NULL;
+  return turbo_agent_state_set_replan_limit(state, CLI_MAX_REPLANS);
+failed:
+  json_free(context); json_free(planner); json_free(versions);
+  return -1;
+}
+
 int turbo_cli_run(const turbo_cli_options_t *cli_options, FILE *input, FILE *output,
                   FILE *diagnostics, const turbo_agent_config_t *model_override,
-                  volatile sig_atomic_t *interrupted) {
+                  const atomic_int *interrupted) {
   const char *workspace, *prompt, *model;
-  int read_only, exit_code = 1, rc;
-  tstr root = NULL, line = NULL;
+  int read_only, general, exit_code = 1, rc;
+  tstr root = NULL, line = NULL, index_root = NULL;
+  turbo_agent_knowledge_store_t *knowledge = NULL;
+  turbo_cli_vector_t *vector = NULL;
   turbo_tool_registry_t *registry = NULL;
   turbo_agent_workspace_t *workspace_context = NULL;
   cmeta_threadpool_t *pool = NULL;
@@ -245,19 +296,86 @@ int turbo_cli_run(const turbo_cli_options_t *cli_options, FILE *input, FILE *out
   turbo_agent_harness_config_t harness_config;
   cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
   turbo_agent_policy_t policy = turbo_agent_policy_default();
+  turbo_cli_storage_t storage = {0};
   if (!cli_options || !cli_options->workspace || !input || !output || !diagnostics) return 2;
+  if (cli_options->diagram || cli_options->diagram_focus || cli_options->diagram_direction ||
+      cli_options->diagram_depth || cli_options->diagram_journals || cli_options->diagram_origins ||
+      cli_options->diagram_to || cli_options->diagram_plan_steps)
+    return turbo_cli_export_diagram(cli_options, output, diagnostics);
   workspace = cli_options->workspace; prompt = cli_options->prompt; model = cli_options->model;
   read_only = cli_options->read_only;
+  general = cli_options->mode && !strcmp(cli_options->mode, "general");
+  if (!cli_options->workflow || !strcmp(cli_options->workflow, "loop"))
+    session_config.workflow_kind = TURBO_AGENT_SESSION_WORKFLOW_LOOP;
+  else if (!strcmp(cli_options->workflow, "review"))
+    session_config.workflow_kind = TURBO_AGENT_SESSION_WORKFLOW_REVIEW;
+  else if (!strcmp(cli_options->workflow, "engineering"))
+    session_config.workflow_kind = TURBO_AGENT_SESSION_WORKFLOW_ENGINEERING;
+  else {
+    fputs("Invalid workflow: use loop, review or engineering.\n", diagnostics);
+    return 2;
+  }
+  if ((cli_options->mode && strcmp(cli_options->mode, "coding") && !general) ||
+      (cli_options->instructions && (!cli_options->instructions[0] ||
+        strlen(cli_options->instructions) > CLI_MAX_PROMPT_BYTES ||
+        !vstr_utf8_valid(vstr_from_cstr(cli_options->instructions)))) ||
+      (cli_options->knowledge_db && (!cli_options->knowledge_db[0] ||
+        !strcmp(cli_options->knowledge_db, ":memory:") || !strncmp(cli_options->knowledge_db, "file:", 5) ||
+        !vstr_utf8_valid(vstr_from_cstr(cli_options->knowledge_db)))) ||
+      (cli_options->index_dir && (!cli_options->index_dir[0] ||
+        (!cli_options->knowledge_db && !cli_options->vector_db))) ||
+      turbo_cli_vector_validate(cli_options) != SALTS_OK) {
+    fputs("Invalid agent options: mode is coding|general; --index-dir requires one knowledge/vector database; vector mode requires an embedding URL and model.\n", diagnostics);
+    return 2;
+  }
+  if ((cli_options->resume && !cli_options->session_db) ||
+      (cli_options->session_db && !cli_options->session_db[0])) {
+    fputs("--resume requires a nonempty --session-db path.\n", diagnostics); return 2;
+  }
   if ((prompt && (!prompt[0] || strlen(prompt) > CLI_MAX_PROMPT_BYTES || !vstr_utf8_valid(vstr_from_cstr(prompt)))) ||
       !workspace[0] || strlen(workspace) > CLI_MAX_PROMPT_BYTES) {
     fputs("Invalid prompt or workspace.\n", diagnostics); return 2;
   }
   root = cli_absolute_path(workspace);
   if (!root) { fputs("Cannot resolve workspace.\n", diagnostics); exit_code = 2; goto done; }
+  if (cli_options->index_dir) {
+    index_root = cli_absolute_path(cli_options->index_dir);
+    if (!index_root) { fputs("Cannot resolve index directory.\n", diagnostics); exit_code = 2; goto done; }
+  }
+  if (cli_options->session_db) {
+    rc = turbo_cli_storage_open(&storage, cli_options->session_db, root, cli_options->resume);
+    if (rc != SALTS_OK) {
+      if (rc == SALTS_EALREADY) fputs("Session already exists; use --resume or a new session file.\n", diagnostics);
+      else if (rc == SALTS_EBUSY) fputs("Session is locked or contains unfinished work; automatic retry is refused.\n", diagnostics);
+      else fputs("Cannot open session: check the file, workspace, format and storage limits.\n", diagnostics);
+      goto done;
+    }
+    /* CLI owns the backend through worker drain, including construction failure.
+     * Session receives a borrowed descriptor and never closes that connection. */
+    session_config.runtime_store = storage.store;
+    session_config.runtime_store.user_data_free = NULL;
+    session_config.thread_id = json_get_string(storage.metadata, "thread_id");
+  }
+  if (cli_options->knowledge_db) {
+    rc = turbo_cli_knowledge_open(cli_options->knowledge_db, index_root, interrupted, &knowledge);
+    if (rc != SALTS_OK) {
+      fputs("Cannot prepare knowledge index: check the dedicated database, FTS5, source text and import limits. Earlier per-document imports may remain.\n", diagnostics);
+      if (interrupted && atomic_load_explicit(interrupted, memory_order_relaxed)) exit_code = 130;
+      goto done;
+    }
+  }
+  if (cli_options->vector_db) {
+    rc = turbo_cli_vector_open(cli_options, index_root, interrupted, &vector);
+    if (rc != SALTS_OK) {
+      fputs("Cannot prepare vector index: check its dedicated file, lock, embedding identity/service and import limits. Earlier per-document imports may remain.\n", diagnostics);
+      if (interrupted && atomic_load_explicit(interrupted, memory_order_relaxed)) exit_code = 130;
+      goto done;
+    }
+  }
   registry = turbo_tool_registry_create();
   if (!registry) goto done;
 #ifdef TURBO_CLI_CODING_TOOLS
-  {
+  if (!general) {
     turbo_coding_workspace_config_t tools;
     turbo_coding_workspace_config_init(&tools);
     tools.files.workspace_root = root;
@@ -272,23 +390,30 @@ int turbo_cli_run(const turbo_cli_options_t *cli_options, FILE *input, FILE *out
   else (void)turbo_agent_config_apply_env(&session_config.agent_config, NULL, 0);
   if (model) session_config.agent_config.model = model;
   session_config.agent_config.tool_registry = registry;
+  if (cli_options->instructions) session_config.agent_config.instructions = cli_options->instructions;
   if (!session_config.agent_config.instructions)
-    session_config.agent_config.instructions = "You are a coding agent. Inspect relevant files before editing. "
+    session_config.agent_config.instructions = general
+        ? "You are a general-purpose assistant. Answer the user's request clearly. "
+          "Use supplied reference material as evidence, cite its source paths, and distinguish evidence from inference."
+        : "You are a coding agent. Inspect relevant files before editing. "
         "Use workspace-relative file paths; use fs.list with path . for the root. "
         "Run relevant tests and report actual results. Shell commands have host privileges. "
         "Do not claim a change or test succeeded without checking its tool result.";
-  session_config.workflow_kind = TURBO_AGENT_SESSION_WORKFLOW_LOOP;
   app_config.session_config = &session_config;
   turbo_agent_harness_config_init(&harness_config);
   harness_config.app_config = &app_config; harness_config.executor = pool;
   harness = turbo_agent_harness_create(&harness_config);
   if (!harness) { fputs("Cannot initialize agent. Check model configuration.\n", diagnostics); goto done; }
   session = turbo_agent_app_session(turbo_agent_harness_app(harness));
-  policy.workspace_root = root; policy.allow_patch = !read_only; policy.allow_shell = !read_only;
+  if (turbo_cli_storage_load(&storage, session, &previous) != SALTS_OK) {
+    fputs("Cannot load the session's completed run.\n", diagnostics); goto done;
+  }
+  policy.workspace_root = root; policy.allow_patch = !general && !read_only; policy.allow_shell = !general && !read_only;
   if (turbo_agent_set_tool_policy(turbo_agent_session_agent(session), &policy) != 0) goto done;
-  if (!prompt) fputs(read_only ? "TurboAgent (read-only). /quit exits.\n" :
+  if (!prompt) fputs(general ? "TurboAgent (general). /quit exits.\n" :
+                    read_only ? "TurboAgent (read-only). /quit exits.\n" :
                     "TurboAgent (workspace edits and host shell enabled). /quit exits.\n", diagnostics);
-  for (size_t turn = 0; turn < CLI_MAX_TURNS; ) {
+  for (size_t turn = storage.turns; turn < TURBO_CLI_MAX_TURNS; ) {
     json_value_t *state, *result = NULL;
     turbo_agent_harness_execution_t *execution = NULL;
     turbo_agent_harness_run_options_t options;
@@ -297,7 +422,7 @@ int turbo_cli_run(const turbo_cli_options_t *cli_options, FILE *input, FILE *out
     size_t history_bytes;
     int completion_rc;
     const char *text;
-    if (interrupted && *interrupted) { exit_code = 130; goto done; }
+    if (interrupted && atomic_load_explicit(interrupted, memory_order_relaxed)) { exit_code = 130; goto done; }
     if (prompt) text = prompt;
     else {
       fputs("> ", diagnostics); fflush(diagnostics);
@@ -305,7 +430,7 @@ int turbo_cli_run(const turbo_cli_options_t *cli_options, FILE *input, FILE *out
       rc = cli_read_line(input, &line);
       if (rc == 0) { exit_code = 0; goto done; }
       if (rc < 0) {
-        if (interrupted && *interrupted) exit_code = 130;
+        if (interrupted && atomic_load_explicit(interrupted, memory_order_relaxed)) exit_code = 130;
         else { fputs("Input must be bounded UTF-8 text.\n", diagnostics); exit_code = 2; }
         goto done;
       }
@@ -326,14 +451,30 @@ int turbo_cli_run(const turbo_cli_options_t *cli_options, FILE *input, FILE *out
                               diagnostics) != 0) {
       json_free(state); goto done;
     }
+    if (turbo_cli_knowledge_prepare(knowledge, text, state) != SALTS_OK ||
+        turbo_cli_vector_prepare(vector, text, state) != SALTS_OK) {
+      json_free(state);
+      fputs("Cannot retrieve bounded knowledge context; no model call was submitted.\n", diagnostics);
+      if (interrupted && atomic_load_explicit(interrupted, memory_order_relaxed)) exit_code = 130;
+      goto done;
+    }
     turbo_agent_harness_run_options_init(&options);
+    if (cli_prepare_workflow(state, session_config.workflow_kind) != 0) {
+      json_free(state);
+      fputs("Cannot prepare workflow; no model call was submitted.\n", diagnostics); goto done;
+    }
     options.graph_options = &graph_options;
     options.deadline_mono_ms = cmeta_monotonic_ms() + CLI_EXECUTION_TIMEOUT_MS;
+    if (turbo_cli_storage_begin(&storage, session) != SALTS_OK) {
+      json_free(state);
+      fputs("Cannot commit session start; no work was submitted.\n", diagnostics); goto done;
+    }
     rc = turbo_agent_harness_start_state(harness, state, &options, &execution);
     json_free(state);
     if (rc != SALTS_OK) { fputs("Agent run could not start.\n", diagnostics); goto done; }
     while ((rc = turbo_agent_harness_execution_wait(execution, CLI_WAIT_MS)) == SALTS_ETIMEDOUT) {
-      if (interrupted && *interrupted) turbo_agent_harness_execution_cancel(execution, TURBO_CANCEL_USER);
+      if (interrupted && atomic_load_explicit(interrupted, memory_order_relaxed))
+        turbo_agent_harness_execution_cancel(execution, TURBO_CANCEL_USER);
     }
     if (rc != SALTS_OK) {
       turbo_agent_harness_execution_cancel(execution, TURBO_CANCEL_SHUTDOWN);
@@ -342,8 +483,8 @@ int turbo_cli_run(const turbo_cli_options_t *cli_options, FILE *input, FILE *out
     /* Result publication can precede terminal callback cleanup. The next
      * Session projection requires quiescence, so drain this single-worker pool. */
     cmeta_threadpool_wait(pool);
-    completion_rc = turbo_cli_complete_execution(execution, rc, interrupted && *interrupted,
-                                                  output, diagnostics, &result);
+    completion_rc = cli_complete_execution(execution, rc, interrupted && atomic_load_explicit(interrupted, memory_order_relaxed),
+                                           output, diagnostics, &result, &storage, session);
     turbo_agent_harness_execution_release(execution);
     if (completion_rc != 0) { exit_code = completion_rc; goto done; }
     json_free(previous); previous = result;
@@ -355,8 +496,14 @@ done:
   json_free(previous);
   turbo_agent_harness_release(harness);
   if (pool) { cmeta_threadpool_wait(pool); cmeta_threadpool_destroy(pool); }
+  turbo_cli_storage_close(&storage);
   turbo_agent_workspace_destroy(workspace_context);
   turbo_tool_registry_destroy(registry);
-  tstr_free(root); tstr_free(line);
+  turbo_agent_knowledge_store_close(knowledge);
+  if (turbo_cli_vector_close(vector) != SALTS_OK) {
+    fputs("Cannot drain or close vector retrieval resources.\n", diagnostics);
+    exit_code = 1;
+  }
+  tstr_free(root); tstr_free(line); tstr_free(index_root);
   return exit_code;
 }

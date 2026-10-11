@@ -305,7 +305,7 @@ int turbo_agent_runtime_result_to_json(const turbo_graph_run_result_t *result,
 }
 
 char *turbo_agent_runtime_make_id(const char *prefix) {
-  return turbo_runtime_record_id(prefix);
+  return turbo_runtime_record_uuid(prefix);
 }
 
 int turbo_agent_runtime_parse_json_string(const char *json_text, json_value_t **out_json) {

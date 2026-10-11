@@ -149,6 +149,7 @@ static json_value_t *create_remote_jsonrpc_request_from_fixture(const char *fixt
 }
 
 static void check_remote_jsonrpc_success(const json_value_t *response_json, const char *id) {
+  if (!json_object_get(response_json, "result")) info("JSON-RPC request: %s", id);
   check_not_null(response_json);
   check_true(json_type(response_json) == JSON_OBJECT);
   check_equal(json_get_string(response_json, "jsonrpc"), "2.0");
@@ -1205,6 +1206,20 @@ spec("turbo agent runtime remote api") {
                                            "thread_command_resume_request");
       check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json),
                    0);
+      /* The completed fork is now the published head. A thread-scoped resume
+       * must not silently jump back to the older interrupted branch. */
+      check_remote_jsonrpc_error(response_json, "req-thread-resume", -32603);
+      json_free(response_json); response_json = NULL;
+      json_free(request_json); request_json = NULL;
+      check_equal(turbo_agent_runtime_get_latest_checkpoint(runtime, thread2_run_id, &result_state), 0);
+      json_object_set_string(thread_command_params, "checkpoint_id", json_get_string(result_state, "id"));
+      json_free(result_state); result_state = NULL;
+      check_equal(turbo_agent_runtime_prepare_checkpoint_command_override_json_value(runtime,
+          json_get_string(thread_command_params, "checkpoint_id"), thread_command_json, &result_state), 0);
+      json_object_add(thread_command_params, "state", result_state); result_state = NULL;
+      request_json = create_remote_jsonrpc_request("req-thread-resume", "runtime.resume", thread_command_params);
+      check_not_null(request_json);
+      check_equal(turbo_agent_runtime_remote_dispatch_jsonrpc(remote, request_json, &response_json), 0);
       check_remote_jsonrpc_success_fixture(response_json,
                                            "runtime_remote_graph_runs.golden.json",
                                            "thread_command_resume_response");

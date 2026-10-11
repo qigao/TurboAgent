@@ -1464,7 +1464,7 @@ spec("turbo agent session api") {
     check_equal(json_get_string(json_array_get(registry_tools, 0), "name"),
                  "session.echo");
     check_equal(json_get_string(json_array_get(openai_responses, 0), "name"),
-                 "session.echo");
+                 "session_echo");
     function_object =
         json_object_get(json_array_get(openai_chat, 0), "function");
     check_equal(json_get_string(function_object, "name"), "session.echo");
@@ -1583,7 +1583,7 @@ spec("turbo agent session api") {
     check_equal(turbo_tool_registry_add(registry, &slashed), TURBO_TOOL_OK);
 
     agent_config.model = "gpt-5.4";
-    agent_config.provider = turbo_model_provider_openai_responses();
+    agent_config.provider = turbo_model_provider_anthropic_messages();
     agent_config.transport_fn = session_success_transport;
     agent_config.tool_registry = registry;
     config.runtime_store = turbo_agent_runtime_store_memory_create();
@@ -1599,7 +1599,7 @@ spec("turbo agent session api") {
     check_equal(json_array_size(errors), 0);
     check_true(json_is_null(json_object_get(diagnostics, "tool_schemas")));
     status = json_object_get(diagnostics, "tool_schema_status");
-    check_equal(json_get_string(status, "selected_format"), "openai_responses");
+    check_equal(json_get_string(status, "selected_format"), "anthropic");
     compatible_status = json_object_get(status, "openai_compatible_chat");
     check_false(json_get_bool(compatible_status, "ok", true));
     check_false(json_get_bool(compatible_status, "selected", true));

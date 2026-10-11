@@ -2,6 +2,7 @@
 
 #include "turbo_agent_dag_compiler.h"
 #include "turbo_runtime_json.h"
+#include "turbo_diagram.h"
 
 #include <string.h>
 
@@ -199,6 +200,54 @@ static void dag_config(
   turbo_agent_compiler_config_init(config);
   config->allowed_capabilities = allowed;
   config->allowed_capability_count = allowed_count;
+}
+
+spec("Compiled plan diagrams") {
+  static turbo_tool_registry_t *registry;
+  static turbo_agent_executable_dag_t *plan;
+  static dag_probe_t read_probe, write_probe;
+  static json_value_t *args, *view, *selected;
+  static tstr text;
+  before_each() {
+    read_probe = (dag_probe_t){0}; write_probe = (dag_probe_t){0};
+    registry = make_dag_registry(&read_probe, &write_probe); check_not_null(registry);
+    args = dag_args("private argument content"); check_not_null(args);
+  }
+  after_each() {
+    turbo_agent_executable_dag_destroy(plan); plan = NULL;
+    turbo_tool_registry_destroy(registry); registry = NULL;
+    json_free(args); json_free(view); json_free(selected); args = view = selected = NULL;
+    tstr_free(text); text = NULL;
+  }
+  it("exports frozen steps, gates and dependencies without arguments or tool invocation") {
+    turbo_agent_compiler_config_t config;
+    turbo_agent_dag_source_t source;
+    turbo_agent_dag_step_source_t steps[3];
+    const char *allowed[] = {"runtime_tools"}, *patch_dep[] = {"inspect"}, *verify_dep[] = {"patch"};
+    dag_config(&config, allowed, 1);
+    dag_step(&steps[0], "inspect", "repo.inspect", args, NULL, 0);
+    dag_step(&steps[1], "patch", "repo.patch", args, patch_dep, 1);
+    steps[1].flags = TURBO_AGENT_DAG_STEP_APPROVAL_BEFORE | TURBO_AGENT_DAG_STEP_CHECKPOINT_AFTER;
+    dag_step(&steps[2], "verify", "repo.inspect", args, verify_dep, 1);
+    steps[2].retry_limit = 2;
+    dag_source(&source, steps, 3);
+    check_equal(turbo_agent_compile_dag(&config, registry, &source, &plan, NULL), TURBO_AGENT_COMPILE_OK);
+    steps[1].step_id = "mutated"; steps[1].flags = 0;
+    check_equal(turbo_agent_executable_dag_diagram(plan, &view), SALTS_OK);
+    turbo_agent_executable_dag_destroy(plan); plan = NULL;
+    check_equal(turbo_diagram_mermaid(view, &text), SALTS_OK);
+    check_contains(text, "patch: repo.patch; approval gate; checkpoint boundary");
+    check_contains(text, "verify: repo.inspect; retry limit 2");
+    check_contains(text, "n0 -->|\"required by\"| n1");
+    check_contains(text, "n1 -->|\"required by\"| n2");
+    check_null(strstr(text, "private argument content")); check_null(strstr(text, "mutated"));
+    check_equal(turbo_diagram_neighborhood(view, "patch", TURBO_DIAGRAM_OUTGOING, 1, &selected), SALTS_OK);
+    check_equal(json_array_size(json_object_get(selected, "nodes")), 2u);
+    check_equal(json_get_string(json_array_get(json_object_get(selected, "nodes"), 0), "id"), "patch");
+    check_equal(json_get_string(json_array_get(json_object_get(selected, "nodes"), 1), "id"), "verify");
+    check_equal(json_get_string(selected, "plan_hash_decimal"), json_get_string(view, "plan_hash_decimal"));
+    check_equal(read_probe.calls, 0); check_equal(write_probe.calls, 0);
+  }
 }
 
 spec("AgentCompiler Phase 3 DAG admission") {
@@ -685,8 +734,8 @@ spec("AgentCompiler Phase 3 DAG admission") {
     check_equal(turbo_tool_registry_get_native_projection(
                     approved, "math.project", &observed),
                 TURBO_TOOL_OK);
-    check_equal(observed.function, FunctionMeta(dag_native_increment));
-    check_equal(observed.abi, FunctionAbi(dag_native_increment));
+    check_true(cmeta_function_desc_equal(observed.function, FunctionMeta(dag_native_increment)));
+    check_true(cmeta_function_abi_desc_equal(observed.abi, FunctionAbi(dag_native_increment)));
     check_true(cmeta_callable_same(
         observed.callable, dag_native_increment_callable()));
     check_equal(probe.calls, 0);

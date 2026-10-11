@@ -40,7 +40,10 @@ static json_value_t *turbo_agent_state_get_versions_array_local(json_value_t *st
     if (!versions) {
       return NULL;
     }
-    json_object_add(state, key, versions);
+    if (!json_object_add_checked(state, key, versions)) {
+      json_free(versions);
+      return NULL;
+    }
   }
 
   return json_type(versions) == JSON_ARRAY ? versions : NULL;
@@ -64,8 +67,7 @@ CXX_C_API int turbo_agent_state_append_array_version(json_value_t *state, const 
     return -1;
   }
 
-  json_array_add(versions, value);
-  return 0;
+  return json_array_add_checked(versions, value) ? 0 : -1;
 }
 
 CXX_C_API int turbo_agent_state_append_object_version(json_value_t *state, const char *key,
@@ -81,8 +83,7 @@ CXX_C_API int turbo_agent_state_append_object_version(json_value_t *state, const
     return -1;
   }
 
-  json_array_add(versions, value);
-  return 0;
+  return json_array_add_checked(versions, value) ? 0 : -1;
 }
 
 static json_value_t *turbo_agent_state_get_current_array_version_local(json_value_t *state,

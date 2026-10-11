@@ -1,6 +1,9 @@
 #include "turbo_runtime_segment.h"
+#include "turbo_runtime_head_internal.h"
 #include "turbo_event_log.h"
 #include <salts/clock.h>
+#include <cmeta_uuid.h>
+#include <fmt.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,6 +110,20 @@ int turbo_runtime_execution_result_json(const turbo_graph_run_result_t *result,
 fail:
   json_free(json_result);
   return -1;
+}
+
+char *turbo_runtime_record_uuid(const char *prefix) {
+  cmeta_uuid_t uuid;
+  char formatted[SALTS_UUID_STRING_SIZE];
+  char *result;
+  tstr text;
+  if (!prefix || !prefix[0] || cmeta_uuid_v4_generate(&uuid) != 0 ||
+      cmeta_uuid_format(&uuid, formatted, sizeof(formatted)) != 0) return NULL;
+  text = tstr_format("{}_{}", prefix, formatted);
+  if (!text) return NULL;
+  result = turbo_runtime_segment_strdup(text);
+  tstr_free(text);
+  return result;
 }
 
 char *turbo_runtime_record_id(const char *prefix) {
@@ -618,7 +635,7 @@ static int turbo_runtime_segment_record_checkpoint_from_parts(
   }
   *out_checkpoint_id = NULL;
 
-  checkpoint_id = turbo_runtime_record_id("ckpt");
+  checkpoint_id = turbo_runtime_record_uuid("ckpt");
   if (!checkpoint_id ||
       turbo_runtime_segment_snapshots(segment, state, &control_snapshot, &workflow_snapshot) != 0 ||
       turbo_runtime_segment_collect_event_log_events(events_log, &events_json) != 0 ||
@@ -774,6 +791,7 @@ int turbo_runtime_segment_execute(const turbo_runtime_segment_t *segment,
   json_value_t *result_state = NULL;
   json_value_t *summary_json = NULL;
   json_value_t *summary_state_json = NULL;
+  json_value_t *published_run = NULL;
   const char *persisted_checkpoint_id = NULL;
   char created_at[32];
   char updated_at[32];
@@ -788,7 +806,8 @@ int turbo_runtime_segment_execute(const turbo_runtime_segment_t *segment,
     return -1;
   }
   if (turbo_runtime_record_timestamp(updated_at, sizeof(updated_at)) != 0 ||
-      turbo_runtime_segment_upsert_thread(runtime, thread_id, updated_at) != 0) {
+      turbo_runtime_segment_upsert_thread(runtime, thread_id, updated_at) != 0 ||
+      turbo_runtime_head_initialize(runtime, thread_id) != 0) {
     return -1;
   }
   if (segment->enter) segment->enter(segment, segment->user_data);
@@ -834,9 +853,10 @@ int turbo_runtime_segment_execute(const turbo_runtime_segment_t *segment,
   if (turbo_runtime_segment_finalize_run(
           runtime, run_id, thread_id, parent_run_id, parent_agent_run_id, parent_tool_call_id,
           parent_tool_name, parent_graph_run_id, call_frame_id, forked_from_checkpoint_id, graph,
-          created_at, updated_at, persisted_checkpoint_id, &result, result_state, NULL) != 0 ||
+          created_at, updated_at, persisted_checkpoint_id, &result, result_state, &published_run) != 0 ||
       turbo_runtime_segment_make_summary(segment, checkpoint_id, &result,
-                                         summary_state_json, &summary_json) != 0) {
+                                         summary_state_json, &summary_json) != 0 ||
+      turbo_runtime_head_publish(runtime, thread_id, published_run) != 0) {
     goto cleanup;
   }
 
@@ -850,6 +870,7 @@ cleanup:
   if (segment->leave) segment->leave(segment, segment->user_data);
   free((char *)checkpoint_id);
   turbo_runtime_segment_json_free(&summary_state_json);
+  turbo_runtime_segment_json_free(&published_run);
   turbo_runtime_segment_json_free(&summary_json);
   turbo_runtime_json_destroy(result_state);
   turbo_graph_checkpoint_destroy(stream_checkpoint);

@@ -108,11 +108,14 @@ int turbo_agent_replan_prepare_node(turbo_graph_exec_ctx_t *ctx, void *user_data
   }
 
   planner_state = turbo_agent_substate_create(planner_input, planner_events);
-  if (!planner_state ||
-      turbo_agent_state_append_object_version(ctx->state, "planner_state_versions",
-                                              planner_state) != 0) {
+  if (!planner_state) {
     json_free(planner_input); planner_input = NULL;
     json_free(planner_events); planner_events = NULL;
+    return -1;
+  }
+  if (turbo_agent_substate_copy_memory(planner_state, ctx->state) != 0 ||
+      turbo_agent_state_append_object_version(ctx->state, "planner_state_versions", planner_state) != 0) {
+    json_free(planner_state);
     return -1;
   }
 

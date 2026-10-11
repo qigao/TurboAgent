@@ -1,4 +1,6 @@
 #include "turbo_agent_dag_compiler.h"
+#include "turbo_diagram.h"
+#include <fmt.h>
 
 #include "turbo_runtime_json.h"
 #include "turbo_tool_schema.h"
@@ -922,6 +924,47 @@ int turbo_agent_executable_dag_pure_region_eligible(
 const turbo_tool_registry_t *turbo_agent_executable_dag_approved_tools(
     const turbo_agent_executable_dag_t *plan) {
   return plan ? plan->approved_tools : NULL;
+}
+
+int turbo_agent_executable_dag_diagram(const turbo_agent_executable_dag_t *plan,
+                                      json_value_t **out_view) {
+  json_value_t *view = NULL;
+  tstr label = NULL, hash = NULL;
+  int rc = SALTS_ENOMEM;
+  if (out_view) *out_view = NULL;
+  if (!plan || !out_view) return SALTS_EINVAL;
+  if (plan->step_count > TURBO_DIAGRAM_MAX_NODES) return SALTS_ENOSPC;
+  view = turbo_diagram_create("plan");
+  hash = tstr_format("{}", plan->plan_hash);
+  if (!view || !hash ||
+      turbo_runtime_json_object_set_string(view, "plan_hash_decimal", hash) != 0 ||
+      turbo_runtime_json_object_set_int64(view, "plan_generation", plan->plan_generation) != 0)
+    goto done;
+  for (size_t i = 0; i < plan->step_count; ++i) {
+    const turbo_agent_executable_dag_step_t *step = &plan->steps[i];
+    if (strlen(step->step_id) > TURBO_DIAGRAM_MAX_TEXT_BYTES ||
+        strlen(step->tool_name) > TURBO_DIAGRAM_MAX_TEXT_BYTES) { rc = SALTS_ENOSPC; goto done; }
+    label = tstr_format("{}: {}{}{}; retry limit {}", step->step_id, step->tool_name,
+        step->flags & TURBO_AGENT_DAG_STEP_APPROVAL_BEFORE ? "; approval gate" : "",
+        step->flags & TURBO_AGENT_DAG_STEP_CHECKPOINT_AFTER ? "; checkpoint boundary" : "",
+        step->retry_limit);
+    if (!label) { rc = SALTS_ENOMEM; goto done; }
+    rc = turbo_diagram_add_node(view, step->step_id, label);
+    tstr_free(label); label = NULL;
+    if (rc != 0) goto done;
+  }
+  for (size_t i = 0; i < plan->step_count; ++i) {
+    const turbo_agent_executable_dag_step_t *step = &plan->steps[i];
+    for (size_t d = 0; d < step->dependency_count; ++d) {
+      rc = turbo_diagram_add_edge(view, plan->steps[step->dependency_indices[d]].step_id,
+                                  step->step_id, "required by");
+      if (rc != 0) goto done;
+    }
+  }
+  *out_view = view; view = NULL; rc = SALTS_OK;
+done:
+  json_free(view); tstr_free(label); tstr_free(hash);
+  return rc;
 }
 
 json_value_t *turbo_agent_executable_dag_certificate_json_value(

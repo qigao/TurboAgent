@@ -495,10 +495,15 @@ static int turbo_vector_store_id_is_indexed_chunk(const char *id,
     return 0;
   }
   document_id_len = strlen(document_id);
-  return strncmp(id, document_id, document_id_len) == 0 &&
-         strncmp(id + document_id_len, chunk_suffix,
-                 sizeof(chunk_suffix) - 1) == 0 &&
-         id[document_id_len + sizeof(chunk_suffix) - 1] != '\0';
+  if (strncmp(id, document_id, document_id_len) != 0 ||
+      strncmp(id + document_id_len, chunk_suffix, sizeof(chunk_suffix) - 1) != 0)
+    return 0;
+  const char *ordinal = id + document_id_len + sizeof(chunk_suffix) - 1;
+  if (!*ordinal) return 0;
+  /* Another document may contain this prefix; generated ordinals are decimal. */
+  for (; *ordinal; ++ordinal)
+    if (*ordinal < '0' || *ordinal > '9') return 0;
+  return 1;
 }
 
 static json_value_t *turbo_vector_store_index_summary(
@@ -521,8 +526,9 @@ static json_value_t *turbo_vector_store_index_summary(
 static int turbo_vector_store_set_summary(json_value_t **out_summary_json,
                                           json_value_t *summary) {
   if (!out_summary_json) {
-    json_free(summary); summary = NULL;
-    return summary ? 0 : -1;
+    int status = summary ? 0 : -1;
+    json_free(summary);
+    return status;
   }
   *out_summary_json = summary;
   return summary ? 0 : -1;
@@ -694,14 +700,16 @@ static int turbo_vector_sqlite_delete_indexed_chunks(
     return -1;
   }
   snprintf(prefix, (size_t)needed + 1, "%s#chunk-", document_id);
+  /* SQLite TEXT substr counts characters; the allocation length above is bytes. */
   if (turbo_vector_sqlite_prepare(
-          db, "DELETE FROM vector_documents WHERE substr(id,1,?)=?;",
+          db, "DELETE FROM vector_documents WHERE substr(id,1,length(?1))=?1 "
+              "AND length(id)>length(?1) "
+              "AND substr(id,length(?1)+1) NOT GLOB '*[^0-9]*';",
           &stmt) != 0) {
     free(prefix);
     return -1;
   }
-  sqlite3_bind_int64(stmt, 1, (sqlite3_int64)needed);
-  sqlite3_bind_text(stmt, 2, prefix, -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(stmt, 1, prefix, -1, SQLITE_TRANSIENT);
   ok = sqlite3_step(stmt) == SQLITE_DONE;
   sqlite3_finalize(stmt);
   free(prefix);

@@ -461,7 +461,7 @@ spec("turbo agent knowledge store") {
     knowledge_test_write_file(tool_docs_path, "directory tool indexes graph notes\n");
 
     check_equal(turbo_agent_knowledge_store_add_tools(registry, store), 0);
-    check_equal(turbo_tool_registry_count(registry), 10);
+    check_equal(turbo_tool_registry_count(registry), 11);
 
     snprintf(arguments_json, sizeof(arguments_json),
              "{\"path\":\"%s\",\"kind\":\"note\",\"chunk_target_bytes\":128}",
@@ -691,7 +691,7 @@ spec("turbo agent knowledge store") {
 
     check_equal(turbo_agent_knowledge_store_add_action_tools(action_registry, store),
                  0);
-    check_equal(turbo_action_tool_registry_count(action_registry), 10);
+    check_equal(turbo_action_tool_registry_count(action_registry), 11);
     index_definition =
         turbo_action_tool_registry_find(action_registry, "agent.knowledge.index_file");
     search_definition =

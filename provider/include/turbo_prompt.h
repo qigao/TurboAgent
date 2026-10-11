@@ -59,6 +59,9 @@ turbo_prompt_messages_to_openai_chat_json(
 
 /**
  * @brief Convert canonical TurboParser JSON-native messages into OpenAI Responses input JSON.
+ * Assistant function calls and tool results become separate function_call and
+ * function_call_output items, linked by call_id. Content parts retain order;
+ * structured argument objects are serialized to the wire's JSON string form.
  * @param messages Canonical message array.
  * @return JSON array owned by caller, or NULL on validation/allocation failure.
  */

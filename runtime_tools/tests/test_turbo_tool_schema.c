@@ -255,6 +255,54 @@ spec("turbo tool schema helpers") {
 
   describe("provider schema builders") {
 
+    group("Responses wire names") {
+      static turbo_tool_registry_t *registry;
+      static json_value_t *tools, *args, *result;
+      after_each() {
+        json_free(tools); tools = NULL;
+        json_free(args); args = NULL;
+        json_free(result); result = NULL;
+        turbo_tool_registry_destroy(registry); registry = NULL;
+      }
+
+      it("exports an executable alias without changing canonical names or strict validation") {
+        turbo_tool_definition_t definition = {
+            .name = "fs.read", .description = "read a file",
+            .parameters_json = "{\"type\":\"object\"}", .strict = 1,
+            .json_value_handler = fake_tool_json_value_handler};
+        const char *canonical = NULL;
+        registry = turbo_tool_registry_create(); check_not_null(registry);
+        check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+        tools = turbo_tool_schema_build_openai_tools(registry); check_not_null(tools);
+        const json_value_t *tool = json_array_get(tools, 0);
+        const char *wire_name = json_get_string(tool, "name");
+        check_equal(wire_name, "fs_read");
+        check_true(json_get_bool(tool, "strict", false));
+        check_false(json_get_bool(json_object_get(tool, "parameters"), "additionalProperties", true));
+        check_equal(turbo_tool_registry_resolve_name(registry, wire_name, &canonical), TURBO_TOOL_OK);
+        check_equal(canonical, "fs.read");
+        args = json_create_object(); check_not_null(args);
+        check_equal(turbo_tool_registry_execute_json_value(registry, wire_name, args, &result), TURBO_TOOL_OK);
+        check_true(json_get_bool(result, "ok", false));
+        json_free(tools);
+        tools = turbo_tool_schema_build_registry_json_value(registry); check_not_null(tools);
+        check_equal(json_get_string(json_array_get(tools, 0), "name"), "fs.read");
+      }
+
+      it("rejects aliases shared by different canonical names") {
+        turbo_tool_definition_t definition = {
+            .name = "fs.read", .description = "read a file",
+            .parameters_json = "{\"type\":\"object\"}", .strict = 1,
+            .handler = fake_tool_handler};
+        registry = turbo_tool_registry_create(); check_not_null(registry);
+        check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+        definition.name = "fs/read";
+        check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+        tools = turbo_tool_schema_build_openai_tools(registry);
+        check_null(tools);
+      }
+    }
+
     it("should build openai chat tool payloads from registry definitions") {
       turbo_tool_registry_t *registry = turbo_tool_registry_create();
       turbo_tool_definition_t definition = {

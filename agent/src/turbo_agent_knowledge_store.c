@@ -1,9 +1,11 @@
 #include "turbo_agent_knowledge_store.h"
+#include "turbo_agent_knowledge_store_internal.h"
 
 #include "turbo_agent_state.h"
 #include "turbo_agent_workflow.h"
 #include "sqlite3.h"
 
+#include <cmeta/pp.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,11 +17,6 @@
 #else
 #include <dirent.h>
 #endif
-
-struct turbo_agent_knowledge_store_s {
-  sqlite3 *db;
-  int fts5_enabled;
-};
 
 #define TURBO_KNOWLEDGE_QUERY_MAX_TOKENS 16
 
@@ -1827,6 +1824,9 @@ int turbo_agent_knowledge_store_tool_graph(json_value_t **out_graph_json) {
           nodes, "agent.knowledge.get_document", "observe",
           "Load one indexed document and all of its ordered chunks.") != 0 ||
       turbo_knowledge_tool_graph_add_node(
+          nodes, "agent.knowledge.diagram", "observe",
+          "Inspect selected document/chunk relationships and indexed revisions without loading text.") != 0 ||
+      turbo_knowledge_tool_graph_add_node(
           nodes, "agent.knowledge.upsert_text", "mutate",
           "Persist notes, task summaries, or discovered facts into local knowledge.") != 0 ||
       turbo_knowledge_tool_graph_add_node(
@@ -1853,6 +1853,12 @@ int turbo_agent_knowledge_store_tool_graph(json_value_t **out_graph_json) {
       turbo_knowledge_tool_graph_add_edge(
           edges, "agent.knowledge.list_documents", "agent.knowledge.get_document",
           "Open one listed document by id.") != 0 ||
+      turbo_knowledge_tool_graph_add_edge(
+          edges, "agent.knowledge.search", "agent.knowledge.diagram",
+          "Inspect document identities and chunk ownership for matching document IDs.") != 0 ||
+      turbo_knowledge_tool_graph_add_edge(
+          edges, "agent.knowledge.list_documents", "agent.knowledge.diagram",
+          "Build an indexed snapshot diagram from selected document IDs.") != 0 ||
       turbo_knowledge_tool_graph_add_edge(
           edges, "agent.knowledge.upsert_text", "agent.knowledge.stats",
           "Refresh counts after writing memory or facts.") != 0 ||
@@ -2476,84 +2482,6 @@ static int turbo_knowledge_tool_json_handler(
   return 0;
 }
 
-static int turbo_knowledge_search_tool_json(const char *arguments_json,
-                                            char **out_output, void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_search_tool_json_value,
-                                           user_data);
-}
-
-static int turbo_knowledge_build_context_tool_json(const char *arguments_json,
-                                                   char **out_output,
-                                                   void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_build_context_tool_json_value,
-                                           user_data);
-}
-
-static int turbo_knowledge_list_documents_tool_json(const char *arguments_json,
-                                                    char **out_output,
-                                                    void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_list_documents_tool_json_value,
-                                           user_data);
-}
-
-static int turbo_knowledge_stats_tool_json(const char *arguments_json,
-                                           char **out_output, void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_stats_tool_json_value,
-                                           user_data);
-}
-
-static int turbo_knowledge_tool_graph_tool_json(const char *arguments_json,
-                                                char **out_output,
-                                                void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_tool_graph_tool_json_value,
-                                           user_data);
-}
-
-static int turbo_knowledge_get_document_tool_json(const char *arguments_json,
-                                                  char **out_output,
-                                                  void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_get_document_tool_json_value,
-                                           user_data);
-}
-
-static int turbo_knowledge_upsert_text_tool_json(const char *arguments_json,
-                                                 char **out_output,
-                                                 void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_upsert_text_tool_json_value,
-                                           user_data);
-}
-
-static int turbo_knowledge_index_file_tool_json(const char *arguments_json,
-                                                char **out_output,
-                                                void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_index_file_tool_json_value,
-                                           user_data);
-}
-
-static int turbo_knowledge_index_directory_tool_json(const char *arguments_json,
-                                                     char **out_output,
-                                                     void *user_data) {
-  return turbo_knowledge_tool_json_handler(
-      arguments_json, out_output, turbo_knowledge_index_directory_tool_json_value,
-      user_data);
-}
-
-static int turbo_knowledge_delete_document_tool_json(const char *arguments_json,
-                                                     char **out_output,
-                                                     void *user_data) {
-  return turbo_knowledge_tool_json_handler(arguments_json, out_output,
-                                           turbo_knowledge_delete_document_tool_json_value,
-                                           user_data);
-}
-
 static int turbo_knowledge_search_action_handler(const json_value_t *args,
                                                  json_value_t **out_result,
                                                  void *user_data) {
@@ -2896,33 +2824,39 @@ static int turbo_knowledge_delete_document_action_handler(
   return 0;
 }
 
-int turbo_agent_knowledge_store_add_tools(turbo_tool_registry_t *registry,
-                                          turbo_agent_knowledge_store_t *store) {
-  static const char *search_schema =
+/* One stable tool catalog projects into two existing registry contracts.
+ * Metadata does not grant invocation authority or transfer the borrowed store. */
+static const char search_schema[] =
       "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},"
       "\"kind\":{\"type\":\"string\"},"
       "\"uri_prefix\":{\"type\":\"string\"},"
       "\"limit\":{\"type\":\"integer\",\"minimum\":0}},"
       "\"required\":[\"query\"],\"additionalProperties\":false}";
-  static const char *build_context_schema =
+
+static const char build_context_schema[] =
       "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},"
       "\"kind\":{\"type\":\"string\"},"
       "\"uri_prefix\":{\"type\":\"string\"},"
       "\"limit\":{\"type\":\"integer\",\"minimum\":0}},"
       "\"required\":[\"query\"],\"additionalProperties\":false}";
-  static const char *stats_schema =
+
+static const char stats_schema[] =
       "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}";
-  static const char *tool_graph_schema =
+
+static const char tool_graph_schema[] =
       "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}";
-  static const char *list_documents_schema =
+
+static const char list_documents_schema[] =
       "{\"type\":\"object\",\"properties\":{\"kind\":{\"type\":\"string\"},"
       "\"uri_prefix\":{\"type\":\"string\"},"
       "\"limit\":{\"type\":\"integer\",\"minimum\":0}},"
       "\"additionalProperties\":false}";
-  static const char *get_document_schema =
+
+static const char get_document_schema[] =
       "{\"type\":\"object\",\"properties\":{\"document_id\":{\"type\":\"string\"}},"
       "\"required\":[\"document_id\"],\"additionalProperties\":false}";
-  static const char *upsert_text_schema =
+
+static const char upsert_text_schema[] =
       "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},"
       "\"uri\":{\"type\":\"string\"},"
       "\"kind\":{\"type\":\"string\"},"
@@ -2931,12 +2865,14 @@ int turbo_agent_knowledge_store_add_tools(turbo_tool_registry_t *registry,
       "\"text\":{\"type\":\"string\"},"
       "\"chunk_target_bytes\":{\"type\":\"integer\",\"minimum\":0}},"
       "\"required\":[\"id\",\"text\"],\"additionalProperties\":false}";
-  static const char *index_schema =
+
+static const char index_schema[] =
       "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
       "\"kind\":{\"type\":\"string\"},"
       "\"chunk_target_bytes\":{\"type\":\"integer\",\"minimum\":0}},"
       "\"required\":[\"path\"],\"additionalProperties\":false}";
-  static const char *index_directory_schema =
+
+static const char index_directory_schema[] =
       "{\"type\":\"object\",\"properties\":{\"root_dir\":{\"type\":\"string\"},"
       "\"kind\":{\"type\":\"string\"},"
       "\"include_extensions\":{\"type\":\"string\"},"
@@ -2945,319 +2881,101 @@ int turbo_agent_knowledge_store_add_tools(turbo_tool_registry_t *registry,
       "\"max_files\":{\"type\":\"integer\",\"minimum\":0},"
       "\"max_file_bytes\":{\"type\":\"integer\",\"minimum\":0}},"
       "\"required\":[\"root_dir\"],\"additionalProperties\":false}";
-  static const char *delete_document_schema =
+
+static const char delete_document_schema[] =
       "{\"type\":\"object\",\"properties\":{\"document_id\":{\"type\":\"string\"}},"
       "\"required\":[\"document_id\"],\"additionalProperties\":false}";
-  turbo_tool_definition_t definition;
 
-  if (!registry || !store) {
-    return -1;
+#define TURBO_KNOWLEDGE_TOOL_ROWS(M) \
+  Schema(M, \
+      ("agent.knowledge.search", \
+       "Search the local SQLite FTS5 knowledge index.", \
+       search_schema, turbo_knowledge_search_tool_json, turbo_knowledge_search_tool_json_value, \
+       turbo_knowledge_search_action_handler, TURBO_ACTION_OBSERVE, 1), \
+      ("agent.knowledge.build_context", \
+       "Build merged local knowledge context text from the SQLite FTS5 index.", \
+       build_context_schema, turbo_knowledge_build_context_tool_json, turbo_knowledge_build_context_tool_json_value, \
+       turbo_knowledge_build_context_action_handler, TURBO_ACTION_OBSERVE, 1), \
+      ("agent.knowledge.stats", \
+       "Inspect local SQLite FTS5 knowledge index statistics.", \
+       stats_schema, turbo_knowledge_stats_tool_json, turbo_knowledge_stats_tool_json_value, \
+       turbo_knowledge_stats_action_handler, TURBO_ACTION_OBSERVE, 1), \
+      ("agent.knowledge.tool_graph", \
+       "Describe recommended dependencies between local knowledge tools.", \
+       tool_graph_schema, turbo_knowledge_tool_graph_tool_json, turbo_knowledge_tool_graph_tool_json_value, \
+       turbo_knowledge_tool_graph_action_handler, TURBO_ACTION_OBSERVE, 1), \
+      ("agent.knowledge.list_documents", \
+       "List documents currently indexed in the knowledge store.", \
+       list_documents_schema, turbo_knowledge_list_documents_tool_json, turbo_knowledge_list_documents_tool_json_value, \
+       turbo_knowledge_list_documents_action_handler, TURBO_ACTION_OBSERVE, 1), \
+      ("agent.knowledge.get_document", \
+       "Load one indexed document with its chunks.", \
+       get_document_schema, turbo_knowledge_get_document_tool_json, turbo_knowledge_get_document_tool_json_value, \
+       turbo_knowledge_get_document_action_handler, TURBO_ACTION_OBSERVE, 1), \
+      ("agent.knowledge.diagram", \
+       "Inspect selected indexed documents and their chunks as a bounded JSON or Mermaid graph; source freshness is unverified.", \
+       turbo_knowledge_diagram_schema, turbo_knowledge_diagram_tool_json, turbo_knowledge_diagram_tool_value, \
+       turbo_knowledge_diagram_tool_value, TURBO_ACTION_OBSERVE, 1), \
+      ("agent.knowledge.upsert_text", \
+       "Index or replace one text document in the SQLite FTS5 knowledge index.", \
+       upsert_text_schema, turbo_knowledge_upsert_text_tool_json, turbo_knowledge_upsert_text_tool_json_value, \
+       turbo_knowledge_upsert_text_action_handler, TURBO_ACTION_MUTATE, 1), \
+      ("agent.knowledge.index_file", \
+       "Index one local text file into the SQLite FTS5 knowledge index.", \
+       index_schema, turbo_knowledge_index_file_tool_json, turbo_knowledge_index_file_tool_json_value, \
+       turbo_knowledge_index_file_action_handler, TURBO_ACTION_MUTATE, 1), \
+      ("agent.knowledge.index_directory", \
+       "Index local text files under a directory into the SQLite FTS5 knowledge index.", \
+       index_directory_schema, turbo_knowledge_index_directory_tool_json, turbo_knowledge_index_directory_tool_json_value, \
+       turbo_knowledge_index_directory_action_handler, TURBO_ACTION_MUTATE, 1), \
+      ("agent.knowledge.delete_document", \
+       "Delete one document and its chunks from the knowledge index.", \
+       delete_document_schema, turbo_knowledge_delete_document_tool_json, turbo_knowledge_delete_document_tool_json_value, \
+       turbo_knowledge_delete_document_action_handler, TURBO_ACTION_MUTATE, 1))
+
+/* The string ABI remains a thin adapter over each catalog row's JSON handler. */
+#define KNOWLEDGE_STRING_ROW(tool_name, text, parameters, string_handler, value_handler, action_handler, action_kind, repeatable) \
+  static int string_handler(const char *arguments_json, char **out_output, void *user_data) { \
+    return turbo_knowledge_tool_json_handler(arguments_json, out_output, value_handler, user_data); \
   }
+Replay(TURBO_KNOWLEDGE_TOOL_ROWS, KNOWLEDGE_STRING_ROW)
+#undef KNOWLEDGE_STRING_ROW
 
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.search";
-  definition.description = "Search the local SQLite FTS5 knowledge index.";
-  definition.parameters_json = search_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_search_tool_json;
-  definition.json_value_handler = turbo_knowledge_search_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
+#define KNOWLEDGE_NORMAL_ROW(tool_name, text, parameters, string_handler, value_handler, action_handler, action_kind, repeatable) \
+  {.name = tool_name, .description = text, .parameters_json = parameters, .strict = 1, \
+   .handler = string_handler, .json_value_handler = value_handler},
+static const turbo_tool_definition_t knowledge_tools[] = {
+  Replay(TURBO_KNOWLEDGE_TOOL_ROWS, KNOWLEDGE_NORMAL_ROW)
+};
+#undef KNOWLEDGE_NORMAL_ROW
+
+#define KNOWLEDGE_ACTION_ROW(tool_name, text, parameters, string_handler, value_handler, action_handler, action_kind, repeatable) \
+  {.name = tool_name, .description = text, .parameters_json = parameters, \
+   .kind = action_kind, .idempotent = repeatable, .handler = action_handler},
+static const turbo_action_tool_definition_t knowledge_actions[] = {
+  Replay(TURBO_KNOWLEDGE_TOOL_ROWS, KNOWLEDGE_ACTION_ROW)
+};
+#undef KNOWLEDGE_ACTION_ROW
+#undef TURBO_KNOWLEDGE_TOOL_ROWS
+
+int turbo_agent_knowledge_store_add_tools(turbo_tool_registry_t *registry,
+                                         turbo_agent_knowledge_store_t *store) {
+  if (!registry || !store) return -1;
+  for (size_t i = 0; i < sizeof(knowledge_tools) / sizeof(knowledge_tools[0]); ++i) {
+    turbo_tool_definition_t definition = knowledge_tools[i];
+    definition.user_data = store;
+    if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) return -1;
   }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.build_context";
-  definition.description =
-      "Build merged local knowledge context text from the SQLite FTS5 index.";
-  definition.parameters_json = build_context_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_build_context_tool_json;
-  definition.json_value_handler = turbo_knowledge_build_context_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.stats";
-  definition.description = "Inspect local SQLite FTS5 knowledge index statistics.";
-  definition.parameters_json = stats_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_stats_tool_json;
-  definition.json_value_handler = turbo_knowledge_stats_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.tool_graph";
-  definition.description = "Describe recommended dependencies between local knowledge tools.";
-  definition.parameters_json = tool_graph_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_tool_graph_tool_json;
-  definition.json_value_handler = turbo_knowledge_tool_graph_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.list_documents";
-  definition.description = "List documents currently indexed in the knowledge store.";
-  definition.parameters_json = list_documents_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_list_documents_tool_json;
-  definition.json_value_handler = turbo_knowledge_list_documents_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.get_document";
-  definition.description = "Load one indexed document with its chunks.";
-  definition.parameters_json = get_document_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_get_document_tool_json;
-  definition.json_value_handler = turbo_knowledge_get_document_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.upsert_text";
-  definition.description = "Index or replace one text document in the SQLite FTS5 knowledge index.";
-  definition.parameters_json = upsert_text_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_upsert_text_tool_json;
-  definition.json_value_handler = turbo_knowledge_upsert_text_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.index_file";
-  definition.description = "Index one local text file into the SQLite FTS5 knowledge index.";
-  definition.parameters_json = index_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_index_file_tool_json;
-  definition.json_value_handler = turbo_knowledge_index_file_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.index_directory";
-  definition.description =
-      "Index local text files under a directory into the SQLite FTS5 knowledge index.";
-  definition.parameters_json = index_directory_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_index_directory_tool_json;
-  definition.json_value_handler = turbo_knowledge_index_directory_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.delete_document";
-  definition.description = "Delete one document and its chunks from the knowledge index.";
-  definition.parameters_json = delete_document_schema;
-  definition.strict = 1;
-  definition.handler = turbo_knowledge_delete_document_tool_json;
-  definition.json_value_handler = turbo_knowledge_delete_document_tool_json_value;
-  definition.user_data = store;
-  if (turbo_tool_registry_add(registry, &definition) != TURBO_TOOL_OK) {
-    return -1;
-  }
-
   return 0;
 }
 
-int turbo_agent_knowledge_store_add_action_tools(
-    turbo_action_tool_registry_t *registry, turbo_agent_knowledge_store_t *store) {
-  static const char *search_schema =
-      "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},"
-      "\"kind\":{\"type\":\"string\"},"
-      "\"uri_prefix\":{\"type\":\"string\"},"
-      "\"limit\":{\"type\":\"integer\",\"minimum\":0}},"
-      "\"required\":[\"query\"],\"additionalProperties\":false}";
-  static const char *build_context_schema =
-      "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},"
-      "\"kind\":{\"type\":\"string\"},"
-      "\"uri_prefix\":{\"type\":\"string\"},"
-      "\"limit\":{\"type\":\"integer\",\"minimum\":0}},"
-      "\"required\":[\"query\"],\"additionalProperties\":false}";
-  static const char *stats_schema =
-      "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}";
-  static const char *tool_graph_schema =
-      "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}";
-  static const char *list_documents_schema =
-      "{\"type\":\"object\",\"properties\":{\"kind\":{\"type\":\"string\"},"
-      "\"uri_prefix\":{\"type\":\"string\"},"
-      "\"limit\":{\"type\":\"integer\",\"minimum\":0}},"
-      "\"additionalProperties\":false}";
-  static const char *get_document_schema =
-      "{\"type\":\"object\",\"properties\":{\"document_id\":{\"type\":\"string\"}},"
-      "\"required\":[\"document_id\"],\"additionalProperties\":false}";
-  static const char *upsert_text_schema =
-      "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},"
-      "\"uri\":{\"type\":\"string\"},"
-      "\"kind\":{\"type\":\"string\"},"
-      "\"title\":{\"type\":\"string\"},"
-      "\"metadata_json\":{\"type\":\"string\"},"
-      "\"text\":{\"type\":\"string\"},"
-      "\"chunk_target_bytes\":{\"type\":\"integer\",\"minimum\":0}},"
-      "\"required\":[\"id\",\"text\"],\"additionalProperties\":false}";
-  static const char *index_schema =
-      "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
-      "\"kind\":{\"type\":\"string\"},"
-      "\"chunk_target_bytes\":{\"type\":\"integer\",\"minimum\":0}},"
-      "\"required\":[\"path\"],\"additionalProperties\":false}";
-  static const char *index_directory_schema =
-      "{\"type\":\"object\",\"properties\":{\"root_dir\":{\"type\":\"string\"},"
-      "\"kind\":{\"type\":\"string\"},"
-      "\"include_extensions\":{\"type\":\"string\"},"
-      "\"chunk_target_bytes\":{\"type\":\"integer\",\"minimum\":0},"
-      "\"recursive\":{\"type\":\"boolean\"},"
-      "\"max_files\":{\"type\":\"integer\",\"minimum\":0},"
-      "\"max_file_bytes\":{\"type\":\"integer\",\"minimum\":0}},"
-      "\"required\":[\"root_dir\"],\"additionalProperties\":false}";
-  static const char *delete_document_schema =
-      "{\"type\":\"object\",\"properties\":{\"document_id\":{\"type\":\"string\"}},"
-      "\"required\":[\"document_id\"],\"additionalProperties\":false}";
-  turbo_action_tool_definition_t definition;
-
-  if (!registry || !store) {
-    return -1;
+int turbo_agent_knowledge_store_add_action_tools(turbo_action_tool_registry_t *registry,
+                                                turbo_agent_knowledge_store_t *store) {
+  if (!registry || !store) return -1;
+  for (size_t i = 0; i < sizeof(knowledge_actions) / sizeof(knowledge_actions[0]); ++i) {
+    turbo_action_tool_definition_t definition = knowledge_actions[i];
+    definition.user_data = store;
+    if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) return -1;
   }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.search";
-  definition.description = "Search the local SQLite FTS5 knowledge index.";
-  definition.parameters_json = search_schema;
-  definition.kind = TURBO_ACTION_OBSERVE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_search_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.build_context";
-  definition.description =
-      "Build merged local knowledge context text from the SQLite FTS5 index.";
-  definition.parameters_json = build_context_schema;
-  definition.kind = TURBO_ACTION_OBSERVE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_build_context_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.stats";
-  definition.description = "Inspect local SQLite FTS5 knowledge index statistics.";
-  definition.parameters_json = stats_schema;
-  definition.kind = TURBO_ACTION_OBSERVE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_stats_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.tool_graph";
-  definition.description = "Describe recommended dependencies between local knowledge tools.";
-  definition.parameters_json = tool_graph_schema;
-  definition.kind = TURBO_ACTION_OBSERVE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_tool_graph_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.list_documents";
-  definition.description = "List documents currently indexed in the knowledge store.";
-  definition.parameters_json = list_documents_schema;
-  definition.kind = TURBO_ACTION_OBSERVE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_list_documents_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.get_document";
-  definition.description = "Load one indexed document with its chunks.";
-  definition.parameters_json = get_document_schema;
-  definition.kind = TURBO_ACTION_OBSERVE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_get_document_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.upsert_text";
-  definition.description = "Index or replace one text document in the SQLite FTS5 knowledge index.";
-  definition.parameters_json = upsert_text_schema;
-  definition.kind = TURBO_ACTION_MUTATE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_upsert_text_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.index_file";
-  definition.description = "Index one local text file into the SQLite FTS5 knowledge index.";
-  definition.parameters_json = index_schema;
-  definition.kind = TURBO_ACTION_MUTATE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_index_file_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.index_directory";
-  definition.description =
-      "Index local text files under a directory into the SQLite FTS5 knowledge index.";
-  definition.parameters_json = index_directory_schema;
-  definition.kind = TURBO_ACTION_MUTATE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_index_directory_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
-  memset(&definition, 0, sizeof(definition));
-  definition.name = "agent.knowledge.delete_document";
-  definition.description = "Delete one document and its chunks from the knowledge index.";
-  definition.parameters_json = delete_document_schema;
-  definition.kind = TURBO_ACTION_MUTATE;
-  definition.idempotent = 1;
-  definition.handler = turbo_knowledge_delete_document_action_handler;
-  definition.user_data = store;
-  if (turbo_action_tool_registry_add(registry, &definition) != TURBO_ACTION_TOOL_OK) {
-    return -1;
-  }
-
   return 0;
 }

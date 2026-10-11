@@ -12,7 +12,7 @@ extern "C" {
  * Generic durable record navigation. Historical Agent-prefixed names are kept
  * for source compatibility; these operations have no Agent state dependency.
  * All JSON outputs are independent owned trees, released with json_free().
- * Output slots are cleared on entry. Return 0 on success, -1 on invalid input,
+ * Output slots are cleared on entry. Unless documented otherwise, return 0 on success, -1 on invalid input,
  * missing data, malformed records or storage failure. No record is modified.
  * The caller keeps runtime alive and serializes conflicting mutations during
  * multi-record queries; per-operation store locking is not a read transaction.
@@ -30,6 +30,19 @@ extern "C" {
 CXX_C_API int turbo_agent_runtime_get_thread(turbo_agent_runtime_t *runtime,
                                              const char *thread_id,
                                              json_value_t **out_thread_json);
+
+/** Read the last successfully published segment's independent run snapshot.
+ * Publication order, not timestamp or run id, defines the thread head. The
+ * caller serializes executions on a thread. The output is cleared on entry and
+ * owned by the caller (json_free). Returns SALTS_OK, SALTS_ENOENT if no head
+ * record exists (legacy data), SALTS_EBUSY if adoption began but no segment was
+ * published, SALTS_EPROTO for malformed data, or a storage/allocation error.
+ * A legacy custom callback returning -1 requires a successful empty filtered
+ * list to establish absence. Other storage errors never fall back to history.
+ * Example: get_published_thread_head(runtime, "thread-id", &run).
+ */
+CXX_C_API int turbo_agent_runtime_get_published_thread_head(
+    turbo_agent_runtime_t *runtime, const char *thread_id, json_value_t **out_run);
 
 /**
  * @brief Fetch one persisted run record as JSON.
@@ -138,8 +151,9 @@ CXX_C_API int turbo_agent_runtime_get_thread_state_json_value(
 /**
  * @brief Load one thread head state snapshot as a TurboParser JSON-native object.
  *
- * The runtime resolves the newest interrupted run first. When the thread has
- * no interrupted run, it falls back to the newest run by `updated_at`.
+ * New segments publish an explicit snapshot; that snapshot is the authority.
+ * Only threads without a head record use legacy selection: newest interrupted
+ * run first, otherwise newest run by `updated_at`. Empty or corrupt heads fail.
  *
  * @param runtime Runtime handle.
  * @param thread_id Thread id.
@@ -203,8 +217,10 @@ CXX_C_API int turbo_agent_runtime_load_history_events_json_value(
 /**
  * @brief Load durable canonical event history for the current thread lineage.
  *
- * The runtime resolves the thread's newest interrupted run first. If no
- * interrupted run exists, it falls back to the newest run by `updated_at`.
+ * Published heads load the checkpoint parent chain ending at the head's exact
+ * checkpoint, or an empty array when it has none. Unpublished checkpoints are
+ * excluded. Only older threads without a head retain legacy pending/latest
+ * selection and per-run checkpoint enumeration.
  *
  * @param runtime Runtime handle.
  * @param thread_id Thread id.
@@ -217,7 +233,8 @@ CXX_C_API int turbo_agent_runtime_load_thread_history_events_json_value(
 
 /** ID selection helpers return malloc-owned text (free), or NULL on -1.
  * latest uses updated_at; pending restricts status to interrupted. current/head
- * prefer pending, falling back to latest as the legacy API requires. */
+ * use the published snapshot, or prefer pending then latest for legacy threads
+ * without a head record. A failed head read never selects a historical run. */
 CXX_C_API int turbo_agent_runtime_latest_run_id_for_thread(
     turbo_agent_runtime_t *runtime, const char *thread_id, char **out_run_id);
 CXX_C_API int turbo_agent_runtime_pending_run_id_for_thread(

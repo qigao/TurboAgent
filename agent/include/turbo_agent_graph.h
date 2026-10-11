@@ -46,7 +46,14 @@ CXX_C_API int turbo_agent_plan_commit_node(turbo_graph_exec_ctx_t *ctx, void *us
  * @brief Graph node that prepares executor input for the current plan step.
  * @param ctx Graph execution context.
  * @param user_data Unused.
- * @return 0 on success, non-zero on error.
+ * @return 0 on success, non-zero on invalid plan/progress or allocation failure.
+ * The new executor substate owns plan_step_origin {schema_version:1,
+ * plan_version, step_index}, referencing root plan_versions[v].steps[s]. This
+ * provenance survives checkpoints; it is not a compiled DAG step or approval.
+ * Plan/progress version arrays must be aligned. On failure no model/tool is
+ * invoked; the caller must stop this graph attempt. No inputs are retained
+ * outside the state owner. Example: install a planner/engineering loop to use
+ * this node before executor model/tool dispatch.
  */
 CXX_C_API int turbo_agent_plan_step_prepare_node(turbo_graph_exec_ctx_t *ctx,
                                                         void *user_data);

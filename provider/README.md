@@ -33,6 +33,14 @@ Event emit callbacks receive borrowed events valid only for the callback; clone
 them before retaining them. SSE conversion preserves the existing aggregation
 and incremental delivery behavior.
 
+Responses message projection emits separate `function_call` and
+`function_call_output` items with matching `call_id` values. It preserves text,
+tool-call and result order, including parallel calls and canonical content
+blocks; argument objects become JSON strings. Chat-shaped `tool_calls` and
+`role=tool` messages are not valid substitutes for these Responses items.
+The lower-level request builder still accepts an explicit `previous_response_id`
+for hosts that own server-side conversation storage.
+
 The [module decision](../agent/docs/module-separation.md#provider-boundary)
 documents Agent projection, custom callback compatibility, and ownership tradeoffs.
 `test_turbo_provider`, prompt, embedding, and SSE tests link only this target.

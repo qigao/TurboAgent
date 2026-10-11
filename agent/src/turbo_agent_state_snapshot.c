@@ -97,6 +97,20 @@ CXX_C_API json_value_t *turbo_agent_state_ensure_versioned_substate(
   return turbo_agent_state_get_current_object_version(root_state, state_key);
 }
 
+CXX_C_API int turbo_agent_substate_copy_memory(json_value_t *substate, const json_value_t *parent) {
+  const json_value_t *memory = turbo_agent_state_memory_context(parent);
+  json_value_t *copy;
+  if (!substate || !parent) return -1;
+  if (!memory) return 0;
+  copy = json_clone(memory);
+  if (!copy) return -1;
+  if (turbo_runtime_json_object_set(substate, "memory_context", copy) != 0) {
+    json_free(copy);
+    return -1;
+  }
+  return 0;
+}
+
 CXX_C_API json_value_t *turbo_agent_substate_create(json_value_t *input, json_value_t *events) {
   json_value_t *substate;
 

@@ -7,8 +7,10 @@
 #include "turbo_agent_state_flow_domain_internal.h"
 #include "turbo_agent_tool_executor_internal.h"
 #include "turbo_agent_util_internal.h"
+#include "turbo_agent_workflow_graph_internal.h"
 
 #include "turbo_tool_registry.h"
+#include <fmt.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,7 +95,8 @@ static int turbo_agent_tool_calls_preflight(const turbo_tool_registry_t *registr
   return SALTS_OK;
 }
 
-int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+int turbo_agent_tool_node_scoped(turbo_graph_exec_ctx_t *ctx, void *user_data,
+                                 const char *scope) {
   turbo_agent_t *agent = (turbo_agent_t *)user_data;
   const json_value_t *tool_calls;
   turbo_agent_tool_execution_t *calls = NULL;
@@ -102,7 +105,7 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   json_value_t *outputs = NULL;
   size_t count;
   size_t index;
-  char turn_key[32];
+  tstr local_turn_key = NULL, scoped_turn_key = NULL;
   int guardrail_rejected = 0;
   int rc = -1;
 
@@ -118,11 +121,17 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     return -1;
   }
   turbo_agent_execution_context_get(&saved_context);
-  snprintf(turn_key, sizeof(turn_key), "%zu", turbo_agent_state_event_count(ctx->state) - 1);
+  if (!turbo_agent_state_event_count(ctx->state)) return -1;
+  local_turn_key = tstr_format("{}", turbo_agent_state_event_count(ctx->state) - 1);
+  if (scope && local_turn_key) scoped_turn_key = tstr_format("{}:{}", scope, local_turn_key);
+  if (!local_turn_key || (scope && !scoped_turn_key)) {
+    turbo_agent_state_set_model_error(ctx->state, "tool", "failed to allocate tool journal identity");
+    goto cleanup;
+  }
   calls = (turbo_agent_tool_execution_t *)calloc(count, sizeof(*calls));
   if (!calls) {
     turbo_agent_state_set_model_error(ctx->state, "tool", "failed to allocate tool batch");
-    return -1;
+    goto cleanup;
   }
   if (turbo_agent_tool_calls_preflight(agent->tool_registry, &agent->tool_policy, tool_calls, calls,
                                        count) != SALTS_OK) {
@@ -133,8 +142,10 @@ int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     turbo_agent_state_set_model_error(ctx->state, "tool", "tool registry is not configured");
     goto cleanup;
   }
-  for (index = 0; index < count; ++index)
-    calls[index].turn_key = turn_key;
+  for (index = 0; index < count; ++index) {
+    calls[index].turn_key = scope ? scoped_turn_key : local_turn_key;
+    calls[index].legacy_turn_key = scope ? local_turn_key : NULL;
+  }
 
   for (index = 0; index < count; ++index) {
     turbo_agent_execution_context_t tool_context = saved_context;
@@ -325,5 +336,10 @@ cleanup:
   turbo_runtime_json_destroy(event);
   turbo_runtime_json_destroy(outputs);
   turbo_agent_tool_executions_destroy(calls, count);
+  tstr_free(scoped_turn_key); tstr_free(local_turn_key);
   return rc;
+}
+
+int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+  return turbo_agent_tool_node_scoped(ctx, user_data, NULL);
 }

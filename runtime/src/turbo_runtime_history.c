@@ -1,4 +1,5 @@
 #include "turbo_runtime_history.h"
+#include <salts/error_codes.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -237,7 +238,17 @@ cleanup:
 
 int turbo_agent_runtime_current_run_id_for_thread(turbo_agent_runtime_t *runtime,
                                                          const char *thread_id, char **out_run_id) {
+  json_value_t *head = NULL;
+  int rc;
   if (out_run_id) *out_run_id = NULL;
+  if (!runtime || !thread_id || !out_run_id) return -1;
+  rc = turbo_agent_runtime_get_published_thread_head(runtime, thread_id, &head);
+  if (rc == SALTS_OK) {
+    *out_run_id = turbo_runtime_history_strdup(json_get_string(head, "id"));
+    json_free(head);
+    return *out_run_id ? 0 : -1;
+  }
+  if (rc != SALTS_ENOENT) return -1;
   if (turbo_agent_runtime_pending_run_id_for_thread(runtime, thread_id, out_run_id) == 0 &&
       out_run_id && *out_run_id) {
     return 0;
@@ -254,12 +265,21 @@ int turbo_agent_runtime_current_checkpoint_id_for_thread(turbo_agent_runtime_t *
                                                          char **out_checkpoint_id) {
   if (out_checkpoint_id) *out_checkpoint_id = NULL;
   char *run_id = NULL;
+  json_value_t *head = NULL;
   int rc;
 
   if (!runtime || !thread_id || !out_checkpoint_id) {
     return -1;
   }
   *out_checkpoint_id = NULL;
+  rc = turbo_agent_runtime_get_published_thread_head(runtime, thread_id, &head);
+  if (rc == SALTS_OK) {
+    const char *id = json_get_string(head, "latest_checkpoint_id");
+    if (id && id[0]) *out_checkpoint_id = turbo_runtime_history_strdup(id);
+    json_free(head);
+    return *out_checkpoint_id ? 0 : -1;
+  }
+  if (rc != SALTS_ENOENT) return -1;
   rc = turbo_agent_runtime_current_run_id_for_thread(runtime, thread_id, &run_id);
   if (rc != 0 || !run_id) {
     free(run_id);
@@ -467,11 +487,19 @@ CXX_C_API int turbo_agent_runtime_get_thread_head_state_json_value(turbo_agent_r
                                                                    json_value_t **out_state) {
   if (out_state) *out_state = NULL;
   char *run_id = NULL;
+  json_value_t *head = NULL;
   int rc;
 
   if (!runtime || !thread_id || !out_state) {
     return -1;
   }
+  rc = turbo_agent_runtime_get_published_thread_head(runtime, thread_id, &head);
+  if (rc == SALTS_OK) {
+    rc = turbo_runtime_history_state_from_run_record(runtime, head, out_state);
+    json_free(head);
+    return rc;
+  }
+  if (rc != SALTS_ENOENT) return -1;
   if (turbo_agent_runtime_thread_head_run_id_for_thread(runtime, thread_id, &run_id) != 0 ||
       !run_id) {
     return -1;
@@ -709,11 +737,26 @@ CXX_C_API int turbo_agent_runtime_load_thread_history_events_json_value(
     turbo_agent_runtime_t *runtime, const char *thread_id, json_value_t **out_events_json_value) {
   if (out_events_json_value) *out_events_json_value = NULL;
   char *run_id = NULL;
+  json_value_t *head = NULL;
   int rc;
 
   if (!runtime || !thread_id || !out_events_json_value) {
     return -1;
   }
+  rc = turbo_agent_runtime_get_published_thread_head(runtime, thread_id, &head);
+  if (rc == SALTS_OK) {
+    const char *checkpoint_id = json_get_string(head, "latest_checkpoint_id");
+    if (checkpoint_id) {
+      rc = turbo_agent_runtime_load_history_events_json_value(runtime, NULL, checkpoint_id,
+                                                              out_events_json_value);
+    } else {
+      *out_events_json_value = json_create_array();
+      rc = *out_events_json_value ? 0 : -1;
+    }
+    json_free(head);
+    return rc;
+  }
+  if (rc != SALTS_ENOENT) return -1;
   rc = turbo_agent_runtime_current_run_id_for_thread(runtime, thread_id, &run_id);
   if (rc != 0 || !run_id) {
     free(run_id);

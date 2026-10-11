@@ -75,7 +75,9 @@ CXX_C_API void turbo_runtime_segment_init(turbo_runtime_segment_t *segment);
  * Start from start_state, or resume/fork a caller-loaded start_checkpoint with
  * the supplied identity/lineage. Capture and forward events/checkpoints in their
  * original order. Persist interrupted/cancelled/timed-out checkpoints before the
- * run record, then construct the summary. Snapshot callback NULL means empty
+ * run record, then construct the summary and publish a thread-head run snapshot.
+ * A head adoption marker is written before execution of the first segment.
+ * Snapshot callback NULL means empty
  * control/workflow projections; full state is still stored in checkpoint_json.
  * Summary callback NULL returns generic identity/status/result fields, without
  * Agent commands or policy. Callbacks do not run on a background thread.
@@ -86,7 +88,11 @@ CXX_C_API void turbo_runtime_segment_init(turbo_runtime_segment_t *segment);
  * A graph ERROR may return owned diagnostic state with -1; other failures leave
  * outputs NULL. No rollback/transaction is implied: a later failure can leave a
  * thread, checkpoint or run record already written. A failed summary callback
- * occurs after run persistence. Existing graph callbacks keep their borrow rules.
+ * occurs after run persistence, before head publication. A failed publication
+ * leaves the previous head snapshot authoritative (or an empty adoption marker);
+ * this guarantee requires an atomic backend put, as provided by SQLite. The
+ * legacy file backend writes in place and cannot guarantee crash atomicity.
+ * Existing graph callbacks keep their borrow rules.
  *
  * Example: turbo_runtime_segment_init(&request), set runtime/graph/thread_id/
  * run_id/start_state, then
@@ -102,6 +108,10 @@ CXX_C_API int turbo_runtime_record_timestamp(char *buffer, size_t buffer_size);
  * IDs retain the legacy prefix/monotonic-tick/process-counter format. This is
  * not a globally coordinated ID allocator across processes or restarts. */
 CXX_C_API char *turbo_runtime_record_id(const char *prefix);
+/** Create a prefix_UUID-v4 ID for persistent records across process restarts.
+ * Returns a malloc/free string or NULL on invalid prefix, entropy/allocation
+ * failure. Prefix is borrowed. Existing IDs remain valid lookup keys. */
+CXX_C_API char *turbo_runtime_record_uuid(const char *prefix);
 /** Borrowed stable text corresponding to the persisted execution status. */
 CXX_C_API const char *turbo_runtime_execution_status_text(turbo_graph_exec_status_t status);
 /** Serialize a graph result to an owned JSON tree; 0/-1. */

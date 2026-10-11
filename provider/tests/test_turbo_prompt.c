@@ -307,6 +307,67 @@ spec("turbo prompt helpers") {
       turbo_runtime_json_destroy(messages);
     }
 
+    group("Responses tool history") {
+      static json_value_t *messages, *wire;
+      after_each() {
+        json_free(messages); messages = NULL;
+        json_free(wire); wire = NULL;
+      }
+
+      it("preserves parallel calls and their results as separate ordered input items") {
+        const char source[] = "[{\"role\":\"user\",\"content\":\"Read both files\"},"
+            "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":["
+            "{\"type\":\"function\",\"id\":\"a\",\"function\":{\"name\":\"fs_read\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}},"
+            "{\"type\":\"function\",\"id\":\"b\",\"function\":{\"name\":\"fs_read\",\"arguments\":{\"path\":\"b\"}}}]},"
+            "{\"role\":\"tool\",\"tool_call_id\":\"b\",\"content\":\"B\"},"
+            "{\"role\":\"tool\",\"tool_call_id\":\"a\",\"content\":\"A\"},"
+            "{\"role\":\"assistant\",\"content\":\"Done\"}]";
+        messages = json_parse(source, strlen(source)); check_not_null(messages);
+        wire = turbo_prompt_messages_to_openai_responses_json(messages); check_not_null(wire);
+        check_equal(json_array_size(wire), 6u);
+        check_equal(json_get_string(json_array_get(wire, 0), "content"), "Read both files");
+        for (size_t i = 1; i <= 2; ++i) {
+          const json_value_t *item = json_array_get(wire, i);
+          check_equal(json_get_string(item, "type"), "function_call");
+          check_equal(json_get_string(item, "name"), "fs_read");
+          check_null(json_object_get(item, "tool_calls"));
+          check_null(json_object_get(item, "role"));
+        }
+        check_equal(json_get_string(json_array_get(wire, 1), "call_id"), "a");
+        check_equal(json_get_string(json_array_get(wire, 1), "arguments"), "{\"path\":\"a\"}");
+        check_equal(json_get_string(json_array_get(wire, 2), "call_id"), "b");
+        check_equal(json_get_string(json_array_get(wire, 2), "arguments"), "{\"path\":\"b\"}");
+        check_equal(json_get_string(json_array_get(wire, 3), "type"), "function_call_output");
+        check_equal(json_get_string(json_array_get(wire, 3), "call_id"), "b");
+        check_equal(json_get_string(json_array_get(wire, 3), "output"), "B");
+        check_equal(json_get_string(json_array_get(wire, 4), "call_id"), "a");
+        check_equal(json_get_string(json_array_get(wire, 4), "output"), "A");
+        check_equal(json_get_string(json_array_get(wire, 5), "content"), "Done");
+        check_null(json_object_get(json_array_get(messages, 1), "type"));
+      }
+
+      it("converts text and tool content blocks without sending Chat content types") {
+        const char source[] = "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Checking\"},"
+            "{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"read\",\"input\":{}}]},"
+            "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"a\",\"content\":\"ok\"}]}]";
+        messages = json_parse(source, strlen(source)); check_not_null(messages);
+        wire = turbo_prompt_messages_to_openai_responses_json(messages); check_not_null(wire);
+        check_equal(json_array_size(wire), 3u);
+        check_equal(json_get_string(json_array_get(wire, 0), "content"), "Checking");
+        check_equal(json_get_string(json_array_get(wire, 1), "type"), "function_call");
+        check_equal(json_get_string(json_array_get(wire, 1), "arguments"), "{}");
+        check_equal(json_get_string(json_array_get(wire, 2), "type"), "function_call_output");
+        check_equal(json_get_string(json_array_get(wire, 2), "call_id"), "a");
+      }
+
+      it("rejects tool messages without a correlation id") {
+        const char source[] = "[{\"role\":\"tool\",\"content\":\"ok\"}]";
+        messages = json_parse(source, strlen(source)); check_not_null(messages);
+        wire = turbo_prompt_messages_to_openai_responses_json(messages);
+        check_null(wire);
+      }
+    }
+
     it("should convert canonical messages into anthropic json") {
       json_value_t *messages = turbo_prompt_messages_create_json_value();
       json_value_t *assistant = NULL;

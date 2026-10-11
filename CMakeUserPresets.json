@@ -325,6 +325,129 @@
                 "android-win-environment"
             ],
             "cacheVariables": {}
+        },
+        {
+            "name": "ci-windows-release",
+            "displayName": "CI / SDK Release (windows-x64)",
+            "inherits": [
+                "base-ci-release",
+                "vcpkg-cache-ci",
+                "ISWindows",
+                "Msvc",
+                "flags-msvc"
+            ],
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci-windows-release",
+                "VCPKG_TARGET_TRIPLET": "$penv{QIGAO_VCPKG_WINDOWS_TRIPLET}",
+                "VCPKG_HOST_TRIPLET": "$penv{QIGAO_VCPKG_WINDOWS_HOST_TRIPLET}",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/ci-windows-release/$penv{QIGAO_VCPKG_WINDOWS_TRIPLET}",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/windows-x64",
+                "ENABLE_PRAKTOR_TOOLS": false
+            },
+            "environment": {
+                "SALTS_ROOT": "$penv{SALTS_ROOT}",
+                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
+                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
+                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}",
+                "PATH": "${sourceDir}/build/ci-windows-release/bin${pathListSep}${sourceDir}/vcpkg_installed/ci-windows-release/$penv{QIGAO_VCPKG_WINDOWS_TRIPLET}/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$env{TURBOWASM_ROOT}/bin${pathListSep}$env{RE2C_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
+        },
+        {
+            "name": "ci-linux-release",
+            "displayName": "CI / SDK Release (linux-x64)",
+            "inherits": [
+                "base-ci-release",
+                "vcpkg-cache-ci",
+                "ISLinux",
+                "Gcc",
+                "flags-gnu"
+            ],
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci-linux-release",
+                "VCPKG_TARGET_TRIPLET": "x64-linux",
+                "VCPKG_HOST_TRIPLET": "x64-linux",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/ci-linux-release/x64-linux",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/linux-x64",
+                "ENABLE_PRAKTOR_TOOLS": true
+            },
+            "environment": {
+                "SALTS_ROOT": "$penv{SALTS_ROOT}",
+                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
+                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
+                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}",
+                "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
+                "PRAKTOR_ROOT": "$penv{PRAKTOR_ROOT}",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/ci-linux-release/bin:${sourceDir}/vcpkg_installed/ci-linux-release/x64-linux/lib:$env{SALTS_ROOT}/lib:$env{SALTS_ROOT}/bin:$env{SALTS_UTILS_ROOT}/lib:$env{SALTS_UTILS_ROOT}/bin:$env{CHTTP_ROOT}/lib:$env{CHTTP_ROOT}/bin:$env{TURBOWASM_ROOT}/lib:$env{TURBOWASM_ROOT}/bin:$env{TURBOSCRIPT_ROOT}/lib:$env{TURBOSCRIPT_ROOT}/bin:$env{PRAKTOR_ROOT}/lib:$env{PRAKTOR_ROOT}/bin:$penv{LD_LIBRARY_PATH}"
+            }
+        },
+        {
+            "name": "ci-macos-release",
+            "displayName": "CI / SDK Release (macos-arm64)",
+            "inherits": [
+                "base-ci-release",
+                "vcpkg-cache-ci",
+                "ISMac",
+                "AppleClang",
+                "flags-darwin"
+            ],
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci-macos-release",
+                "VCPKG_TARGET_TRIPLET": "arm64-osx",
+                "VCPKG_HOST_TRIPLET": "arm64-osx",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/ci-macos-release/arm64-osx",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/macos-arm64",
+                "ENABLE_PRAKTOR_TOOLS": true,
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "ENABLE_TESTS": false,
+                "BUILD_TESTS": false,
+                "BUILD_TESTING": false
+            },
+            "environment": {
+                "SALTS_ROOT": "$penv{SALTS_ROOT}",
+                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
+                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
+                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}",
+                "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
+                "PRAKTOR_ROOT": "$penv{PRAKTOR_ROOT}",
+                "DYLD_LIBRARY_PATH": "${sourceDir}/build/ci-macos-release/bin:${sourceDir}/vcpkg_installed/ci-macos-release/arm64-osx/lib:$env{SALTS_ROOT}/lib:$env{SALTS_ROOT}/bin:$env{SALTS_UTILS_ROOT}/lib:$env{SALTS_UTILS_ROOT}/bin:$env{CHTTP_ROOT}/lib:$env{CHTTP_ROOT}/bin:$env{TURBOWASM_ROOT}/lib:$env{TURBOWASM_ROOT}/bin:$env{TURBOSCRIPT_ROOT}/lib:$env{TURBOSCRIPT_ROOT}/bin:$env{PRAKTOR_ROOT}/lib:$env{PRAKTOR_ROOT}/bin:$penv{DYLD_LIBRARY_PATH}"
+            }
+        },
+        {
+            "name": "ci-android-release",
+            "displayName": "CI / SDK Release (android-arm64-v8a)",
+            "inherits": [
+                "base-ci-release",
+                "vcpkg-cache-ci",
+                "ISLinux",
+                "android-base"
+            ],
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci-android-release",
+                "VCPKG_TARGET_TRIPLET": "arm64-android",
+                "VCPKG_HOST_TRIPLET": "x64-linux",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/ci-android-release/arm64-android",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/android-arm64-v8a",
+                "ENABLE_PRAKTOR_TOOLS": true,
+                "ANDROID_ABI": "arm64-v8a",
+                "ANDROID_PLATFORM": "android-26",
+                "ENABLE_TESTS": false,
+                "BUILD_TESTS": false,
+                "BUILD_TESTING": false,
+                "ENABLE_CODEX_BRIDGE": false
+            },
+            "environment": {
+                "SALTS_ROOT": "$penv{SALTS_ROOT}",
+                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
+                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
+                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}",
+                "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
+                "PRAKTOR_ROOT": "$penv{PRAKTOR_ROOT}",
+                "ANDROID_NDK_HOME": "$penv{ANDROID_NDK_HOME}"
+            }
         }
     ],
     "buildPresets": [
@@ -427,6 +550,50 @@
             "targets": [
                 "install"
             ]
+        },
+        {
+            "name": "ci-windows-release",
+            "configurePreset": "ci-windows-release"
+        },
+        {
+            "name": "install-ci-windows-release",
+            "configurePreset": "ci-windows-release",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "ci-linux-release",
+            "configurePreset": "ci-linux-release"
+        },
+        {
+            "name": "install-ci-linux-release",
+            "configurePreset": "ci-linux-release",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "ci-macos-release",
+            "configurePreset": "ci-macos-release"
+        },
+        {
+            "name": "install-ci-macos-release",
+            "configurePreset": "ci-macos-release",
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "ci-android-release",
+            "configurePreset": "ci-android-release"
+        },
+        {
+            "name": "install-ci-android-release",
+            "configurePreset": "ci-android-release",
+            "targets": [
+                "install"
+            ]
         }
     ],
     "testPresets": [
@@ -449,6 +616,16 @@
             "name": "linux-release-user",
             "inherits": "base-test",
             "configurePreset": "linux-release-user"
+        },
+        {
+            "name": "ci-windows-release",
+            "inherits": "base-test",
+            "configurePreset": "ci-windows-release"
+        },
+        {
+            "name": "ci-linux-release",
+            "inherits": "base-test",
+            "configurePreset": "ci-linux-release"
         }
     ]
 }

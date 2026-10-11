@@ -11,6 +11,58 @@ TurboScript / Praktor 保持显式 `latest` 策略。缺失清单项或指定发
 TurboAgent 自身的第三方 C/C++ 依赖（sqlite）仍由项目的
 vcpkg manifest/toolchain 解析，也不写入 Native package 的版本依赖元数据。
 
+## CI 与发布构建入口
+
+仓库 CI 和 tag 发布共同调用
+[`native-sdk-build.yml`](../../.github/workflows/native-sdk-build.yml)，
+执行版本解析、四个平台的完整构建与安装，以及同一轮工件的 NuGet 打包。
+PR、main 和手动 CI 只生成工件；`native-sdk-release.yml` 仅在 `v*` tag push
+时发布包和 GitHub Release，写权限限定在 publish job。
+
+此前两条流程分别维护 CMake 参数、SDK restore 和安装检查，Windows 还绕过
+manifest。现在平台配置的事实源为
+[`CMakeUserPresets.json`](../../CMakeUserPresets.json)：
+
+| Configure / build preset | SDK | 正式测试 | 可选后端 |
+| --- | --- | --- | --- |
+| `ci-linux-release` | linux-x64 | CTest 全量 | Wasm、Praktor |
+| `ci-windows-release` | windows-x64 | CTest 全量 | Wasm |
+| `ci-macos-release` | macos-arm64 | 保持关闭 | Wasm、Praktor |
+| `ci-android-release` | android-arm64-v8a | 无设备 runner，关闭 | Wasm、Praktor；关闭 CodexBridge |
+
+每个 profile 都通过根 `vcpkg.json` 配置完整 build graph；安装使用
+`install-<preset>` build preset，产物进入 `build/sdk/<rid>`。Windows/Linux
+测试使用同名 test preset，真实模型测试保持显式 opt-in。
+macOS 延续原发布流程的 build/install 覆盖，不将它描述为测试通过。
+普通 CI 因此也覆盖 macOS 和 NuGet 打包；Linux 的 Praktor 配置覆盖完整 graph，
+Android 与发布配置统一启用 Wasm/Praktor，代价是 CI 构建量增加。
+
+SDK restore 脚本提供当前 profile 的 `SALTS_ROOT`、`SALTS_UTILS_ROOT`、
+`CHTTP_ROOT`、`TURBOWASM_ROOT`，启用 Praktor 时还提供 `TURBOSCRIPT_ROOT`、
+`PRAKTOR_ROOT`。第一方 package 从这些根精确查找；`CMAKE_PREFIX_PATH` 只含
+该 profile 的 vcpkg 前缀。Android 沿用同一发布包中的 Linux host IDLC 和 Salts
+runtime，宿主路径由 `TURBOAGENT_HOST_IDLC`、`TURBOAGENT_HOST_SALTS_ROOT`
+传入，NDK 通过外层 vcpkg toolchain chainload。
+
+共享 cache setup 提供工具链、只读远端缓存和可写本地缓存；Windows CI 的
+target/host triplet 从其 `QIGAO_VCPKG_WINDOWS_TRIPLET` 和
+`QIGAO_VCPKG_WINDOWS_HOST_TRIPLET` 接收，路径也由 preset 从 triplet 派生。
+本地复现 CI preset 时需显式提供这些父环境、SDK 根和 `RE2C_ROOT`，Windows
+先进入匹配的 `VsDevCmd.bat`。开发机仍可使用原来的 `win-release-user` 等入口。
+
+保留既有独立工作流会继续产生配置漂移；只抽取参数仍会重复维护构建和打包
+顺序，因此选择共享 workflow 与 presets。行为验证归正式 CTest，移除临时
+consumer 工程和 CMake 导出文本断言。迁移不改变 SDK 格式；回滚此构建编排
+提交即可恢复先前流程，Agent 重构单独提交。本地和远端的验证范围分别记录，
+本地通过不代表所有 runner 已通过。
+
+本轮本地验证：`ci-windows-release` configure、全量 build、同名 CTest 和
+`install-ci-windows-release` 均通过；95 项离线测试通过，1 项 live 默认跳过
+（10.99 秒）。使用本机 MSVC 与 `x64-windows` target/host triplet、清单选定
+SDK；未执行托管 runner 的 `qigao-x64-windows-v145` 配置。
+三个 workflow 的 `actionlint` 通过。Linux、macOS、Android、远端 Actions、
+完整四平台 NuGet 打包与真实模型调用尚未在本轮执行。
+
 ## SDK platforms
 
 - `sdk/linux-x64`
@@ -36,7 +88,7 @@ Praktor 当前不发布 Windows SDK，因此：
 - `SALTS_UTILS_ROOT`
 - `CHTTP_ROOT`
 - `TURBOWASM_ROOT`
-- Linux/macOS/Android 如需 PraktorTools，再设置 `PRAKTOR_ROOT` 和可发现的 TurboScript SDK
+- Linux/macOS/Android 如需 PraktorTools，再设置 `PRAKTOR_ROOT`、`TURBOSCRIPT_ROOT`
 
 第一方根目录只在对应 user preset 的环境中定义，不能用旧的 `-D*_ROOT` cache 参数
 覆盖。`CMAKE_PREFIX_PATH` 只用于当前 vcpkg profile；缺少根目录时不能退回系统 SDK。

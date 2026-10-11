@@ -1,0 +1,256 @@
+name: Build and package TurboAgent native SDKs
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: TurboAgent project version
+        value: ${{ jobs.metadata.outputs.version }}
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      package_version: ${{ steps.version.outputs.package_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          text = Path("CMakeLists.txt").read_text(encoding="utf-8")
+          match = re.search(r"project\(\s*TurboAgent\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", text, re.S)
+          if not match:
+              raise SystemExit("TurboAgent project version not found")
+          version = match.group(1)
+          manifest = json.loads(Path("vcpkg.json").read_text(encoding="utf-8"))
+          if manifest.get("version-semver") != version:
+              raise SystemExit("vcpkg.json version does not match CMake project version")
+          print(version)
+          PY
+          )"
+          test -n "$version"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+            package_version="$version"
+          else
+            package_version="$version-ci.$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: metadata
+    name: ${{ matrix.rid }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            runner: ubuntu-24.04
+            preset: ci-linux-release
+            praktor: 1
+            tests: true
+          - rid: windows-x64
+            runner: windows-2025
+            preset: ci-windows-release
+            praktor: 0
+            tests: true
+          - rid: macos-arm64
+            runner: macos-15
+            preset: ci-macos-release
+            praktor: 1
+            tests: false
+          - rid: android-arm64-v8a
+            runner: ubuntu-24.04
+            preset: ci-android-release
+            praktor: 1
+            tests: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
+      - name: Prepare Linux toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm
+
+      - name: Prepare macOS toolchain
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install ninja nasm
+
+      - name: Locate MSVC toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
+            throw "MSVC x64 toolchain is required"
+          }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          # The setup actions expose Windows-native paths; presets consume CMake paths.
+          foreach ($name in @('VCPKG_ROOT', 'VCPKG_CACHE_REPOSITORY_ROOT', 'RE2C_ROOT')) {
+            $path = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($path)) { throw "$name is required" }
+            "$name=$($path.Replace('\', '/'))" >> $env:GITHUB_ENV
+          }
+
+      - name: Restore native SDKs on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SDK_RID: ${{ matrix.rid }}
+          WITH_PRAKTOR: ${{ matrix.praktor }}
+        run: bash cmake/ci/restore-native-sdk.sh "$SDK_RID" "$WITH_PRAKTOR" 1
+
+      - name: Restore native SDKs on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64 -WithWasm
+
+      - name: Configure on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: cmake --preset "$SDK_PRESET"
+
+      - name: Configure on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --preset ci-windows-release
+
+      - name: Build on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: cmake --build --preset "$SDK_PRESET"
+
+      - name: Build on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset ci-windows-release
+
+      - name: Test on Unix
+        if: runner.os != 'Windows' && matrix.tests
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: ctest --preset "$SDK_PRESET"
+
+      - name: Test on Windows
+        if: runner.os == 'Windows' && matrix.tests
+        shell: cmd
+        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release
+
+      - name: Install on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: cmake --build --preset "install-$SDK_PRESET"
+
+      - name: Install on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset install-ci-windows-release
+
+      - name: Record SDK provenance
+        shell: bash
+        env:
+          SDK_RID: ${{ matrix.rid }}
+          WITH_PRAKTOR: ${{ matrix.praktor }}
+          SDK_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          praktor=off
+          if [[ "$WITH_PRAKTOR" == 1 ]]; then praktor=on; fi
+          printf 'version=%s\ncommit=%s\nrid=%s\npraktor_tools=%s\n' \
+            "$SDK_VERSION" "$GITHUB_SHA" "$SDK_RID" "$praktor" \
+            > "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-sdk-${{ matrix.rid }}
+          path: build/sdk
+          if-no-files-found: error
+          compression-level: 9
+
+  pack:
+    name: Pack TurboAgent.Native
+    needs: [metadata, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: turboagent-sdk-*
+          path: package/sdk
+          merge-multiple: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Configure GitHub Packages source
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/nuget.config"
+          printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text --configfile "$config"
+          echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
+
+      - name: Create NuGet package
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          dotnet restore packaging/nuget/TurboAgent.Native.csproj \
+            --configfile "$NUGET_CONFIG" --packages "$RUNNER_TEMP/pack-nuget"
+          dotnet pack packaging/nuget/TurboAgent.Native.csproj \
+            --no-restore --configuration Release --output dist \
+            -p:PackageVersion="$PACKAGE_VERSION" \
+            -p:PackageRoot="$GITHUB_WORKSPACE/package" \
+            -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: dist/*.nupkg
+          if-no-files-found: error

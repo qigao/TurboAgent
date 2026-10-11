@@ -5,6 +5,10 @@ rid="${1:?usage: restore-native-sdk.sh <rid> <with-praktor:0|1> [with-wasm:0|1]}
 with_praktor="${2:-0}"
 with_wasm="${3:-0}"
 versions="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/native-sdk-versions.json"
+if [[ "$with_praktor" != "0" && "$with_praktor" != "1" ]]; then
+  echo "with-praktor must be 0 or 1" >&2
+  exit 2
+fi
 if [[ "$with_wasm" != "0" && "$with_wasm" != "1" ]]; then
   echo "with-wasm must be 0 or 1" >&2
   exit 2
@@ -34,8 +38,7 @@ restore_sdk() {
   unzip -q "$nupkg" -d "$dir/package"
   local root="$dir/package/sdk/$rid"
   test -f "$root/$config_rel"
-  printf '%s
-' "$root"
+  printf '%s\n' "$root"
 }
 
 salts_root="$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake')"

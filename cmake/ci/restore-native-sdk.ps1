@@ -5,7 +5,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $versions = Get-Content -LiteralPath (Join-Path $PSScriptRoot "native-sdk-versions.json") -Raw | ConvertFrom-Json
-$sdkRoot = Join-Path $env:RUNNER_TEMP "turboagent-release-sdks"
+if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { throw "RUNNER_TEMP is required" }
+$sdkRoot = [System.IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP "turboagent-release-sdks"))
 New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null
 
 function Restore-Sdk(
@@ -23,8 +24,11 @@ function Restore-Sdk(
     }
   }
 
-  $dir = Join-Path $sdkRoot $Name
-  if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+  $dir = [System.IO.Path]::GetFullPath((Join-Path $sdkRoot $Name))
+  if ([System.IO.Path]::GetDirectoryName($dir) -ne $sdkRoot) {
+    throw "SDK restore directory must be directly inside $sdkRoot"
+  }
+  if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
   $download = Join-Path $dir "download"
   $package = Join-Path $dir "package"
   New-Item -ItemType Directory -Force -Path $download, $package | Out-Null
@@ -46,7 +50,8 @@ function Restore-Sdk(
   if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
     throw "missing restored SDK config: $config"
   }
-  return $root
+  # These roots feed CMake presets and must use CMake path separators.
+  return $root.Replace('\', '/')
 }
 
 $saltsRoot = Restore-Sdk "qigao/salts" "Salts.Native.*.nupkg" "salts" "lib\cmake\Salts\SaltsConfig.cmake"

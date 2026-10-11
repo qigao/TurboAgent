@@ -32,6 +32,28 @@
                 "dev-linux-ninja",
                 "pkg-vcpkg"
             ]
+        },
+        {
+            "name": "base-ci-release",
+            "hidden": true,
+            "inherits": [
+                "release-mode",
+                "pkg-vcpkg"
+            ],
+            "generator": "Ninja",
+            "cacheVariables": {
+                "ENABLE_TESTS": true,
+                "BUILD_TESTS": true,
+                "BUILD_TESTING": true,
+                "BUILD_EXAMPLES": false,
+                "BUILD_BENCHMARKS": false,
+                "ENABLE_SANITIZER_ADDRESS": false,
+                "ENABLE_ASAN": false,
+                "ENABLE_WASM_TOOLS": true,
+                "ENABLE_CODING_TOOLS": true,
+                "ENABLE_MCP_TOOLS": true,
+                "ENABLE_CODEX_BRIDGE": true
+            }
         }
     ]
 }

@@ -30,7 +30,12 @@ if(BUILD_TESTS AND ENABLE_CODING_TOOLS)
   target_compile_definitions(test_turbo_cli_storage PRIVATE
     CLI_STORAGE_FIXTURE="$<TARGET_FILE:cli_storage_fixture>")
   add_dependencies(test_turbo_cli_storage cli_storage_fixture)
-  set_tests_properties(test_turbo_cli_storage PROPERTIES TIMEOUT 30)
+  # This is one multi-case, process-spawning SQLite/CLI acceptance test, not
+  # a single cheap unit case. Windows 2025 exhausted the old 30s CTest cap
+  # after 17 independently passing cases, before the remaining journal tests
+  # could finish. Retain every case and fail on an actual 120s timeout; do not
+  # suppress, skip, or automatically retry failed tests.
+  set_tests_properties(test_turbo_cli_storage PROPERTIES TIMEOUT 120)
   target_include_directories(test_turbo_cli_diagnostics PRIVATE "${PROJECT_SOURCE_DIR}/agent/tests")
   target_include_directories(test_turbo_cli_vector PRIVATE "${PROJECT_SOURCE_DIR}/agent/tests")
   target_link_libraries(test_turbo_cli_vector PRIVATE CHttp::Server unofficial::sqlite3::sqlite3)

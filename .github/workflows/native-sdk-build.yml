@@ -177,6 +177,15 @@ jobs:
           SDK_PRESET: ${{ matrix.preset }}
         run: ctest --preset "$SDK_PRESET"
 
+      - name: Stress queued compiled Harness borrow/cancel (Linux)
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: |
+          set -euo pipefail
+          ctest --preset "$SDK_PRESET" -R '^test_turbo_agent_harness_compiled$' --repeat until-fail:25 --output-on-failure
+
       - name: Stress Provider DSO terminal/unload (Unix)
         if: matrix.rid == 'linux-x64' || matrix.rid == 'macos-arm64'
         shell: bash
@@ -188,6 +197,15 @@ jobs:
         if: runner.os == 'Windows' && matrix.tests
         shell: cmd
         run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release
+
+      - name: Stress queued compiled Harness borrow/cancel (Windows)
+        if: matrix.rid == 'windows-x64'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          ctest --preset ci-windows-release -R "^test_turbo_agent_harness_compiled$" --repeat until-fail:25 --output-on-failure
+          if errorlevel 1 exit /b 1
 
       - name: Stress Provider DSO terminal/unload (Windows)
         if: matrix.rid == 'windows-x64'

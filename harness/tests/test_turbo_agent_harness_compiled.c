@@ -23,6 +23,7 @@ typedef struct compiled_inspect_probe_s {
   int block_callback;
   atomic_int entered;
   atomic_int release_callback;
+  atomic_int external_owner_releases; /* test-only source callback owner */
 } compiled_inspect_probe_t;
 
 static int compiled_harness_transport(const char *request, char **response, void *user) {
@@ -58,9 +59,10 @@ static int compiled_inspect_handler(const json_value_t *arguments,
   return 0;
 }
 
-static turbo_tool_status_t register_compiled_inspect(
+static turbo_tool_status_t register_compiled_inspect_with_owner(
     turbo_tool_registry_t *registry, compiled_inspect_probe_t *probe,
-    turbo_tool_effect_flags_t effects, int strict_result) {
+    turbo_tool_effect_flags_t effects, int strict_result,
+    turbo_tool_user_data_free_fn owner_release) {
   const char *required[] = {"runtime_tools"};
   turbo_tool_definition_v6_t definition = {0};
   definition.struct_size = sizeof(definition);
@@ -72,6 +74,7 @@ static turbo_tool_status_t register_compiled_inspect(
       "\"required\":[\"value\"],\"additionalProperties\":false}";
   definition.definition.json_value_handler = compiled_inspect_handler;
   definition.definition.user_data = probe;
+  definition.definition.user_data_free = owner_release;
   definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
   definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
   definition.required_capabilities = required;
@@ -82,6 +85,44 @@ static turbo_tool_status_t register_compiled_inspect(
   definition.strict_result = strict_result;
   definition.effect_flags = effects;
   return turbo_tool_registry_add_v6(registry, &definition);
+}
+
+static turbo_tool_status_t register_compiled_inspect(
+    turbo_tool_registry_t *registry, compiled_inspect_probe_t *probe,
+    turbo_tool_effect_flags_t effects, int strict_result) {
+  return register_compiled_inspect_with_owner(
+      registry, probe, effects, strict_result, NULL);
+}
+
+/* Simulate release of a source-owned callback/Provider binding. The projected
+ * executable plan borrows user_data and must NEVER invoke this callback as
+ * its own destructor. Exactly the source Registry's final destruction does. */
+static void compiled_external_owner_release(void *user_data) {
+  compiled_inspect_probe_t *probe = (compiled_inspect_probe_t *)user_data;
+  if (probe) {
+    atomic_fetch_add_explicit(&probe->external_owner_releases, 1,
+                              memory_order_acq_rel);
+  }
+}
+
+typedef struct compiled_queue_gate_s {
+  atomic_int entered;
+  atomic_int open;
+} compiled_queue_gate_t;
+
+static void compiled_queue_gate_worker(void *user_data) {
+  compiled_queue_gate_t *gate = (compiled_queue_gate_t *)user_data;
+  atomic_store_explicit(&gate->entered, 1, memory_order_release);
+  while (!atomic_load_explicit(&gate->open, memory_order_acquire))
+    cmeta_thread_yield();
+}
+
+static void compiled_queue_wait_entered(compiled_queue_gate_t *gate) {
+  const uint64_t deadline = cmeta_monotonic_ms() + UINT64_C(10000);
+  while (!atomic_load_explicit(&gate->entered, memory_order_acquire) &&
+         cmeta_monotonic_ms() < deadline)
+    cmeta_thread_yield();
+  check_true(atomic_load_explicit(&gate->entered, memory_order_acquire));
 }
 
 static turbo_agent_harness_t *make_compiled_harness_with_store(
@@ -925,6 +966,135 @@ spec("Harness bounded asynchronous compiled Inspect") {
     check_equal(probe.calls, 0);
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+}
+
+/* These tests prove only the required HOST-held callback-owner drain barrier.
+ * They deliberately never destroy a source Registry while a queued or active
+ * borrowed tool callback can still run, and they don't forge Plugin Leases. */
+spec("Harness async compiled source callback lifetime #115") {
+  it("holds a borrowed callback through worker queue and caller Harness release") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    compiled_queue_gate_t gate;
+    turbo_agent_compiler_config_t config;
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_harness_execution_t *execution = NULL;
+    turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_FAILED;
+    json_value_t *summary = NULL, *state = NULL;
+
+    atomic_init(&probe.external_owner_releases, 0);
+    atomic_init(&gate.entered, 0);
+    atomic_init(&gate.open, 0);
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(cmeta_threadpool_try_submit(
+        pool, compiled_queue_gate_worker, &gate), SALTS_OK);
+    compiled_queue_wait_entered(&gate);
+    check_equal(register_compiled_inspect_with_owner(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1,
+        compiled_external_owner_release), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, turbo_agent_runtime_store_memory_create(), "async-borrow-queued");
+    check_not_null(harness);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_source,
+        strlen(compiled_inspect_source), "borrow_one",
+        NULL, 0, NULL, &execution), SALTS_OK);
+    check_not_null(execution);
+    check_equal(turbo_agent_harness_execution_get_status(execution, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_QUEUED);
+    check_equal(probe.calls, 0);
+    check_equal(atomic_load_explicit(
+        &probe.external_owner_releases, memory_order_acquire), 0);
+
+    /* Execution retains App/Session/Graph/plan. External source Registry and
+     * callback code/data are still explicitly owned by this Host test. */
+    turbo_agent_harness_release(harness);
+    atomic_store_explicit(&gate.open, 1, memory_order_release);
+    check_equal(turbo_agent_harness_execution_wait(execution, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_get_status(execution, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_COMPLETED);
+    check_equal(turbo_agent_harness_execution_take_result(
+        execution, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "completed");
+    check_true(json_get_bool(json_object_get(state, "compiled_result"), "ok", false));
+    check_equal(probe.calls, 1);
+    check_equal(atomic_load_explicit(
+        &probe.external_owner_releases, memory_order_acquire), 0);
+    json_free(summary);
+    json_free(state);
+    turbo_agent_harness_execution_release(execution);
+    check_equal(atomic_load_explicit(
+        &probe.external_owner_releases, memory_order_acquire), 0);
+
+    /* Only the Host's final source Registry destroy owns this callback release.
+     * The intervening plan projection must not double free borrowed userdata. */
+    turbo_tool_registry_destroy(registry);
+    check_equal(atomic_load_explicit(
+        &probe.external_owner_releases, memory_order_acquire), 1);
+    cmeta_threadpool_wait(pool);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("cancels a queued plan without invoking its borrowed provider callback") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    compiled_queue_gate_t gate;
+    turbo_agent_compiler_config_t config;
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_harness_execution_t *execution = NULL;
+    turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_FAILED;
+
+    atomic_init(&probe.external_owner_releases, 0);
+    atomic_init(&gate.entered, 0);
+    atomic_init(&gate.open, 0);
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(cmeta_threadpool_try_submit(
+        pool, compiled_queue_gate_worker, &gate), SALTS_OK);
+    compiled_queue_wait_entered(&gate);
+    check_equal(register_compiled_inspect_with_owner(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1,
+        compiled_external_owner_release), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, turbo_agent_runtime_store_memory_create(), "async-borrow-cancel");
+    check_not_null(harness);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_source,
+        strlen(compiled_inspect_source), "borrow_cancel",
+        NULL, 0, NULL, &execution), SALTS_OK);
+    check_not_null(execution);
+    check_equal(turbo_agent_harness_execution_get_status(execution, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_QUEUED);
+    check_equal(turbo_agent_harness_execution_cancel(
+        execution, TURBO_CANCEL_USER), SALTS_OK);
+    turbo_agent_harness_release(harness);
+    atomic_store_explicit(&gate.open, 1, memory_order_release);
+    check_equal(turbo_agent_harness_execution_wait(execution, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_get_status(execution, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_CANCELLED);
+    check_equal(probe.calls, 0);
+    check_equal(atomic_load_explicit(
+        &probe.external_owner_releases, memory_order_acquire), 0);
+    turbo_agent_harness_execution_release(execution);
+    turbo_tool_registry_destroy(registry);
+    check_equal(atomic_load_explicit(
+        &probe.external_owner_releases, memory_order_acquire), 1);
+    cmeta_threadpool_wait(pool);
     cmeta_threadpool_destroy(pool);
   }
 }

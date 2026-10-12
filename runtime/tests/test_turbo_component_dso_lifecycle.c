@@ -11,6 +11,7 @@
 #include <salts/thread.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef PRAKTOR_DSO_N_PATH
@@ -122,6 +123,10 @@ typedef struct provider_dso_terminal_race {
   cmeta_plugin_ref ref;
   atomic_int initial_busy_ready;
   atomic_int release_gate;
+  atomic_int drain_first_observed;
+  atomic_int release_completed;
+  /* 0 = competing, 1 = forced drain-first, 2 = forced release-first. */
+  int schedule;
   salts_component_plugin_status initial_drain;
   cmeta_plugin_status initial_unload;
   salts_component_plugin_status scope_release;
@@ -149,9 +154,30 @@ static void provider_dso_terminal_drainer(void *arg) {
     atomic_store_explicit(&race->timed_out, 1, memory_order_release);
     return;
   }
-  /* Race the last scope release. BUSY is expected until the count reaches
-   * zero; OK can occur only after Salts has settled the generation. */
+  /* The release-first schedule waits for a completed final release before
+   * the first drain attempt. The drain-first schedule forces one BUSY
+   * observation before allowing release; otherwise the calls truly race. */
+  if (race->schedule == 2) {
+    while (!atomic_load_explicit(&race->release_completed,
+                                 memory_order_acquire) &&
+           cmeta_monotonic_ms() < stop)
+      cmeta_thread_yield();
+    if (!atomic_load_explicit(&race->release_completed,
+                              memory_order_acquire)) {
+      atomic_store_explicit(&race->timed_out, 1, memory_order_release);
+      return;
+    }
+  }
   race->final_drain = SALTS_COMPONENT_PLUGIN_BUSY;
+  if (race->schedule == 1) {
+    race->final_drain = salts_component_plugin_generation_drain(
+        race->runtime, race->generation);
+    if (race->final_drain == SALTS_COMPONENT_PLUGIN_BUSY)
+      ++race->busy_polls;
+    atomic_store_explicit(&race->drain_first_observed, 1,
+                          memory_order_release);
+    if (race->final_drain != SALTS_COMPONENT_PLUGIN_BUSY) return;
+  }
   while (cmeta_monotonic_ms() < stop) {
     race->final_drain = salts_component_plugin_generation_drain(
         race->runtime, race->generation);
@@ -181,7 +207,19 @@ static void provider_dso_terminal_releaser(void *arg) {
     atomic_store_explicit(&race->timed_out, 1, memory_order_release);
     return;
   }
+  if (race->schedule == 1) {
+    while (!atomic_load_explicit(&race->drain_first_observed,
+                                 memory_order_acquire) &&
+           cmeta_monotonic_ms() < stop)
+      cmeta_thread_yield();
+    if (!atomic_load_explicit(&race->drain_first_observed,
+                              memory_order_acquire)) {
+      atomic_store_explicit(&race->timed_out, 1, memory_order_release);
+      return;
+    }
+  }
   race->scope_release = salts_component_plugin_scope_release(race->scope);
+  atomic_store_explicit(&race->release_completed, 1, memory_order_release);
 }
 
 static void provider_dso_control_init(
@@ -406,7 +444,16 @@ spec("cross-platform real Provider DSO close, drain, unload") {
     race.ref = ref;
     atomic_init(&race.initial_busy_ready, 0);
     atomic_init(&race.release_gate, 0);
+    atomic_init(&race.drain_first_observed, 0);
+    atomic_init(&race.release_completed, 0);
     atomic_init(&race.timed_out, 0);
+    {
+      const char *order = getenv("TURBO_DSO_RACE_ORDER");
+      race.schedule = !order || !order[0] ? 0 :
+          strcmp(order, "drain-first") == 0 ? 1 :
+          strcmp(order, "release-first") == 0 ? 2 : -1;
+      check_true(race.schedule >= 0);
+    }
     check_equal(cmeta_thread_create(
         &drainer, provider_dso_terminal_drainer, &race), SALTS_OK);
     while (!atomic_load_explicit(&race.initial_busy_ready,
@@ -435,6 +482,14 @@ spec("cross-platform real Provider DSO close, drain, unload") {
     check_equal(cmeta_thread_join(&drainer), SALTS_OK);
     check_equal(atomic_load_explicit(&race.timed_out, memory_order_acquire), 0);
     check_equal(race.scope_release, SALTS_COMPONENT_PLUGIN_OK);
+    check_true(atomic_load_explicit(&race.release_completed,
+                                     memory_order_acquire));
+    if (race.schedule == 1) {
+      check_true(atomic_load_explicit(&race.drain_first_observed,
+                                      memory_order_acquire));
+      check_true(race.busy_polls > 0);
+    }
+    if (race.schedule == 2) check_equal(race.busy_polls, 0);
     check_equal(race.final_drain, SALTS_COMPONENT_PLUGIN_OK);
     check_equal(race.poll_result, CMETA_PLUGIN_OK);
     check_true(race.quiescent);

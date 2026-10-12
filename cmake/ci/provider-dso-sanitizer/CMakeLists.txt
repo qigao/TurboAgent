@@ -123,8 +123,17 @@ set_target_properties(
   test_turbo_component_dso_sanitized
   provider_dso_instrumented_n provider_dso_instrumented_n1
   PROPERTIES BUILD_RPATH "${SALTS_ROOT}/lib;${SALTS_ROOT}/bin")
-add_test(NAME provider_dso_full_source_sanitizer
-  COMMAND test_turbo_component_dso_sanitized)
-set_tests_properties(provider_dso_full_source_sanitizer PROPERTIES
-  TIMEOUT 120
-  ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")
+# Keep the ordinary simultaneous race, and explicitly enumerate both
+# happens-before orders. These are independently reportable CTest cases.
+foreach(_schedule IN ITEMS "competing" "drain_first" "release_first")
+  set(_test_name "provider_dso_full_source_sanitizer_${_schedule}")
+  add_test(NAME "${_test_name}" COMMAND test_turbo_component_dso_sanitized)
+  set(_test_environment "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")
+  if(_schedule STREQUAL "drain_first")
+    list(APPEND _test_environment "TURBO_DSO_RACE_ORDER=drain-first")
+  elseif(_schedule STREQUAL "release_first")
+    list(APPEND _test_environment "TURBO_DSO_RACE_ORDER=release-first")
+  endif()
+  set_tests_properties("${_test_name}" PROPERTIES
+    TIMEOUT 120 ENVIRONMENT "${_test_environment}")
+endforeach()

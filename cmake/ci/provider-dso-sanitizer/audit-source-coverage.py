@@ -40,6 +40,7 @@ expected = [
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_destroy_barrier.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_partial_destroy.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_repeated_close_failures.c",
+    agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_reinit_lifetime.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_generation_drain_close_failure.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_multigeneration_isolated_drain.c",
     agent / "praktor_tools/tests/praktor_dso_provider.c",
@@ -72,6 +73,7 @@ libs = [
     build / "test_provider_registry_destroy_barrier",
     build / "test_provider_registry_partial_destroy",
     build / "test_provider_registry_repeated_close_failures",
+    build / "test_provider_registry_reinit_lifetime",
     build / "test_provider_generation_drain_close_failure",
     build / "test_provider_multigeneration_isolated_drain",
 ]
@@ -336,5 +338,35 @@ for endpoint in ("cmeta_plugin_registry_destroy", "cmeta_plugin_registry_load",
                      repeated_symbols):
         raise SystemExit(f"FAIL: repeated close image lacks {endpoint}")
     print(f"REPEATED CLOSE SOURCE DEFINED: {endpoint}")
+
+
+# Re-initialization conformance must use the original first-party Salts
+# Registry implementation and genuine POSIX close across BOTH Registry
+# incarnations, not an uninstrumented SDK or a mock loader.
+reinit_map = build / "provider_registry_reinit_lifetime.map"
+if not reinit_map.is_file():
+    raise SystemExit("FAIL: Registry re-init test linker map missing")
+reinit_data = reinit_map.read_text(encoding="utf-8", errors="replace")
+for member in ("plugin_registry.c.o", "plugin_posix.c.o", "close_fault_hook.c.o"):
+    if not re.search(
+        r"libprovider_dso_firstparty_runtime\.a\(" + re.escape(member) + r"\)",
+        reinit_data,
+    ):
+        raise SystemExit(f"FAIL: re-init image lacks first-party instrumented {member}")
+    print(f"REGISTRY REINIT SOURCE LINKED: {member}")
+reinit_symbols = subprocess.run(
+    ["nm", "--defined-only", str(build / "test_provider_registry_reinit_lifetime")],
+    capture_output=True, text=True, check=True,
+).stdout
+for name in ("cmeta_plugin_registry_init",
+             "cmeta_plugin_registry_destroy",
+             "cmeta_plugin_registry_release_real",
+             "cmeta_plugin_platform_close",
+             "cmeta_plugin_platform_close_real",
+             "provider_close_fault_arm_sequence"):
+    if not re.search(r"(?m)^\S+\s+[TW]\s+" + name + r"$",
+                     reinit_symbols):
+        raise SystemExit(f"FAIL: Registry re-init executable lacks {name}")
+    print(f"REGISTRY REINIT SOURCE DEFINED: {name}")
 
 print(f"PASS: {kind} first-party objects, Sanitizer symbols, extracted-archive audit")

@@ -37,6 +37,7 @@ expected = [
     salts / "platform/src/clock.c",
     agent / "runtime/tests/test_turbo_component_dso_lifecycle.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_dso_close_failure.c",
+    agent / "cmake/ci/provider-dso-sanitizer/test_provider_generation_drain_close_failure.c",
     agent / "praktor_tools/tests/praktor_dso_provider.c",
     agent / "praktor_tools/tests/praktor_dso_managed_provider.c",
 ]
@@ -46,7 +47,7 @@ for source in expected:
         row for row in commands
         if pathlib.Path(row["file"]).resolve() == source
     ]
-    minimum = 2 if source.name == "praktor_dso_provider.c" else 1
+    minimum = 3 if source.name == "praktor_dso_provider.c" else 1
     if len(matching) != minimum:
         raise SystemExit(f"FAIL: {source} has {len(matching)} objects, expected {minimum}")
     for row in matching:
@@ -60,8 +61,10 @@ libs = [
     build / "libprovider_dso_instrumented_n.so",
     build / "libprovider_dso_instrumented_n1.so",
     build / "libprovider_dso_instrumented_managed.so",
+    build / "libprovider_dso_instrumented_managed_component.so",
     build / "test_turbo_component_dso_sanitized",
     build / "test_provider_dso_close_failure",
+    build / "test_provider_generation_drain_close_failure",
 ]
 symbol = "__tsan_" if kind == "thread" else "__asan_"
 for library in libs:
@@ -122,6 +125,7 @@ archive = subprocess.run(
 ).stdout
 for function in [
     "cmeta_plugin_registry_unload",
+    "cmeta_plugin_registry_release_real",
     "salts_component_plugin_generation_drain",
     "salts_component_plugin_scope_release",
     "cmeta_mutex_lock",
@@ -165,5 +169,41 @@ for entry in (
     if not re.search(r"(?m)^\S+\s+[TW]\s+" + entry + r"$", close_symbols):
         raise SystemExit(f"FAIL: missing source-owned loader endpoint {entry}")
     print(f"FAULT-CLOSE DEFINED: {entry}")
+
+
+# Integrated source-owned Generation drain failure must call a test shim,
+# then the genuine Registry lease-release function; the Managed Component
+# Provider DSO must also contain sanitizer instrumentation.
+integrated_map = build / "provider_generation_drain_close_failure.map"
+if not integrated_map.is_file():
+    raise SystemExit("FAIL: no integrated drain+close linker map")
+integrated_map_text = integrated_map.read_text(
+    encoding="utf-8", errors="replace"
+)
+for member in ("plugin_registry.c.o", "component_plugin.c.o",
+               "plugin_posix.c.o", "close_fault_hook.c.o"):
+    if not re.search(
+        r"libprovider_dso_firstparty_runtime\.a\(" + re.escape(member) + r"\)",
+        integrated_map_text,
+    ):
+        raise SystemExit(f"FAIL: integrated image lacks instrumented {member}")
+    print(f"INTEGRATED SOURCE LINKED: {member}")
+integrated_symbols = subprocess.run(
+    ["nm", "--defined-only",
+     str(build / "test_provider_generation_drain_close_failure")],
+    capture_output=True, text=True, check=True,
+).stdout
+for endpoint in (
+    "cmeta_plugin_registry_release",
+    "cmeta_plugin_registry_release_real",
+    "provider_release_fault_arm",
+    "salts_component_plugin_generation_drain",
+    "cmeta_plugin_platform_close",
+    "cmeta_plugin_platform_close_real",
+):
+    if not re.search(r"(?m)^\S+\s+[TW]\s+" + endpoint + r"$",
+                     integrated_symbols):
+        raise SystemExit(f"FAIL: integrated image missing {endpoint}")
+    print(f"INTEGRATED SOURCE DEFINED: {endpoint}")
 
 print(f"PASS: {kind} first-party objects, Sanitizer symbols, extracted-archive audit")

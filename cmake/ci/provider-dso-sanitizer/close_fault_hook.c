@@ -49,3 +49,41 @@ cmeta_plugin_status cmeta_plugin_platform_close(
     atomic_fetch_add_explicit(&successes, 1, memory_order_relaxed);
   return status;
 }
+
+/* Test-only failure of the Registry's lease-release entrypoint. A failed
+ * release does not mutate the caller's authoritative lease. The actual pinned
+ * Salts implementation handles all successful calls, including recovery. */
+static atomic_int release_pending;
+static atomic_int release_injected;
+static atomic_int release_native_attempts;
+
+cmeta_plugin_status cmeta_plugin_registry_release_real(
+    cmeta_plugin_registry *registry, cmeta_plugin_lease *lease);
+
+void provider_release_fault_arm(int failures) {
+  atomic_store_explicit(&release_pending, failures, memory_order_release);
+}
+
+int provider_release_fault_injected(void) {
+  return atomic_load_explicit(&release_injected, memory_order_acquire);
+}
+
+int provider_release_fault_native_attempts(void) {
+  return atomic_load_explicit(&release_native_attempts, memory_order_acquire);
+}
+
+cmeta_plugin_status cmeta_plugin_registry_release(
+    cmeta_plugin_registry *registry, cmeta_plugin_lease *lease) {
+  int count = atomic_load_explicit(&release_pending, memory_order_acquire);
+  while (count > 0) {
+    if (atomic_compare_exchange_weak_explicit(
+            &release_pending, &count, count - 1,
+            memory_order_acq_rel, memory_order_acquire)) {
+      atomic_fetch_add_explicit(&release_injected, 1, memory_order_relaxed);
+      return CMETA_PLUGIN_BUSY;
+    }
+  }
+  atomic_fetch_add_explicit(
+      &release_native_attempts, 1, memory_order_relaxed);
+  return cmeta_plugin_registry_release_real(registry, lease);
+}

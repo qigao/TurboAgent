@@ -74,6 +74,8 @@ find_path(SIMDE_INCLUDE_DIR simde/x86/sse2.h REQUIRED)
 # failing wrapper. Ordinary Salts build targets are never altered.
 set_source_files_properties("${_salts}/plugin/src/plugin_posix.c" PROPERTIES
   COMPILE_DEFINITIONS "cmeta_plugin_platform_close=cmeta_plugin_platform_close_real")
+set_source_files_properties("${_salts}/plugin/src/plugin_registry.c" PROPERTIES
+  COMPILE_DEFINITIONS "cmeta_plugin_registry_release=cmeta_plugin_registry_release_real")
 add_library(provider_dso_firstparty_runtime STATIC ${_runtime_sources})
 target_include_directories(provider_dso_firstparty_runtime PUBLIC
   "${_salts}/plugin/include"
@@ -98,6 +100,15 @@ add_library(provider_dso_instrumented_n1 SHARED
   "${_fixture_dir}/praktor_dso_provider.c")
 add_library(provider_dso_instrumented_managed SHARED
   "${_fixture_dir}/praktor_dso_managed_provider.c")
+add_library(provider_dso_instrumented_managed_component SHARED
+  "${_fixture_dir}/praktor_dso_provider.c")
+target_compile_definitions(provider_dso_instrumented_managed_component PRIVATE
+  PRAKTOR_DSO_MANAGED_LIFECYCLE=1 PRAKTOR_DSO_EPOCH=43
+  "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.sanitizer.provider.M43\"")
+target_include_directories(provider_dso_instrumented_managed_component PRIVATE
+  "${_fixture_dir}")
+target_link_libraries(provider_dso_instrumented_managed_component PRIVATE
+  Salts::ComponentPluginABI Salts::PluginABI)
 target_include_directories(provider_dso_instrumented_managed PRIVATE
   "${_fixture_dir}")
 target_link_libraries(provider_dso_instrumented_managed PRIVATE
@@ -146,13 +157,32 @@ target_link_options(test_provider_dso_close_failure PRIVATE
 add_dependencies(test_provider_dso_close_failure
   provider_dso_instrumented_managed)
 
+# Integrated test holds a real Managed Component Provider's Generation lease
+# across one injected Registry release failure and later one injected
+# native close failure, ultimately invoking the genuine POSIX loader.
+add_executable(test_provider_generation_drain_close_failure
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_provider_generation_drain_close_failure.c")
+target_include_directories(test_provider_generation_drain_close_failure PRIVATE
+  "${_fixture_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(test_provider_generation_drain_close_failure PRIVATE
+  "PRAKTOR_DSO_MANAGED_COMPONENT_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component>\"")
+target_link_libraries(test_provider_generation_drain_close_failure PRIVATE
+  provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
+  Threads::Threads ${CMAKE_DL_LIBS})
+target_link_options(test_provider_generation_drain_close_failure PRIVATE
+  "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/provider_generation_drain_close_failure.map")
+add_dependencies(test_provider_generation_drain_close_failure
+  provider_dso_instrumented_managed_component)
+
 foreach(target IN ITEMS
     provider_dso_firstparty_runtime
     provider_dso_instrumented_n
     provider_dso_instrumented_n1
     provider_dso_instrumented_managed
+    provider_dso_instrumented_managed_component
     test_turbo_component_dso_sanitized
-    test_provider_dso_close_failure)
+    test_provider_dso_close_failure
+    test_provider_generation_drain_close_failure)
   target_compile_options(${target} PRIVATE
     ${_sanitizer_flags} -fno-omit-frame-pointer -g -O1)
   target_link_options(${target} PRIVATE ${_sanitizer_flags})
@@ -163,8 +193,9 @@ endforeach()
 set(CMAKE_BUILD_RPATH "${SALTS_ROOT}/lib;${SALTS_ROOT}/bin")
 set_target_properties(
   test_turbo_component_dso_sanitized test_provider_dso_close_failure
+  test_provider_generation_drain_close_failure
   provider_dso_instrumented_n provider_dso_instrumented_n1
-  provider_dso_instrumented_managed
+  provider_dso_instrumented_managed provider_dso_instrumented_managed_component
   PROPERTIES BUILD_RPATH "${SALTS_ROOT}/lib;${SALTS_ROOT}/bin")
 # Keep the ordinary simultaneous race, and explicitly enumerate both
 # happens-before orders. These are independently reportable CTest cases.
@@ -186,5 +217,11 @@ endforeach()
 add_test(NAME provider_dso_close_failure_recovery
   COMMAND test_provider_dso_close_failure)
 set_tests_properties(provider_dso_close_failure_recovery PROPERTIES
+  TIMEOUT 120
+  ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")
+
+add_test(NAME provider_generation_drain_and_close_failure
+  COMMAND test_provider_generation_drain_close_failure)
+set_tests_properties(provider_generation_drain_and_close_failure PROPERTIES
   TIMEOUT 120
   ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")

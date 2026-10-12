@@ -1,6 +1,33 @@
 #include "praktor_dso_fixture.h"
 #include <salts/plugin_decl.h>
 
+#ifdef PRAKTOR_DSO_MANAGED_LIFECYCLE
+#include "praktor_dso_managed_probe.h"
+static praktor_dso_managed_probe fixture_managed = {0};
+static cmeta_plugin_status CMETA_PLUGIN_CALL managed_start(void *self) {
+  return self == &fixture_managed ? CMETA_PLUGIN_OK : CMETA_PLUGIN_INVALID_ARGUMENT;
+}
+static cmeta_plugin_status CMETA_PLUGIN_CALL managed_stop(void *self) {
+  if (self != &fixture_managed) return CMETA_PLUGIN_INVALID_ARGUMENT;
+  fixture_managed.stopped = 1;
+  return CMETA_PLUGIN_OK;
+}
+static bool CMETA_PLUGIN_CALL managed_quiet(const void *self) {
+  return self == &fixture_managed && fixture_managed.stopped == 1;
+}
+static void CMETA_PLUGIN_CALL managed_destroy(void *self) {
+  if (self != &fixture_managed) return;
+  if (fixture_managed.host_destroy_count)
+    atomic_fetch_add_explicit(
+        fixture_managed.host_destroy_count, 1, memory_order_acq_rel);
+}
+#define PRAKTOR_DSO_LIFECYCLE \
+  CMETA_PLUGIN_LIFECYCLE( \
+    &fixture_managed, managed_start, managed_stop, managed_quiet, managed_destroy)
+#else
+#define PRAKTOR_DSO_LIFECYCLE CMETA_PLUGIN_PASSIVE()
+#endif
+
 #ifndef PRAKTOR_DSO_EPOCH
 #error "PRAKTOR_DSO_EPOCH must name the independently built Provider DSO"
 #endif
@@ -111,4 +138,4 @@ CMETA_PLUGIN_DECLARE(
     PRAKTOR_DSO_PLUGIN_ID,
     (1,0,0),
     PRAKTOR_DSO_EXPORTS,
-    CMETA_PLUGIN_PASSIVE());
+    PRAKTOR_DSO_LIFECYCLE);

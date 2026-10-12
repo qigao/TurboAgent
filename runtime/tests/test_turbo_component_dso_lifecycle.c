@@ -129,7 +129,7 @@ typedef struct provider_dso_terminal_race {
   cmeta_plugin_status poll_result;
   cmeta_plugin_status final_unload;
   int busy_polls;
-  int timed_out;
+  atomic_int timed_out;
   bool quiescent;
 } provider_dso_terminal_race;
 
@@ -146,7 +146,7 @@ static void provider_dso_terminal_drainer(void *arg) {
          cmeta_monotonic_ms() < stop)
     cmeta_thread_yield();
   if (!atomic_load_explicit(&race->release_gate, memory_order_acquire)) {
-    race->timed_out = 1;
+    atomic_store_explicit(&race->timed_out, 1, memory_order_release);
     return;
   }
   /* Race the last scope release. BUSY is expected until the count reaches
@@ -160,7 +160,7 @@ static void provider_dso_terminal_drainer(void *arg) {
     cmeta_thread_yield();
   }
   if (race->final_drain == SALTS_COMPONENT_PLUGIN_BUSY) {
-    race->timed_out = 1;
+    atomic_store_explicit(&race->timed_out, 1, memory_order_release);
     return;
   }
   if (race->final_drain != SALTS_COMPONENT_PLUGIN_OK) return;
@@ -178,7 +178,7 @@ static void provider_dso_terminal_releaser(void *arg) {
          cmeta_monotonic_ms() < stop)
     cmeta_thread_yield();
   if (!atomic_load_explicit(&race->release_gate, memory_order_acquire)) {
-    race->timed_out = 1;
+    atomic_store_explicit(&race->timed_out, 1, memory_order_release);
     return;
   }
   race->scope_release = salts_component_plugin_scope_release(race->scope);
@@ -406,6 +406,7 @@ spec("cross-platform real Provider DSO close, drain, unload") {
     race.ref = ref;
     atomic_init(&race.initial_busy_ready, 0);
     atomic_init(&race.release_gate, 0);
+    atomic_init(&race.timed_out, 0);
     check_equal(cmeta_thread_create(
         &drainer, provider_dso_terminal_drainer, &race), SALTS_OK);
     while (!atomic_load_explicit(&race.initial_busy_ready,
@@ -432,7 +433,7 @@ spec("cross-platform real Provider DSO close, drain, unload") {
     atomic_store_explicit(&race.release_gate, 1, memory_order_release);
     check_equal(cmeta_thread_join(&releaser), SALTS_OK);
     check_equal(cmeta_thread_join(&drainer), SALTS_OK);
-    check_equal(race.timed_out, 0);
+    check_equal(atomic_load_explicit(&race.timed_out, memory_order_acquire), 0);
     check_equal(race.scope_release, SALTS_COMPONENT_PLUGIN_OK);
     check_equal(race.final_drain, SALTS_COMPONENT_PLUGIN_OK);
     check_equal(race.poll_result, CMETA_PLUGIN_OK);

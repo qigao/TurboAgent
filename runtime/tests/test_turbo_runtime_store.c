@@ -115,6 +115,73 @@ done:
   json_free(record);
 }
 
+typedef struct store_claim_worker_s {
+  turbo_agent_runtime_t *runtime;
+  atomic_int *go;
+  int result;
+} store_claim_worker_t;
+
+static void store_claim_worker(void *arg) {
+  store_claim_worker_t *worker = (store_claim_worker_t *)arg;
+  json_value_t *record = json_create_object();
+  worker->result = SALTS_ENOMEM;
+  if (!record) return;
+  while (!atomic_load_explicit(worker->go, memory_order_acquire))
+    cmeta_thread_yield();
+  worker->result = turbo_agent_runtime_store_put_json_if_absent(
+      worker->runtime, "claims", "shared-identity", record);
+  json_free(record);
+}
+
+spec("Atomic per-Runtime claim-if-absent") {
+  it("admits exactly one of eight simultaneous claims") {
+    enum { CLAIMERS = 8 };
+    turbo_agent_runtime_store_t backend = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&backend);
+    store_claim_worker_t workers[CLAIMERS] = {0};
+    cmeta_thread_t threads[CLAIMERS] = {0};
+    json_value_t *stored = NULL;
+    atomic_int go;
+    int succeeded = 0, conflicts = 0;
+    atomic_init(&go, 0);
+    check_not_null(runtime);
+    for (int i = 0; i < CLAIMERS; ++i) {
+      workers[i].runtime = runtime;
+      workers[i].go = &go;
+      check_equal(cmeta_thread_create(&threads[i], store_claim_worker, &workers[i]),
+                  SALTS_OK);
+    }
+    atomic_store_explicit(&go, 1, memory_order_release);
+    for (int i = 0; i < CLAIMERS; ++i) {
+      check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+      if (workers[i].result == SALTS_OK) ++succeeded;
+      if (workers[i].result == SALTS_EALREADY) ++conflicts;
+    }
+    check_equal(succeeded, 1);
+    check_equal(conflicts, CLAIMERS - 1);
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "claims", "shared-identity", &stored), SALTS_OK);
+    check_not_null(stored);
+    json_free(stored);
+    turbo_agent_runtime_destroy(runtime);
+  }
+
+  it("preserves unknown backend read failure and never substitutes a write") {
+    store_test_probe_t probe = {0};
+    turbo_agent_runtime_store_t backend = store_test_callbacks(&probe);
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&backend);
+    json_value_t *record = json_create_object();
+    check_not_null(runtime);
+    check_not_null(record);
+    probe.get_result = SALTS_EIO;
+    check_equal(turbo_agent_runtime_store_put_json_if_absent(
+        runtime, "claims", "one", record), SALTS_EIO);
+    check_equal(atomic_load(&probe.calls), 1);
+    json_free(record);
+    turbo_agent_runtime_destroy(runtime);
+  }
+}
+
 spec("File store enumeration failure") {
   static char *directory;
   static tstr path;

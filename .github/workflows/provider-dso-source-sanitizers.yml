@@ -120,5 +120,5 @@ jobs:
         run: |
           set -euo pipefail
           ctest --test-dir "build/provider-dso-sanitizer/$KIND" \
-            -R '^provider_dso_full_source_sanitizer_(competing|drain_first|release_first)$' \
+            -R '^provider_dso_(full_source_sanitizer_(competing|drain_first|release_first)|close_failure_recovery)$' \
             --repeat until-fail:10 --output-on-failure

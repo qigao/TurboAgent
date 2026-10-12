@@ -53,6 +53,7 @@ set(_runtime_sources
   "${_salts}/plugin/src/plugin.c"
   "${_salts}/plugin/src/plugin_registry.c"
   "${_salts}/plugin/src/plugin_posix.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/close_fault_hook.c"
   "${_salts}/component-plugin/src/component_plugin.c"
   "${_salts}/component-plugin/src/component_plugin_runtime.c"
   "${_salts}/component/src/component.c"
@@ -68,6 +69,11 @@ endforeach()
 # released vstr.c source rather than the uninstrumented Core entrypoint.
 # SIMDe is an external header-only dependency, version pinned in CI.
 find_path(SIMDE_INCLUDE_DIR simde/x86/sse2.h REQUIRED)
+# Test-only interposition: preserve the exact pinned POSIX loader source,
+# rename only its close symbol, and route Registry unload through a controlled
+# failing wrapper. Ordinary Salts build targets are never altered.
+set_source_files_properties("${_salts}/plugin/src/plugin_posix.c" PROPERTIES
+  COMPILE_DEFINITIONS "cmeta_plugin_platform_close=cmeta_plugin_platform_close_real")
 add_library(provider_dso_firstparty_runtime STATIC ${_runtime_sources})
 target_include_directories(provider_dso_firstparty_runtime PUBLIC
   "${_salts}/plugin/include"
@@ -78,6 +84,8 @@ target_include_directories(provider_dso_firstparty_runtime PUBLIC
   "${_salts}/utils/include"
   "${SIMDE_INCLUDE_DIR}"
   "${SALTS_ROOT}/include")
+target_include_directories(provider_dso_firstparty_runtime PRIVATE
+  "${_salts}/plugin/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(provider_dso_firstparty_runtime PRIVATE
   _DEFAULT_SOURCE=1 _POSIX_C_SOURCE=200809L _XOPEN_SOURCE=700)
 target_link_libraries(provider_dso_firstparty_runtime PUBLIC
@@ -88,6 +96,12 @@ add_library(provider_dso_instrumented_n SHARED
   "${_fixture_dir}/praktor_dso_provider.c")
 add_library(provider_dso_instrumented_n1 SHARED
   "${_fixture_dir}/praktor_dso_provider.c")
+add_library(provider_dso_instrumented_managed SHARED
+  "${_fixture_dir}/praktor_dso_managed_provider.c")
+target_include_directories(provider_dso_instrumented_managed PRIVATE
+  "${_fixture_dir}")
+target_link_libraries(provider_dso_instrumented_managed PRIVATE
+  Salts::PluginABI)
 foreach(fixture IN ITEMS provider_dso_instrumented_n provider_dso_instrumented_n1)
   target_include_directories(${fixture} PRIVATE "${_fixture_dir}")
   target_link_libraries(${fixture} PRIVATE
@@ -115,11 +129,30 @@ target_link_options(test_turbo_component_dso_sanitized PRIVATE
 add_dependencies(test_turbo_component_dso_sanitized
   provider_dso_instrumented_n provider_dso_instrumented_n1)
 
+# A managed Provider DSO exposes a test-only host counter for destroy().
+# The fault injector is linked into the exact source-built Plugin Registry,
+# and the final successful close still delegates to the real Salts dlclose.
+add_executable(test_provider_dso_close_failure
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_provider_dso_close_failure.c")
+target_include_directories(test_provider_dso_close_failure PRIVATE
+  "${_fixture_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(test_provider_dso_close_failure PRIVATE
+  "PRAKTOR_DSO_MANAGED_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed>\"")
+target_link_libraries(test_provider_dso_close_failure PRIVATE
+  provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
+  Threads::Threads ${CMAKE_DL_LIBS})
+target_link_options(test_provider_dso_close_failure PRIVATE
+  "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/provider_dso_close_failure.map")
+add_dependencies(test_provider_dso_close_failure
+  provider_dso_instrumented_managed)
+
 foreach(target IN ITEMS
     provider_dso_firstparty_runtime
     provider_dso_instrumented_n
     provider_dso_instrumented_n1
-    test_turbo_component_dso_sanitized)
+    provider_dso_instrumented_managed
+    test_turbo_component_dso_sanitized
+    test_provider_dso_close_failure)
   target_compile_options(${target} PRIVATE
     ${_sanitizer_flags} -fno-omit-frame-pointer -g -O1)
   target_link_options(${target} PRIVATE ${_sanitizer_flags})
@@ -129,8 +162,9 @@ endforeach()
 # source-coverage claim. Use the release SDK's exact headers and ELF libs.
 set(CMAKE_BUILD_RPATH "${SALTS_ROOT}/lib;${SALTS_ROOT}/bin")
 set_target_properties(
-  test_turbo_component_dso_sanitized
+  test_turbo_component_dso_sanitized test_provider_dso_close_failure
   provider_dso_instrumented_n provider_dso_instrumented_n1
+  provider_dso_instrumented_managed
   PROPERTIES BUILD_RPATH "${SALTS_ROOT}/lib;${SALTS_ROOT}/bin")
 # Keep the ordinary simultaneous race, and explicitly enumerate both
 # happens-before orders. These are independently reportable CTest cases.
@@ -146,3 +180,11 @@ foreach(_schedule IN ITEMS "competing" "drain_first" "release_first")
   set_tests_properties("${_test_name}" PROPERTIES
     TIMEOUT 120 ENVIRONMENT "${_test_environment}")
 endforeach()
+
+# Explicit deterministic platform close failure: two refused closes followed
+# by one real dlclose, and a host counter verifying destroy() exactly once.
+add_test(NAME provider_dso_close_failure_recovery
+  COMMAND test_provider_dso_close_failure)
+set_tests_properties(provider_dso_close_failure_recovery PROPERTIES
+  TIMEOUT 120
+  ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")

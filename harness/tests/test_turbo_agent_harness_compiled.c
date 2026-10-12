@@ -339,7 +339,7 @@ spec("Harness durable compiled Inspect attempt") {
     check_equal(run_durable_inspect(harness, compiled_inspect_bad_args, "bad_plan",
         &replayed, &tool_status, &result, &certificate), SALTS_EPROTO);
     check_equal(turbo_agent_runtime_store_get_json_status(
-        runtime, "compiled_inspect_attempts", "compiled-test-thread:bad_plan",
+        runtime, "compiled_inspect_attempts", "020_compiled-test-thread_bad_plan",
         &record), SALTS_ENOENT);
     check_equal(probe.calls, 1);
 

@@ -363,7 +363,7 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
     const turbo_agent_compiler_config_t *compiler_config,
     const char *source_json, size_t source_json_size,
     const turbo_tool_execution_context_t *context,
-    const char *attempt_id, int *out_replayed,
+    const char *attempt_id, int *out_replayed, int gate_held,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,
@@ -403,8 +403,10 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
     return SALTS_EINVAL;
   }
 
-  rc = turbo_agent_harness_begin_submit(harness);
-  if (rc != SALTS_OK) return rc;
+  if (!gate_held) {
+    rc = turbo_agent_harness_begin_submit(harness);
+    if (rc != SALTS_OK) return rc;
+  }
 
   registry = turbo_agent_app_tool_registry(harness->app);
   if (!registry) {
@@ -592,7 +594,7 @@ done:
   turbo_runtime_json_destroy(result);
   turbo_runtime_json_destroy(certificate);
   turbo_agent_executable_plan_destroy(plan);
-  turbo_agent_harness_end_failed_submit(harness);
+  if (!gate_held) turbo_agent_harness_end_failed_submit(harness);
   return rc;
 }
 
@@ -607,7 +609,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     json_value_t **out_certificate) {
   return turbo_agent_harness_execute_compiled_inspect_impl(
       harness, compiler_config, source_json, source_json_size, context,
-      NULL, NULL, out_diagnostic, out_tool_status, out_result, out_certificate);
+      NULL, NULL, 0, out_diagnostic, out_tool_status, out_result, out_certificate);
 }
 
 int turbo_agent_harness_execute_compiled_inspect_durable_json(
@@ -623,7 +625,7 @@ int turbo_agent_harness_execute_compiled_inspect_durable_json(
   if (!attempt_id) return SALTS_EINVAL;
   return turbo_agent_harness_execute_compiled_inspect_impl(
       harness, compiler_config, source_json, source_json_size, context,
-      attempt_id, out_replayed, out_diagnostic, out_tool_status,
+      attempt_id, out_replayed, 0, out_diagnostic, out_tool_status,
       out_result, out_certificate);
 }
 

@@ -8,4 +8,9 @@ int provider_close_fault_injected(void);
 int provider_close_fault_native_attempts(void);
 int provider_close_fault_native_successes(void);
 
+/* Fail exactly the next N Plugin Lease releases without consuming a lease. */
+void provider_release_fault_arm(int failures);
+int provider_release_fault_injected(void);
+int provider_release_fault_native_attempts(void);
+
 #endif

@@ -364,6 +364,7 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
     const char *source_json, size_t source_json_size,
     const turbo_tool_execution_context_t *context,
     const char *attempt_id, int *out_replayed, int gate_held,
+    const char *expected_plan_hash,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,
@@ -423,6 +424,17 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
     goto done;
   }
 
+  if (expected_plan_hash) {
+    char actual_hash[17];
+    snprintf(actual_hash, sizeof(actual_hash), "%016llx",
+             (unsigned long long)turbo_agent_executable_plan_hash(plan));
+    if (strcmp(actual_hash, expected_plan_hash) != 0) {
+      rc = turbo_agent_harness_compiled_reject(
+          out_diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
+          "compiled Graph checkpoint plan identity changed");
+      goto done;
+    }
+  }
   approved = turbo_agent_executable_plan_approved_tools(plan);
   name = turbo_agent_executable_plan_tool_name(plan);
   if (!approved || !name ||
@@ -609,7 +621,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     json_value_t **out_certificate) {
   return turbo_agent_harness_execute_compiled_inspect_impl(
       harness, compiler_config, source_json, source_json_size, context,
-      NULL, NULL, 0, out_diagnostic, out_tool_status, out_result, out_certificate);
+      NULL, NULL, 0, NULL, out_diagnostic, out_tool_status, out_result, out_certificate);
 }
 
 int turbo_agent_harness_execute_compiled_inspect_durable_json(
@@ -625,7 +637,7 @@ int turbo_agent_harness_execute_compiled_inspect_durable_json(
   if (!attempt_id) return SALTS_EINVAL;
   return turbo_agent_harness_execute_compiled_inspect_impl(
       harness, compiler_config, source_json, source_json_size, context,
-      attempt_id, out_replayed, 0, out_diagnostic, out_tool_status,
+      attempt_id, out_replayed, 0, NULL, out_diagnostic, out_tool_status,
       out_result, out_certificate);
 }
 

@@ -67,5 +67,62 @@ class PackageValidationTest(unittest.TestCase):
             validator.validate(self.path, SHA, VERSION)
 
 
+    def test_wrong_version(self):
+        name = "sdk/linux-x64/turboagent-sdk-manifest.txt"
+        self.make_zip(override={name: (
+            f"version=9.9.9\\ncommit={SHA}\\nrid=linux-x64\\npraktor_tools=on\\n"
+        ).encode()})
+        with self.assertRaisesRegex(ValueError, "version mismatch"):
+            validator.validate(self.path, SHA, VERSION)
+
+    def test_wrong_manifest_rid(self):
+        name = "sdk/windows-x64/turboagent-sdk-manifest.txt"
+        self.make_zip(override={name: (
+            f"version=1.3.0\\ncommit={SHA}\\nrid=linux-x64\\npraktor_tools=off\\n"
+        ).encode()})
+        with self.assertRaisesRegex(ValueError, "RID mismatch"):
+            validator.validate(self.path, SHA, VERSION)
+
+    def test_missing_public_headers(self):
+        self.make_zip(omit={"sdk/linux-x64/include/turbo_agent_api.h"})
+        with self.assertRaisesRegex(ValueError, "missing public include"):
+            validator.validate(self.path, SHA, VERSION)
+
+    def test_missing_native_libraries(self):
+        self.make_zip(omit={"sdk/windows-x64/lib/libturboagent.a"})
+        with self.assertRaisesRegex(ValueError, "missing native libraries"):
+            validator.validate(self.path, SHA, VERSION)
+
+    def test_extra_unexpected_platform(self):
+        self.make_zip()
+        with zipfile.ZipFile(self.path, "a") as archive:
+            archive.writestr("sdk/unsupported-rid/lib/unexpected.a", b"not-empty")
+        with self.assertRaisesRegex(ValueError, "unexpected platform SDK trees"):
+            validator.validate(self.path, SHA, VERSION)
+
+    def test_unsafe_archive_traversal(self):
+        self.make_zip()
+        with zipfile.ZipFile(self.path, "a") as archive:
+            archive.writestr("sdk/../escape.cmake", b"malicious")
+        with self.assertRaisesRegex(ValueError, "unsafe archive path"):
+            validator.validate(self.path, SHA, VERSION)
+
+    def test_duplicate_archive_member(self):
+        import warnings
+
+        self.make_zip()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with zipfile.ZipFile(self.path, "a") as archive:
+                archive.writestr("sdk/linux-x64/include/turbo_agent_api.h", b"bad duplicate")
+        with self.assertRaisesRegex(ValueError, "duplicate archive entries"):
+            validator.validate(self.path, SHA, VERSION)
+
+    def test_invalid_requested_sha(self):
+        self.make_zip()
+        with self.assertRaisesRegex(ValueError, "full 40-character commit SHA"):
+            validator.validate(self.path, "invalid", VERSION)
+
+
 if __name__ == "__main__":
     unittest.main()

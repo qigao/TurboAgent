@@ -70,7 +70,7 @@ class PackageValidationTest(unittest.TestCase):
     def test_wrong_version(self):
         name = "sdk/linux-x64/turboagent-sdk-manifest.txt"
         self.make_zip(override={name: (
-            f"version=9.9.9\\ncommit={SHA}\\nrid=linux-x64\\npraktor_tools=on\\n"
+            f"version=9.9.9\ncommit={SHA}\nrid=linux-x64\npraktor_tools=on\n"
         ).encode()})
         with self.assertRaisesRegex(ValueError, "version mismatch"):
             validator.validate(self.path, SHA, VERSION)
@@ -78,7 +78,7 @@ class PackageValidationTest(unittest.TestCase):
     def test_wrong_manifest_rid(self):
         name = "sdk/windows-x64/turboagent-sdk-manifest.txt"
         self.make_zip(override={name: (
-            f"version=1.3.0\\ncommit={SHA}\\nrid=linux-x64\\npraktor_tools=off\\n"
+            f"version=1.3.0\ncommit={SHA}\nrid=linux-x64\npraktor_tools=off\n"
         ).encode()})
         with self.assertRaisesRegex(ValueError, "RID mismatch"):
             validator.validate(self.path, SHA, VERSION)

@@ -73,10 +73,18 @@ add_test(NAME turboagent.installed_consumer COMMAND turboagent_installed_consume
 # the loader may need libruntime_core.so through libruntime.so. Define a
 # closed, explicit deployment path for the test instead of inheriting runner
 # state or relying on source build directories.
-if(UNIX AND NOT APPLE)
+if(UNIX)
   string(JOIN ":" _runtime_loader_path ${_runtime_dirs})
+  if(APPLE)
+    # macOS uses dyld for transitive @rpath library resolution. Bound these
+    # paths strictly to the unpacked SDK + independently restored providers.
+    set(_loader_env_name "DYLD_LIBRARY_PATH")
+  else()
+    # ELF DT_RUNPATH on the executable is not transitive to indirect DSOs.
+    set(_loader_env_name "LD_LIBRARY_PATH")
+  endif()
   set_tests_properties(turboagent.installed_consumer PROPERTIES
-    ENVIRONMENT "LD_LIBRARY_PATH=${_runtime_loader_path}")
+    ENVIRONMENT "${_loader_env_name}=${_runtime_loader_path}")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/runtime-library-path.txt"
        "${_runtime_loader_path}\n")
 endif()

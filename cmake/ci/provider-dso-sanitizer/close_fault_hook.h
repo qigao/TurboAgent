@@ -8,6 +8,10 @@
 void provider_close_fault_arm(int failures);
 /* Skip N genuine native closes, then simulate a bounded close failure. */
 void provider_close_fault_arm_after(int genuine_closes, int failures);
+/* Test-only per-close sequence: bit 0 fails attempt 1, bit 1 attempt 2,
+ * etc. The other attempts delegate to genuine pinned Salts dlclose. */
+void provider_close_fault_arm_sequence(uint32_t failed_attempt_mask);
+int provider_close_fault_sequence_calls(void);
 int provider_close_fault_injected(void);
 int provider_close_fault_native_attempts(void);
 int provider_close_fault_native_successes(void);

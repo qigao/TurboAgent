@@ -24,12 +24,29 @@ restore_sdk() {
   local tag
   local nupkg
 
-  # Include prereleases and select by publication time across all pages.
-  if ! tag="$(gh api "repos/$repo/releases?per_page=100" --paginate --slurp |
-      jq -er '[.[][] | select(.draft == false and .published_at != null)] | max_by(.published_at) | .tag_name // empty')"; then
-    echo "failed to resolve latest published release for $repo" >&2
-    return 1
-  fi
+  # The published CHttp RPC Owner ABI requires one immutable Salts/Utils pair.
+  # Dynamic release selection is limited to unrelated tool SDKs.
+  case "$repo" in
+    qigao/salts)
+      tag="v2.3.0-rc.15"
+      pattern="Salts.Native.2.3.0-rc.15.nupkg"
+      ;;
+    qigao/salts-utils)
+      tag="v4.3.0-rc.10"
+      pattern="SaltsUtils.Native.4.3.0-rc.10.nupkg"
+      ;;
+    qigao/chttp)
+      tag="v2.1.0-rc.5"
+      pattern="CHttp.Native.2.1.0-rc.5.nupkg"
+      ;;
+    *)
+      if ! tag="$(gh api "repos/$repo/releases?per_page=100" --paginate --slurp |
+          jq -er '[.[][] | select(.draft == false and .published_at != null)] | max_by(.published_at) | .tag_name // empty')"; then
+        echo "failed to resolve latest published release for $repo" >&2
+        return 1
+      fi
+      ;;
+  esac
   printf 'Restoring %s@%s (%s)\n' "$repo" "$tag" "$rid" >&2
   rm -rf "$dir" || return 1
   mkdir -p "$dir/download" "$dir/package" || return 1
@@ -41,6 +58,13 @@ restore_sdk() {
     return 1
   fi
   unzip -q "$nupkg" -d "$dir/package" || return 1
+  case "$repo" in
+    qigao/salts|qigao/salts-utils|qigao/chttp)
+      python "$repository_root/cmake/ci/verify-published-native-sdk.py" \
+        --repo "$repo" --archive "$nupkg" \
+        --extracted "$dir/package" --rid "$rid" || return 1
+      ;;
+  esac
   local root="$dir/package/sdk/$rid"
   if [[ ! -f "$root/$config_rel" ]]; then
     echo "missing restored SDK config: $root/$config_rel" >&2

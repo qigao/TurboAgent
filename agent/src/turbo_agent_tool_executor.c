@@ -282,6 +282,20 @@ turbo_agent_tool_cancel_status(const turbo_cancel_token_t *cancel_token) {
   return rc == SALTS_ETIMEDOUT ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
 }
 
+/* Check the entire model-originating batch before publishing any Journal record.
+ * Schema/Capability admission is handled separately; this structural gate
+ * prevents invalid JSON from reaching a callback or entering the durable log.
+ * Callbacks still consume the original, unchanged arguments text. */
+static int turbo_agent_tool_arguments_object_valid(const char *arguments_json) {
+  json_value_t *arguments;
+  int valid;
+  if (!arguments_json) return 0;
+  arguments = json_parse(arguments_json, strlen(arguments_json));
+  valid = arguments && json_type(arguments) == JSON_OBJECT;
+  json_free(arguments);
+  return valid;
+}
+
 static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executor,
                                             turbo_agent_runtime_t *runtime, const char *thread_id,
                                             const char *run_id,
@@ -512,6 +526,16 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
       calls[index].status = TURBO_TOOL_ERROR;
       calls[index].replayed = 1;
       calls[index].policy_reason = reason ? reason : "tool_policy_denied";
+    }
+  }
+  /* Do not create a partial planned batch if a later call has malformed
+   * JSON. In particular, before_tool middleware may have changed arguments
+   * after the Workflow node's initial preflight. */
+  for (index = 0; index < call_count; ++index) {
+    if (!calls[index].replayed &&
+        !turbo_agent_tool_arguments_object_valid(calls[index].arguments_json)) {
+      rc = SALTS_EPROTO;
+      goto cleanup;
     }
   }
   for (index = 0; index < call_count; ++index) {

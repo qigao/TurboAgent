@@ -40,7 +40,13 @@ find_package(Threads REQUIRED)
 find_package(Salts CONFIG REQUIRED
   PATHS "${SALTS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 
+# Include the CMeta descriptor/object functions actually used during
+# Plugin manifest admission and Component projection, not just their SDK ABI.
+# Salts::Core and unrelated CMeta modules remain external to this gate.
 set(_runtime_sources
+  "${_salts}/cmeta/src/interface.c"
+  "${_salts}/cmeta/src/component.c"
+  "${_salts}/cmeta/src/object.c"
   "${_salts}/plugin/src/plugin.c"
   "${_salts}/plugin/src/plugin_registry.c"
   "${_salts}/plugin/src/plugin_posix.c"

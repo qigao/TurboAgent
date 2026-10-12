@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Out-of-tree Linux NuGet SDK relocation and negative consumer gate (#112).
+"""Out-of-tree Unix NuGet SDK relocation and negative consumer gate (#112).
 
 Run only after the same-run package has been verified, unpacked, and consumed
 successfully once. Never use a source/build-tree TurboAgent library or a
@@ -7,6 +7,7 @@ previously published TurboAgent package.
 """
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
 import shutil
@@ -46,11 +47,23 @@ def execute(argv: list[str], *, should_fail: bool = False, failure_text: str | N
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Test exact-run Linux/macOS SDK relocation")
+    parser.add_argument("--rid", choices=("linux-x64", "macos-arm64"), required=True)
+    rid = parser.parse_args().rid
+    platforms = {
+        "linux-x64": ("linux", "x64-linux", "linux", "LD_LIBRARY_PATH", "libruntime_core.so*"),
+        "macos-arm64": ("darwin", "arm64-osx", "consumer-macos", "DYLD_LIBRARY_PATH",
+                        "*runtime_core*.dylib"),
+    }
+    host_platform, triplet, vcpkg_profile, loader_env_name, core_library_pattern = platforms[rid]
+    if sys.platform != host_platform:
+        raise RuntimeError(f"{rid} consumer cannot run on host {sys.platform}")
+
     workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
     temporary = Path(os.environ["RUNNER_TEMP"]).resolve()
     source = workspace / "packaging/nuget/consumer"
-    original = temporary / "turboagent-consumer-package/sdk/linux-x64"
-    relocated = temporary / "turboagent-relocated-112/sdk/linux-x64"
+    original = temporary / "turboagent-consumer-package/sdk" / rid
+    relocated = temporary / "turboagent-relocated-112/sdk" / rid
     if not (original / "turboagent-sdk-manifest.txt").is_file():
         raise RuntimeError(f"verified, unpacked original SDK missing: {original}")
     if relocated.exists():
@@ -82,15 +95,17 @@ def main() -> None:
         "CMAKE_TOOLCHAIN_FILE": str(
             Path(os.environ["VCPKG_CACHE_REPOSITORY_ROOT"]) / "cmake/QigaoVcpkgToolchain.cmake"
         ),
-        "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "VCPKG_HOST_TRIPLET": "x64-linux",
-        "VCPKG_INSTALLED_DIR": str(workspace / "vcpkg_installed/linux"),
-        "CMAKE_PREFIX_PATH": str(workspace / "vcpkg_installed/linux/x64-linux"),
+        "VCPKG_TARGET_TRIPLET": triplet,
+        "VCPKG_HOST_TRIPLET": triplet,
+        "VCPKG_INSTALLED_DIR": str(workspace / "vcpkg_installed" / vcpkg_profile),
+        "CMAKE_PREFIX_PATH": str(workspace / "vcpkg_installed" / vcpkg_profile / triplet),
         "EXPECTED_WITH_PRAKTOR": "ON",
-        "EXPECTED_RID": "linux-x64",
+        "EXPECTED_RID": rid,
         "EXPECTED_TURBOAGENT_PREFIX": str(relocated),
         **root_dirs,
     }
+    if rid == "macos-arm64":
+        args["CMAKE_OSX_ARCHITECTURES"] = "arm64"
 
     def configure(build: Path, overrides: dict[str, str] | None = None,
                   *, should_fail: bool = False, failure_text: str | None = None,
@@ -107,6 +122,7 @@ def main() -> None:
     execute(["cmake", "--build", str(relocated_build)])
     clean_env = dict(os.environ)
     clean_env.pop("LD_LIBRARY_PATH", None)
+    clean_env.pop("DYLD_LIBRARY_PATH", None)
     execute(["ctest", "--test-dir", str(relocated_build), "--output-on-failure"], env=clean_env)
 
     executable = relocated_build / "turboagent_installed_consumer"
@@ -116,10 +132,21 @@ def main() -> None:
         raise RuntimeError("relocated executable or explicit deployment paths missing")
     if str(relocated) not in loader_dirs or str(original) in loader_dirs:
         raise RuntimeError("relocated runtime loader paths reference wrong SDK")
-    loader_env = dict(clean_env, LD_LIBRARY_PATH=loader_dirs)
-    linked = execute(["ldd", str(executable)], env=loader_env).stdout
-    if "not found" in linked or str(relocated) not in linked:
-        raise RuntimeError(f"relocated consumer did not resolve installed SDK libraries:\n{linked}")
+    loader_env = dict(clean_env, **{loader_env_name: loader_dirs})
+    if rid == "linux-x64":
+        linked = execute(["ldd", str(executable)], env=loader_env).stdout
+        if "not found" in linked or str(relocated) not in linked:
+            raise RuntimeError(f"relocated ELF dependency resolution failed:\n{linked}")
+    else:
+        # macOS install-name entries can use @rpath. Inspect the actual load
+        # commands for this relocation and execute under the controlled dyld
+        # path above, rather than assuming an install name is absolute.
+        commands = execute(["otool", "-l", str(executable)]).stdout
+        dependencies = execute(["otool", "-L", str(executable)]).stdout
+        if "LC_RPATH" not in commands or str(relocated) not in commands:
+            raise RuntimeError(f"relocated macOS @rpath not found:\n{commands}")
+        if "runtime" not in dependencies.lower():
+            raise RuntimeError(f"macOS linked consumer lacks Runtime library:\n{dependencies}")
 
     configure(temporary / "negative-original-prefix",
               {"EXPECTED_TURBOAGENT_PREFIX": str(original)},
@@ -133,7 +160,7 @@ def main() -> None:
 
     corrupted = temporary / "corrupt-installed-sdk"
     shutil.copytree(relocated, corrupted, symlinks=True)
-    broken_libs = sorted((corrupted / "lib").glob("libruntime_core.so*"))
+    broken_libs = sorted((corrupted / "lib").glob(core_library_pattern))
     if not broken_libs:
         raise RuntimeError("expected installed runtime_core library absent from Linux package")
     for library in broken_libs:
@@ -155,7 +182,8 @@ def main() -> None:
         raise RuntimeError(f"corrupt SDK was rejected for an unrelated reason:\\n{outcome.stdout}")
     print("PASS: corrupt installed binary rejected")
 
-    print("PASS: relocated SDK linked and executed; negative original/RID/Salts/library cases rejected")
+    print(f"PASS: {rid} relocated SDK linked and executed; "
+          "negative original/RID/Salts/library cases rejected")
 
 
 if __name__ == "__main__":

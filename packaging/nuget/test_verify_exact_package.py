@@ -128,7 +128,7 @@ class PackageValidationTest(unittest.TestCase):
     def test_wrong_pr_source_head(self):
         name = "sdk/linux-x64/turboagent-sdk-manifest.txt"
         self.make_zip(override={name: (
-            f"version=1.3.0\\ncommit={SHA}\\nsource_head={'d' * 40}\\nrid=linux-x64\\npraktor_tools=on\\n"
+            f"version=1.3.0\ncommit={SHA}\nsource_head={'d' * 40}\nrid=linux-x64\npraktor_tools=on\n"
         ).encode()})
         with self.assertRaisesRegex(ValueError, "wrong PR source HEAD"):
             validator.validate(self.path, SHA, SOURCE_HEAD, VERSION)

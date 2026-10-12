@@ -525,3 +525,108 @@ spec("Harness durable compiled Inspect attempt") {
   }
 
 }
+
+spec("Harness compiled Inspect canonical Session Run/Checkpoint") {
+  it("interrupts before the tool and safely resumes the exact graph checkpoint across SQLite reopen") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    turbo_runtime_sqlite_config_t sqlite_config;
+    turbo_agent_runtime_store_t store = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_agent_harness_t *harness;
+    turbo_agent_runtime_t *runtime;
+    turbo_agent_compiler_config_t config;
+    json_value_t *summary = NULL, *state = NULL, *record = NULL;
+    char *directory = tt_make_temp_dir("compiled-graph-checkpoint");
+    char *checkpoint_id = NULL;
+    char db_path[1024];
+    const char *checkpoint_view;
+
+    check_not_null(directory);
+    check_true(snprintf(db_path, sizeof(db_path), "%s/session.db", directory) <
+               (int)sizeof(db_path));
+    turbo_runtime_sqlite_config_init(&sqlite_config);
+    sqlite_config.path = db_path;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    check_not_null(registry);
+    check_not_null(pool);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, store, "compiled-graph-thread");
+    check_not_null(harness);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+
+    check_equal(turbo_agent_harness_compiled_inspect_graph_run_json(
+        harness, &config, compiled_inspect_source, strlen(compiled_inspect_source),
+        "graph_attempt", NULL, 1, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "interrupted");
+    checkpoint_view = json_get_string(summary, "checkpoint_id");
+    check_not_null(checkpoint_view);
+    checkpoint_id = malloc(strlen(checkpoint_view) + 1);
+    check_not_null(checkpoint_id);
+    strcpy(checkpoint_id, checkpoint_view);
+    check_equal(probe.calls, 0);
+    runtime = turbo_agent_session_runtime(
+        turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "compiled_inspect_attempts",
+        "021_compiled-graph-thread_graph_attempt", &record), SALTS_ENOENT);
+    json_free(summary); summary = NULL;
+    json_free(state); state = NULL;
+
+    /* A source with different arguments is not allowed to reuse a checkpoint
+     * created by the old compiled plan topology. */
+    check_equal(turbo_agent_harness_compiled_inspect_graph_run_json(
+        harness, &config, compiled_inspect_bad_args, strlen(compiled_inspect_bad_args),
+        "graph_attempt", checkpoint_id, 0, &summary, &state), SALTS_EPROTO);
+    check_equal(probe.calls, 0);
+
+    turbo_agent_harness_release(harness);
+    cmeta_threadpool_destroy(pool);
+    pool = cmeta_threadpool_create_with_config(&pool_config);
+    check_not_null(pool);
+    sqlite_config.create_if_missing = 0;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, store, "compiled-graph-thread");
+    check_not_null(harness);
+
+    check_equal(turbo_agent_harness_compiled_inspect_graph_run_json(
+        harness, &config, compiled_inspect_source, strlen(compiled_inspect_source),
+        "graph_attempt", checkpoint_id, 0, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "completed");
+    check_true(json_get_bool(
+        json_object_get(state, "compiled_result"), "ok", false));
+    check_equal(probe.calls, 1);
+    runtime = turbo_agent_session_runtime(
+        turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "compiled_inspect_attempts",
+        "021_compiled-graph-thread_graph_attempt", &record), SALTS_OK);
+    check_equal(json_get_string(record, "phase"), "committed");
+    json_free(record); record = NULL;
+    json_free(summary); summary = NULL;
+    json_free(state); state = NULL;
+
+    /* Replaying the old checkpoint must consume the committed attempt record
+     * rather than invoking the backend again. */
+    check_equal(turbo_agent_harness_compiled_inspect_graph_run_json(
+        harness, &config, compiled_inspect_source, strlen(compiled_inspect_source),
+        "graph_attempt", checkpoint_id, 0, &summary, &state), SALTS_OK);
+    check_true(json_get_bool(state, "compiled_replayed", false));
+    check_equal(probe.calls, 1);
+    json_free(summary);
+    json_free(state);
+    free(checkpoint_id);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+    tt_remove_tree(directory);
+    free(directory);
+  }
+}

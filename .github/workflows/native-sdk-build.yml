@@ -351,6 +351,7 @@ jobs:
             -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm" \
             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor" \
             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
+            -DEXPECTED_WITH_PRAKTOR=ON \
             -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
           cmake --build "$RUNNER_TEMP/turboagent-consumer-build"
           consumer="$RUNNER_TEMP/turboagent-consumer-build/turboagent_installed_consumer"
@@ -436,6 +437,7 @@ jobs:
             -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm" \
             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor" \
             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
+            -DEXPECTED_WITH_PRAKTOR=ON \
             -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
           cmake --build "$RUNNER_TEMP/turboagent-consumer-build"
           consumer="$RUNNER_TEMP/turboagent-consumer-build/turboagent_installed_consumer"

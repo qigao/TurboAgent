@@ -1,0 +1,51 @@
+#include "close_fault_hook.h"
+#include "plugin_loader_internal.h"
+
+#include <stdatomic.h>
+
+static atomic_int pending;
+static atomic_int injected;
+static atomic_int attempts;
+static atomic_int successes;
+
+/* The real Salts plugin_posix.c implementation is compiled unmodified apart
+ * from a test-only symbol rename. Every successful delegate performs dlclose. */
+cmeta_plugin_status cmeta_plugin_platform_close_real(
+    cmeta_plugin_library *library);
+
+void provider_close_fault_arm(int failures) {
+  atomic_store_explicit(&pending, failures, memory_order_release);
+}
+
+int provider_close_fault_injected(void) {
+  return atomic_load_explicit(&injected, memory_order_acquire);
+}
+
+int provider_close_fault_native_attempts(void) {
+  return atomic_load_explicit(&attempts, memory_order_acquire);
+}
+
+int provider_close_fault_native_successes(void) {
+  return atomic_load_explicit(&successes, memory_order_acquire);
+}
+
+cmeta_plugin_status cmeta_plugin_platform_close(
+    cmeta_plugin_library *library) {
+  int count = atomic_load_explicit(&pending, memory_order_acquire);
+  while (count > 0) {
+    if (atomic_compare_exchange_weak_explicit(
+            &pending, &count, count - 1,
+            memory_order_acq_rel, memory_order_acquire)) {
+      atomic_fetch_add_explicit(&injected, 1, memory_order_relaxed);
+      /* No close, no handle mutation: emulate a failed OS close in the
+       * same return contract as the actual Salts POSIX loader. */
+      return CMETA_PLUGIN_UNLOAD_FAILED;
+    }
+  }
+
+  atomic_fetch_add_explicit(&attempts, 1, memory_order_relaxed);
+  cmeta_plugin_status status = cmeta_plugin_platform_close_real(library);
+  if (status == CMETA_PLUGIN_OK)
+    atomic_fetch_add_explicit(&successes, 1, memory_order_relaxed);
+  return status;
+}

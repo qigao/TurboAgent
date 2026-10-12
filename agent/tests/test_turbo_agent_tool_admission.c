@@ -1,5 +1,6 @@
 #include "tinytest.h"
 #include "../src/turbo_agent_tool_executor_internal.h"
+#include "turbo_agent_graph.h"
 #include "turbo_runtime_store.h"
 #include "turbo_tool_registry.h"
 
@@ -12,6 +13,7 @@
  * side effect, including when it occurs in the second call of a batch. */
 typedef struct admission_probe_s {
   int callbacks;
+  int canonical_guardrails;
 } admission_probe_t;
 
 static int admission_tool_handler(const char *arguments_json, char **out,
@@ -22,6 +24,30 @@ static int admission_tool_handler(const char *arguments_json, char **out,
   *out = malloc(3);
   if (!*out) return -1;
   memcpy(*out, "ok", 3);
+  return 0;
+}
+
+static int admission_model_transport(const char *request, char **response, void *user) {
+  (void)request;
+  (void)response;
+  (void)user;
+  return -1;
+}
+
+static int admission_canonical_guardrail(
+    turbo_agent_t *agent, const json_value_t *state, const char *id,
+    const char *tool_name, const char *arguments, const char **reason, void *user) {
+  admission_probe_t *probe = (admission_probe_t *)user;
+  (void)agent;
+  (void)state;
+  (void)id;
+  (void)arguments;
+  if (reason) *reason = NULL;
+  if (strcmp(tool_name, "admission.probe") != 0) {
+    if (reason) *reason = "uncanonical_tool_name";
+    return -1;
+  }
+  ++probe->canonical_guardrails;
   return 0;
 }
 
@@ -174,5 +200,47 @@ spec("model tool argument structure before durable admission") {
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);
     turbo_agent_runtime_destroy(runtime);
+  }
+
+  it("passes canonical registry tool identity to Workflow Guardrails") {
+    static const char model_event[] =
+        "{\\"kind\\":\\"model\\",\\"output_text\\":\\"\\",\\"tool_calls\\":["
+        "{\\"call_id\\":\\"alias-call\\",\\"name\\":\\"admission_probe\\","
+        "\\"arguments\\":\\"{}\\"}]}";
+    admission_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {
+        "admission.probe", "Wire-alias fixture", "{\\"type\\":\\"object\\"}",
+        NULL, 0, admission_tool_handler, NULL, &probe, NULL};
+    turbo_agent_config_t config = {0};
+    turbo_agent_guardrail_t guardrail = {0};
+    turbo_agent_t *agent;
+    turbo_graph_exec_ctx_t ctx = {0};
+    json_value_t *state = turbo_agent_state_create();
+    json_value_t *event;
+
+    check_not_null(registry);
+    check_not_null(state);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    config.model = "test";
+    config.transport_fn = admission_model_transport;
+    config.tool_registry = registry;
+    agent = turbo_agent_create(&config);
+    check_not_null(agent);
+    guardrail.before_tool = admission_canonical_guardrail;
+    guardrail.user_data = &probe;
+    check_equal(turbo_agent_add_guardrail(agent, &guardrail), 0);
+    event = json_parse(model_event, sizeof(model_event) - 1);
+    check_not_null(event);
+    json_array_add(json_object_get(state, "events"), event);
+    ctx.state = state;
+
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.canonical_guardrails, 1);
+    check_equal(probe.callbacks, 1);
+
+    json_free(state);
+    turbo_agent_destroy(agent);
+    turbo_tool_registry_destroy(registry);
   }
 }

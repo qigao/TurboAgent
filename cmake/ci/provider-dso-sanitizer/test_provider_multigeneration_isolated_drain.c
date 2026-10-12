@@ -181,6 +181,7 @@ spec("independent Managed DSO Generation retirement under scoped release failure
     cmeta_plugin_ref old_ref = {0}, new_ref = {0};
     cmeta_plugin_lease original_lease = {0}, stale_token = {0};
     cmeta_plugin_lease consumed_token = {0}, replacement_lease = {0};
+    cmeta_plugin_lease guard_lease = {0};
     const cmeta_plugin_manifest *manifest = NULL;
     cmeta_plugin_lifecycle_info info = {0};
     managed_generation new_generation = {0};
@@ -239,6 +240,7 @@ spec("independent Managed DSO Generation retirement under scoped release failure
     check_equal(managed_build(
         &new_generation, UINT64_C(45), &registry, new_ref),
         SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(new_generation.modules[0].lease.slot, stale_token.slot);
     check_equal(salts_component_plugin_runtime_init(
         &runtime), SALTS_COMPONENT_PLUGIN_OK);
     check_equal(cmeta_plugin_registry_get_lifecycle(
@@ -284,7 +286,6 @@ spec("independent Managed DSO Generation retirement under scoped release failure
     check_equal(current_acquire.lease.plugin.slot, stale_token.plugin.slot);
     check_true(current_acquire.lease.plugin.generation !=
                stale_token.plugin.generation);
-    check_equal(current_acquire.lease.slot, stale_token.slot);
     check_equal(publication.status, SALTS_COMPONENT_PLUGIN_OK);
     check_null(publication.previous);
     check_equal(cmeta_plugin_registry_get_lifecycle(
@@ -311,6 +312,16 @@ spec("independent Managed DSO Generation retirement under scoped release failure
     check_equal(salts_component_plugin_runtime_destroy(
         &runtime), SALTS_COMPONENT_PLUGIN_OK);
 
+    /* Reserve the freed Generation lease slot so replay checks cover the
+     * exact same per-Plugin Lease slot index across release/re-acquire. */
+    manifest = NULL;
+    check_equal(cmeta_plugin_registry_acquire(
+        &registry, new_ref, &guard_lease, &manifest), CMETA_PLUGIN_OK);
+    check_equal(guard_lease.slot, new_generation.modules[0].lease.slot);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, new_ref, &info), CMETA_PLUGIN_OK);
+    check_equal(info.active_leases, (size_t)2u);
+
     /* A copied token from THIS SAME new incarnation must also be fenced
      * after its real holder releases it and its lease slot gets recycled. */
     consumed_token = current_acquire.lease;
@@ -332,11 +343,13 @@ spec("independent Managed DSO Generation retirement under scoped release failure
     check_true(cmeta_plugin_lease_valid(consumed_token));
     check_equal(cmeta_plugin_registry_get_lifecycle(
         &registry, new_ref, &info), CMETA_PLUGIN_OK);
-    check_equal(info.active_leases, (size_t)1u);
+    check_equal(info.active_leases, (size_t)2u);
     check_equal(cmeta_plugin_registry_unload(
         &registry, new_ref), CMETA_PLUGIN_BUSY);
     check_equal(cmeta_plugin_registry_release(
         &registry, &replacement_lease), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_release(
+        &registry, &guard_lease), CMETA_PLUGIN_OK);
     check_false(cmeta_plugin_lease_valid(replacement_lease));
     check_equal(cmeta_plugin_registry_request_stop(
         &registry, new_ref), CMETA_PLUGIN_OK);

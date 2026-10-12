@@ -35,9 +35,22 @@ foreach(_dependency IN LISTS _required_sdks)
   endif()
 endforeach()
 
+# For an NDK cross-build, CMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+# would re-root the absolute extracted package prefix under the Android sysroot.
+# The consumer deliberately loads the *target* SDK from that exact extracted
+# directory. Permit explicitly pinned first-party package configs to remain
+# outside the sysroot; leave the NDK/compiler's other cross settings intact.
+set(_saved_find_root_mode "${CMAKE_FIND_ROOT_PATH_MODE_PACKAGE}")
+if(CMAKE_CROSSCOMPILING)
+  set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+endif()
 find_package(TurboAgent CONFIG REQUIRED
   PATHS "${_expected}"
-  NO_DEFAULT_PATH)
+  NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH)
+if(CMAKE_CROSSCOMPILING)
+  set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE "${_saved_find_root_mode}")
+endif()
 file(REAL_PATH "${TurboAgent_DIR}" _resolved_config)
 string(FIND "${_resolved_config}/" "${_expected}/" _prefix_pos)
 if(NOT _prefix_pos EQUAL 0)

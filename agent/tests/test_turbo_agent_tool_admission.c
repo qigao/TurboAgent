@@ -210,7 +210,7 @@ spec("model tool argument structure before durable admission") {
     admission_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {
-        "admission.probe", "Wire-alias fixture", "{\\"type\\":\\"object\\"}",
+        "admission.probe", "Wire-alias fixture", "{\"type\":\"object\"}",
         NULL, 0, admission_tool_handler, NULL, &probe, NULL};
     turbo_agent_config_t config = {0};
     turbo_agent_guardrail_t guardrail = {0};

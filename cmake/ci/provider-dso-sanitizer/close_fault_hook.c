@@ -54,13 +54,25 @@ cmeta_plugin_status cmeta_plugin_platform_close(
  * release does not mutate the caller's authoritative lease. The actual pinned
  * Salts implementation handles all successful calls, including recovery. */
 static atomic_int release_pending;
+static atomic_uint_least64_t release_target_key;
 static atomic_int release_injected;
 static atomic_int release_native_attempts;
 
 cmeta_plugin_status cmeta_plugin_registry_release_real(
     cmeta_plugin_registry *registry, cmeta_plugin_lease *lease);
 
+static uint64_t provider_plugin_key(cmeta_plugin_ref ref) {
+  return ((uint64_t)ref.slot << 32u) | (uint64_t)ref.generation;
+}
+
 void provider_release_fault_arm(int failures) {
+  atomic_store_explicit(&release_target_key, 0u, memory_order_release);
+  atomic_store_explicit(&release_pending, failures, memory_order_release);
+}
+
+void provider_release_fault_arm_plugin(cmeta_plugin_ref ref, int failures) {
+  atomic_store_explicit(
+      &release_target_key, provider_plugin_key(ref), memory_order_release);
   atomic_store_explicit(&release_pending, failures, memory_order_release);
 }
 
@@ -75,7 +87,13 @@ int provider_release_fault_native_attempts(void) {
 cmeta_plugin_status cmeta_plugin_registry_release(
     cmeta_plugin_registry *registry, cmeta_plugin_lease *lease) {
   int count = atomic_load_explicit(&release_pending, memory_order_acquire);
-  while (count > 0) {
+  const uint64_t target =
+      atomic_load_explicit(&release_target_key, memory_order_acquire);
+  /* Other Plugin generations must be able to settle independently even
+   * when their drain calls overlap the targeted failing release. */
+  const bool matches = target == 0u ||
+      (lease != NULL && provider_plugin_key(lease->plugin) == target);
+  while (matches && count > 0) {
     if (atomic_compare_exchange_weak_explicit(
             &release_pending, &count, count - 1,
             memory_order_acq_rel, memory_order_acquire)) {

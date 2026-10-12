@@ -166,7 +166,11 @@ jobs:
       - name: Test macOS real Provider DSO unload
         if: matrix.rid == 'macos-arm64'
         shell: bash
-        run: ctest --preset ci-macos-release -R '^test_turbo_component_dso_lifecycle        shell: bash
+        run: ctest --preset ci-macos-release -R '^test_turbo_component_dso_lifecycle$' --output-on-failure
+
+      - name: Test on Unix
+        if: runner.os != 'Windows' && matrix.tests
+        shell: bash
         env:
           SDK_PRESET: ${{ matrix.preset }}
         run: ctest --preset "$SDK_PRESET"

@@ -162,6 +162,20 @@ static chttp_client_config typed_client_config(void) {
   return config;
 }
 
+/* The invalid-request probe must inspect the bounded HTTP response payload;
+ * do not treat the parsed DOM as an owned value or assume NUL termination. */
+static int turboagent_rpc_body_contains(
+    const chttp_response *response, const char *needle) {
+  size_t i, n;
+  if (response == NULL || response->body == NULL || needle == NULL) return 0;
+  n = strlen(needle);
+  if (n > response->body_size) return 0;
+  for (i = 0u; i <= response->body_size - n; ++i)
+    if (memcmp((const unsigned char *)response->body + i, needle, n) == 0)
+      return 1;
+  return 0;
+}
+
 spec("TurboAgent installed DataBind IDL typed RPC Owner") {
   it("compiles generated MethodPlan, mounts into HTTP Server, executes typed Client") {
     static const char contract_source[] =
@@ -321,6 +335,13 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     crpc_error call_error = {0};
     uint16_t port = 0u;
     char uri[64];
+    static const char bad_partial[] =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"calc.add\",\"params\":[3,\"not-uint\",2],\"id\":600}";
+    static const chttp_header json_headers[] = {
+        {"Content-Type", "application/json"}, {"Accept", "application/json"}};
+    chttp_response invalid_response = {0};
+    chttp_error invalid_error = {0};
+    chttp_options invalid_post = {0};
 
     projection = data_bind_rpc_projection_artifact_find(
         &databind_turboagent_typed_rpc_rpc_projection, "Calc", "Add");
@@ -400,6 +421,22 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     call.response_bytes = sizeof(response);
     call.request_id = UINT64_C(601);
     check_equal(chttp_client_init(&client, &client_config), SALTS_OK);
+    /* Partial native ingress: "left" decoded before invalid "right".
+     * The Provider must NOT execute, and the bounded slot must be reusable. */
+    invalid_post.connection_uri = uri;
+    invalid_post.authority = "localhost";
+    invalid_post.target = "/rpc";
+    invalid_post.headers = json_headers;
+    invalid_post.header_count = 2u;
+    invalid_post.body = bad_partial;
+    invalid_post.body_size = sizeof(bad_partial) - 1u;
+    invalid_post.timeout_ms = TYPED_TIMEOUT_MS;
+    check_equal(chttp_post(&client, &invalid_post, &invalid_response, &invalid_error),
+                SALTS_OK);
+    check_equal(invalid_response.status_code, 200u);
+    check_true(turboagent_rpc_body_contains(&invalid_response, "\"code\":-32602"));
+    check_equal(atomic_load_explicit(&probe.invoked, memory_order_acquire), 0);
+    chttp_response_destroy(&invalid_response);
     check_equal(chttp_client_rpc_call(&client, &call, &outcome, &call_error), SALTS_OK);
     check_equal(outcome.kind, CHTTP_CLIENT_RPC_SUCCESS);
     check_equal(response.sum, (uint32_t)11u);

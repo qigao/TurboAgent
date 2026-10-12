@@ -281,10 +281,18 @@ jobs:
             --commit "$GITHUB_SHA" \
             --package-version "$PACKAGE_VERSION"
 
+      - name: Record exact-run NuGet archive SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum TurboAgent.Native.*.nupkg > SHA256SUMS)
+
       - uses: actions/upload-artifact@v4
         with:
           name: turboagent-native-nuget
-          path: dist/*.nupkg
+          path: |
+            dist/*.nupkg
+            dist/SHA256SUMS
           if-no-files-found: error
 
   consume-linux:
@@ -377,6 +385,35 @@ jobs:
           set -euo pipefail
           python3 packaging/nuget/consumer/check_relocation.py --rid linux-x64
 
+
+      - name: Preserve linux-x64 installed-consumer evidence
+        if: always()
+        shell: bash
+        env:
+          CONSUMER_JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/turboagent-evidence-linux-x64"
+          mkdir -p "$evidence"
+          {
+            echo "head=$GITHUB_SHA"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "rid=linux-x64"
+            echo "job_status=$CONSUMER_JOB_STATUS"
+          } > "$evidence/provenance.txt"
+          if test -f "$RUNNER_TEMP/turboagent-consumer-ldd.txt"; then cp "$RUNNER_TEMP/turboagent-consumer-ldd.txt" "$evidence/linked-dependencies.txt"; fi
+          if test -f "$RUNNER_TEMP/turboagent-consumer-build/Testing/Temporary/LastTest.log"; then cp "$RUNNER_TEMP/turboagent-consumer-build/Testing/Temporary/LastTest.log" "$evidence/initial-ctest.log"; fi
+          if test -f "$RUNNER_TEMP/turboagent-consumer-relocated-build/Testing/Temporary/LastTest.log"; then cp "$RUNNER_TEMP/turboagent-consumer-relocated-build/Testing/Temporary/LastTest.log" "$evidence/relocated-ctest.log"; fi
+          if test -f "$RUNNER_TEMP/turboagent-relocated-112/sdk/linux-x64/turboagent-sdk-manifest.txt"; then cp "$RUNNER_TEMP/turboagent-relocated-112/sdk/linux-x64/turboagent-sdk-manifest.txt" "$evidence/sdk-manifest.txt"; fi
+          if test -f packed/SHA256SUMS; then cp packed/SHA256SUMS "$evidence/nuget-sha256.txt"; fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turboagent-installed-consumer-linux-x64-evidence
+          path: ${{ runner.temp }}/turboagent-evidence-linux-x64
+          if-no-files-found: error
+
   consume-macos:
     name: Consume packed NuGet SDK / macos-arm64
     needs: [metadata, pack]
@@ -465,6 +502,35 @@ jobs:
         run: |
           set -euo pipefail
           python3 packaging/nuget/consumer/check_relocation.py --rid macos-arm64
+
+
+      - name: Preserve macos-arm64 installed-consumer evidence
+        if: always()
+        shell: bash
+        env:
+          CONSUMER_JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/turboagent-evidence-macos-arm64"
+          mkdir -p "$evidence"
+          {
+            echo "head=$GITHUB_SHA"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "rid=macos-arm64"
+            echo "job_status=$CONSUMER_JOB_STATUS"
+          } > "$evidence/provenance.txt"
+          if test -f "$RUNNER_TEMP/turboagent-consumer-otool.txt"; then cp "$RUNNER_TEMP/turboagent-consumer-otool.txt" "$evidence/dyld-load-commands.txt"; fi
+          if test -f "$RUNNER_TEMP/turboagent-consumer-build/Testing/Temporary/LastTest.log"; then cp "$RUNNER_TEMP/turboagent-consumer-build/Testing/Temporary/LastTest.log" "$evidence/initial-ctest.log"; fi
+          if test -f "$RUNNER_TEMP/turboagent-consumer-relocated-build/Testing/Temporary/LastTest.log"; then cp "$RUNNER_TEMP/turboagent-consumer-relocated-build/Testing/Temporary/LastTest.log" "$evidence/relocated-ctest.log"; fi
+          if test -f "$RUNNER_TEMP/turboagent-relocated-112/sdk/macos-arm64/turboagent-sdk-manifest.txt"; then cp "$RUNNER_TEMP/turboagent-relocated-112/sdk/macos-arm64/turboagent-sdk-manifest.txt" "$evidence/sdk-manifest.txt"; fi
+          if test -f packed/SHA256SUMS; then cp packed/SHA256SUMS "$evidence/nuget-sha256.txt"; fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turboagent-installed-consumer-macos-arm64-evidence
+          path: ${{ runner.temp }}/turboagent-evidence-macos-arm64
+          if-no-files-found: error
 
   consume-windows:
     name: Consume packed NuGet SDK / windows-x64
@@ -602,6 +668,44 @@ jobs:
           python packaging/nuget/consumer/check_windows_relocation.py
           if errorlevel 1 exit /b 1
 
+
+      - name: Preserve windows-x64 installed-consumer evidence
+        if: always()
+        shell: pwsh
+        env:
+          CONSUMER_JOB_STATUS: ${{ job.status }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $env:RUNNER_TEMP 'turboagent-evidence-windows-x64'
+          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+          @(
+            "head=$env:GITHUB_SHA"
+            "run_id=$env:GITHUB_RUN_ID"
+            'rid=windows-x64'
+            "job_status=$env:CONSUMER_JOB_STATUS"
+          ) | Set-Content -LiteralPath (Join-Path $evidence 'provenance.txt') -Encoding utf8
+          $records = @(
+            @('turboagent-consumer-build/Testing/Temporary/LastTest.log', 'initial-ctest.log'),
+            @('turboagent-relocated-112-windows-build/Testing/Temporary/LastTest.log', 'relocated-ctest.log'),
+            @('turboagent-relocated-112/sdk/windows-x64/turboagent-sdk-manifest.txt', 'sdk-manifest.txt')
+          )
+          foreach ($record in $records) {
+            $src = Join-Path $env:RUNNER_TEMP $record[0]
+            if (Test-Path -LiteralPath $src -PathType Leaf) {
+              Copy-Item -LiteralPath $src -Destination (Join-Path $evidence $record[1])
+            }
+          }
+          if (Test-Path -LiteralPath 'packed/SHA256SUMS') {
+            Copy-Item -LiteralPath 'packed/SHA256SUMS' -Destination (Join-Path $evidence 'nuget-sha256.txt')
+          }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turboagent-installed-consumer-windows-x64-evidence
+          path: ${{ runner.temp }}/turboagent-evidence-windows-x64
+          if-no-files-found: error
+
   consume-android:
     name: Cross-link packed NuGet SDK / android-arm64-v8a
     needs: [metadata, pack]
@@ -694,3 +798,31 @@ jobs:
         run: |
           set -euo pipefail
           python3 packaging/nuget/consumer/check_android_relocation.py
+
+      - name: Preserve android-arm64-v8a installed-consumer evidence
+        if: always()
+        shell: bash
+        env:
+          CONSUMER_JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/turboagent-evidence-android-arm64-v8a"
+          mkdir -p "$evidence"
+          {
+            echo "head=$GITHUB_SHA"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "rid=android-arm64-v8a"
+            echo "job_status=$CONSUMER_JOB_STATUS"
+          } > "$evidence/provenance.txt"
+          if test -f "$RUNNER_TEMP/android-consumer-elf-header.txt"; then cp "$RUNNER_TEMP/android-consumer-elf-header.txt" "$evidence/initial-elf-header.txt"; fi
+          if test -f "$RUNNER_TEMP/android-relocated-consumer-elf-header.txt"; then cp "$RUNNER_TEMP/android-relocated-consumer-elf-header.txt" "$evidence/relocated-elf-header.txt"; fi
+          if test -f "$RUNNER_TEMP/android-relocated-consumer-needed.txt"; then cp "$RUNNER_TEMP/android-relocated-consumer-needed.txt" "$evidence/relocated-needed.txt"; fi
+          if test -f "$RUNNER_TEMP/turboagent-relocated-112-android/sdk/android-arm64-v8a/turboagent-sdk-manifest.txt"; then cp "$RUNNER_TEMP/turboagent-relocated-112-android/sdk/android-arm64-v8a/turboagent-sdk-manifest.txt" "$evidence/sdk-manifest.txt"; fi
+          if test -f packed/SHA256SUMS; then cp packed/SHA256SUMS "$evidence/nuget-sha256.txt"; fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turboagent-installed-consumer-android-arm64-v8a-evidence
+          path: ${{ runner.temp }}/turboagent-evidence-android-arm64-v8a
+          if-no-files-found: error

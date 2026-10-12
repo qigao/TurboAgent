@@ -110,6 +110,10 @@ if(BUILD_TESTS)
     if(ENABLE_SANITIZER_THREAD OR ENABLE_SANITIZER_ADDRESS)
       target_link_options(test_turbo_praktor_dso_compiled_harness PRIVATE
         "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/queued_dso_sanitizer.map")
+      # Also audit static Salts::Plugin / Salts::ComponentPlugin objects that
+      # can be extracted inside this shared Praktor integration target.
+      target_link_options(praktor_tools PRIVATE
+        "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/praktor_tools_sanitizer.map")
     endif()
   endif()
 endif()

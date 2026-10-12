@@ -1,0 +1,280 @@
+/* Native Provider DSO lifecycle test. This target deliberately does not
+ * depend on Praktor: Windows and macOS can qualify OS module unload while the
+ * optional PraktorTools module is absent or untested on those platforms.
+ * Salts Plugin Registry remains the sole DSO loader and ref-count authority.
+ */
+#include "tinytest.h"
+#include "praktor_dso_fixture.h"
+
+#include <salts/component_plugin.h>
+#include <salts/clock.h>
+#include <salts/thread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <string.h>
+
+#ifndef PRAKTOR_DSO_N_PATH
+#error "Provider N shared module must be provided by CMake"
+#endif
+#ifndef PRAKTOR_DSO_N1_PATH
+#error "Provider N+1 shared module must be provided by CMake"
+#endif
+
+typedef struct provider_generation_fixture {
+  salts_component_plugin_generation generation;
+  salts_component_deployment deployments[1];
+  salts_component_instance instances[1];
+  salts_component_dependency dependencies[1];
+  size_t order[1];
+  salts_component_plugin_module modules[1];
+} provider_generation_fixture;
+
+typedef struct provider_dso_host {
+  atomic_int cancel;
+} provider_dso_host;
+
+typedef struct provider_dso_call {
+  praktor_dso_gate gate; /* borrowed; owning Scope outlives this thread */
+  praktor_dso_control control;
+  int result;
+} provider_dso_call;
+
+typedef struct provider_dso_racer {
+  salts_component_plugin_runtime *runtime;
+  salts_component_plugin_generation *old_generation;
+  cmeta_plugin_registry *registry;
+  cmeta_plugin_ref old_ref;
+  atomic_int ready;
+  atomic_int go;
+  salts_component_plugin_status drain_result;
+  cmeta_plugin_status unload_result;
+} provider_dso_racer;
+
+static salts_component_plugin_status provider_dso_build(
+    provider_generation_fixture *fixture, uint64_t id,
+    cmeta_plugin_registry *registry, cmeta_plugin_ref ref) {
+  const salts_component_plugin_generation_storage storage = {
+    fixture->deployments, 1u, fixture->instances, 1u,
+    fixture->dependencies, 1u, fixture->order, 1u,
+    fixture->modules, 1u
+  };
+  const salts_component_plugin_source source = {
+    ref, PRAKTOR_DSO_PROVIDER_EXPORT_ID, NULL, NULL
+  };
+  return salts_component_plugin_generation_build(
+      &fixture->generation, id, registry, &storage,
+      NULL, 0u, &source, 1u, NULL, 0u);
+}
+
+static int provider_dso_bind(
+    salts_component_plugin_scope *scope, praktor_dso_gate *out) {
+  salts_component_service service = {0};
+  return salts_component_plugin_scope_find_service(
+             scope, praktor_dso_gate_interface(), &service) ==
+             SALTS_COMPONENT_PLUGIN_OK &&
+         praktor_dso_gate_borrow_from_object(
+             service.object, service.interfaces, out) == CMETA_OK;
+}
+
+static int provider_dso_cancelled(void *host) {
+  provider_dso_host *owner = (provider_dso_host *)host;
+  return atomic_load_explicit(&owner->cancel, memory_order_acquire);
+}
+
+static uint64_t provider_dso_now_ms(void *host) {
+  (void)host;
+  return cmeta_monotonic_ms();
+}
+
+static void provider_dso_yield(void *host) {
+  (void)host;
+  cmeta_thread_yield();
+}
+
+static void provider_dso_invoke(void *arg) {
+  provider_dso_call *call = (provider_dso_call *)arg;
+  call->result = praktor_dso_gate_run(&call->gate, &call->control);
+}
+
+static void provider_dso_concurrent_unload(void *arg) {
+  provider_dso_racer *race = (provider_dso_racer *)arg;
+  atomic_store_explicit(&race->ready, 1, memory_order_release);
+  while (!atomic_load_explicit(&race->go, memory_order_acquire))
+    cmeta_thread_yield();
+  /* Independently run against the real registry while the main host
+   * simultaneously closes N+1. N must still have an in-flight callback
+   * and a live Salts scope. These calls cannot unload N. */
+  race->drain_result = salts_component_plugin_generation_drain(
+      race->runtime, race->old_generation);
+  race->unload_result = cmeta_plugin_registry_unload(
+      race->registry, race->old_ref);
+}
+
+static void provider_dso_control_init(
+    praktor_dso_control *control, provider_dso_host *host,
+    int block_until_cancel) {
+  memset(control, 0, sizeof(*control));
+  control->host = host;
+  control->cancelled = provider_dso_cancelled;
+  control->now_ms = provider_dso_now_ms;
+  control->yield = provider_dso_yield;
+  control->block_until_cancel = block_until_cancel;
+  atomic_init(&control->entered, 0);
+  atomic_init(&control->exited, 0);
+}
+
+spec("cross-platform real Provider DSO close, drain, unload") {
+  it("pins callback inside N while N+1 executes and unload races with close") {
+    const cmeta_plugin_registry_config plugin_config = {2};
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref old_ref = {0}, new_ref = {0};
+    cmeta_plugin_lifecycle_info info;
+    provider_generation_fixture n = {0}, n1 = {0};
+    salts_component_plugin_runtime runtime = SALTS_COMPONENT_PLUGIN_RUNTIME_INIT;
+    salts_component_plugin_generation *retired = NULL;
+    salts_component_plugin_scope old_scope = SALTS_COMPONENT_PLUGIN_SCOPE_INIT;
+    salts_component_plugin_scope new_scope = SALTS_COMPONENT_PLUGIN_SCOPE_INIT;
+    salts_component_plugin_scope stale_scope = SALTS_COMPONENT_PLUGIN_SCOPE_INIT;
+    provider_dso_host host = {0};
+    provider_dso_call old_call = {0}, new_call = {0};
+    provider_dso_racer racer = {0};
+    cmeta_thread_t callback_thread = {0}, race_thread = {0};
+    bool quiet = false;
+    int entered, ready;
+
+    atomic_init(&host.cancel, 0);
+    provider_dso_control_init(&old_call.control, &host, 1);
+    provider_dso_control_init(&new_call.control, &host, 0);
+    check_equal(cmeta_plugin_registry_init(&registry, &plugin_config),
+                CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N_PATH, &old_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N1_PATH, &new_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_start(&registry, old_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_start(&registry, new_ref), CMETA_PLUGIN_OK);
+    check_equal(provider_dso_build(&n, UINT64_C(41), &registry, old_ref),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(provider_dso_build(&n1, UINT64_C(42), &registry, new_ref),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_init(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_publish(
+        &runtime, &n.generation, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_null(retired);
+
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &old_scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_scope_generation_id(&old_scope),
+                UINT64_C(41));
+    check_true(provider_dso_bind(&old_scope, &old_call.gate));
+    check_equal(cmeta_thread_create(
+        &callback_thread, provider_dso_invoke, &old_call), SALTS_OK);
+    {
+      const uint64_t stop = cmeta_monotonic_ms() + UINT64_C(10000);
+      while (!atomic_load_explicit(&old_call.control.entered,
+                                   memory_order_acquire) &&
+             cmeta_monotonic_ms() < stop)
+        cmeta_thread_yield();
+    }
+    entered = atomic_load_explicit(
+        &old_call.control.entered, memory_order_acquire);
+    check_true(entered);
+
+    check_equal(salts_component_plugin_runtime_publish(
+        &runtime, &n1.generation, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &n.generation);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &n.generation), SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, old_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, old_ref), CMETA_PLUGIN_BUSY);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, old_ref, &info), CMETA_PLUGIN_OK);
+    check_true(info.active_leases > 0u);
+
+    /* Admission moves forward atomically. A stale expected-41 projection
+     * must be rejected rather than silently executing its N callback in N+1. */
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &stale_scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_scope_generation_id(&stale_scope),
+                UINT64_C(42));
+    check_true(salts_component_plugin_scope_generation_id(
+        &stale_scope) != UINT64_C(41));
+    check_equal(salts_component_plugin_scope_release(
+        &stale_scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &new_scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_scope_generation_id(&new_scope),
+                UINT64_C(42));
+    check_true(provider_dso_bind(&new_scope, &new_call.gate));
+    new_call.result = praktor_dso_gate_run(
+        &new_call.gate, &new_call.control);
+    check_equal(new_call.result, 42);
+    check_true(atomic_load_explicit(
+        &new_call.control.exited, memory_order_acquire));
+
+    racer.runtime = &runtime;
+    racer.old_generation = &n.generation;
+    racer.registry = &registry;
+    racer.old_ref = old_ref;
+    atomic_init(&racer.ready, 0);
+    atomic_init(&racer.go, 0);
+    check_equal(cmeta_thread_create(
+        &race_thread, provider_dso_concurrent_unload, &racer), SALTS_OK);
+    {
+      const uint64_t stop = cmeta_monotonic_ms() + UINT64_C(10000);
+      while (!atomic_load_explicit(&racer.ready, memory_order_acquire) &&
+             cmeta_monotonic_ms() < stop)
+        cmeta_thread_yield();
+    }
+    ready = atomic_load_explicit(&racer.ready, memory_order_acquire);
+    check_true(ready);
+    atomic_store_explicit(&racer.go, 1, memory_order_release);
+    check_equal(salts_component_plugin_runtime_close(
+        &runtime, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &n1.generation);
+    check_equal(cmeta_thread_join(&race_thread), SALTS_OK);
+    check_equal(racer.drain_result, SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(racer.unload_result, CMETA_PLUGIN_BUSY);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &n1.generation), SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, new_ref), CMETA_PLUGIN_BUSY);
+
+    atomic_store_explicit(&host.cancel, 1, memory_order_release);
+    check_equal(cmeta_thread_join(&callback_thread), SALTS_OK);
+    check_equal(old_call.result, -41);
+    check_true(atomic_load_explicit(
+        &old_call.control.exited, memory_order_acquire));
+    /* A completed callback does not remove the caller-held scope. */
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &n.generation), SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(salts_component_plugin_scope_release(
+        &old_scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &n.generation), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, old_ref, &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    /* Platform Plugin backend reaches actual dlclose / FreeLibrary. */
+    check_equal(cmeta_plugin_registry_unload(&registry, old_ref),
+                CMETA_PLUGIN_OK);
+
+    check_equal(salts_component_plugin_scope_release(
+        &new_scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &n1.generation), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_destroy(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, new_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, new_ref, &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, new_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
+  }
+}

@@ -325,12 +325,32 @@ jobs:
         run: |
           set -euo pipefail
           prefix="$RUNNER_TEMP/turboagent-consumer-package/sdk/linux-x64"
+          # The release SDKs are deliberately NOT inside CMAKE_PREFIX_PATH:
+          # bind the exact restored provider roots, avoiding system/source fallback.
+          for entry in \
+            "SALTS_ROOT:Salts/SaltsConfig.cmake" \
+            "SALTS_UTILS_ROOT:SaltsUtils/SaltsUtilsConfig.cmake" \
+            "CHTTP_ROOT:Chttp/ChttpConfig.cmake" \
+            "TURBOWASM_ROOT:TurboWasm/TurboWasmConfig.cmake" \
+            "PRAKTOR_ROOT:Praktor/PraktorConfig.cmake" \
+            "TURBOSCRIPT_ROOT:TurboScript/TurboScriptConfig.cmake"; do
+            name="${entry%%:*}"
+            rel="${entry#*:}"
+            root="${!name:?required SDK root is missing: $name}"
+            test -f "$root/lib/cmake/$rel" || { echo "missing exact SDK config: $name/$rel" >&2; exit 1; }
+          done
           cmake -S packaging/nuget/consumer -B "$RUNNER_TEMP/turboagent-consumer-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_CACHE_REPOSITORY_ROOT/cmake/QigaoVcpkgToolchain.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/linux" \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux" \
+            -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts" \
+            -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils" \
+            -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp" \
+            -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm" \
+            -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor" \
+            -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
             -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
           cmake --build "$RUNNER_TEMP/turboagent-consumer-build"
           ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure

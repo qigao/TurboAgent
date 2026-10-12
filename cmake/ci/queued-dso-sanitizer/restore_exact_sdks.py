@@ -72,13 +72,23 @@ def main() -> None:
                 if (name.is_absolute() or ".." in name.parts or
                         "\\" in info.filename or info.filename.startswith("/")):
                     raise RuntimeError(f"unsafe package member in {repo}@{tag}")
-            archive.extractall(extracted)
+            # Preserve the executable bits carried by the exact NuGet
+            # asset. Python ZipFile.extractall does NOT retain Unix modes:
+            # stripping salts-idlc's +x makes IDL.cmake fail closed.
+        subprocess.run(["unzip", "-q", str(pkg), "-d", str(extracted)],
+                       check=True)
         prefix = extracted / "sdk" / RID
         config = prefix / "lib" / "cmake" / cmake_package / (
             cmake_package + "Config.cmake"
         )
         if not config.is_file():
             raise RuntimeError(f"missing exact {repo}@{tag} SDK config {config}")
+        if var == "SALTS_UTILS_ROOT":
+            host_idlc = prefix / "bin" / "salts-idlc"
+            if not host_idlc.is_file() or not os.access(host_idlc, os.X_OK):
+                raise RuntimeError(
+                    f"matching host salts-idlc must be executable: {host_idlc}"
+                )
         exports.append(f"{var}={prefix.as_posix()}\n")
         report["packages"].append({
             "env": var, "repo": repo, "tag": tag,

@@ -604,6 +604,18 @@ spec("Harness compiled Inspect canonical Session Run/Checkpoint") {
     sqlite_config.create_if_missing = 0;
     check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
     harness = make_compiled_harness_with_store(
+        pool, registry, store, "other-graph-thread");
+    check_not_null(harness);
+    check_equal(turbo_agent_harness_compiled_inspect_graph_run_json(
+        harness, &config, compiled_inspect_source, strlen(compiled_inspect_source),
+        "graph_attempt", checkpoint_id, 0, &summary, &state), SALTS_EPROTO);
+    check_null(summary);
+    check_null(state);
+    check_equal(probe.calls, 0);
+    turbo_agent_harness_release(harness);
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+
+    harness = make_compiled_harness_with_store(
         pool, registry, store, "compiled-graph-thread");
     check_not_null(harness);
 

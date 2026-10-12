@@ -25,7 +25,7 @@ ROOTS = {
 
 
 def execute(argv: list[str], *, should_fail: bool = False, failure_text: str | None = None,
-            env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+            allow_failure: bool = False, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, env=env, check=False)
     if should_fail:
@@ -91,12 +91,14 @@ def main() -> None:
     }
 
     def configure(build: Path, overrides: dict[str, str] | None = None,
-                  *, should_fail: bool = False, failure_text: str | None = None):
+                  *, should_fail: bool = False, failure_text: str | None = None,
+                  allow_failure: bool = False):
         actual = dict(args)
         actual.update(overrides or {})
         invocation = ["cmake", "-S", str(source), "-B", str(build), "-G", "Ninja"]
         invocation.extend(f"-D{name}={value}" for name, value in actual.items())
-        return execute(invocation, should_fail=should_fail, failure_text=failure_text)
+        return execute(invocation, should_fail=should_fail, failure_text=failure_text,
+                       allow_failure=allow_failure)
 
     relocated_build = temporary / "turboagent-consumer-relocated-build"
     configure(relocated_build)
@@ -135,17 +137,20 @@ def main() -> None:
     for library in broken_libs:
         library.unlink()
     bad_build = temporary / "negative-broken-import"
-    outcome = configure(bad_build, {"EXPECTED_TURBOAGENT_PREFIX": str(corrupted)})
+    outcome = configure(bad_build, {"EXPECTED_TURBOAGENT_PREFIX": str(corrupted)},
+                        allow_failure=True)
     # The exported import may fail at configure or link, or during CTest's
     # loader resolution. Any of those is an acceptable fail-closed result;
     # succeeding at all stages is an acceptance bug.
     if outcome.returncode == 0:
-        outcome = execute(["cmake", "--build", str(bad_build)])  # may fail
+        outcome = execute(["cmake", "--build", str(bad_build)], allow_failure=True)
         if outcome.returncode == 0:
             outcome = execute(["ctest", "--test-dir", str(bad_build), "--output-on-failure"],
-                              env=clean_env)
+                              env=clean_env, allow_failure=True)
     if outcome.returncode == 0:
         raise AssertionError("consumer accepted a missing packaged runtime_core library")
+    if "runtime_core" not in outcome.stdout:
+        raise RuntimeError(f"corrupt SDK was rejected for an unrelated reason:\\n{outcome.stdout}")
     print("PASS: corrupt installed binary rejected")
 
     print("PASS: relocated SDK linked and executed; negative original/RID/Salts/library cases rejected")

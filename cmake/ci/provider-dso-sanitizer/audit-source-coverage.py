@@ -29,13 +29,16 @@ expected = [
     salts / "plugin/src/plugin.c",
     salts / "plugin/src/plugin_registry.c",
     salts / "plugin/src/plugin_posix.c",
+    agent / "cmake/ci/provider-dso-sanitizer/close_fault_hook.c",
     salts / "component-plugin/src/component_plugin.c",
     salts / "component-plugin/src/component_plugin_runtime.c",
     salts / "component/src/component.c",
     salts / "platform/src/thread_posix.c",
     salts / "platform/src/clock.c",
     agent / "runtime/tests/test_turbo_component_dso_lifecycle.c",
+    agent / "cmake/ci/provider-dso-sanitizer/test_provider_dso_close_failure.c",
     agent / "praktor_tools/tests/praktor_dso_provider.c",
+    agent / "praktor_tools/tests/praktor_dso_managed_provider.c",
 ]
 commands = json.loads((build / "compile_commands.json").read_text(encoding="utf-8"))
 for source in expected:
@@ -56,7 +59,9 @@ libs = [
     build / "libprovider_dso_firstparty_runtime.a",
     build / "libprovider_dso_instrumented_n.so",
     build / "libprovider_dso_instrumented_n1.so",
+    build / "libprovider_dso_instrumented_managed.so",
     build / "test_turbo_component_dso_sanitized",
+    build / "test_provider_dso_close_failure",
 ]
 symbol = "__tsan_" if kind == "thread" else "__asan_"
 for library in libs:
@@ -102,7 +107,7 @@ for member in ("data.c.o", "function.c.o", "vstr.c.o"):
 # The linked executable must own Core UTF-8 validation, not just define it
 # in an unused archive. The symbol appears in the non-stripped native binary.
 binary_symbols = subprocess.run(
-    ["nm", "--defined-only", str(libs[-1])],
+    ["nm", "--defined-only", str(build / "test_turbo_component_dso_sanitized")],
     capture_output=True, text=True, check=True
 ).stdout
 for symbol_name in ("vstr_utf8_valid", "vstr_utf8_invalid_offset"):
@@ -134,4 +139,31 @@ for function in [
     if not re.search(r"(?m)^\S+\s+[TW]\s+" + re.escape(function) + r"$", archive):
         raise SystemExit(f"FAIL: no source-defined {function} in instrumented archive")
     print(f"SOURCE DEFINED: {function}")
+
+# Verify both source-owned loader endpoints and the test-only failpoint
+# reached the fault-test image; no substituted uninstrumented host loader.
+close_test_map = build / "provider_dso_close_failure.map"
+if not close_test_map.is_file():
+    raise SystemExit("FAIL: missing fault-close test linker map")
+close_map_text = close_test_map.read_text(encoding="utf-8", errors="replace")
+for item in ("plugin_posix.c.o", "close_fault_hook.c.o"):
+    if not re.search(
+        r"libprovider_dso_firstparty_runtime\.a\(" + re.escape(item) + r"\)",
+        close_map_text,
+    ):
+        raise SystemExit(f"FAIL: fault-close image lacks instrumented {item}")
+    print(f"FAULT-CLOSE LINKED: {item}")
+close_symbols = subprocess.run(
+    ["nm", "--defined-only", str(build / "test_provider_dso_close_failure")],
+    capture_output=True, text=True, check=True,
+).stdout
+for entry in (
+    "cmeta_plugin_platform_close",
+    "cmeta_plugin_platform_close_real",
+    "provider_close_fault_arm",
+):
+    if not re.search(r"(?m)^\S+\s+[TW]\s+" + entry + r"$", close_symbols):
+        raise SystemExit(f"FAIL: missing source-owned loader endpoint {entry}")
+    print(f"FAULT-CLOSE DEFINED: {entry}")
+
 print(f"PASS: {kind} first-party objects, Sanitizer symbols, extracted-archive audit")

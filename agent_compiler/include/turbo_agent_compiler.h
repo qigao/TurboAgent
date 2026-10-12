@@ -178,6 +178,17 @@ CXX_C_API const char *turbo_agent_executable_plan_step_id(
     const turbo_agent_executable_plan_t *plan);
 CXX_C_API turbo_agent_template_kind_t turbo_agent_executable_plan_template_kind(
     const turbo_agent_executable_plan_t *plan);
+
+/**
+ * Borrow the immutable plan-owned RuntimeTools projection.
+ *
+ * The caller may inspect admission-time result/effect contracts, but must not
+ * mutate/destroy the registry; it is valid only until plan destruction.
+ * No caller may substitute a different registry when executing this plan.
+ */
+CXX_C_API const turbo_tool_registry_t *turbo_agent_executable_plan_approved_tools(
+    const turbo_agent_executable_plan_t *plan);
+
 CXX_C_API turbo_tool_execution_policy_t turbo_agent_executable_plan_execution_policy(
     const turbo_agent_executable_plan_t *plan);
 

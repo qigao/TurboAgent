@@ -213,6 +213,18 @@ static void capture_graph_event(const json_value_t *event, void *user_data) {
   capture->last_payload[sizeof(capture->last_payload) - 1] = '\0';
 }
 
+typedef struct graph_token_probe_s {
+  const turbo_cancel_token_t *expected;
+  int received;
+} graph_token_probe_t;
+
+static int graph_token_probe_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+  graph_token_probe_t *probe = (graph_token_probe_t *)user_data;
+  if (!ctx || !probe) return -1;
+  probe->received = ctx->cancel_token == probe->expected;
+  return probe->received ? 0 : -1;
+}
+
 spec("turbo graph runtime") {
 
   describe("graph structure") {
@@ -1164,5 +1176,44 @@ spec("turbo graph runtime") {
       turbo_graph_destroy(other_graph);
       turbo_graph_destroy(source_graph);
     }
+  }
+}
+
+
+spec("Controlled Graph node cancellation borrow") {
+  it("makes the exact token available only during controlled node invocation") {
+    turbo_graph_t *graph = turbo_graph_create("graph-token-forwarding");
+    turbo_cancel_source_t *source = NULL;
+    turbo_cancel_token_t *token = NULL;
+    graph_token_probe_t probe = {0};
+    turbo_graph_run_result_t result = {0};
+    json_value_t *input = json_create_object(), *state = NULL;
+
+    check_not_null(graph);
+    check_not_null(input);
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_graph_add_json_value_node_ex(
+        graph, "node", "borrow-test-v1", graph_token_probe_node,
+        &probe), TURBO_GRAPH_EXEC_OK);
+    check_equal(turbo_graph_set_entry(graph, "node"), TURBO_GRAPH_EXEC_OK);
+
+    probe.expected = token;
+    check_equal(turbo_graph_run_json_value_stream_controlled(
+        graph, input, NULL, token, NULL, NULL, &result, &state),
+        TURBO_GRAPH_EXEC_OK);
+    check_true(probe.received);
+    json_free(state); state = NULL;
+
+    probe.received = 0;
+    probe.expected = NULL;
+    check_equal(turbo_graph_run_json_value(
+        graph, input, NULL, &result, &state), TURBO_GRAPH_EXEC_OK);
+    check_true(probe.received);
+    json_free(state);
+    json_free(input);
+    turbo_graph_destroy(graph);
+    turbo_cancel_token_release(token);
+    turbo_cancel_source_destroy(source);
   }
 }

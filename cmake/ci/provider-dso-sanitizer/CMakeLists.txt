@@ -221,6 +221,26 @@ add_dependencies(test_provider_registry_repeated_close_failures
   provider_dso_instrumented_managed_component
   provider_dso_instrumented_managed_component_n1)
 
+# An old Registry's Ref and Lease token authority ENDS at final destroy.
+# Re-init of that Host Registry object is explicit, and its fresh identities
+# must not be confused with previous instance tokens (current public ABI
+# has no cross-incarnation field).
+add_executable(test_provider_registry_reinit_lifetime
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_provider_registry_reinit_lifetime.c")
+target_include_directories(test_provider_registry_reinit_lifetime PRIVATE
+  "${_fixture_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(test_provider_registry_reinit_lifetime PRIVATE
+  "PRAKTOR_DSO_MANAGED_COMPONENT_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component>\""
+  "PRAKTOR_DSO_MANAGED_COMPONENT_N1_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component_n1>\"")
+target_link_libraries(test_provider_registry_reinit_lifetime PRIVATE
+  provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
+  Threads::Threads ${CMAKE_DL_LIBS})
+target_link_options(test_provider_registry_reinit_lifetime PRIVATE
+  "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/provider_registry_reinit_lifetime.map")
+add_dependencies(test_provider_registry_reinit_lifetime
+  provider_dso_instrumented_managed_component
+  provider_dso_instrumented_managed_component_n1)
+
 # Integrated test holds a real Managed Component Provider's Generation lease
 # across one injected Registry release failure and later one injected
 # native close failure, ultimately invoking the genuine POSIX loader.
@@ -268,7 +288,9 @@ foreach(target IN ITEMS
     test_provider_registry_destroy_barrier
     test_provider_registry_partial_destroy
   test_provider_registry_repeated_close_failures
+  test_provider_registry_reinit_lifetime
     test_provider_registry_repeated_close_failures
+    test_provider_registry_reinit_lifetime
     test_provider_generation_drain_close_failure
     test_provider_multigeneration_isolated_drain)
   target_compile_options(${target} PRIVATE
@@ -354,4 +376,15 @@ foreach(_case IN ITEMS "same-image" "across-images")
   add_test(NAME "${_test}" COMMAND test_provider_registry_repeated_close_failures)
   set_tests_properties("${_test}" PROPERTIES TIMEOUT 120 ENVIRONMENT
     "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin;TURBO_DSO_CLOSE_FAILURE_SCHEDULE=${_case}")
+endforeach()
+
+
+# Registry generation counters are scoped to a single Registry lifetime.
+# These two explicit Host recovery histories separately prove all native
+# handles are closed before a fresh init on the same Registry storage.
+foreach(_scenario IN ITEMS "repeated" "partial")
+  set(_case "provider_registry_reinit_${_scenario}")
+  add_test(NAME "${_case}" COMMAND test_provider_registry_reinit_lifetime)
+  set_tests_properties("${_case}" PROPERTIES TIMEOUT 120 ENVIRONMENT
+    "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin;TURBO_REGISTRY_REINIT_CASE=${_scenario}")
 endforeach()

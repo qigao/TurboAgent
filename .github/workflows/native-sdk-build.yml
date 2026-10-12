@@ -375,7 +375,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 packaging/nuget/consumer/check_relocation.py
+          python3 packaging/nuget/consumer/check_relocation.py --rid linux-x64
 
   consume-macos:
     name: Consume packed NuGet SDK / macos-arm64
@@ -459,6 +459,12 @@ jobs:
           test -n "$loader_path"
           # CTest sets only the exact installed provider paths, not ambient dyld paths.
           env -u DYLD_LIBRARY_PATH ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure
+
+      - name: Verify relocated macOS SDK and fail-closed consumer negatives
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 packaging/nuget/consumer/check_relocation.py --rid macos-arm64
 
   consume-windows:
     name: Consume packed NuGet SDK / windows-x64

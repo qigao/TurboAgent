@@ -125,6 +125,12 @@ def main() -> None:
         raise RuntimeError("relocated Android ARM64 cross-linked consumer is missing")
     header = run(["readelf", "-h", str(exe)]).stdout
     dynamic = run(["readelf", "-d", str(exe)]).stdout
+    (temporary / "android-relocated-consumer-elf-header.txt").write_text(
+        header, encoding="utf-8"
+    )
+    (temporary / "android-relocated-consumer-needed.txt").write_text(
+        dynamic, encoding="utf-8"
+    )
     if "Machine:                           AArch64" not in header:
         raise RuntimeError(f"unexpected target architecture (not AArch64):\n{header}")
     if "libruntime_core.so" not in dynamic or "libturbo_runtime.so" not in dynamic:

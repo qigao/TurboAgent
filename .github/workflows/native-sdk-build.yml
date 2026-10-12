@@ -266,6 +266,10 @@ jobs:
             -p:PackageRoot="$GITHUB_WORKSPACE/package" \
             -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"
 
+      - name: Test NuGet validation failure gates
+        shell: bash
+        run: python3 -m unittest discover -s packaging/nuget -p 'test_verify_exact_package.py' -v
+
       - name: Verify exact-run NuGet archive provenance and platform contents
         shell: bash
         env:

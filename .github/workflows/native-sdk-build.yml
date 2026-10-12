@@ -13,6 +13,8 @@ permissions:
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 2
+  # Pull-request workflows test the synthetic merge ref; preserve its source HEAD too.
+  SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   metadata:
@@ -213,8 +215,9 @@ jobs:
         run: |
           praktor=off
           if [[ "$WITH_PRAKTOR" == 1 ]]; then praktor=on; fi
-          printf 'version=%s\ncommit=%s\nrid=%s\npraktor_tools=%s\n' \
-            "$SDK_VERSION" "$GITHUB_SHA" "$SDK_RID" "$praktor" \
+          [[ "$SOURCE_HEAD_SHA" =~ ^[[:xdigit:]]{40}$ ]] || { echo "invalid PR source SHA" >&2; exit 1; }
+          printf 'version=%s\ncommit=%s\nsource_head=%s\nrun_id=%s\nrid=%s\npraktor_tools=%s\n' \
+            "$SDK_VERSION" "$GITHUB_SHA" "$SOURCE_HEAD_SHA" "$GITHUB_RUN_ID" "$SDK_RID" "$praktor" \
             > "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
 
       - uses: actions/upload-artifact@v4
@@ -279,6 +282,7 @@ jobs:
           python3 packaging/nuget/verify_exact_package.py \
             "dist/TurboAgent.Native.${PACKAGE_VERSION}.nupkg" \
             --commit "$GITHUB_SHA" \
+            --source-head "$SOURCE_HEAD_SHA" \
             --package-version "$PACKAGE_VERSION"
 
       - name: Record exact-run NuGet archive SHA-256
@@ -325,7 +329,7 @@ jobs:
           test "$(find packed -maxdepth 1 -name '*.nupkg' -type f | wc -l)" -eq 1
           package="packed/TurboAgent.Native.${PACKAGE_VERSION}.nupkg"
           python3 packaging/nuget/verify_exact_package.py "$package" \
-            --commit "$GITHUB_SHA" --package-version "$PACKAGE_VERSION"
+            --commit "$GITHUB_SHA" --source-head "$SOURCE_HEAD_SHA" --package-version "$PACKAGE_VERSION"
           mkdir -p "$RUNNER_TEMP/turboagent-consumer-package"
           unzip -q "$package" -d "$RUNNER_TEMP/turboagent-consumer-package"
       - name: Configure and build standalone installed consumer
@@ -396,7 +400,8 @@ jobs:
           evidence="$RUNNER_TEMP/turboagent-evidence-linux-x64"
           mkdir -p "$evidence"
           {
-            echo "head=$GITHUB_SHA"
+            echo "tested_commit=$GITHUB_SHA"
+            echo "source_head=$SOURCE_HEAD_SHA"
             echo "run_id=$GITHUB_RUN_ID"
             echo "rid=linux-x64"
             echo "job_status=$CONSUMER_JOB_STATUS"
@@ -447,7 +452,7 @@ jobs:
           test "$(find packed -maxdepth 1 -name '*.nupkg' -type f | wc -l | tr -d ' ')" -eq 1
           package="packed/TurboAgent.Native.${PACKAGE_VERSION}.nupkg"
           python3 packaging/nuget/verify_exact_package.py "$package" \
-            --commit "$GITHUB_SHA" --package-version "$PACKAGE_VERSION"
+            --commit "$GITHUB_SHA" --source-head "$SOURCE_HEAD_SHA" --package-version "$PACKAGE_VERSION"
           mkdir -p "$RUNNER_TEMP/turboagent-consumer-package"
           unzip -q "$package" -d "$RUNNER_TEMP/turboagent-consumer-package"
       - name: Configure, link and run installed macOS consumer
@@ -514,7 +519,8 @@ jobs:
           evidence="$RUNNER_TEMP/turboagent-evidence-macos-arm64"
           mkdir -p "$evidence"
           {
-            echo "head=$GITHUB_SHA"
+            echo "tested_commit=$GITHUB_SHA"
+            echo "source_head=$SOURCE_HEAD_SHA"
             echo "run_id=$GITHUB_RUN_ID"
             echo "rid=macos-arm64"
             echo "job_status=$CONSUMER_JOB_STATUS"
@@ -576,7 +582,7 @@ jobs:
           if ($packages.Count -ne 1) { throw "expected exactly one same-run NuGet archive" }
           $package = "packed/TurboAgent.Native.$($env:PACKAGE_VERSION).nupkg"
           if (-not (Test-Path -LiteralPath $package -PathType Leaf)) { throw "missing exact-version package" }
-          python packaging/nuget/verify_exact_package.py $package --commit $env:GITHUB_SHA --package-version $env:PACKAGE_VERSION
+          python packaging/nuget/verify_exact_package.py $package --commit $env:GITHUB_SHA --source-head $env:SOURCE_HEAD_SHA --package-version $env:PACKAGE_VERSION
           if ($LASTEXITCODE -ne 0) { throw "NuGet package provenance check failed" }
           $zip = Join-Path $env:RUNNER_TEMP "turboagent-consumer-package.zip"
           Copy-Item -LiteralPath $package -Destination $zip -Force
@@ -679,7 +685,8 @@ jobs:
           $evidence = Join-Path $env:RUNNER_TEMP 'turboagent-evidence-windows-x64'
           New-Item -ItemType Directory -Path $evidence -Force | Out-Null
           @(
-            "head=$env:GITHUB_SHA"
+            "tested_commit=$env:GITHUB_SHA"
+            "source_head=$env:SOURCE_HEAD_SHA"
             "run_id=$env:GITHUB_RUN_ID"
             'rid=windows-x64'
             "job_status=$env:CONSUMER_JOB_STATUS"
@@ -744,7 +751,7 @@ jobs:
           test "$(find packed -maxdepth 1 -name '*.nupkg' -type f | wc -l)" -eq 1
           package="packed/TurboAgent.Native.${PACKAGE_VERSION}.nupkg"
           python3 packaging/nuget/verify_exact_package.py "$package" \
-            --commit "$GITHUB_SHA" --package-version "$PACKAGE_VERSION"
+            --commit "$GITHUB_SHA" --source-head "$SOURCE_HEAD_SHA" --package-version "$PACKAGE_VERSION"
           mkdir -p "$RUNNER_TEMP/turboagent-consumer-package"
           unzip -q "$package" -d "$RUNNER_TEMP/turboagent-consumer-package"
       - name: Cross-configure and link installed Android consumer
@@ -809,7 +816,8 @@ jobs:
           evidence="$RUNNER_TEMP/turboagent-evidence-android-arm64-v8a"
           mkdir -p "$evidence"
           {
-            echo "head=$GITHUB_SHA"
+            echo "tested_commit=$GITHUB_SHA"
+            echo "source_head=$SOURCE_HEAD_SHA"
             echo "run_id=$GITHUB_RUN_ID"
             echo "rid=android-arm64-v8a"
             echo "job_status=$CONSUMER_JOB_STATUS"

@@ -566,3 +566,89 @@ jobs:
           $env:PATH = (($deps + @("$env:SystemRoot\System32", "$env:SystemRoot")) -join ';')
           & $ctest --test-dir (Join-Path $env:RUNNER_TEMP 'turboagent-consumer-build') --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "installed Windows consumer CTest failed" }
+
+  consume-android:
+    name: Cross-link packed NuGet SDK / android-arm64-v8a
+    needs: [metadata, pack]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: packed
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+      - name: Verify Android cross toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ANDROID_NDK_HOME:-}"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build binutils
+      - name: Restore exact Android prerequisite SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash cmake/ci/restore-native-sdk.sh android-arm64-v8a 1 1
+      - name: Unpack same-run NuGet artifact
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          test "$(find packed -maxdepth 1 -name '*.nupkg' -type f | wc -l)" -eq 1
+          package="packed/TurboAgent.Native.${PACKAGE_VERSION}.nupkg"
+          python3 packaging/nuget/verify_exact_package.py "$package" \
+            --commit "$GITHUB_SHA" --package-version "$PACKAGE_VERSION"
+          mkdir -p "$RUNNER_TEMP/turboagent-consumer-package"
+          unzip -q "$package" -d "$RUNNER_TEMP/turboagent-consumer-package"
+      - name: Cross-configure and link installed Android consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/turboagent-consumer-package/sdk/android-arm64-v8a"
+          for entry in \
+            "SALTS_ROOT:Salts/SaltsConfig.cmake" \
+            "SALTS_UTILS_ROOT:SaltsUtils/SaltsUtilsConfig.cmake" \
+            "CHTTP_ROOT:Chttp/ChttpConfig.cmake" \
+            "TURBOWASM_ROOT:TurboWasm/TurboWasmConfig.cmake" \
+            "PRAKTOR_ROOT:Praktor/PraktorConfig.cmake" \
+            "TURBOSCRIPT_ROOT:TurboScript/TurboScriptConfig.cmake"; do
+            name="${entry%%:*}"
+            rel="${entry#*:}"
+            root="${!name:?required Android SDK root missing: $name}"
+            test -f "$root/lib/cmake/$rel" || { echo "missing exact Android SDK config: $name/$rel" >&2; exit 1; }
+          done
+          cmake -S packaging/nuget/consumer -B "$RUNNER_TEMP/turboagent-consumer-android" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_CACHE_REPOSITORY_ROOT/cmake/QigaoVcpkgToolchain.cmake" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-android \
+            -DVCPKG_HOST_TRIPLET=x64-linux \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/consumer-android" \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/vcpkg_installed/consumer-android/arm64-android" \
+            -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts" \
+            -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils" \
+            -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp" \
+            -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm" \
+            -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor" \
+            -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
+            -DEXPECTED_WITH_PRAKTOR=ON \
+            -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
+          cmake --build "$RUNNER_TEMP/turboagent-consumer-android"
+          consumer="$RUNNER_TEMP/turboagent-consumer-android/turboagent_installed_consumer"
+          test -f "$consumer"
+          readelf -h "$consumer" | tee "$RUNNER_TEMP/android-consumer-elf-header.txt"
+          grep -Eq 'Machine:[[:space:]]*AArch64' "$RUNNER_TEMP/android-consumer-elf-header.txt"
+          readelf -d "$consumer" | grep 'NEEDED'
+          echo "Android arm64 installed SDK consumer: CROSS-LINK PASS; no device execution claimed"

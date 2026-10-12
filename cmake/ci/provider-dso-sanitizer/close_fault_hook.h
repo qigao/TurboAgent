@@ -1,6 +1,8 @@
 #ifndef TURBOAGENT_PROVIDER_CLOSE_FAULT_H
 #define TURBOAGENT_PROVIDER_CLOSE_FAULT_H
 
+#include <salts/plugin.h>
+
 /* Test-only fault injection at the actual Salts POSIX loader close boundary.
  * This is never included in normal SDK or production Plugin builds. */
 void provider_close_fault_arm(int failures);

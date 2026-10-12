@@ -88,11 +88,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Exercise immutable SDK release rejection contracts offline
+        shell: bash
+        run: python -m unittest discover -s cmake/ci -p test_verify_published_native_sdk.py -v
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
         with:
           mode: read
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
 
       - name: Prepare Linux toolchain
         if: runner.os == 'Linux'

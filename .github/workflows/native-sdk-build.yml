@@ -358,7 +358,11 @@ jobs:
           # Observe the real ELF loader graph and reject unresolved dependencies.
           # Do not inherit a runner-wide LD_LIBRARY_PATH fallback.
           readelf -d "$consumer" | grep -E '(RPATH|RUNPATH)'
-          env -u LD_LIBRARY_PATH ldd "$consumer" | tee "$RUNNER_TEMP/turboagent-consumer-ldd.txt"
+          # Explicit deployment paths for direct and transitive DSOs, generated
+          # by the standalone consumer from the unpacked exact-run SDK graph.
+          loader_path="$(cat "$RUNNER_TEMP/turboagent-consumer-build/runtime-library-path.txt")"
+          test -n "$loader_path"
+          env LD_LIBRARY_PATH="$loader_path" ldd "$consumer" | tee "$RUNNER_TEMP/turboagent-consumer-ldd.txt"
           if grep -q 'not found' "$RUNNER_TEMP/turboagent-consumer-ldd.txt"; then
             echo "installed consumer has unresolved shared library dependencies" >&2
             exit 1

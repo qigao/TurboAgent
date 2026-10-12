@@ -186,6 +186,15 @@ jobs:
           set -euo pipefail
           ctest --preset "$SDK_PRESET" -R '^test_turbo_agent_harness_compiled$' --repeat until-fail:25 --output-on-failure
 
+      - name: Stress real Managed DSO queued compiled Harness (Linux)
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: |
+          set -euo pipefail
+          ctest --preset "$SDK_PRESET" -R '^test_turbo_praktor_dso_compiled_harness$' --repeat until-fail:25 --output-on-failure
+
       - name: Stress Provider DSO terminal/unload (Unix)
         if: matrix.rid == 'linux-x64' || matrix.rid == 'macos-arm64'
         shell: bash

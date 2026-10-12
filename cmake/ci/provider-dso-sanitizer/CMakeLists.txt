@@ -47,6 +47,8 @@ set(_runtime_sources
   "${_salts}/cmeta/src/interface.c"
   "${_salts}/cmeta/src/component.c"
   "${_salts}/cmeta/src/object.c"
+  "${_salts}/cmeta/src/data.c"
+  "${_salts}/cmeta/src/function.c"
   "${_salts}/plugin/src/plugin.c"
   "${_salts}/plugin/src/plugin_registry.c"
   "${_salts}/plugin/src/plugin_posix.c"

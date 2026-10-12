@@ -1120,49 +1120,6 @@ cleanup:
 
 enum { TURBO_HARNESS_PRAKTOR_MAX_YAML_BYTES = 256 * 1024 };
 
-/* Compile-only review gate for three-step Change/Repair templates. The
- * compiler supplies the canonical names and frozen effect facts; this gate
- * never consults the model's original untrusted tool-name strings. */
-static int turbo_harness_praktor_certificate_admitted(
-    const json_value_t *certificate) {
-  const json_value_t *dag = certificate ? json_object_get(certificate, "dag") : NULL;
-  const json_value_t *steps = dag ? json_object_get(dag, "steps") : NULL;
-  size_t i;
-  if (!steps || json_type(steps) != JSON_ARRAY ||
-      json_array_size(steps) != 3) return 0;
-  for (i = 0; i < 3; ++i) {
-    const json_value_t *step = json_array_get(steps, i);
-    int64_t effects, retry, flags;
-    if (!step || json_type(step) != JSON_OBJECT ||
-        !json_get_string(step, "tool")) return 0;
-    effects = turbo_runtime_json_value_as_int64(
-        json_object_get(step, "effect_flags"), -1);
-    retry = turbo_runtime_json_value_as_int64(
-        json_object_get(step, "retry_limit"), -1);
-    flags = turbo_runtime_json_value_as_int64(
-        json_object_get(step, "flags"), -1);
-    if (retry != 0 || effects <= 0 ||
-        (effects & TURBO_TOOL_EFFECT_UNKNOWN) ||
-        (effects & ~((int64_t)TURBO_TOOL_EFFECT_KNOWN_MASK)))
-      return 0; /* No implicit retry or guessed optimizer authority. */
-    if (i != 1) {
-      if (flags != TURBO_AGENT_DAG_STEP_NONE ||
-          !(effects == TURBO_TOOL_EFFECT_PURE ||
-            ((effects & TURBO_TOOL_EFFECT_READ) &&
-             !(effects & ~(TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK)))))
-        return 0;
-    } else {
-      if (flags != (TURBO_AGENT_DAG_STEP_APPROVAL_BEFORE |
-                    TURBO_AGENT_DAG_STEP_CHECKPOINT_AFTER) ||
-          (effects & TURBO_TOOL_EFFECT_PURE) ||
-          !(effects & (TURBO_TOOL_EFFECT_WRITE |
-                       TURBO_TOOL_EFFECT_EXTERNAL_MUTATION)))
-        return 0;
-    }
-  }
-  return 1;
-}
-
 int turbo_agent_harness_prepare_praktor_template(
     turbo_agent_harness_t *harness,
     const turbo_agent_compiler_config_t *compiler_config,
@@ -1211,7 +1168,7 @@ int turbo_agent_harness_prepare_praktor_template(
     rc = SALTS_ENOMEM;
     goto done;
   }
-  if (!turbo_harness_praktor_certificate_admitted(certificate)) {
+  if (!turbo_agent_template_praktor_execution_preflight(plan)) {
     rc = turbo_agent_harness_compiled_reject(
         out_diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
         "Praktor preview requires declared effects, approval and zero retries");

@@ -163,6 +163,16 @@ CXX_C_API turbo_agent_verify_status_t
 turbo_agent_template_verify_status_from_praktor_result(
     const json_value_t *praktor_result);
 
+/**
+ * Pure fail-closed execution preflight for three-step Praktor Change/Repair.
+ * Checks immutable compiler facts only: known semantic effects, approval +
+ * checkpoint fence on mutation, and zero backend retry until a dedicated
+ * retry/journal runtime gate qualifies retry behavior. No Tool/Praktor calls.
+ * A successful check is NOT itself a host approval or permission grant.
+ */
+CXX_C_API int turbo_agent_template_praktor_execution_preflight(
+    const turbo_agent_template_plan_t *plan);
+
 /** Caller-owned deterministic certificate for template + underlying DAG. */
 CXX_C_API json_value_t *
 turbo_agent_template_plan_certificate_json_value(

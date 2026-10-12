@@ -53,6 +53,52 @@ static void managed_drain_concurrent(void *data) {
       worker->gate->runtime, worker->generation);
 }
 
+
+typedef struct provider_reuse_gate {
+  atomic_int ready;
+  atomic_int go;
+  cmeta_plugin_registry *registry;
+  salts_component_plugin_runtime *runtime;
+} provider_reuse_gate;
+
+typedef struct provider_reuse_acquire_worker {
+  provider_reuse_gate *gate;
+  cmeta_plugin_ref ref;
+  cmeta_plugin_status status;
+  cmeta_plugin_lease lease;
+  const cmeta_plugin_manifest *manifest;
+} provider_reuse_acquire_worker;
+
+typedef struct provider_reuse_publish_worker {
+  provider_reuse_gate *gate;
+  salts_component_plugin_generation *generation;
+  salts_component_plugin_generation *previous;
+  salts_component_plugin_status status;
+} provider_reuse_publish_worker;
+
+static void provider_reuse_acquire_in_thread(void *data) {
+  provider_reuse_acquire_worker *worker =
+      (provider_reuse_acquire_worker *)data;
+  worker->lease = (cmeta_plugin_lease){0};
+  worker->manifest = NULL;
+  atomic_fetch_add_explicit(&worker->gate->ready, 1, memory_order_acq_rel);
+  while (!atomic_load_explicit(&worker->gate->go, memory_order_acquire))
+    cmeta_thread_yield();
+  worker->status = cmeta_plugin_registry_acquire(
+      worker->gate->registry, worker->ref,
+      &worker->lease, &worker->manifest);
+}
+
+static void provider_reuse_publish_in_thread(void *data) {
+  provider_reuse_publish_worker *worker =
+      (provider_reuse_publish_worker *)data;
+  atomic_fetch_add_explicit(&worker->gate->ready, 1, memory_order_acq_rel);
+  while (!atomic_load_explicit(&worker->gate->go, memory_order_acquire))
+    cmeta_thread_yield();
+  worker->status = salts_component_plugin_runtime_publish(
+      worker->gate->runtime, worker->generation, &worker->previous);
+}
+
 static salts_component_plugin_status managed_build(
     managed_generation *item, uint64_t epoch,
     cmeta_plugin_registry *registry, cmeta_plugin_ref ref) {
@@ -111,6 +157,172 @@ static int managed_run_scoped(
 }
 
 spec("independent Managed DSO Generation retirement under scoped release failure") {
+
+  it("fences stale Ref acquire against reused slot and new Generation publication") {
+    const cmeta_plugin_registry_config config = {1u};
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref old_ref = {0}, new_ref = {0};
+    cmeta_plugin_lifecycle_info info = {0};
+    cmeta_plugin_lease negative_lease = {0};
+    const cmeta_plugin_manifest *negative_manifest = NULL;
+    managed_generation new_generation = {0};
+    salts_component_plugin_runtime runtime = SALTS_COMPONENT_PLUGIN_RUNTIME_INIT;
+    salts_component_plugin_generation *retired = NULL;
+    salts_component_plugin_scope new_scope = SALTS_COMPONENT_PLUGIN_SCOPE_INIT;
+    provider_reuse_gate gate = {0};
+    provider_reuse_acquire_worker acquisition[2] = {{0}};
+    provider_reuse_publish_worker publication = {0};
+    cmeta_thread_t threads[3] = {0};
+    atomic_int old_destroy, new_destroy, entered, exited;
+    const uint64_t deadline = cmeta_monotonic_ms() + UINT64_C(10000);
+    bool quiet = false;
+    int ready;
+
+    atomic_init(&old_destroy, 0);
+    atomic_init(&new_destroy, 0);
+    atomic_init(&entered, 0);
+    atomic_init(&exited, 0);
+    check_equal(cmeta_plugin_registry_init(&registry, &config), CMETA_PLUGIN_OK);
+
+    /* The first real Managed DSO fully finishes its lifetime and returns
+     * its bounded Registry slot to the free list. */
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_MANAGED_COMPONENT_PATH, &old_ref),
+        CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_start(
+        &registry, old_ref), CMETA_PLUGIN_OK);
+    check_equal(managed_set_host_destroy_counter(
+        &registry, old_ref, &old_destroy), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, old_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, old_ref, &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, old_ref), CMETA_PLUGIN_OK);
+    check_equal(atomic_load_explicit(
+        &old_destroy, memory_order_acquire), 1);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+
+    /* The same physical slot is occupied by a NEW DSO incarnation. Even
+     * before STARTED, the old ref must never resolve to its manifest. */
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_MANAGED_COMPONENT_PATH, &new_ref),
+        CMETA_PLUGIN_OK);
+    check_equal(new_ref.slot, old_ref.slot);
+    check_true(new_ref.generation != old_ref.generation);
+    check_equal(cmeta_plugin_registry_acquire(
+        &registry, old_ref, &negative_lease, &negative_manifest),
+        CMETA_PLUGIN_STALE);
+    check_false(cmeta_plugin_lease_valid(negative_lease));
+    check_null(negative_manifest);
+    check_equal(cmeta_plugin_registry_acquire(
+        &registry, new_ref, &negative_lease, &negative_manifest),
+        CMETA_PLUGIN_INVALID_STATE);
+    check_false(cmeta_plugin_lease_valid(negative_lease));
+    check_null(negative_manifest);
+
+    check_equal(cmeta_plugin_registry_start(
+        &registry, new_ref), CMETA_PLUGIN_OK);
+    check_equal(managed_set_host_destroy_counter(
+        &registry, new_ref, &new_destroy), CMETA_PLUGIN_OK);
+    check_equal(managed_build(
+        &new_generation, UINT64_C(45), &registry, new_ref),
+        SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_init(
+        &runtime), SALTS_COMPONENT_PLUGIN_OK);
+
+    /* Same atomic barrier: an old stale Plugin ref attempts acquire while
+     * an authorized new Ref acquires its lease and Generation 45 publishes.
+     * Registry and ComponentPlugin must each preserve their own ownership. */
+    gate.registry = &registry;
+    gate.runtime = &runtime;
+    atomic_init(&gate.ready, 0);
+    atomic_init(&gate.go, 0);
+    acquisition[0].gate = &gate;
+    acquisition[0].ref = old_ref;
+    acquisition[1].gate = &gate;
+    acquisition[1].ref = new_ref;
+    publication.gate = &gate;
+    publication.generation = &new_generation.generation;
+    check_equal(cmeta_thread_create(
+        &threads[0], provider_reuse_acquire_in_thread, &acquisition[0]),
+        SALTS_OK);
+    check_equal(cmeta_thread_create(
+        &threads[1], provider_reuse_acquire_in_thread, &acquisition[1]),
+        SALTS_OK);
+    check_equal(cmeta_thread_create(
+        &threads[2], provider_reuse_publish_in_thread, &publication),
+        SALTS_OK);
+    while (atomic_load_explicit(&gate.ready, memory_order_acquire) < 3 &&
+           cmeta_monotonic_ms() < deadline)
+      cmeta_thread_yield();
+    ready = atomic_load_explicit(&gate.ready, memory_order_acquire);
+    atomic_store_explicit(&gate.go, 1, memory_order_release);
+    for (size_t i = 0u; i < 3u; ++i)
+      check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+    check_equal(ready, 3);
+    check_equal(acquisition[0].status, CMETA_PLUGIN_STALE);
+    check_false(cmeta_plugin_lease_valid(acquisition[0].lease));
+    check_null(acquisition[0].manifest);
+    check_equal(acquisition[1].status, CMETA_PLUGIN_OK);
+    check_true(cmeta_plugin_lease_valid(acquisition[1].lease));
+    check_not_null(acquisition[1].manifest);
+    check_equal(publication.status, SALTS_COMPONENT_PLUGIN_OK);
+    check_null(publication.previous);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, new_ref, &info), CMETA_PLUGIN_OK);
+    check_equal(info.active_leases, (size_t)2u);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, old_ref), CMETA_PLUGIN_STALE);
+
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &new_scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_scope_generation_id(
+        &new_scope), UINT64_C(45));
+    check_equal(managed_run_scoped(&new_scope, &entered, &exited), 43);
+    check_equal(salts_component_plugin_runtime_close(
+        &runtime, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &new_generation.generation);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, retired), SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(salts_component_plugin_scope_release(
+        &new_scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, new_ref, &info), CMETA_PLUGIN_OK);
+    check_equal(info.active_leases, (size_t)1u);
+    check_equal(salts_component_plugin_runtime_destroy(
+        &runtime), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, new_ref), CMETA_PLUGIN_BUSY);
+
+    /* The one valid concurrent-acquire worker, not the rejected stale
+     * caller, releases the final Plugin lease. Then actual dlclose occurs. */
+    check_equal(cmeta_plugin_registry_release(
+        &registry, &acquisition[1].lease), CMETA_PLUGIN_OK);
+    check_false(cmeta_plugin_lease_valid(acquisition[1].lease));
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, new_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, new_ref, &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, new_ref), CMETA_PLUGIN_OK);
+    check_equal(atomic_load_explicit(
+        &old_destroy, memory_order_acquire), 1);
+    check_equal(atomic_load_explicit(
+        &new_destroy, memory_order_acquire), 1);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, old_ref, &info), CMETA_PLUGIN_STALE);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, new_ref, &info), CMETA_PLUGIN_STALE);
+    check_equal(cmeta_plugin_registry_destroy(
+        &registry), CMETA_PLUGIN_OK);
+  }
+
   it("allows healthy N+1 drain/unload while N retains failed lease") {
     const cmeta_plugin_registry_config config = {2u};
     cmeta_plugin_registry registry = {0};

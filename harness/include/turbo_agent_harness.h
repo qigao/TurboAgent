@@ -178,6 +178,33 @@ CXX_C_API int turbo_agent_harness_compiled_inspect_graph_run_json(
     json_value_t **out_summary, json_value_t **out_state);
 
 /**
+ * Submit a bounded, explicit compiled Inspect Graph to the existing Harness
+ * executor. START requires checkpoint_id=NULL and may interrupt before tool
+ * execution. RESUME requires an exact checkpoint belonging to this Session.
+ *
+ * The submitted Graph and its compiler capability snapshot are owned by the
+ * returned execution. All caller-provided source/config/attempt strings are
+ * copied before accepting work; returned summaries/states use the existing
+ * turbo_agent_harness_execution_take_result() API. No implicit Agent Loop,
+ * Inbox follow-ups, plan fallback or side-effect retry is permitted.
+ *
+ * options may supply deadline/event_sink but must not supply graph_options or
+ * session_options, since these are derived from the compiled admission.
+ * Provider callbacks and the tool registry must remain live/quiescent until
+ * the accepted work and terminal callbacks have drained. Cancellation is
+ * observed at Graph safe points; in-flight synchronous tool callbacks still
+ * require provider cooperation for prompt cancellation.
+ */
+CXX_C_API int turbo_agent_harness_submit_compiled_inspect_graph_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const char *attempt_id, const char *checkpoint_id,
+    int interrupt_before_tool,
+    const turbo_agent_harness_run_options_t *options,
+    turbo_agent_harness_execution_t **out_execution);
+
+/**
  * Resume the harness default workflow.
  * `options->session_options` is required and selects checkpoint/thread scope
  * and override/patch/command input semantics.

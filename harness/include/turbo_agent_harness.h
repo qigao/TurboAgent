@@ -10,6 +10,7 @@
 
 #include "turbo_agent_app.h"
 #include "turbo_agent_execution.h"
+#include "turbo_agent_compiler.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -82,6 +83,40 @@ CXX_C_API int turbo_agent_harness_start_state(turbo_agent_harness_t *harness,
 CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, const char *user_text,
                                              const turbo_agent_harness_run_options_t *options,
                                              turbo_agent_harness_execution_t **out_execution);
+
+/**
+ * Synchronous, explicit compiled Inspect admission and execution.
+ *
+ * This is deliberately a narrow Phase-1 bridge, NOT the Session's durable
+ * async Graph / Run / Checkpoint API. Only a frozen read-only Inspect plan with
+ * declared PURE or READ(+NETWORK) semantic effects and a strict typed result
+ * contract is admitted. Tool callbacks remain trusted registry implementations.
+ * The host explicitly supplies capability allowlists through compiler_config;
+ * deny_unlisted_capabilities must be enabled.
+ *
+ * Harness serializes this call against all start/resume/fork operations.
+ * Compilation and capability/effect/result-contract admission invoke no tools.
+ * After admission, the plan-owned projection is the sole execution authority:
+ * there is no raw loop fallback or automatic retry. Result validation happens
+ * AFTER a callback may have run; invalid results are rejected without re-exec.
+ *
+ * On admitted execution a caller-owned plan certificate is returned, including
+ * when the callback/result verification fails. Return SALTS_OK only on
+ * completed, validated result. out_tool_status describes backend outcome.
+ *
+ * The source registry and provider callbacks must remain quiescent/alive for
+ * the entire call; calling this does NOT persist run state, journal effects,
+ * manage external Plugin leases, or provide hard process sandboxing.
+ */
+CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate);
 
 /**
  * Resume the harness default workflow.

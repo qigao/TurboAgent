@@ -627,6 +627,11 @@
             "name": "ci-linux-release",
             "inherits": "base-test",
             "configurePreset": "ci-linux-release"
+        },
+        {
+            "name": "ci-macos-release",
+            "inherits": "base-test",
+            "configurePreset": "ci-macos-release"
         }
     ]
 }

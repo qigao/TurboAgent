@@ -54,7 +54,7 @@ class PackageValidationTest(unittest.TestCase):
         self.make_zip(override={name: (
             f"version=1.3.0\ncommit={'b' * 40}\nsource_head={SOURCE_HEAD}\nrid=linux-x64\npraktor_tools=on\n"
         ).encode()})
-        with self.assertRaisesRegex(ValueError, "wrong commit"):
+        with self.assertRaisesRegex(ValueError, "wrong tested commit"):
             validator.validate(self.path, SHA, SOURCE_HEAD, VERSION)
 
     def test_empty_binary(self):

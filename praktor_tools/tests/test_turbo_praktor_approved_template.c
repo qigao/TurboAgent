@@ -108,6 +108,49 @@ static turbo_agent_template_plan_t *approved_template(
   return plan;
 }
 
+typedef struct approved_fault_store_s {
+  turbo_agent_runtime_store_t inner;
+  int fail_committed;
+  int failures;
+} approved_fault_store_t;
+
+static int approved_fault_put(void *user, const char *collection,
+                              const char *id, const char *record_json) {
+  approved_fault_store_t *fault = (approved_fault_store_t *)user;
+  if (fault->fail_committed && strcmp(collection, "praktor_template_attempts") == 0) {
+    json_value_t *parsed = json_parse(record_json, strlen(record_json));
+    const char *phase = parsed ? json_get_string(parsed, "phase") : NULL;
+    int reject = phase && strcmp(phase, "committed") == 0;
+    json_free(parsed);
+    if (reject) {
+      ++fault->failures;
+      return SALTS_EIO;
+    }
+  }
+  return fault->inner.put(fault->inner.user_data, collection, id, record_json);
+}
+
+static int approved_fault_get(void *user, const char *collection,
+                              const char *id, char **output) {
+  approved_fault_store_t *fault = (approved_fault_store_t *)user;
+  return fault->inner.get(fault->inner.user_data, collection, id, output);
+}
+
+static int approved_fault_list(void *user, const char *collection,
+                               const char *filter_key, const char *filter_value,
+                               char **output) {
+  approved_fault_store_t *fault = (approved_fault_store_t *)user;
+  return fault->inner.list(fault->inner.user_data, collection,
+                           filter_key, filter_value, output);
+}
+
+static void approved_fault_destroy(void *user) {
+  approved_fault_store_t *fault = (approved_fault_store_t *)user;
+  if (fault->inner.user_data_free)
+    fault->inner.user_data_free(fault->inner.user_data);
+  fault->inner = (turbo_agent_runtime_store_t){0};
+}
+
 spec("approved Praktor ABI 2.6 execution / durable attempt") {
   it("rejects absent host approval and replays a committed three-step workflow") {
     approved_probe_t probe = {0};
@@ -275,4 +318,51 @@ spec("approved Praktor ABI 2.6 execution / durable attempt") {
     tt_remove_tree(directory);
     free(directory);
   }
+  it("never retries a Praktor HostTool after a failed durable COMMITTED write") {
+    approved_probe_t probe = {0};
+    approved_fault_store_t fault = {0};
+    turbo_agent_runtime_store_t callbacks;
+    turbo_tool_registry_t *registry = approved_registry(&probe, TURBO_TOOL_EFFECT_WRITE);
+    json_value_t *args = json_create_object(), *record = NULL, *result = NULL;
+    turbo_agent_template_plan_t *plan = approved_template(registry, args, 0);
+    turbo_agent_runtime_t *runtime;
+    turbo_agent_template_outcome_t outcome;
+    int replayed = -1;
+
+    check_not_null(registry);
+    check_not_null(plan);
+    fault.inner = turbo_agent_runtime_store_memory_create();
+    check_not_null(fault.inner.put);
+    callbacks = (turbo_agent_runtime_store_t){
+        approved_fault_put, approved_fault_get, approved_fault_list,
+        &fault, approved_fault_destroy};
+    runtime = turbo_agent_runtime_create(&callbacks);
+    check_not_null(runtime);
+    check_equal(turbo_praktor_template_approval_commit(
+        runtime, plan, "thread_A", "commit_fault", "host_reviewed"), TURBO_TOOL_OK);
+    fault.fail_committed = 1;
+    check_equal(turbo_praktor_template_execute_approved(
+        runtime, plan, "thread_A", "commit_fault", "host_reviewed",
+        NULL, &replayed, &outcome, &result), TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_equal(probe.inspect + probe.change + probe.verify, 3);
+    check_equal(replayed, 0);
+    check_null(result);
+    check_equal(fault.failures, 1);
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "praktor_template_attempts", "008_thread_A_commit_fault", &record),
+        SALTS_OK);
+    check_equal(json_get_string(record, "phase"), "started");
+    json_free(record); record = NULL;
+    fault.fail_committed = 0;
+    check_equal(turbo_praktor_template_execute_approved(
+        runtime, plan, "thread_A", "commit_fault", "host_reviewed",
+        NULL, &replayed, &outcome, &result), TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_equal(probe.inspect + probe.change + probe.verify, 3);
+
+    turbo_agent_runtime_destroy(runtime);
+    turbo_agent_template_plan_destroy(plan);
+    json_free(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
 }

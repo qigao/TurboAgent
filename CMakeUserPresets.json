@@ -403,6 +403,7 @@
                 "CMAKE_OSX_ARCHITECTURES": "arm64",
                 "ENABLE_TESTS": false,
                 "BUILD_TESTS": false,
+                "ENABLE_PROVIDER_DSO_CONFORMANCE": true,
                 "BUILD_TESTING": false
             },
             "environment": {

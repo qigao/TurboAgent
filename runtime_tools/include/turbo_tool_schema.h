@@ -43,6 +43,27 @@ turbo_tool_schema_validate_arguments_json_value(
     size_t diagnostic_capacity);
 
 /**
+ * Explicitly validate a result against a registry-owned v5/v6 contract.
+ *
+ * This is an opt-in pure validation operation, NOT an execution hook. Registering
+ * strict_result never changes direct RuntimeTools invocation semantics.
+ * The registered result schema (not the caller) is authoritative; exact tool
+ * names and unambiguous wire aliases resolve through RuntimeTools.
+ *
+ * An opaque/undeclared result contract, unknown tool or invalid arguments return
+ * INVALID_ARGUMENT rather than claiming validation success. Unsupported schema
+ * keywords fail closed. Strict result schemas treat absent additionalProperties
+ * as false, identically to strict tool parameter contracts.
+ */
+CXX_C_API turbo_tool_schema_validation_status_t
+turbo_tool_schema_validate_result_json_value(
+    const turbo_tool_registry_t *registry,
+    const char *tool_name,
+    const json_value_t *result,
+    char *diagnostic,
+    size_t diagnostic_capacity);
+
+/**
  * @brief Serialize registry tools into OpenAI Responses API shape.
  * Names use the same wire aliases as compatible Chat (for example fs.read ->
  * fs_read). The registry retains canonical names and resolves these aliases.

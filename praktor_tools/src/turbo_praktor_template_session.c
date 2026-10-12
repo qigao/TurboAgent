@@ -17,6 +17,10 @@ struct turbo_praktor_template_session_run_s {
   char *attempt_id;
   char *approval_id;
   char plan_hash[17];
+  /* One address-stable Salts-owned ComponentPlugin generation lease.
+   * A live scope is never copied/moved, including across queue latency. */
+  salts_component_plugin_scope plugin_scope;
+  int plugin_scope_live;
 };
 
 static char *praktor_session_copy_id(const char *source, size_t max_length) {
@@ -43,6 +47,12 @@ void turbo_praktor_template_session_run_release(
   atomic_thread_fence(memory_order_acquire);
   turbo_agent_execution_release(run->execution);
   turbo_graph_destroy(run->graph);
+  /* Module callbacks must have returned and the Graph must be destroyed
+   * before retiring the generation lease. */
+  if (run->plugin_scope_live) {
+    (void)salts_component_plugin_scope_release(&run->plugin_scope);
+    run->plugin_scope_live = 0;
+  }
   free(run->thread_id);
   free(run->attempt_id);
   free(run->approval_id);
@@ -109,10 +119,12 @@ static int praktor_session_node(turbo_graph_exec_ctx_t *ctx, void *user) {
   return accepted && status == TURBO_TOOL_OK ? 0 : -1;
 }
 
-int turbo_praktor_template_session_submit(
+static int praktor_template_session_submit_impl(
     cmeta_threadpool_t *executor, turbo_agent_session_t *session,
-    const turbo_agent_template_plan_t *plan, const char *attempt_id,
-    const char *host_approval_id, const char *checkpoint_id,
+    const turbo_agent_template_plan_t *plan,
+    salts_component_plugin_runtime *component_runtime,
+    uint64_t expected_generation_id,
+    const char *attempt_id, const char *host_approval_id, const char *checkpoint_id,
     int interrupt_before_workflow, uint64_t deadline_mono_ms,
     turbo_praktor_template_session_run_t **out_run) {
   turbo_praktor_template_session_run_t *run = NULL;
@@ -130,6 +142,7 @@ int turbo_praktor_template_session_submit(
   if (!executor || !session || !plan ||
       !turbo_agent_template_praktor_execution_preflight(plan) ||
       (checkpoint_id && (!checkpoint_id[0] || interrupt_before_workflow)) ||
+      (!!component_runtime != (expected_generation_id != 0)) ||
       cmeta_threadpool_capacity(executor) == 0 ||
       !cmeta_threadpool_is_accepting(executor))
     return SALTS_EINVAL;
@@ -144,6 +157,21 @@ int turbo_praktor_template_session_submit(
   run->attempt_id = praktor_session_copy_id(attempt_id, 64);
   run->approval_id = praktor_session_copy_id(host_approval_id, 64);
   if (!run->thread_id || !run->attempt_id || !run->approval_id) goto fail;
+  if (component_runtime) {
+    /* Acquire before queueing, and reject if publication raced with the
+     * trusted plan's expected generation identity. */
+    if (salts_component_plugin_scope_acquire(
+            component_runtime, &run->plugin_scope) != SALTS_COMPONENT_PLUGIN_OK) {
+      rc = SALTS_EBUSY;
+      goto fail;
+    }
+    run->plugin_scope_live = 1;
+    if (salts_component_plugin_scope_generation_id(
+            &run->plugin_scope) != expected_generation_id) {
+      rc = SALTS_EPROTO;
+      goto fail;
+    }
+  }
   snprintf(run->plan_hash, sizeof(run->plan_hash), "%016llx",
            (unsigned long long)turbo_agent_template_plan_hash(plan));
   if (snprintf(semantic_id, sizeof(semantic_id), "praktor-approved-v1-%s",
@@ -214,6 +242,35 @@ fail:
   turbo_praktor_template_session_run_release(run);
   turbo_praktor_template_session_run_release(run);
   return rc == SALTS_EINVAL ? SALTS_EPROTO : rc;
+}
+
+int turbo_praktor_template_session_submit(
+    cmeta_threadpool_t *executor, turbo_agent_session_t *session,
+    const turbo_agent_template_plan_t *plan, const char *attempt_id,
+    const char *host_approval_id, const char *checkpoint_id,
+    int interrupt_before_workflow, uint64_t deadline_mono_ms,
+    turbo_praktor_template_session_run_t **out_run) {
+  return praktor_template_session_submit_impl(
+      executor, session, plan, NULL, 0, attempt_id, host_approval_id,
+      checkpoint_id, interrupt_before_workflow, deadline_mono_ms, out_run);
+}
+
+int turbo_praktor_template_session_submit_scoped(
+    cmeta_threadpool_t *executor, turbo_agent_session_t *session,
+    const turbo_agent_template_plan_t *plan,
+    salts_component_plugin_runtime *component_runtime,
+    uint64_t expected_generation_id,
+    const char *attempt_id, const char *host_approval_id, const char *checkpoint_id,
+    int interrupt_before_workflow, uint64_t deadline_mono_ms,
+    turbo_praktor_template_session_run_t **out_run) {
+  if (!component_runtime || !expected_generation_id) {
+    if (out_run) *out_run = NULL;
+    return SALTS_EINVAL;
+  }
+  return praktor_template_session_submit_impl(
+      executor, session, plan, component_runtime, expected_generation_id,
+      attempt_id, host_approval_id, checkpoint_id, interrupt_before_workflow,
+      deadline_mono_ms, out_run);
 }
 
 int turbo_praktor_template_session_run_wait(

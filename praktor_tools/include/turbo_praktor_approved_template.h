@@ -5,6 +5,7 @@
 #include "turbo_praktor_tool_pack.h"
 #include "turbo_runtime_store.h"
 #include "turbo_agent_session_execution.h"
+#include <salts/component_plugin.h>
 #include <salts/thread_pool.h>
 
 #ifdef __cplusplus
@@ -92,6 +93,35 @@ typedef struct turbo_praktor_template_session_run_s
 CXX_C_API int turbo_praktor_template_session_submit(
     cmeta_threadpool_t *executor, turbo_agent_session_t *session,
     const turbo_agent_template_plan_t *frozen_plan,
+    const char *attempt_id, const char *host_approval_id,
+    const char *checkpoint_id, int interrupt_before_workflow,
+    uint64_t deadline_mono_ms,
+    turbo_praktor_template_session_run_t **out_run);
+
+/**
+ * Dynamically loaded Provider variant: acquire one Salts ComponentPlugin
+ * generation scope BEFORE queue admission and hold it until the asynchronous
+ * Session execution's terminal callback has finished and the run's final
+ * reference is released. The exact expected generation ID is a mandatory
+ * host-side identity fence; a stale/published-different generation fails
+ * without queuing or invoking a HostTool.
+ *
+ * The compiler-approved RuntimeTools projection MUST have been bound by the
+ * trusted host to services from this same generation. A generation ID is an
+ * identity assertion, not permission or a service-discovery fallback.
+ * The ComponentPlugin runtime and generation storage must remain address-
+ * stable until the scope releases. Callers must drain the run before their
+ * own Provider/Session/executor teardown; release of the caller run handle
+ * alone never forces cancellation and cannot stop synchronous callbacks.
+ *
+ * Use this API for Plugin-backed callbacks. The unscoped submit overload
+ * remains intended for non-DSO/static Provider callbacks.
+ */
+CXX_C_API int turbo_praktor_template_session_submit_scoped(
+    cmeta_threadpool_t *executor, turbo_agent_session_t *session,
+    const turbo_agent_template_plan_t *frozen_plan,
+    salts_component_plugin_runtime *component_runtime,
+    uint64_t expected_generation_id,
     const char *attempt_id, const char *host_approval_id,
     const char *checkpoint_id, int interrupt_before_workflow,
     uint64_t deadline_mono_ms,

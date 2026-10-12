@@ -342,4 +342,95 @@ spec("approved Praktor asynchronous Session Checkpoint") {
     cmeta_threadpool_destroy(pool);
   }
 
+  it("pins the exact Salts ComponentPlugin generation across async cancellation and release") {
+    session_probe_t probe = {0};
+    salts_component_plugin_generation generation = SALTS_COMPONENT_PLUGIN_GENERATION_INIT;
+    salts_component_plugin_generation_storage storage = {0};
+    salts_component_plugin_runtime component_runtime =
+        SALTS_COMPONENT_PLUGIN_RUNTIME_INIT;
+    salts_component_plugin_generation *retired = NULL;
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 2};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = session_registry(&probe);
+    turbo_agent_session_t *session = new_session(
+        registry, "praktor_scoped_thread", turbo_agent_runtime_store_memory_create());
+    json_value_t *args = json_create_object(), *summary = NULL, *state = NULL;
+    turbo_agent_template_plan_t *plan = session_plan(registry, args);
+    turbo_praktor_template_session_run_t *run = NULL;
+    turbo_agent_execution_status_t status;
+    int entered;
+
+    probe.wait_for_cancel = 1;
+    atomic_init(&probe.change_entered, 0);
+    atomic_init(&probe.cancel_observed, 0);
+    check_not_null(pool); check_not_null(registry);
+    check_not_null(session); check_not_null(plan);
+
+    /* A real Salts ComponentPlugin generation, with no dynamic DSO fixture.
+     * It is an admission/lease witness, not a claim about a loaded module. */
+    check_equal(salts_component_plugin_generation_build(
+        &generation, UINT64_C(41), NULL, &storage,
+        NULL, 0, NULL, 0, NULL, 0), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_init(&component_runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_publish(
+        &component_runtime, &generation, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_null(retired);
+    check_equal(turbo_praktor_template_approval_commit(
+        turbo_agent_session_runtime(session), plan, "praktor_scoped_thread",
+        "scoped_cancel", "host_scoped"), TURBO_TOOL_OK);
+
+    /* A stale compiled generation cannot borrow the new published one. */
+    check_equal(turbo_praktor_template_session_submit_scoped(
+        pool, session, plan, &component_runtime, UINT64_C(40),
+        "scoped_cancel", "host_scoped", NULL, 0, 0, &run), SALTS_EPROTO);
+    check_null(run);
+
+    check_equal(turbo_praktor_template_session_submit_scoped(
+        pool, session, plan, &component_runtime, UINT64_C(41),
+        "scoped_cancel", "host_scoped", NULL, 0, 0, &run), SALTS_OK);
+    check_not_null(run);
+    {
+      const uint64_t stop = cmeta_monotonic_ms() + UINT64_C(10000);
+      while (!atomic_load_explicit(&probe.change_entered, memory_order_acquire) &&
+             cmeta_monotonic_ms() < stop) cmeta_thread_yield();
+    }
+    entered = atomic_load_explicit(&probe.change_entered, memory_order_acquire);
+    check_equal(salts_component_plugin_runtime_close(
+        &component_runtime, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &generation);
+    check_equal(salts_component_plugin_generation_drain(
+        &component_runtime, &generation), SALTS_COMPONENT_PLUGIN_BUSY);
+    if (entered) check_equal(turbo_praktor_template_session_run_cancel(
+        run, TURBO_CANCEL_USER), SALTS_OK);
+    check_equal(turbo_praktor_template_session_run_wait(run, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_praktor_template_session_run_status(run, &status), SALTS_OK);
+    check_true(entered);
+    check_true(atomic_load_explicit(&probe.cancel_observed, memory_order_acquire));
+    check_true(status != TURBO_AGENT_EXECUTION_COMPLETED);
+    check_equal(probe.change, 1);
+    check_equal(probe.verify, 0);
+    /* Even when the callback finished, an outstanding caller-owned run
+     * still protects the generation from draining. */
+    check_equal(salts_component_plugin_generation_drain(
+        &component_runtime, &generation), SALTS_COMPONENT_PLUGIN_BUSY);
+
+    (void)turbo_praktor_template_session_run_take_result(run, &summary, &state);
+    json_free(summary); json_free(state);
+    turbo_praktor_template_session_run_release(run);
+    run = NULL;
+    /* Worker completion callback releases its own run reference.
+     * Joining the bounded executor proves callback quiescence. */
+    cmeta_threadpool_destroy(pool); pool = NULL;
+    check_equal(salts_component_plugin_generation_drain(
+        &component_runtime, &generation), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_destroy(&component_runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+
+    turbo_agent_template_plan_destroy(plan);
+    json_free(args);
+    turbo_agent_session_destroy(session);
+    turbo_tool_registry_destroy(registry);
+  }
+
 }

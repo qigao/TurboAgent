@@ -13,7 +13,7 @@ target_include_directories(
                        $<INSTALL_INTERFACE:include>)
 target_link_libraries(
   praktor_tools
-  PUBLIC TurboAgent::RuntimeTools TurboAgent::AgentCompiler TurboAgent::Runtime Salts::JsonParser
+  PUBLIC TurboAgent::RuntimeTools TurboAgent::AgentCompiler TurboAgent::Runtime TurboAgent::Agent Salts::JsonParser
   PRIVATE Praktor::Praktor Salts::Core)
 
 cmake_config_target(praktor_tools FOLDER "Praktor Tools" EXPORT_NAME PraktorTools

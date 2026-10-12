@@ -220,7 +220,7 @@ spec("turbo agent tool executor") {
   it("should validate a complete batch before the first side effect") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_t *agent;
@@ -254,7 +254,7 @@ spec("turbo agent tool executor") {
     turbo_tool_definition_v2_t definition = {
         sizeof(turbo_tool_definition_v2_t),
         TURBO_TOOL_DEFINITION_V2_ABI_VERSION,
-        {"probe", "Probe", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+        {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}", NULL, 1, tool_executor_probe_handler, NULL,
          &probe, NULL},
         {TURBO_TOOL_EXECUTION_PARALLEL_SAFE, TURBO_TOOL_IDEMPOTENCY_READ_ONLY}};
     turbo_agent_tool_executor_config_t executor_config;
@@ -300,7 +300,7 @@ spec("turbo agent tool executor") {
   it("should enforce output bounds without committing oversized output") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_tool_executor_config_t executor_config;
@@ -344,7 +344,7 @@ spec("turbo agent tool executor") {
     turbo_tool_definition_v3_t definition = {
         sizeof(turbo_tool_definition_v3_t),
         TURBO_TOOL_DEFINITION_V3_ABI_VERSION,
-        {"remote", "Remote", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+        {"remote", "Remote", "{\"type\":\"object\",\"additionalProperties\":true}", NULL, 1, tool_executor_probe_handler, NULL,
          &probe, NULL},
         {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE},
         required,
@@ -395,7 +395,7 @@ spec("turbo agent tool executor") {
     turbo_tool_definition_v3_t definition = {
         sizeof(turbo_tool_definition_v3_t),
         TURBO_TOOL_DEFINITION_V3_ABI_VERSION,
-        {"remote", "Remote", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+        {"remote", "Remote", "{\"type\":\"object\",\"additionalProperties\":true}", NULL, 1, tool_executor_probe_handler, NULL,
          &probe, NULL},
         {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE},
         required,
@@ -448,7 +448,7 @@ spec("turbo agent tool executor") {
     definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
     definition.definition.name = "context_probe";
     definition.definition.description = "Observe execution context.";
-    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.parameters_json = "{\"type\":\"object\",\"additionalProperties\":true}";
     definition.definition.strict = 1;
     definition.definition.user_data = &probe;
     definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
@@ -511,7 +511,7 @@ spec("turbo agent tool executor") {
     definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
     definition.definition.name = "observe";
     definition.definition.description = "Observed tool";
-    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.parameters_json = "{\"type\":\"object\",\"additionalProperties\":true}";
     definition.definition.strict = 1;
     definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
     definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
@@ -557,7 +557,7 @@ spec("turbo agent tool executor") {
   it("should observe cancellation before invoking a synchronous callback") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_tool_executor_t *executor = NULL;
@@ -593,7 +593,7 @@ spec("turbo agent tool executor") {
   it("should not retry a callback after a started journal loses its commit") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_tool_executor_t *executor = NULL;
@@ -650,7 +650,7 @@ spec("turbo agent tool executor") {
   it("should replay committed output and reject a changed call identity") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
@@ -722,7 +722,7 @@ spec("turbo agent tool executor") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {
-        "probe", "Probe", "{\"type\":\"object\"}",
+        "probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
         NULL, 1, tool_executor_probe_handler, NULL, &probe, NULL};
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);

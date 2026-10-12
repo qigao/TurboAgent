@@ -594,6 +594,14 @@ jobs:
           & $ctest --test-dir (Join-Path $env:RUNNER_TEMP 'turboagent-consumer-build') --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "installed Windows consumer CTest failed" }
 
+      - name: Verify relocated Windows NuGet SDK and consumer negatives
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          python packaging/nuget/consumer/check_windows_relocation.py
+          if errorlevel 1 exit /b 1
+
   consume-android:
     name: Cross-link packed NuGet SDK / android-arm64-v8a
     needs: [metadata, pack]

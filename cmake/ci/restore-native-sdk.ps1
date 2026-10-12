@@ -63,11 +63,14 @@ function Restore-Sdk(
   Copy-Item -LiteralPath $nupkg.FullName -Destination $zip -Force
   Expand-Archive -LiteralPath $zip -DestinationPath $package -Force
   if ($Repo -in @('qigao/salts', 'qigao/salts-utils', 'qigao/chttp')) {
-    & python (Join-Path $PSScriptRoot 'verify-published-native-sdk.py') `
-      --repo $Repo --archive $nupkg.FullName --extracted $package --rid $Rid
+    # A PowerShell function emits child stdout into its return value.
+    # Keep attestation output in the log, not the SDK root assignment.
+    $attestation = @(& python (Join-Path $PSScriptRoot 'verify-published-native-sdk.py') `
+      --repo $Repo --archive $nupkg.FullName --extracted $package --rid $Rid 2>&1)
     if ($LASTEXITCODE -ne 0) {
-      throw "published SDK identity verification failed for $Repo@$tag"
+      throw ('published SDK verification failed for ' + $Repo + '@' + $tag + ': ' + ($attestation -join ' '))
     }
+    [Console]::Error.WriteLine(($attestation -join [Environment]::NewLine))
   }
 
   $root = Join-Path $package ("sdk\" + $Rid)

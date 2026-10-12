@@ -204,9 +204,9 @@ spec("model tool argument structure before durable admission") {
 
   it("passes canonical registry tool identity to Workflow Guardrails") {
     static const char model_event[] =
-        "{\\"kind\\":\\"model\\",\\"output_text\\":\\"\\",\\"tool_calls\\":["
-        "{\\"call_id\\":\\"alias-call\\",\\"name\\":\\"admission_probe\\","
-        "\\"arguments\\":\\"{}\\"}]}";
+        "{\"kind\":\"model\",\"output_text\":\"\",\"tool_calls\":["
+        "{\"call_id\":\"alias-call\",\"name\":\"admission_probe\","
+        "\"arguments\":\"{}\"}]}";
     admission_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {

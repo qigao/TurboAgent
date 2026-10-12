@@ -314,7 +314,7 @@ spec("Harness durable compiled Inspect attempt") {
     json_free(certificate); certificate = NULL;
 
     check_equal(turbo_agent_runtime_store_get_json_status(
-        runtime, "compiled_inspect_attempts", "compiled-test-thread:run_one",
+        runtime, "compiled_inspect_attempts", "020_compiled-test-thread_run_one",
         &record), SALTS_OK);
     check_equal(json_get_string(record, "phase"), "committed");
     json_free(record); record = NULL;
@@ -361,12 +361,12 @@ spec("Harness durable compiled Inspect attempt") {
     runtime = turbo_agent_session_runtime(
         turbo_agent_app_session(turbo_agent_harness_app(harness)));
     check_equal(turbo_agent_runtime_store_get_json_status(
-        runtime, "compiled_inspect_attempts", "compiled-test-thread:run_one",
+        runtime, "compiled_inspect_attempts", "020_compiled-test-thread_run_one",
         &record), SALTS_OK);
     check_equal(turbo_runtime_json_object_set_string(
         record, "phase", "started"), TURBO_RUNTIME_JSON_OK);
     check_equal(turbo_agent_runtime_store_put_json(
-        runtime, "compiled_inspect_attempts", "compiled-test-thread:run_one",
+        runtime, "compiled_inspect_attempts", "020_compiled-test-thread_run_one",
         record), SALTS_OK);
     json_free(record); record = NULL;
 

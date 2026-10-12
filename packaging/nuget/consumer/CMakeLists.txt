@@ -69,3 +69,14 @@ set_target_properties(turboagent_installed_consumer PROPERTIES
 
 enable_testing()
 add_test(NAME turboagent.installed_consumer COMMAND turboagent_installed_consumer)
+# DT_RUNPATH on the consumer does not guarantee transitive DSO discovery:
+# the loader may need libruntime_core.so through libruntime.so. Define a
+# closed, explicit deployment path for the test instead of inheriting runner
+# state or relying on source build directories.
+if(UNIX AND NOT APPLE)
+  string(JOIN ":" _runtime_loader_path ${_runtime_dirs})
+  set_tests_properties(turboagent.installed_consumer PROPERTIES
+    ENVIRONMENT "LD_LIBRARY_PATH=${_runtime_loader_path}")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/runtime-library-path.txt"
+       "${_runtime_loader_path}\n")
+endif()

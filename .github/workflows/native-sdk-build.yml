@@ -266,6 +266,17 @@ jobs:
             -p:PackageRoot="$GITHUB_WORKSPACE/package" \
             -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"
 
+      - name: Verify exact-run NuGet archive provenance and platform contents
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          python3 packaging/nuget/verify_exact_package.py \
+            "dist/TurboAgent.Native.${PACKAGE_VERSION}.nupkg" \
+            --commit "$GITHUB_SHA" \
+            --package-version "$PACKAGE_VERSION"
+
       - uses: actions/upload-artifact@v4
         with:
           name: turboagent-native-nuget

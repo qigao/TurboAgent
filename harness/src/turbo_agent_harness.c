@@ -4,6 +4,7 @@
 
 #include "turbo_agent_session_execution.h"
 #include "turbo_tool_schema.h"
+#include "turbo_runtime_store.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -278,13 +279,91 @@ static int turbo_agent_harness_compiled_reject(
   return SALTS_EPROTO;
 }
 
+#define TURBO_HARNESS_INSPECT_COLLECTION "compiled_inspect_attempts"
+#define TURBO_HARNESS_INSPECT_MAX_RECORD_BYTES (1024u * 1024u)
+
+/* SQLite Store treats IDs as SQL values, but validate both identity components
+ * as path-safe for the RuntimeStore file backend as well. A file backend is
+ * NOT claimed crash-safe; these records are still useful for local inspection. */
+static int turbo_harness_inspect_key_component(const char *s, size_t max_len) {
+  size_t n;
+  if (!s || !s[0]) return 0;
+  for (n = 0; s[n]; ++n) {
+    const char c = s[n];
+    if (n >= max_len ||
+        !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.'))
+      return 0;
+  }
+  return n > 0;
+}
+
+/* The record contains only identity, declarative contracts and JSON outcomes.
+ * Never persist function pointers, Runtime state, provider handles or leases. */
+static int turbo_harness_inspect_record_write(
+    turbo_agent_runtime_t *runtime, const char *key, const char *thread_id,
+    const char *attempt_id, const char *hash_hex, const char *tool,
+    const char *result_schema, turbo_tool_effect_flags_t effects,
+    const char *phase, turbo_tool_status_t status, const char *error,
+    const json_value_t *result) {
+  json_value_t *record = json_create_object();
+  char *serialized = NULL;
+  int rc = SALTS_ENOMEM;
+  if (!runtime || !record) goto cleanup;
+  if (turbo_runtime_json_object_set_int64(record, "schema_version", 1) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "id", key) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "thread_id", thread_id) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "attempt_id", attempt_id) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "plan_hash", hash_hex) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "tool_name", tool) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "result_schema", result_schema) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "effects", (int64_t)effects) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "phase", phase) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "tool_status", status) !=
+          TURBO_RUNTIME_JSON_OK ||
+      (error && turbo_runtime_json_object_set_string(record, "error", error) !=
+          TURBO_RUNTIME_JSON_OK) ||
+      (result && turbo_runtime_json_object_set_clone(record, "result", result) !=
+          TURBO_RUNTIME_JSON_OK))
+    goto cleanup;
+  serialized = json_serialize(record, NULL);
+  if (!serialized) goto cleanup;
+  if (strlen(serialized) > TURBO_HARNESS_INSPECT_MAX_RECORD_BYTES) {
+    rc = SALTS_EMSGSIZE;
+    goto cleanup;
+  }
+  rc = turbo_agent_runtime_store_put_json(
+      runtime, TURBO_HARNESS_INSPECT_COLLECTION, key, record) == SALTS_OK
+           ? SALTS_OK : SALTS_EIO;
+cleanup:
+  json_serialize_free(serialized);
+  turbo_runtime_json_destroy(record);
+  return rc;
+}
+
+static int turbo_harness_inspect_record_string_equals(
+    const json_value_t *record, const char *field, const char *expected) {
+  const char *value = record ? json_get_string(record, field) : NULL;
+  return value && expected && strcmp(value, expected) == 0;
+}
+
 /* One synchronous, read-only slice of compiled Harness execution. The async
  * Session Run/Checkpoint/Journal integration is tracked separately in #72. */
-int turbo_agent_harness_execute_compiled_inspect_json(
+static int turbo_agent_harness_execute_compiled_inspect_impl(
     turbo_agent_harness_t *harness,
     const turbo_agent_compiler_config_t *compiler_config,
     const char *source_json, size_t source_json_size,
     const turbo_tool_execution_context_t *context,
+    const char *attempt_id, int *out_replayed,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,
@@ -300,9 +379,16 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   turbo_agent_compile_status_t compiled;
   json_value_t *result = NULL;
   json_value_t *certificate = NULL;
+  json_value_t *stored = NULL;
+  turbo_agent_runtime_t *runtime = NULL;
+  const char *thread_id = NULL;
+  char record_id[192] = {0};
+  char plan_hash_hex[17] = {0};
+  int durable = attempt_id != NULL;
   int strict_result = 0;
   int rc;
 
+  if (out_replayed) *out_replayed = 0;
   if (out_result) *out_result = NULL;
   if (out_certificate) *out_certificate = NULL;
   if (out_tool_status) *out_tool_status = TURBO_TOOL_INVALID_ARGUMENT;
@@ -310,6 +396,8 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   if (!harness || !compiler_config || !compiler_config->deny_unlisted_capabilities ||
       !source_json || !source_json_size || !out_result || !out_certificate ||
       !out_tool_status ||
+      (durable && (!out_replayed ||
+                    !turbo_harness_inspect_key_component(attempt_id, 64))) ||
       (context && (context->abi_version != TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION ||
                    context->struct_size < sizeof(*context)))) {
     return SALTS_EINVAL;
@@ -362,6 +450,92 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   *out_certificate = certificate;
   certificate = NULL;
 
+  if (durable) {
+    turbo_agent_session_t *session = turbo_agent_app_session(harness->app);
+    int read_rc;
+    int width;
+    const char *phase = NULL;
+    const json_value_t *persisted_result;
+    int64_t saved_status;
+
+    if (!session || !(runtime = turbo_agent_session_runtime(session)) ||
+        !(thread_id = turbo_agent_session_thread_id(session)) ||
+        !turbo_harness_inspect_key_component(thread_id, 80)) {
+      rc = SALTS_EINVAL;
+      goto done;
+    }
+    width = snprintf(record_id, sizeof(record_id), "%s:%s", thread_id, attempt_id);
+    if (width < 0 || (size_t)width >= sizeof(record_id)) {
+      rc = SALTS_EINVAL;
+      goto done;
+    }
+    snprintf(plan_hash_hex, sizeof(plan_hash_hex), "%016llx",
+             (unsigned long long)turbo_agent_executable_plan_hash(plan));
+
+    read_rc = turbo_agent_runtime_store_get_json_status(
+        runtime, TURBO_HARNESS_INSPECT_COLLECTION, record_id, &stored);
+    if (read_rc != SALTS_ENOENT) {
+      if (read_rc != SALTS_OK) {
+        rc = read_rc;
+        goto done;  /* Never equate an I/O/corruption error with absence. */
+      }
+      if (!stored || json_type(stored) != JSON_OBJECT ||
+          turbo_runtime_json_value_as_int64(
+              json_object_get(stored, "schema_version"), INT64_MIN) != 1 ||
+          !turbo_harness_inspect_record_string_equals(stored, "id", record_id) ||
+          !turbo_harness_inspect_record_string_equals(stored, "thread_id", thread_id) ||
+          !turbo_harness_inspect_record_string_equals(stored, "attempt_id", attempt_id) ||
+          !turbo_harness_inspect_record_string_equals(stored, "plan_hash", plan_hash_hex) ||
+          !turbo_harness_inspect_record_string_equals(stored, "tool_name", name) ||
+          !turbo_harness_inspect_record_string_equals(
+              stored, "result_schema", result_schema_json) ||
+          turbo_runtime_json_value_as_int64(
+              json_object_get(stored, "effects"), INT64_MIN) != (int64_t)effects) {
+        rc = SALTS_EPROTO;
+        goto done;
+      }
+      phase = json_get_string(stored, "phase");
+      saved_status = turbo_runtime_json_value_as_int64(
+          json_object_get(stored, "tool_status"), INT64_MAX);
+      if (!phase || saved_status > TURBO_TOOL_OK ||
+          saved_status < TURBO_TOOL_TRAPPED) {
+        rc = SALTS_EPROTO;
+        goto done;
+      }
+      if (strcmp(phase, "started") == 0) {
+        *out_tool_status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+        rc = SALTS_EBUSY; /* Uncertain external effect: never retry. */
+        goto done;
+      }
+      if (strcmp(phase, "committed") != 0) {
+        rc = SALTS_EPROTO;
+        goto done;
+      }
+      *out_tool_status = (turbo_tool_status_t)saved_status;
+      persisted_result = json_object_get(stored, "result");
+      if (*out_tool_status == TURBO_TOOL_OK) {
+        if (!persisted_result ||
+            turbo_tool_schema_validate_result_json_value(
+                approved, name, persisted_result, NULL, 0) != TURBO_TOOL_SCHEMA_VALID ||
+            !(*out_result = json_clone(persisted_result))) {
+          rc = SALTS_EPROTO;
+          goto done;
+        }
+        *out_replayed = 1;
+        rc = SALTS_OK;
+      } else {
+        if (persisted_result) {
+          rc = SALTS_EPROTO;
+          goto done;
+        }
+        *out_replayed = 1;
+        rc = turbo_harness_inspect_record_string_equals(
+                 stored, "error", "result_schema") ? SALTS_EPROTO : SALTS_EIO;
+      }
+      goto done;
+    }
+  }
+
   if (context && context->cancel_token) {
     rc = turbo_cancel_token_check(context->cancel_token);
     if (rc != SALTS_OK) {
@@ -371,31 +545,85 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     }
   }
 
+  if (durable) {
+    rc = turbo_harness_inspect_record_write(
+        runtime, record_id, thread_id, attempt_id, plan_hash_hex, name,
+        result_schema_json, effects, "started", TURBO_TOOL_UNKNOWN_SIDE_EFFECT,
+        NULL, NULL);
+    if (rc != SALTS_OK) goto done; /* Never invoke after failed durable STARTED. */
+  }
+
   tool_status = turbo_agent_execute_compiled_plan(plan, context, &result);
   *out_tool_status = tool_status;
   if (tool_status != TURBO_TOOL_OK) {
     rc = SALTS_EIO;
-    goto done;
-  }
-  if (!result ||
-      turbo_tool_schema_validate_result_json_value(
-          approved, name, result, NULL, 0) != TURBO_TOOL_SCHEMA_VALID) {
+  } else if (!result ||
+             turbo_tool_schema_validate_result_json_value(
+                 approved, name, result, NULL, 0) != TURBO_TOOL_SCHEMA_VALID) {
     *out_tool_status = TURBO_TOOL_ERROR;
     rc = turbo_agent_harness_compiled_reject(
         out_diagnostic, TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID,
         "compiled Inspect returned a result violating its admitted schema");
-    goto done;
+  } else {
+    rc = SALTS_OK;
   }
-  *out_result = result;
-  result = NULL;
-  rc = SALTS_OK;
+
+  if (durable) {
+    int write_rc = turbo_harness_inspect_record_write(
+        runtime, record_id, thread_id, attempt_id, plan_hash_hex, name,
+        result_schema_json, effects, "committed", *out_tool_status,
+        rc == SALTS_EPROTO ? "result_schema" : NULL,
+        rc == SALTS_OK ? result : NULL);
+    if (write_rc != SALTS_OK) {
+      /* STARTED survives: outcome is uncertain, even if we saw a callback
+       * result locally. Never return it as committed or retry the callback. */
+      *out_tool_status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+      rc = SALTS_EIO;
+    }
+  }
+  if (rc == SALTS_OK) {
+    *out_result = result;
+    result = NULL;
+  }
 
 done:
+  turbo_runtime_json_destroy(stored);
   turbo_runtime_json_destroy(result);
   turbo_runtime_json_destroy(certificate);
   turbo_agent_executable_plan_destroy(plan);
   turbo_agent_harness_end_failed_submit(harness);
   return rc;
+}
+
+int turbo_agent_harness_execute_compiled_inspect_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate) {
+  return turbo_agent_harness_execute_compiled_inspect_impl(
+      harness, compiler_config, source_json, source_json_size, context,
+      NULL, NULL, out_diagnostic, out_tool_status, out_result, out_certificate);
+}
+
+int turbo_agent_harness_execute_compiled_inspect_durable_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    const char *attempt_id, int *out_replayed,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate) {
+  if (!attempt_id) return SALTS_EINVAL;
+  return turbo_agent_harness_execute_compiled_inspect_impl(
+      harness, compiler_config, source_json, source_json_size, context,
+      attempt_id, out_replayed, out_diagnostic, out_tool_status,
+      out_result, out_certificate);
 }
 
 static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,

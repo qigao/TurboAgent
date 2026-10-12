@@ -95,7 +95,7 @@ spec("model tool argument structure before durable admission") {
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
     turbo_tool_definition_v2_t definition = {
         sizeof(turbo_tool_definition_v2_t), TURBO_TOOL_DEFINITION_V2_ABI_VERSION,
-        {"admission.probe", "Canonical fixture", "{\\"type\\":\\"object\\"}",
+        {"admission.probe", "Canonical fixture", "{\"type\":\"object\"}",
          NULL, 0, admission_tool_handler, NULL, &probe, NULL},
         {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
     turbo_agent_tool_execution_t first = admission_call("same-call", "{}");
@@ -148,7 +148,7 @@ spec("model tool argument structure before durable admission") {
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
     turbo_tool_definition_t dotted = {
-        "admission.probe", "Dotted", "{\\"type\\":\\"object\\"}",
+        "admission.probe", "Dotted", "{\"type\":\"object\"}",
         NULL, 0, admission_tool_handler, NULL, &probe, NULL};
     turbo_tool_definition_t slashed = dotted;
     turbo_agent_tool_execution_t call = admission_call("ambiguous", "{}");

@@ -579,8 +579,19 @@ spec("Harness compiled Inspect canonical Session Run/Checkpoint") {
     json_free(summary); summary = NULL;
     json_free(state); state = NULL;
 
-    /* A source with different arguments is not allowed to reuse a checkpoint
-     * created by the old compiled plan topology. */
+    /* A distinct but valid source changes the compiled plan/topology.
+     * Resuming its checkpoint must not invoke even one callback. */
+    {
+      static const char changed_source[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"value\\\":\\\"another\\\"}\"}";
+      check_not_equal(turbo_agent_harness_compiled_inspect_graph_run_json(
+          harness, &config, changed_source, strlen(changed_source),
+          "graph_attempt", checkpoint_id, 0, &summary, &state), SALTS_OK);
+      json_free(summary); summary = NULL;
+      json_free(state); state = NULL;
+    }
+    check_equal(probe.calls, 0);
+
+    /* Invalid compilation also never reaches graph execution or tool code. */
     check_equal(turbo_agent_harness_compiled_inspect_graph_run_json(
         harness, &config, compiled_inspect_bad_args, strlen(compiled_inspect_bad_args),
         "graph_attempt", checkpoint_id, 0, &summary, &state), SALTS_EPROTO);

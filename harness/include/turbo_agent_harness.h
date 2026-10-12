@@ -150,6 +150,34 @@ CXX_C_API int turbo_agent_harness_execute_compiled_inspect_durable_json(
     json_value_t **out_certificate);
 
 /**
+ * Explicit synchronous compiled Inspect Graph/Session Run & Checkpoint bridge.
+ *
+ * The host supplies the same bounded source and attempt_id on resume. The
+ * source is compiled again only to verify immutable plan identity and build
+ * the same stable graph topology, never to reauthorize a failed attempt.
+ *
+ * START: checkpoint_id=NULL. When interrupt_before_tool!=0 the Session saves
+ * a normal Graph checkpoint before the tool; no tool invocation/STARTED record
+ * is created at this boundary. Caller receives a summary with checkpoint_id.
+ *
+ * RESUME: checkpoint_id must be exact from the interrupted Run; no arbitrary
+ * state override, implicit checkpoint fallback, or legacy loop execution.
+ * The checkpoint's frozen plan hash/attempt identity and graph topology are
+ * verified before callback admission. Tool replay still uses the *existing*
+ * compiled_inspect_attempts journal via the Session Runtime Store.
+ *
+ * Both summary and state are caller-owned. No asynchronous worker is spawned
+ * by this first Run/Checkpoint slice; no multi-step DAG or approval logic.
+ */
+CXX_C_API int turbo_agent_harness_compiled_inspect_graph_run_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const char *attempt_id, const char *checkpoint_id,
+    int interrupt_before_tool,
+    json_value_t **out_summary, json_value_t **out_state);
+
+/**
  * Resume the harness default workflow.
  * `options->session_options` is required and selects checkpoint/thread scope
  * and override/patch/command input semantics.

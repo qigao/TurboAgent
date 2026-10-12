@@ -102,6 +102,17 @@ add_library(provider_dso_instrumented_managed SHARED
   "${_fixture_dir}/praktor_dso_managed_provider.c")
 add_library(provider_dso_instrumented_managed_component SHARED
   "${_fixture_dir}/praktor_dso_provider.c")
+# Use distinct real Provider DSO images; both managed, with separate
+# plugin identities and independent DSO-owned callback/state.
+add_library(provider_dso_instrumented_managed_component_n1 SHARED
+  "${_fixture_dir}/praktor_dso_provider.c")
+target_compile_definitions(provider_dso_instrumented_managed_component_n1 PRIVATE
+  PRAKTOR_DSO_MANAGED_LIFECYCLE=1 PRAKTOR_DSO_EPOCH=44
+  "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.sanitizer.provider.M44\"")
+target_include_directories(provider_dso_instrumented_managed_component_n1 PRIVATE
+  "${_fixture_dir}")
+target_link_libraries(provider_dso_instrumented_managed_component_n1 PRIVATE
+  Salts::ComponentPluginABI Salts::PluginABI)
 target_compile_definitions(provider_dso_instrumented_managed_component PRIVATE
   PRAKTOR_DSO_MANAGED_LIFECYCLE=1 PRAKTOR_DSO_EPOCH=43
   "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.sanitizer.provider.M43\"")
@@ -174,15 +185,35 @@ target_link_options(test_provider_generation_drain_close_failure PRIVATE
 add_dependencies(test_provider_generation_drain_close_failure
   provider_dso_instrumented_managed_component)
 
+# One Generation's injected release failure must not block an unrelated
+# retired Generation from releasing, destroying, and really unloading.
+add_executable(test_provider_multigeneration_isolated_drain
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_provider_multigeneration_isolated_drain.c")
+target_include_directories(test_provider_multigeneration_isolated_drain PRIVATE
+  "${_fixture_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(test_provider_multigeneration_isolated_drain PRIVATE
+  "PRAKTOR_DSO_MANAGED_COMPONENT_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component>\""
+  "PRAKTOR_DSO_MANAGED_COMPONENT_N1_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component_n1>\"")
+target_link_libraries(test_provider_multigeneration_isolated_drain PRIVATE
+  provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
+  Threads::Threads ${CMAKE_DL_LIBS})
+target_link_options(test_provider_multigeneration_isolated_drain PRIVATE
+  "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/provider_multigeneration_isolated_drain.map")
+add_dependencies(test_provider_multigeneration_isolated_drain
+  provider_dso_instrumented_managed_component
+  provider_dso_instrumented_managed_component_n1)
+
 foreach(target IN ITEMS
     provider_dso_firstparty_runtime
     provider_dso_instrumented_n
     provider_dso_instrumented_n1
     provider_dso_instrumented_managed
     provider_dso_instrumented_managed_component
+    provider_dso_instrumented_managed_component_n1
     test_turbo_component_dso_sanitized
     test_provider_dso_close_failure
-    test_provider_generation_drain_close_failure)
+    test_provider_generation_drain_close_failure
+    test_provider_multigeneration_isolated_drain)
   target_compile_options(${target} PRIVATE
     ${_sanitizer_flags} -fno-omit-frame-pointer -g -O1)
   target_link_options(${target} PRIVATE ${_sanitizer_flags})
@@ -194,8 +225,10 @@ set(CMAKE_BUILD_RPATH "${SALTS_ROOT}/lib;${SALTS_ROOT}/bin")
 set_target_properties(
   test_turbo_component_dso_sanitized test_provider_dso_close_failure
   test_provider_generation_drain_close_failure
+  test_provider_multigeneration_isolated_drain
   provider_dso_instrumented_n provider_dso_instrumented_n1
   provider_dso_instrumented_managed provider_dso_instrumented_managed_component
+  provider_dso_instrumented_managed_component_n1
   PROPERTIES BUILD_RPATH "${SALTS_ROOT}/lib;${SALTS_ROOT}/bin")
 # Keep the ordinary simultaneous race, and explicitly enumerate both
 # happens-before orders. These are independently reportable CTest cases.
@@ -223,5 +256,11 @@ set_tests_properties(provider_dso_close_failure_recovery PROPERTIES
 add_test(NAME provider_generation_drain_and_close_failure
   COMMAND test_provider_generation_drain_close_failure)
 set_tests_properties(provider_generation_drain_and_close_failure PROPERTIES
+  TIMEOUT 120
+  ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")
+
+add_test(NAME provider_multigeneration_isolated_drain
+  COMMAND test_provider_multigeneration_isolated_drain)
+set_tests_properties(provider_multigeneration_isolated_drain PROPERTIES
   TIMEOUT 120
   ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")

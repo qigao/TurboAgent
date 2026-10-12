@@ -5,6 +5,9 @@
 
 static atomic_int pending;
 static atomic_int genuine_closes_before_fault;
+static atomic_int close_sequence_enabled;
+static atomic_uint_least32_t close_sequence_failed_mask;
+static atomic_int close_sequence_calls;
 static atomic_int injected;
 static atomic_int attempts;
 static atomic_int successes;
@@ -15,14 +18,31 @@ cmeta_plugin_status cmeta_plugin_platform_close_real(
     cmeta_plugin_library *library);
 
 void provider_close_fault_arm(int failures) {
+  atomic_store_explicit(&close_sequence_enabled, 0, memory_order_release);
   atomic_store_explicit(&genuine_closes_before_fault, 0, memory_order_release);
   atomic_store_explicit(&pending, failures, memory_order_release);
 }
 
 void provider_close_fault_arm_after(int genuine_closes, int failures) {
+  atomic_store_explicit(&close_sequence_enabled, 0, memory_order_release);
   atomic_store_explicit(
       &genuine_closes_before_fault, genuine_closes, memory_order_release);
   atomic_store_explicit(&pending, failures, memory_order_release);
+}
+
+void provider_close_fault_arm_sequence(uint32_t failed_attempt_mask) {
+  /* Test setup is always exclusive with all loader calls. New schedules
+   * replace, rather than combine with, the previous countdown failpoint. */
+  atomic_store_explicit(&genuine_closes_before_fault, 0, memory_order_release);
+  atomic_store_explicit(&pending, 0, memory_order_release);
+  atomic_store_explicit(&close_sequence_calls, 0, memory_order_release);
+  atomic_store_explicit(
+      &close_sequence_failed_mask, failed_attempt_mask, memory_order_release);
+  atomic_store_explicit(&close_sequence_enabled, 1, memory_order_release);
+}
+
+int provider_close_fault_sequence_calls(void) {
+  return atomic_load_explicit(&close_sequence_calls, memory_order_acquire);
 }
 
 int provider_close_fault_injected(void) {
@@ -39,6 +59,23 @@ int provider_close_fault_native_successes(void) {
 
 cmeta_plugin_status cmeta_plugin_platform_close(
     cmeta_plugin_library *library) {
+  if (atomic_load_explicit(&close_sequence_enabled, memory_order_acquire)) {
+    const int index = atomic_fetch_add_explicit(
+        &close_sequence_calls, 1, memory_order_acq_rel);
+    const uint32_t mask = (uint32_t)atomic_load_explicit(
+        &close_sequence_failed_mask, memory_order_acquire);
+    if (index >= 0 && index < 32 && (mask & (UINT32_C(1) << index))) {
+      /* The native handle is untouched, so the real Registry retains
+       * ownership after a simulated close error. */
+      atomic_fetch_add_explicit(&injected, 1, memory_order_relaxed);
+      return CMETA_PLUGIN_UNLOAD_FAILED;
+    }
+    atomic_fetch_add_explicit(&attempts, 1, memory_order_relaxed);
+    cmeta_plugin_status status = cmeta_plugin_platform_close_real(library);
+    if (status == CMETA_PLUGIN_OK)
+      atomic_fetch_add_explicit(&successes, 1, memory_order_relaxed);
+    return status;
+  }
   /* This branch deliberately forwards the first N closes to the
    * genuine POSIX loader. The next close will fail without touching the
    * library handle. Used to verify partial Registry destroy rollback. */

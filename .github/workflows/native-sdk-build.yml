@@ -352,6 +352,7 @@ jobs:
             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor" \
             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
             -DEXPECTED_WITH_PRAKTOR=ON \
+            -DEXPECTED_RID=linux-x64 \
             -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
           cmake --build "$RUNNER_TEMP/turboagent-consumer-build"
           consumer="$RUNNER_TEMP/turboagent-consumer-build/turboagent_installed_consumer"
@@ -438,6 +439,7 @@ jobs:
             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor" \
             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
             -DEXPECTED_WITH_PRAKTOR=ON \
+            -DEXPECTED_RID=macos-arm64 \
             -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
           cmake --build "$RUNNER_TEMP/turboagent-consumer-build"
           consumer="$RUNNER_TEMP/turboagent-consumer-build/turboagent_installed_consumer"
@@ -534,6 +536,7 @@ jobs:
             -DChttp_DIR="%CHTTP_ROOT%/lib/cmake/Chttp" ^
             -DTurboWasm_DIR="%TURBOWASM_ROOT%/lib/cmake/TurboWasm" ^
             -DEXPECTED_WITH_PRAKTOR=OFF ^
+            -DEXPECTED_RID=windows-x64 ^
             -DEXPECTED_TURBOAGENT_PREFIX="%RUNNER_TEMP%/turboagent-consumer-package/sdk/windows-x64"
           if errorlevel 1 exit /b 1
           cmake --build "%RUNNER_TEMP%/turboagent-consumer-build"
@@ -656,6 +659,7 @@ jobs:
             -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor" \
             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
             -DEXPECTED_WITH_PRAKTOR=ON \
+            -DEXPECTED_RID=android-arm64-v8a \
             -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
           cmake --build "$RUNNER_TEMP/turboagent-consumer-android"
           consumer="$RUNNER_TEMP/turboagent-consumer-android/turboagent_installed_consumer"

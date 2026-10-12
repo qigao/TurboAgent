@@ -317,7 +317,8 @@ spec("independent Managed DSO Generation retirement under scoped release failure
     manifest = NULL;
     check_equal(cmeta_plugin_registry_acquire(
         &registry, new_ref, &guard_lease, &manifest), CMETA_PLUGIN_OK);
-    check_equal(guard_lease.slot, new_generation.modules[0].lease.slot);
+    check_equal(guard_lease.slot, stale_token.slot);
+    check_true(guard_lease.slot != current_acquire.lease.slot);
     check_equal(cmeta_plugin_registry_get_lifecycle(
         &registry, new_ref, &info), CMETA_PLUGIN_OK);
     check_equal(info.active_leases, (size_t)2u);

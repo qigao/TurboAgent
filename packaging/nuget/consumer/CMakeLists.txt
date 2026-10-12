@@ -1,0 +1,156 @@
+cmake_minimum_required(VERSION 3.25)
+# Catch wrong Android ABI before compiler/NDK checks, so a conflicting target
+# triplet cannot be mistaken for a valid arm64 installed SDK consumer.
+if(EXPECTED_RID STREQUAL "android-arm64-v8a" AND
+   DEFINED ANDROID_ABI AND NOT ANDROID_ABI STREQUAL "arm64-v8a")
+  message(FATAL_ERROR "Consumer Android ABI mismatch: ${ANDROID_ABI}, expected arm64-v8a")
+endif()
+project(TurboAgentInstalledConsumer LANGUAGES C)
+
+# Explicitly define the policy used for upper-case SDK *_ROOT variables.
+# The actual packages are still pinned via *_DIR and checked below; the
+# environment is not permission to silently load an unrelated SDK.
+if(POLICY CMP0144)
+  cmake_policy(SET CMP0144 NEW)
+endif()
+
+if(NOT DEFINED EXPECTED_TURBOAGENT_PREFIX OR NOT IS_DIRECTORY "${EXPECTED_TURBOAGENT_PREFIX}")
+  message(FATAL_ERROR "An exact unpacked SDK prefix is required")
+endif()
+file(REAL_PATH "${EXPECTED_TURBOAGENT_PREFIX}" _expected)
+
+# Fail closed if the caller selects an SDK RID different from the target OS,
+# or if the extracted prefix carries an unexpected platform manifest. The
+# architecture itself remains verified by native compilation/linking and
+# platform-specific binary inspection (dumpbin/file/readelf).
+if(NOT DEFINED EXPECTED_RID OR "${EXPECTED_RID}" STREQUAL "")
+  message(FATAL_ERROR "EXPECTED_RID must name the exact packaged platform")
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(_native_rid "linux-x64")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set(_native_rid "macos-arm64")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  set(_native_rid "windows-x64")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
+  set(_native_rid "android-arm64-v8a")
+else()
+  message(FATAL_ERROR "Unsupported SDK consumer platform: ${CMAKE_SYSTEM_NAME}")
+endif()
+if(NOT EXPECTED_RID STREQUAL _native_rid)
+  message(FATAL_ERROR "Consumer RID mismatch: ${EXPECTED_RID} on ${CMAKE_SYSTEM_NAME}")
+endif()
+set(_rid_manifest "${_expected}/turboagent-sdk-manifest.txt")
+if(NOT EXISTS "${_rid_manifest}")
+  message(FATAL_ERROR "Missing installed SDK RID manifest: ${_rid_manifest}")
+endif()
+file(STRINGS "${_rid_manifest}" _rid_lines REGEX "^rid=")
+if(NOT "${_rid_lines}" STREQUAL "rid=${EXPECTED_RID}")
+  message(FATAL_ERROR "Installed SDK RID manifest mismatch: ${_rid_lines}, expected ${EXPECTED_RID}")
+endif()
+
+# Check every explicitly supplied SDK config, including optional components
+# not imported by the current feature profile. This also makes unused *_DIR
+# arguments an error instead of silently accepting misleading configuration.
+if(NOT DEFINED EXPECTED_WITH_PRAKTOR)
+  message(FATAL_ERROR "Explicit EXPECTED_WITH_PRAKTOR (ON/OFF) is required")
+endif()
+if(WIN32 AND EXPECTED_WITH_PRAKTOR)
+  message(FATAL_ERROR "Windows SDK must not expose PraktorTools")
+endif()
+set(_required_sdks Salts SaltsUtils Chttp TurboWasm)
+if(EXPECTED_WITH_PRAKTOR)
+  list(APPEND _required_sdks Praktor TurboScript)
+endif()
+foreach(_dependency IN LISTS _required_sdks)
+  if(NOT DEFINED ${_dependency}_DIR)
+    message(FATAL_ERROR "Missing explicit ${_dependency}_DIR SDK binding")
+  endif()
+  if(NOT EXISTS "${${_dependency}_DIR}/${_dependency}Config.cmake")
+    message(FATAL_ERROR "Missing exact ${_dependency} package config at ${${_dependency}_DIR}")
+  endif()
+endforeach()
+
+# For an NDK cross-build, CMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+# would re-root the absolute extracted package prefix under the Android sysroot.
+# The consumer deliberately loads the *target* SDK from that exact extracted
+# directory. Permit explicitly pinned first-party package configs to remain
+# outside the sysroot; leave the NDK/compiler's other cross settings intact.
+set(_saved_find_root_mode "${CMAKE_FIND_ROOT_PATH_MODE_PACKAGE}")
+if(CMAKE_CROSSCOMPILING)
+  set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+endif()
+find_package(TurboAgent CONFIG REQUIRED
+  PATHS "${_expected}"
+  NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH)
+if(CMAKE_CROSSCOMPILING)
+  set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE "${_saved_find_root_mode}")
+endif()
+file(REAL_PATH "${TurboAgent_DIR}" _resolved_config)
+string(FIND "${_resolved_config}/" "${_expected}/" _prefix_pos)
+if(NOT _prefix_pos EQUAL 0)
+  message(FATAL_ERROR "TurboAgent config escaped expected SDK prefix: ${_resolved_config}")
+endif()
+if(NOT TARGET TurboAgent::Runtime)
+  message(FATAL_ERROR "Missing installed TurboAgent::Runtime target")
+endif()
+if(EXPECTED_WITH_PRAKTOR AND NOT TARGET TurboAgent::PraktorTools)
+  message(FATAL_ERROR "Missing installed TurboAgent::PraktorTools target")
+elseif(NOT EXPECTED_WITH_PRAKTOR AND TARGET TurboAgent::PraktorTools)
+  message(FATAL_ERROR "Unexpected PraktorTools export in non-Praktor SDK")
+endif()
+
+add_executable(turboagent_installed_consumer main.c)
+target_link_libraries(turboagent_installed_consumer PRIVATE TurboAgent::Runtime)
+
+# Imported installed libraries do not automatically make their transitive
+# shared-library directories visible to the Linux loader. Test with a
+# deliberately explicit deployment graph, not a source/build-tree fallback or
+# an ambient LD_LIBRARY_PATH. Use the unpacked package and restored SDK roots.
+set(_runtime_dirs "${_expected}/lib")
+set(_required_runtime_roots SALTS_ROOT SALTS_UTILS_ROOT CHTTP_ROOT TURBOWASM_ROOT)
+if(EXPECTED_WITH_PRAKTOR)
+  list(APPEND _required_runtime_roots PRAKTOR_ROOT TURBOSCRIPT_ROOT)
+endif()
+foreach(_root_name IN LISTS _required_runtime_roots)
+  if(NOT DEFINED ENV{${_root_name}} OR "$ENV{${_root_name}}" STREQUAL "")
+    message(FATAL_ERROR "Missing required runtime SDK root ${_root_name}")
+  endif()
+  file(REAL_PATH "$ENV{${_root_name}}" _root)
+  if(NOT IS_DIRECTORY "${_root}/lib")
+    message(FATAL_ERROR "Missing runtime library directory for ${_root_name}: ${_root}/lib")
+  endif()
+  list(APPEND _runtime_dirs "${_root}/lib")
+endforeach()
+# The isolated vcpkg prefix holds third-party native libraries (GmSSL/SQLite).
+foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+  if(IS_DIRECTORY "${_prefix}/lib")
+    list(APPEND _runtime_dirs "${_prefix}/lib")
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES _runtime_dirs)
+set_target_properties(turboagent_installed_consumer PROPERTIES
+  BUILD_RPATH "${_runtime_dirs}")
+
+enable_testing()
+add_test(NAME turboagent.installed_consumer COMMAND turboagent_installed_consumer)
+# DT_RUNPATH on the consumer does not guarantee transitive DSO discovery:
+# the loader may need libruntime_core.so through libruntime.so. Define a
+# closed, explicit deployment path for the test instead of inheriting runner
+# state or relying on source build directories.
+if(UNIX)
+  string(JOIN ":" _runtime_loader_path ${_runtime_dirs})
+  if(APPLE)
+    # macOS uses dyld for transitive @rpath library resolution. Bound these
+    # paths strictly to the unpacked SDK + independently restored providers.
+    set(_loader_env_name "DYLD_LIBRARY_PATH")
+  else()
+    # ELF DT_RUNPATH on the executable is not transitive to indirect DSOs.
+    set(_loader_env_name "LD_LIBRARY_PATH")
+  endif()
+  set_tests_properties(turboagent.installed_consumer PROPERTIES
+    ENVIRONMENT "${_loader_env_name}=${_runtime_loader_path}")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/runtime-library-path.txt"
+       "${_runtime_loader_path}\n")
+endif()

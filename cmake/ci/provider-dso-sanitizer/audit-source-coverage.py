@@ -67,14 +67,34 @@ link_map = build / "provider_dso_sanitized.map"
 if not link_map.is_file():
     raise SystemExit("FAIL: no linker map for sanitizer executable")
 link_data = link_map.read_text(encoding="utf-8", errors="replace")
-# Catch accidentally pulling in released uninstrumented Plugin / Component
-# host implementations. Source-built objects live in our own archive.
+
+# GNU ld lists unused command-line archives under LOAD. That line does not
+# mean any uninstrumented .o reached the image. Reject actually EXTRACTED
+# archive members, which are represented as libarchive.a(member.o).
 for banned in [
     "libcmeta_plugin.a",
     "libsalts_component_plugin.a",
     "libsalts_component.a",
-    "libcmeta_platform.a",
 ]:
-    if re.search(r"(?m)^\s*[^\n]*[/\\]" + re.escape(banned) + r"\b", link_data):
-        raise SystemExit(f"FAIL: linked uninstrumented Salts host archive {banned}")
-print(f"PASS: {kind} first-party compile, symbols, and no uninstrumented Salts host archive")
+    if re.search(re.escape(banned) + r"\\([^)]*\\)", link_data):
+        raise SystemExit(f"FAIL: extracted uninstrumented host archive member from {banned}")
+# These are the two Platform owners that need full source coverage in the race.
+if re.search(r"libcmeta_platform\\.a\\((?:thread_posix|clock)\\.c\\.o\\)", link_data):
+    raise SystemExit("FAIL: pulled uninstrumented POSIX thread or clock implementation")
+
+# Public native entrypoints must come from our sanitized first-party archive.
+archive = subprocess.run(
+    ["nm", "--defined-only", str(libs[0])],
+    capture_output=True, text=True, check=True
+).stdout
+for function in [
+    "cmeta_plugin_registry_unload",
+    "salts_component_plugin_generation_drain",
+    "salts_component_plugin_scope_release",
+    "cmeta_mutex_lock",
+    "cmeta_monotonic_ms",
+]:
+    if not re.search(r"(?m)^\\S+\\s+[TW]\\s+" + re.escape(function) + r"$", archive):
+        raise SystemExit(f"FAIL: no source-defined {function} in instrumented archive")
+    print(f"SOURCE DEFINED: {function}")
+print(f"PASS: {kind} first-party objects, Sanitizer symbols, and extracted-host-archive audit")

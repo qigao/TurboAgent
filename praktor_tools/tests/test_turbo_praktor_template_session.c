@@ -4,12 +4,18 @@
 #include "turbo_runtime_store_sqlite.h"
 
 #include <salts/thread_pool.h>
+#include <salts/thread.h>
+#include <salts/clock.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct session_probe_s {
   int inspect, change, verify;
+  int wait_for_cancel;
+  atomic_int change_entered;
+  atomic_int cancel_observed;
 } session_probe_t;
 
 static int no_model(const char *request, char **response, void *user) {
@@ -33,6 +39,22 @@ static turbo_tool_status_t session_change(
   session_probe_t *p = user;
   (void)args; (void)ctx;
   ++p->change;
+  if (p->wait_for_cancel) {
+    const uint64_t stop = cmeta_monotonic_ms() + UINT64_C(10000);
+    atomic_store_explicit(&p->change_entered, 1, memory_order_release);
+    /* This callback is deliberately cooperative. Absence of a borrowed
+     * Session token fails the test without hanging the CI worker. */
+    while (ctx && ctx->cancel_token &&
+           turbo_cancel_token_check(ctx->cancel_token) == SALTS_OK &&
+           cmeta_monotonic_ms() < stop)
+      cmeta_thread_yield();
+    if (ctx && ctx->cancel_token &&
+        turbo_cancel_token_check(ctx->cancel_token) == SALTS_ECANCELED) {
+      atomic_store_explicit(&p->cancel_observed, 1, memory_order_release);
+      return TURBO_TOOL_CANCELLED;
+    }
+    return TURBO_TOOL_ERROR;
+  }
   *out = json_create_object();
   return *out ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
 }
@@ -256,4 +278,68 @@ spec("approved Praktor asynchronous Session Checkpoint") {
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);
   }
+  it("propagates in-flight Session cancellation to a cooperative Praktor HostTool and drains") {
+    session_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 2};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = session_registry(&probe);
+    turbo_agent_session_t *session = new_session(
+        registry, "praktor_cancel_thread", turbo_agent_runtime_store_memory_create());
+    json_value_t *args = json_create_object(), *summary = NULL, *state = NULL;
+    turbo_agent_template_plan_t *plan = session_plan(registry, args);
+    turbo_praktor_template_session_run_t *run = NULL;
+    turbo_agent_execution_status_t exec_status;
+    json_value_t *attempt = NULL;
+    int entered;
+    probe.wait_for_cancel = 1;
+    atomic_init(&probe.change_entered, 0);
+    atomic_init(&probe.cancel_observed, 0);
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(session);
+    check_not_null(plan);
+
+    check_equal(turbo_praktor_template_approval_commit(
+        turbo_agent_session_runtime(session), plan, "praktor_cancel_thread",
+        "cancel_inflight", "host_review_cancel"), TURBO_TOOL_OK);
+    check_equal(turbo_praktor_template_session_submit(
+        pool, session, plan, "cancel_inflight", "host_review_cancel",
+        NULL, 0, 0, &run), SALTS_OK);
+    check_not_null(run);
+    {
+      const uint64_t stop = cmeta_monotonic_ms() + UINT64_C(10000);
+      while (!atomic_load_explicit(&probe.change_entered, memory_order_acquire) &&
+             cmeta_monotonic_ms() < stop)
+        cmeta_thread_yield();
+    }
+    entered = atomic_load_explicit(&probe.change_entered, memory_order_acquire);
+    if (entered) {
+      check_equal(turbo_praktor_template_session_run_cancel(
+          run, TURBO_CANCEL_USER), SALTS_OK);
+    }
+    check_equal(turbo_praktor_template_session_run_wait(run, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_praktor_template_session_run_status(run, &exec_status), SALTS_OK);
+    check_true(entered);
+    check_true(atomic_load_explicit(&probe.cancel_observed, memory_order_acquire));
+    check_true(exec_status != TURBO_AGENT_EXECUTION_COMPLETED);
+    check_equal(probe.inspect, 1);
+    check_equal(probe.change, 1);
+    check_equal(probe.verify, 0);
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        turbo_agent_session_runtime(session), "praktor_template_attempts",
+        "021_praktor_cancel_thread_cancel_inflight", &attempt), SALTS_OK);
+    check_equal(json_get_string(attempt, "phase"), "committed");
+    json_free(attempt);
+    /* Release after terminal/drain, not while provider callbacks are active. */
+    (void)turbo_praktor_template_session_run_take_result(run, &summary, &state);
+    json_free(summary);
+    json_free(state);
+    turbo_praktor_template_session_run_release(run);
+    turbo_agent_template_plan_destroy(plan);
+    json_free(args);
+    turbo_agent_session_destroy(session);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
 }

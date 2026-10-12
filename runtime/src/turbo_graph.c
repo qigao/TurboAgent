@@ -848,6 +848,7 @@ turbo_graph_run_internal_json_value(turbo_graph_t *graph, json_value_t **state_p
     ctx.step = steps;
     ctx.event_sink = event_sink;
     ctx.event_sink_user_data = event_sink_user_data;
+    ctx.cancel_token = cancel_token;
 
     checkpoint_status =
         turbo_graph_emit_trace_event(&ctx, "graph.node", "start", ctx.current_node, 0);

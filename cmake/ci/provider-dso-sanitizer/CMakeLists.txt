@@ -49,6 +49,7 @@ set(_runtime_sources
   "${_salts}/cmeta/src/object.c"
   "${_salts}/cmeta/src/data.c"
   "${_salts}/cmeta/src/function.c"
+  "${_salts}/utils/src/vstr.c"
   "${_salts}/plugin/src/plugin.c"
   "${_salts}/plugin/src/plugin_registry.c"
   "${_salts}/plugin/src/plugin_posix.c"
@@ -63,6 +64,10 @@ foreach(src IN LISTS _runtime_sources)
   endif()
 endforeach()
 
+# Core Plugin path validation calls vstr_utf8_valid(). Use the exact
+# released vstr.c source rather than the uninstrumented Core entrypoint.
+# SIMDe is an external header-only dependency, version pinned in CI.
+find_path(SIMDE_INCLUDE_DIR simde/x86/sse2.h REQUIRED)
 add_library(provider_dso_firstparty_runtime STATIC ${_runtime_sources})
 target_include_directories(provider_dso_firstparty_runtime PUBLIC
   "${_salts}/plugin/include"
@@ -70,6 +75,8 @@ target_include_directories(provider_dso_firstparty_runtime PUBLIC
   "${_salts}/component/include"
   "${_salts}/platform/include"
   "${_salts}/cmeta/include"
+  "${_salts}/utils/include"
+  "${SIMDE_INCLUDE_DIR}"
   "${SALTS_ROOT}/include")
 target_compile_definitions(provider_dso_firstparty_runtime PRIVATE
   _DEFAULT_SOURCE=1 _POSIX_C_SOURCE=200809L _XOPEN_SOURCE=700)

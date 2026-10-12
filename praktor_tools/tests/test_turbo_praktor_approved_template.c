@@ -2,6 +2,9 @@
 #include "turbo_praktor_approved_template.h"
 #include "turbo_runtime_json.h"
 #include "turbo_runtime_store_sqlite.h"
+#include <salts/thread.h>
+#include <salts/clock.h>
+#include <stdatomic.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +14,9 @@ typedef struct approved_probe_s {
   int inspect;
   int change;
   int verify;
+  int block_change;
+  atomic_int change_entered;
+  atomic_int release_change;
 } approved_probe_t;
 
 static turbo_tool_status_t approved_inspect(
@@ -29,6 +35,11 @@ static turbo_tool_status_t approved_change(
   approved_probe_t *p = (approved_probe_t *)user;
   (void)args; (void)context;
   ++p->change;
+  if (p->block_change) {
+    atomic_store_explicit(&p->change_entered, 1, memory_order_release);
+    while (!atomic_load_explicit(&p->release_change, memory_order_acquire))
+      cmeta_thread_yield();
+  }
   *out = json_create_object();
   return *out ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
 }
@@ -149,6 +160,23 @@ static void approved_fault_destroy(void *user) {
   if (fault->inner.user_data_free)
     fault->inner.user_data_free(fault->inner.user_data);
   fault->inner = (turbo_agent_runtime_store_t){0};
+}
+
+typedef struct approved_concurrent_worker_s {
+  turbo_agent_runtime_t *runtime;
+  const turbo_agent_template_plan_t *plan;
+  turbo_tool_status_t status;
+  int replayed;
+  turbo_agent_template_outcome_t outcome;
+  json_value_t *result;
+} approved_concurrent_worker_t;
+
+static void approved_concurrent_execute(void *arg) {
+  approved_concurrent_worker_t *worker = (approved_concurrent_worker_t *)arg;
+  worker->status = turbo_praktor_template_execute_approved(
+      worker->runtime, worker->plan, "thread_A", "concurrent",
+      "host_approval", NULL, &worker->replayed, &worker->outcome,
+      &worker->result);
 }
 
 spec("approved Praktor ABI 2.6 execution / durable attempt") {
@@ -361,6 +389,67 @@ spec("approved Praktor ABI 2.6 execution / durable attempt") {
 
     turbo_agent_runtime_destroy(runtime);
     turbo_agent_template_plan_destroy(plan);
+    json_free(args);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("rejects same-attempt execution while a released Praktor HostTool is active") {
+    approved_probe_t probe = {0};
+    turbo_tool_registry_t *registry = approved_registry(&probe, TURBO_TOOL_EFFECT_WRITE);
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    json_value_t *args = json_create_object(), *result = NULL;
+    turbo_agent_template_plan_t *plan = approved_template(registry, args, 0);
+    approved_concurrent_worker_t worker = {0};
+    cmeta_thread_t thread = {0};
+    turbo_agent_template_outcome_t outcome;
+    int replayed = -1;
+    int entered;
+    check_not_null(registry);
+    check_not_null(runtime);
+    check_not_null(plan);
+    probe.block_change = 1;
+    atomic_init(&probe.change_entered, 0);
+    atomic_init(&probe.release_change, 0);
+
+    check_equal(turbo_praktor_template_approval_commit(
+        runtime, plan, "thread_A", "concurrent", "host_approval"), TURBO_TOOL_OK);
+    worker.runtime = runtime;
+    worker.plan = plan;
+    check_equal(cmeta_thread_create(&thread, approved_concurrent_execute, &worker),
+                SALTS_OK);
+    {
+      const uint64_t deadline = cmeta_monotonic_ms() + UINT64_C(10000);
+      while (!atomic_load_explicit(&probe.change_entered, memory_order_acquire) &&
+             cmeta_monotonic_ms() < deadline)
+        cmeta_thread_yield();
+    }
+    entered = atomic_load_explicit(&probe.change_entered, memory_order_acquire);
+    if (entered) {
+      check_equal(turbo_praktor_template_execute_approved(
+          runtime, plan, "thread_A", "concurrent", "host_approval",
+          NULL, &replayed, &outcome, &result), TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      check_equal(replayed, 0);
+      check_null(result);
+    }
+    atomic_store_explicit(&probe.release_change, 1, memory_order_release);
+    check_equal(cmeta_thread_join(&thread), SALTS_OK);
+    check_true(entered);
+    check_equal(worker.status, TURBO_TOOL_OK);
+    check_equal(worker.outcome, TURBO_AGENT_TEMPLATE_OUTCOME_COMPLETED);
+    check_equal(probe.inspect, 1);
+    check_equal(probe.change, 1);
+    check_equal(probe.verify, 1);
+    json_free(worker.result);
+    worker.result = NULL;
+    check_equal(turbo_praktor_template_execute_approved(
+        runtime, plan, "thread_A", "concurrent", "host_approval",
+        NULL, &replayed, &outcome, &result), TURBO_TOOL_OK);
+    check_equal(replayed, 1);
+    check_equal(probe.inspect + probe.change + probe.verify, 3);
+    json_free(result);
+    turbo_agent_template_plan_destroy(plan);
+    turbo_agent_runtime_destroy(runtime);
     json_free(args);
     turbo_tool_registry_destroy(registry);
   }

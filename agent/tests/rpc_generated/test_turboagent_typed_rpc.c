@@ -127,7 +127,7 @@ int turboagent_typed_add(
   return 0;
 }
 
-static bool DATA_BIND_NATIVE_CALL chttp_rpc_service_test_invoke(
+static bool DATA_BIND_NATIVE_CALL turboagent_typed_invoke(
     void *context, void *return_storage, void *const *params,
     size_t param_count) {
   int result;

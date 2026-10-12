@@ -1,0 +1,115 @@
+name: Provider DSO full-source sanitizers
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/provider-dso-source-sanitizers.yml'
+      - 'cmake/ci/provider-dso-sanitizer/**'
+      - 'runtime/tests/test_turbo_component_dso_lifecycle.c'
+      - 'praktor_tools/tests/praktor_dso_fixture.h'
+      - 'praktor_tools/tests/praktor_dso_provider.c'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: turboagent-provider-dso-sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-instrumentation:
+    name: Full-source ${{ matrix.sanitizer }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [thread, address]
+    env:
+      # Exact release pair. Do not silently substitute current master, SDK
+      # assets from another tag, or a cached/uninstrumented Salts host archive.
+      SALTS_SOURCE_SHA: c8a1a3d5e259a89ad42e75f1e4c3142e6b106ee1
+      SALTS_SDK_TAG: v2.3.0-rc.14
+      CC: gcc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact Salts release source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c8a1a3d5e259a89ad42e75f1e4c3142e6b106ee1
+          path: salts-source
+          persist-credentials: false
+
+      - name: Restore matching released Salts SDK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          actual="$(git -C salts-source rev-parse HEAD)"
+          test "$actual" = "$SALTS_SOURCE_SHA"
+          mkdir -p "$RUNNER_TEMP/salts-sanitizer/download" "$RUNNER_TEMP/salts-sanitizer/package"
+          gh release download "$SALTS_SDK_TAG" \
+            --repo qigao/salts --pattern 'Salts.Native.*.nupkg' \
+            --dir "$RUNNER_TEMP/salts-sanitizer/download"
+          mapfile -t packages < <(find "$RUNNER_TEMP/salts-sanitizer/download" \
+            -maxdepth 1 -type f -name '*.nupkg' -print)
+          test "${#packages[@]}" -eq 1
+          unzip -q "${packages[0]}" -d "$RUNNER_TEMP/salts-sanitizer/package"
+          sdk="$RUNNER_TEMP/salts-sanitizer/package/sdk/linux-x64"
+          test -f "$sdk/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$sdk/include/salts/component_plugin.h"
+          echo "SALTS_ROOT=$sdk" >> "$GITHUB_ENV"
+          printf 'Salts source SHA: %s\nSalts SDK tag: %s\n' "$actual" "$SALTS_SDK_TAG"
+
+      - name: Configure isolated full-source instrumentation
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+        run: |
+          set -euo pipefail
+          cmake -S cmake/ci/provider-dso-sanitizer \
+            -B "build/provider-dso-sanitizer/$KIND" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=/usr/bin/gcc \
+            -DSANITIZER_KIND="$KIND" \
+            -DSALTS_SOURCE_ROOT="$GITHUB_WORKSPACE/salts-source" \
+            -DSALTS_ROOT="$SALTS_ROOT"
+
+      - name: Build all instrumented first-party objects and DSOs
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+        run: |
+          set -euo pipefail
+          cmake --build "build/provider-dso-sanitizer/$KIND" --parallel 2
+
+      - name: Audit actual first-party source and link closure
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+        run: |
+          set -euo pipefail
+          python3 cmake/ci/provider-dso-sanitizer/audit-source-coverage.py \
+            "build/provider-dso-sanitizer/$KIND" \
+            "$GITHUB_WORKSPACE/salts-source" \
+            "$GITHUB_WORKSPACE" "$KIND"
+
+      - name: Run instrumented native DSO callback/drain race
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+          TSAN_OPTIONS: halt_on_error=1:exitcode=66
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          ctest --test-dir "build/provider-dso-sanitizer/$KIND" \
+            -R '^provider_dso_full_source_sanitizer$' \
+            --repeat until-fail:10 --output-on-failure

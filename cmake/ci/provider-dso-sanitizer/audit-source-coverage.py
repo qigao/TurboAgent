@@ -23,6 +23,8 @@ expected = [
     salts / "cmeta/src/interface.c",
     salts / "cmeta/src/component.c",
     salts / "cmeta/src/object.c",
+    salts / "cmeta/src/data.c",
+    salts / "cmeta/src/function.c",
     salts / "plugin/src/plugin.c",
     salts / "plugin/src/plugin_registry.c",
     salts / "plugin/src/plugin_posix.c",
@@ -82,11 +84,19 @@ for banned in [
         raise SystemExit(f"FAIL: extracted uninstrumented host archive member from {banned}")
 # CMeta implementation in this slice must be chosen from instrumented
 # sources, rather than the uninstrumented released Salts::CMeta archive.
-for owner in ("interface", "component", "object"):
+for owner in ("interface", "component", "object", "data", "function"):
     if re.search(r"libcmeta_cmeta\.a\(" + owner + r"\.c\.o\)", link_data):
         raise SystemExit(f"FAIL: pulled released uninstrumented CMeta {owner}.c.o")
 if re.search(r"libcmeta_platform\.a\((?:thread_posix|clock)\.c\.o\)", link_data):
     raise SystemExit("FAIL: pulled uninstrumented POSIX thread/clock implementation")
+
+# CMeta's two newly admitted source objects must actually be extracted
+# into the native test image. Merely compiling an unused object is insufficient.
+for member in ("data.c.o", "function.c.o"):
+    pattern = r"libprovider_dso_firstparty_runtime\\.a\\(" + re.escape(member) + r"\\)"
+    if not re.search(pattern, link_data):
+        raise SystemExit(f"FAIL: instrumented CMeta {member} was not linked")
+    print(f"SOURCE LINKED: {member}")
 
 # The actual native entrypoints must be defined by the instrumented archive.
 archive = subprocess.run(
@@ -102,6 +112,10 @@ for function in [
     "cmeta_interface_desc_equal",
     "cmeta_component_desc_valid",
     "cmeta_object_borrow",
+    "cmeta_data_desc_valid",
+    "cmeta_data_desc_equal",
+    "cmeta_function_desc_valid",
+    "cmeta_function_abi_desc_valid",
 ]:
     if not re.search(r"(?m)^\S+\s+[TW]\s+" + re.escape(function) + r"$", archive):
         raise SystemExit(f"FAIL: no source-defined {function} in instrumented archive")

@@ -95,6 +95,8 @@ target_compile_definitions(test_turbo_component_dso_sanitized PRIVATE
 target_link_libraries(test_turbo_component_dso_sanitized PRIVATE
   provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
   Threads::Threads ${CMAKE_DL_LIBS})
+target_link_options(test_turbo_component_dso_sanitized PRIVATE
+  "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/provider_dso_sanitized.map")
 add_dependencies(test_turbo_component_dso_sanitized
   provider_dso_instrumented_n provider_dso_instrumented_n1)
 

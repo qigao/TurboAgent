@@ -2,6 +2,7 @@
 
 #include "turbo_agent_praktor_lowering.h"
 #include "turbo_runtime_json.h"
+#include "turbo_runtime_control.h"
 
 #include <stdio.h>
 #include <stdlib.h>

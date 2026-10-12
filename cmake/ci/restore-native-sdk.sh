@@ -12,6 +12,7 @@ if [[ "$with_wasm" != "0" && "$with_wasm" != "1" ]]; then
   echo "with-wasm must be 0 or 1" >&2
   exit 2
 fi
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 sdk_root="${RUNNER_TEMP:?RUNNER_TEMP is required}/turboagent-release-sdks"
 mkdir -p "$sdk_root"
 

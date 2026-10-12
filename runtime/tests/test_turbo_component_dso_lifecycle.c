@@ -242,6 +242,27 @@ static void provider_dso_parallel_load(void *arg) {
       worker->gate->registry, PRAKTOR_DSO_N_PATH, &worker->ref);
 }
 
+
+typedef struct provider_generation_publish_gate {
+  salts_component_plugin_runtime *runtime;
+  atomic_int ready, go;
+} provider_generation_publish_gate;
+typedef struct provider_generation_publish_worker {
+  provider_generation_publish_gate *gate;
+  salts_component_plugin_generation *generation;
+  salts_component_plugin_generation *previous;
+  salts_component_plugin_status status;
+} provider_generation_publish_worker;
+static void provider_dso_publish_concurrently(void *arg) {
+  provider_generation_publish_worker *w =
+      (provider_generation_publish_worker *)arg;
+  atomic_fetch_add_explicit(&w->gate->ready, 1, memory_order_acq_rel);
+  while (!atomic_load_explicit(&w->gate->go, memory_order_acquire))
+    cmeta_thread_yield();
+  w->status = salts_component_plugin_runtime_publish(
+      w->gate->runtime, w->generation, &w->previous);
+}
+
 static void provider_dso_control_init(
     praktor_dso_control *control, provider_dso_host *host,
     int block_until_cancel) {
@@ -256,6 +277,104 @@ static void provider_dso_control_init(
 }
 
 spec("cross-platform real Provider DSO close, drain, unload") {
+
+  it("linearizes simultaneous N and N+1 publication without epoch rollback") {
+    const cmeta_plugin_registry_config config = {2};
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref refs[2] = {{0}};
+    provider_generation_fixture n = {0}, n1 = {0};
+    salts_component_plugin_runtime runtime = SALTS_COMPONENT_PLUGIN_RUNTIME_INIT;
+    salts_component_plugin_generation *retired = NULL;
+    salts_component_plugin_scope scope = SALTS_COMPONENT_PLUGIN_SCOPE_INIT;
+    provider_generation_publish_gate gate = {0};
+    provider_generation_publish_worker workers[2] = {0};
+    cmeta_thread_t threads[2] = {0};
+    provider_dso_call call = {0};
+    provider_dso_host host = {0};
+    bool quiet = false;
+    int ready;
+    atomic_init(&host.cancel, 0);
+    provider_dso_control_init(&call.control, &host, 0);
+    check_equal(cmeta_plugin_registry_init(&registry, &config), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N_PATH, &refs[0]), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N1_PATH, &refs[1]), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_start(&registry, refs[0]), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_start(&registry, refs[1]), CMETA_PLUGIN_OK);
+    check_equal(provider_dso_build(
+        &n, UINT64_C(41), &registry, refs[0]), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(provider_dso_build(
+        &n1, UINT64_C(42), &registry, refs[1]), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_init(&runtime), SALTS_COMPONENT_PLUGIN_OK);
+
+    gate.runtime = &runtime;
+    atomic_init(&gate.ready, 0);
+    atomic_init(&gate.go, 0);
+    workers[0].gate = &gate;
+    workers[0].generation = &n.generation;
+    workers[1].gate = &gate;
+    workers[1].generation = &n1.generation;
+    for (size_t i = 0; i < 2; ++i)
+      check_equal(cmeta_thread_create(
+          &threads[i], provider_dso_publish_concurrently, &workers[i]), SALTS_OK);
+    {
+      const uint64_t deadline = cmeta_monotonic_ms() + UINT64_C(10000);
+      while (atomic_load_explicit(&gate.ready, memory_order_acquire) < 2 &&
+             cmeta_monotonic_ms() < deadline)
+        cmeta_thread_yield();
+    }
+    ready = atomic_load_explicit(&gate.ready, memory_order_acquire);
+    atomic_store_explicit(&gate.go, 1, memory_order_release);
+    for (size_t i = 0; i < 2; ++i)
+      check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+    check_equal(ready, 2);
+    /* N+1 must win final publication in either serialized order. If N+1
+     * publishes first, the stale N candidate must be denied. If N publishes
+     * first, N+1 retires it and takes over admission. */
+    check_equal(workers[1].status, SALTS_COMPONENT_PLUGIN_OK);
+    check_true(workers[0].status == SALTS_COMPONENT_PLUGIN_OK ||
+               workers[0].status == SALTS_COMPONENT_PLUGIN_INVALID_STATE);
+    if (workers[0].status == SALTS_COMPONENT_PLUGIN_OK) {
+      check_null(workers[0].previous);
+      check_true(workers[1].previous == &n.generation);
+      check_equal(salts_component_plugin_generation_drain(
+          &runtime, &n.generation), SALTS_COMPONENT_PLUGIN_OK);
+    } else {
+      check_null(workers[0].previous);
+      check_null(workers[1].previous);
+      check_equal(salts_component_plugin_generation_discard(
+          &n.generation), SALTS_COMPONENT_PLUGIN_OK);
+    }
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_scope_generation_id(&scope), UINT64_C(42));
+    check_true(provider_dso_bind(&scope, &call.gate));
+    check_equal(praktor_dso_gate_run(&call.gate, &call.control), 42);
+    check_equal(salts_component_plugin_runtime_close(
+        &runtime, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &n1.generation);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &n1.generation), SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(salts_component_plugin_scope_release(
+        &scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &n1.generation), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_destroy(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    for (size_t i = 0; i < 2; ++i) {
+      check_equal(cmeta_plugin_registry_request_stop(
+          &registry, refs[i]), CMETA_PLUGIN_OK);
+      check_equal(cmeta_plugin_registry_poll_quiescent(
+          &registry, refs[i], &quiet), CMETA_PLUGIN_OK);
+      check_true(quiet);
+      check_equal(cmeta_plugin_registry_unload(
+          &registry, refs[i]), CMETA_PLUGIN_OK);
+    }
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+    check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
+  }
+
 
   it("admits exactly one of two simultaneous loads of the same real DSO") {
     const cmeta_plugin_registry_config config = {2};

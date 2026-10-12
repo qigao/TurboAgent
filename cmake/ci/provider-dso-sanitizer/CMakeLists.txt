@@ -259,8 +259,14 @@ set_tests_properties(provider_generation_drain_and_close_failure PROPERTIES
   TIMEOUT 120
   ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")
 
-add_test(NAME provider_multigeneration_isolated_drain
-  COMMAND test_provider_multigeneration_isolated_drain)
-set_tests_properties(provider_multigeneration_isolated_drain PROPERTIES
-  TIMEOUT 120
-  ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")
+# Both forced Host recovery orders run as separately reported native CTests.
+# Each still executes the inherited healthy-N+1 scenario and the new
+# dual-failure Slot-reuse scenario; the CTest environment selects order.
+foreach(_order IN ITEMS "old-first" "new-first")
+  string(REPLACE "-" "_" _suffix "${_order}")
+  set(_case "provider_multigeneration_isolated_drain_${_suffix}")
+  add_test(NAME "${_case}" COMMAND test_provider_multigeneration_isolated_drain)
+  set_tests_properties("${_case}" PROPERTIES TIMEOUT 120
+    ENVIRONMENT
+      "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin;TURBO_DSO_RECOVERY_ORDER=${_order}")
+endforeach()

@@ -14,6 +14,9 @@ int provider_close_fault_native_successes(void);
 void provider_release_fault_arm(int failures);
 /* Scope a single non-consuming failure to an exact Plugin slot+generation. */
 void provider_release_fault_arm_plugin(cmeta_plugin_ref ref, int failures);
+/* Two independent exact-ref failures, each consumes only its own budget. */
+void provider_release_fault_arm_two_plugins(
+    cmeta_plugin_ref first, cmeta_plugin_ref second);
 int provider_release_fault_injected(void);
 int provider_release_fault_native_attempts(void);
 

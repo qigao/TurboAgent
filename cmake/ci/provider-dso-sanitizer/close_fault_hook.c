@@ -55,6 +55,8 @@ cmeta_plugin_status cmeta_plugin_platform_close(
  * Salts implementation handles all successful calls, including recovery. */
 static atomic_int release_pending;
 static atomic_uint_least64_t release_target_key;
+static atomic_uint_least64_t release_secondary_key;
+static atomic_int release_secondary_pending;
 static atomic_int release_injected;
 static atomic_int release_native_attempts;
 
@@ -66,14 +68,39 @@ static uint64_t provider_plugin_key(cmeta_plugin_ref ref) {
 }
 
 void provider_release_fault_arm(int failures) {
+  atomic_store_explicit(&release_secondary_pending, 0, memory_order_release);
+  atomic_store_explicit(&release_secondary_key, 0u, memory_order_release);
   atomic_store_explicit(&release_target_key, 0u, memory_order_release);
   atomic_store_explicit(&release_pending, failures, memory_order_release);
 }
 
 void provider_release_fault_arm_plugin(cmeta_plugin_ref ref, int failures) {
+  atomic_store_explicit(&release_secondary_pending, 0, memory_order_release);
+  atomic_store_explicit(&release_secondary_key, 0u, memory_order_release);
   atomic_store_explicit(
       &release_target_key, provider_plugin_key(ref), memory_order_release);
   atomic_store_explicit(&release_pending, failures, memory_order_release);
+}
+
+void provider_release_fault_arm_two_plugins(
+    cmeta_plugin_ref first, cmeta_plugin_ref second) {
+  atomic_store_explicit(
+      &release_target_key, provider_plugin_key(first), memory_order_release);
+  atomic_store_explicit(
+      &release_secondary_key, provider_plugin_key(second), memory_order_release);
+  atomic_store_explicit(&release_pending, 1, memory_order_release);
+  atomic_store_explicit(&release_secondary_pending, 1, memory_order_release);
+}
+
+static int consume_fault_budget(atomic_int *pending) {
+  int count = atomic_load_explicit(pending, memory_order_acquire);
+  while (count > 0) {
+    if (atomic_compare_exchange_weak_explicit(
+            pending, &count, count - 1,
+            memory_order_acq_rel, memory_order_acquire))
+      return 1;
+  }
+  return 0;
 }
 
 int provider_release_fault_injected(void) {
@@ -86,20 +113,21 @@ int provider_release_fault_native_attempts(void) {
 
 cmeta_plugin_status cmeta_plugin_registry_release(
     cmeta_plugin_registry *registry, cmeta_plugin_lease *lease) {
-  int count = atomic_load_explicit(&release_pending, memory_order_acquire);
   const uint64_t target =
       atomic_load_explicit(&release_target_key, memory_order_acquire);
-  /* Other Plugin generations must be able to settle independently even
-   * when their drain calls overlap the targeted failing release. */
-  const bool matches = target == 0u ||
-      (lease != NULL && provider_plugin_key(lease->plugin) == target);
-  while (matches && count > 0) {
-    if (atomic_compare_exchange_weak_explicit(
-            &release_pending, &count, count - 1,
-            memory_order_acq_rel, memory_order_acquire)) {
-      atomic_fetch_add_explicit(&release_injected, 1, memory_order_relaxed);
-      return CMETA_PLUGIN_BUSY;
-    }
+  const uint64_t other =
+      atomic_load_explicit(&release_secondary_key, memory_order_acquire);
+  const uint64_t key = lease != NULL
+      ? provider_plugin_key(lease->plugin) : 0u;
+  /* Both budgets are independent; a failure for one Plugin must never
+   * consume or steal the other Plugin's failure or lease. */
+  const int first = (target == 0u || (lease != NULL && key == target)) &&
+      consume_fault_budget(&release_pending);
+  const int second = !first && other != 0u && key == other &&
+      consume_fault_budget(&release_secondary_pending);
+  if (first || second) {
+    atomic_fetch_add_explicit(&release_injected, 1, memory_order_relaxed);
+    return CMETA_PLUGIN_BUSY;
   }
   atomic_fetch_add_explicit(
       &release_native_attempts, 1, memory_order_relaxed);

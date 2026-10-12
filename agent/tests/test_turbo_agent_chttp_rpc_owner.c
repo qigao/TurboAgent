@@ -38,6 +38,7 @@ static chttp_client_config published_rpc_client_config(void) {
   client.max_header_bytes = 4096u;
   client.max_request_body_bytes = 8192u;
   client.max_response_body_bytes = 8192u;
+  client.max_informational_responses = 2u;
   return client;
 }
 

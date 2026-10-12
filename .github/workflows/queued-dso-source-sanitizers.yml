@@ -122,48 +122,10 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           set -euo pipefail
-          # Match the project-sanctioned CTest preset so the ELF loader
-          # resolves *only* the six explicit pinned SDK runtime paths.
-          # --test-dir alone drops that preset environment and fails to load
-          # libcnet.so.2.3 before any sanitizer can execute.
+          # CTest preset is part of the *exact six-SDK* loader contract.
+          # --test-dir alone drops its pinned LD_LIBRARY_PATH configuration.
           ctest --preset ci-linux-release \
-            -R '^test_turbo_praktor_dso_compiled_harness
-
-      - name: Preserve exact source coverage and test evidence
-        if: always()
-        shell: bash
-        env:
-          KIND: ${{ matrix.sanitizer }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          dest="$RUNNER_TEMP/queued-dso-evidence-$KIND"
-          mkdir -p "$dest"
-          {
-            echo "tested_checkout=$GITHUB_SHA"
-            echo "source_head=$SOURCE_HEAD_SHA"
-            echo "run_id=$GITHUB_RUN_ID"
-            echo "sanitizer=$KIND"
-            echo "job_status=$JOB_STATUS"
-            echo "upstream_salts_instrumentation=NOT_COVERED_IN_THIS_PROCESS"
-          } > "$dest/provenance.txt"
-          for entry in \
-            "$RUNNER_TEMP/queued-dso-exact-sdks/exact-source-and-sdks.json" \
-            build/ci-linux-release/queued_dso_coverage.json \
-            build/ci-linux-release/queued-dso-audit.log \
-            build/ci-linux-release/praktor_tools/queued_dso_sanitizer.map \
-            build/ci-linux-release/Testing/Temporary/LastTest.log \
-            build/ci-linux-release/compile_commands.json; do
-            if test -f "$entry"; then cp "$entry" "$dest/$(basename "$entry")"; fi
-          done
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: queued-dso-source-slice-${{ matrix.sanitizer }}
-          path: ${{ runner.temp }}/queued-dso-evidence-${{ matrix.sanitizer }}
-          if-no-files-found: error
- \
+            -R '^test_turbo_praktor_dso_compiled_harness$' \
             --repeat until-fail:10 --output-on-failure
 
       - name: Preserve exact source coverage and test evidence

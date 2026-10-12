@@ -176,6 +176,26 @@ static int turboagent_rpc_body_contains(
   return 0;
 }
 
+typedef struct turboagent_typed_async_probe {
+  int terminals;
+  int status;
+  chttp_client_rpc_outcome_kind kind;
+  int64_t remote_code;
+} turboagent_typed_async_probe;
+
+static void turboagent_typed_async_complete(
+    void *user, chttp_request handle,
+    const chttp_client_rpc_outcome *outcome, const crpc_error *error) {
+  turboagent_typed_async_probe *probe =
+      (turboagent_typed_async_probe *)user;
+  (void)handle;
+  if (probe == NULL) return;
+  ++probe->terminals;
+  probe->status = error == NULL ? SALTS_OK : error->status;
+  probe->kind = outcome == NULL ? CHTTP_CLIENT_RPC_NONE : outcome->kind;
+  probe->remote_code = outcome == NULL ? 0 : outcome->remote_code;
+}
+
 spec("TurboAgent installed DataBind IDL typed RPC Owner") {
   it("compiles generated MethodPlan, mounts into HTTP Server, executes typed Client") {
     static const char contract_source[] =
@@ -201,6 +221,10 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     chttp_server_rpc_mount_options mount = CHTTP_SERVER_RPC_MOUNT_OPTIONS_INIT;
     chttp_client_config client_config = typed_client_config();
     chttp_client client = {0};
+    chttp_async_client async_client = {0};
+    turboagent_typed_async_probe typed_async_probe = {0};
+    chttp_request async_handle = {0};
+    uint64_t async_deadline = 0u;
     chttp_client_rpc_call_options options = CHTTP_CLIENT_RPC_CALL_OPTIONS_INIT;
     chttp_client_rpc_outcome outcome = CHTTP_CLIENT_RPC_OUTCOME_INIT;
     DataBindNativeOptions native = DATA_BIND_NATIVE_OPTIONS_INIT;
@@ -285,6 +309,44 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     check_equal(outcome.kind, CHTTP_CLIENT_RPC_REMOTE_ERROR);
     check_equal(outcome.remote_code, INT64_C(-32000));
     check_equal(chttp_client_destroy(&client, TYPED_TIMEOUT_MS), SALTS_OK);
+
+    /* The same immutable generated MethodPlan must work on the existing
+     * asynchronous HTTP Owner; caller borrows response storage until the
+     * sole terminal callback, with no duplicate wire ID publication. */
+    request = (AddRequest){3u, 4u, 2u, 1u};
+    response = (AddResponse){0};
+    options.request_id = UINT64_C(504);
+    check_equal(chttp_async_client_init(&async_client, &client_config), SALTS_OK);
+    check_equal(chttp_async_client_rpc_call(
+        &async_client, &options, turboagent_typed_async_complete,
+        &typed_async_probe, &async_handle), SALTS_OK);
+    check_true(async_handle.slot != 0u && async_handle.generation != 0u);
+    {
+      AddResponse rejected = {.sum = UINT32_C(0xdecafbad)};
+      chttp_client_rpc_call_options duplicate = options;
+      chttp_request denied = {0};
+      duplicate.response = &rejected;
+      check_equal(chttp_async_client_rpc_call(
+          &async_client, &duplicate, turboagent_typed_async_complete,
+          &typed_async_probe, &denied), SALTS_EALREADY);
+      check_equal(denied.slot, 0u);
+      check_equal(rejected.sum, UINT32_C(0xdecafbad));
+      check_equal(typed_async_probe.terminals, 0);
+    }
+    async_deadline = cmeta_monotonic_ms() + TYPED_TIMEOUT_MS;
+    while (typed_async_probe.terminals == 0 &&
+           cmeta_monotonic_ms() < async_deadline) {
+      size_t completions = 0u;
+      check_equal(chttp_async_client_poll(&async_client, 5u, &completions), SALTS_OK);
+    }
+    check_equal(typed_async_probe.terminals, 1);
+    check_equal(typed_async_probe.status, SALTS_OK);
+    check_equal(typed_async_probe.kind, CHTTP_CLIENT_RPC_SUCCESS);
+    check_equal(response.sum, (uint32_t)11u);
+    check_equal(chttp_async_request_cancel(&async_client, async_handle), SALTS_ENOENT);
+    check_equal(chttp_async_client_stop(&async_client, TYPED_TIMEOUT_MS), SALTS_OK);
+    check_equal(chttp_async_client_destroy(&async_client), SALTS_OK);
+    check_equal(typed_async_probe.terminals, 1);
 
     check_equal(chttp_server_stop(&server, TYPED_TIMEOUT_MS), SALTS_OK);
     check_equal(chttp_server_destroy(&server), SALTS_OK);

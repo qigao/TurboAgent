@@ -81,6 +81,26 @@ CXX_C_API int turbo_agent_runtime_store_put_json(
     const json_value_t *record_json);
 
 /**
+ * Atomically claim one previously absent record within this Runtime handle.
+ *
+ * Under the existing RuntimeStore mutex, a single get(ENOENT) then put is
+ * serialized against all other operations on this same handle. Unlike
+ * separate get_json_status() + put_json(), concurrent claimers sharing the
+ * handle cannot both succeed. Returns SALTS_OK for one successful claim,
+ * SALTS_EALREADY if any record already exists, or a fail-closed backend
+ * error (not interpreted as absence). A failed put may have committed:
+ * callers MUST NOT perform external side effects unless SALTS_OK is returned.
+ *
+ * This is NOT an atomic cross-handle/process compare-and-swap: callers must
+ * use one exclusively owned durable store/Runtime handle, e.g. the SQLite
+ * backend's exclusive owner. Memory/file backends offer no crash guarantees.
+ * Never reenter the same RuntimeStore from the backend callback.
+ */
+CXX_C_API int turbo_agent_runtime_store_put_json_if_absent(
+    turbo_agent_runtime_t *runtime, const char *collection, const char *id,
+    const json_value_t *record_json);
+
+/**
  * Get a record as an independently owned tree. Return 0 on success, -1 for
  * invalid arguments, a missing/failed record, or invalid JSON. A non-NULL output
  * slot is cleared on entry; release a successful output with json_free().

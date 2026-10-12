@@ -451,3 +451,118 @@ jobs:
           test -n "$loader_path"
           # CTest sets only the exact installed provider paths, not ambient dyld paths.
           env -u DYLD_LIBRARY_PATH ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure
+
+  consume-windows:
+    name: Consume packed NuGet SDK / windows-x64
+    needs: [metadata, pack]
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: packed
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+      - name: Locate MSVC toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw "MSVC x64 toolchain required" }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          foreach ($name in @('VCPKG_ROOT', 'VCPKG_CACHE_REPOSITORY_ROOT')) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) { throw "$name is required" }
+            "$name=$($value.Replace('\', '/'))" >> $env:GITHUB_ENV
+          }
+      - name: Restore exact prerequisite SDKs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64 -WithWasm
+      - name: Unpack exact-run package
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packages = @(Get-ChildItem -LiteralPath packed -File -Filter '*.nupkg')
+          if ($packages.Count -ne 1) { throw "expected exactly one same-run NuGet archive" }
+          $package = "packed/TurboAgent.Native.$($env:PACKAGE_VERSION).nupkg"
+          if (-not (Test-Path -LiteralPath $package -PathType Leaf)) { throw "missing exact-version package" }
+          python packaging/nuget/verify_exact_package.py $package --commit $env:GITHUB_SHA --package-version $env:PACKAGE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "NuGet package provenance check failed" }
+          $zip = Join-Path $env:RUNNER_TEMP "turboagent-consumer-package.zip"
+          Copy-Item -LiteralPath $package -Destination $zip -Force
+          Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'turboagent-consumer-package') -Force
+          $prefix = Join-Path $env:RUNNER_TEMP 'turboagent-consumer-package/sdk/windows-x64'
+          foreach ($file in @('lib/cmake/TurboAgent/TurboAgentConfig.cmake', 'turboagent-sdk-manifest.txt')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $prefix $file))) { throw "missing installed SDK file: $file" }
+          }
+          foreach ($item in @(
+            @('SALTS_ROOT', 'Salts'),
+            @('SALTS_UTILS_ROOT', 'SaltsUtils'),
+            @('CHTTP_ROOT', 'Chttp'),
+            @('TURBOWASM_ROOT', 'TurboWasm')
+          )) {
+            $root = [Environment]::GetEnvironmentVariable($item[0])
+            if ([string]::IsNullOrWhiteSpace($root)) { throw "missing exact provider root: $($item[0])" }
+            if (-not (Test-Path -LiteralPath (Join-Path $root "lib/cmake/$($item[1])/$($item[1])Config.cmake"))) {
+              throw "missing exact provider package config: $($item[1])"
+            }
+          }
+      - name: Configure and link independent MSVC SDK consumer
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          cmake -S packaging/nuget/consumer -B "%RUNNER_TEMP%/turboagent-consumer-build" -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%VCPKG_CACHE_REPOSITORY_ROOT%/cmake/QigaoVcpkgToolchain.cmake" ^
+            -DVCPKG_TARGET_TRIPLET="%QIGAO_VCPKG_WINDOWS_TRIPLET%" ^
+            -DVCPKG_HOST_TRIPLET="%QIGAO_VCPKG_WINDOWS_HOST_TRIPLET%" ^
+            -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%/vcpkg_installed/consumer-windows" ^
+            -DCMAKE_PREFIX_PATH="%GITHUB_WORKSPACE%/vcpkg_installed/consumer-windows/%QIGAO_VCPKG_WINDOWS_TRIPLET%" ^
+            -DSalts_DIR="%SALTS_ROOT%/lib/cmake/Salts" ^
+            -DSaltsUtils_DIR="%SALTS_UTILS_ROOT%/lib/cmake/SaltsUtils" ^
+            -DChttp_DIR="%CHTTP_ROOT%/lib/cmake/Chttp" ^
+            -DTurboWasm_DIR="%TURBOWASM_ROOT%/lib/cmake/TurboWasm" ^
+            -DEXPECTED_WITH_PRAKTOR=OFF ^
+            -DEXPECTED_TURBOAGENT_PREFIX="%RUNNER_TEMP%/turboagent-consumer-package/sdk/windows-x64"
+          if errorlevel 1 exit /b 1
+          cmake --build "%RUNNER_TEMP%/turboagent-consumer-build"
+          if errorlevel 1 exit /b 1
+          dumpbin /dependents "%RUNNER_TEMP%\turboagent-consumer-build\turboagent_installed_consumer.exe"
+          if errorlevel 1 exit /b 1
+      - name: Run consumer against explicitly deployed Windows SDK DLLs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ctest = (Get-Command ctest).Source
+          $prefix = Join-Path $env:RUNNER_TEMP 'turboagent-consumer-package/sdk/windows-x64'
+          $triplet = $env:QIGAO_VCPKG_WINDOWS_TRIPLET
+          if ([string]::IsNullOrWhiteSpace($triplet)) { throw "Windows vcpkg triplet is missing" }
+          $deps = @(
+            (Join-Path $prefix 'bin'),
+            (Join-Path $env:SALTS_ROOT 'bin'),
+            (Join-Path $env:SALTS_UTILS_ROOT 'bin'),
+            (Join-Path $env:CHTTP_ROOT 'bin'),
+            (Join-Path $env:TURBOWASM_ROOT 'bin'),
+            (Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/consumer-windows/$triplet/bin")
+          )
+          foreach ($dir in $deps) {
+            if (-not (Test-Path -LiteralPath $dir -PathType Container)) { throw "missing explicit DLL deployment directory: $dir" }
+          }
+          $exe = Join-Path $env:RUNNER_TEMP 'turboagent-consumer-build/turboagent_installed_consumer.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "missing linked consumer executable" }
+          # Only exact NuGet/SDK/vcpkg DLL locations plus Windows system DLLs.
+          # Do not inherit runner-wide PATH entries that could mask missing packages.
+          $env:PATH = (($deps + @("$env:SystemRoot\System32", "$env:SystemRoot")) -join ';')
+          & $ctest --test-dir (Join-Path $env:RUNNER_TEMP 'turboagent-consumer-build') --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "installed Windows consumer CTest failed" }

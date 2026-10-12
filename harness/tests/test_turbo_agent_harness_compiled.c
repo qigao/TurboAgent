@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <salts/thread_pool.h>
+#include <salts/thread.h>
+#include <salts/clock.h>
 
 static const char compiled_inspect_source[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"value\\\":\\\"hello\\\"}\"}";
 static const char compiled_inspect_bad_args[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"extra\\\":1}\"}";
@@ -18,6 +20,9 @@ static const char compiled_inspect_unknown_tool[] = "{\"template_id\":\"inspect\
 typedef struct compiled_inspect_probe_s {
   int calls;
   int produce_invalid_result;
+  int block_callback;
+  atomic_int entered;
+  atomic_int release_callback;
 } compiled_inspect_probe_t;
 
 static int compiled_harness_transport(const char *request, char **response, void *user) {
@@ -34,6 +39,11 @@ static int compiled_inspect_handler(const json_value_t *arguments,
   if (!probe || !out_result || !arguments ||
       !json_get_string(arguments, "value")) return -1;
   ++probe->calls;
+  if (probe->block_callback) {
+    atomic_store_explicit(&probe->entered, 1, memory_order_release);
+    while (!atomic_load_explicit(&probe->release_callback, memory_order_acquire))
+      cmeta_thread_yield();
+  }
   if (probe->produce_invalid_result) {
     *out_result = json_create_string("unexpected type");
     return *out_result ? 0 : -1;
@@ -651,5 +661,220 @@ spec("Harness compiled Inspect canonical Session Run/Checkpoint") {
     cmeta_threadpool_destroy(pool);
     tt_remove_tree(directory);
     free(directory);
+  }
+}
+
+
+spec("Harness bounded asynchronous compiled Inspect") {
+  it("interrupts before any callback and resumes from an exact checkpoint") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    turbo_agent_compiler_config_t config;
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_harness_execution_t *first = NULL, *second = NULL, *third = NULL;
+    json_value_t *summary = NULL, *state = NULL;
+    turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_FAILED;
+    char source_copy[sizeof(compiled_inspect_source)];
+    char capability_copy[] = "runtime_tools";
+    const char *mutable_allowed[] = {capability_copy};
+    char *checkpoint = NULL;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, turbo_agent_runtime_store_memory_create(), "async-compiled-thread");
+    check_not_null(harness);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = mutable_allowed;
+    config.allowed_capability_count = 1;
+    memcpy(source_copy, compiled_inspect_source, sizeof(source_copy));
+
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, source_copy, strlen(source_copy), "async_one",
+        NULL, 1, NULL, &first), SALTS_OK);
+    check_not_null(first);
+    /* Worker must own its source and capability snapshot, not the stack. */
+    memset(source_copy, 'x', sizeof(source_copy) - 1);
+    memset(capability_copy, 'x', sizeof(capability_copy) - 1);
+    check_equal(turbo_agent_harness_execution_wait(first, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_get_status(first, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_INTERRUPTED);
+    check_equal(turbo_agent_harness_execution_take_result(first, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "interrupted");
+    const char *borrowed_checkpoint = json_get_string(summary, "checkpoint_id");
+    check_not_null(borrowed_checkpoint);
+    checkpoint = malloc(strlen(borrowed_checkpoint) + 1);
+    check_not_null(checkpoint);
+    strcpy(checkpoint, borrowed_checkpoint);
+    check_equal(probe.calls, 0);
+    json_free(state); state = NULL;
+    json_free(summary); summary = NULL;
+
+    config.allowed_capabilities = allowed;
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_source,
+        strlen(compiled_inspect_source), "async_one",
+        checkpoint, 0, NULL, &second), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_wait(second, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_get_status(second, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_COMPLETED);
+    check_equal(turbo_agent_harness_execution_take_result(second, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "completed");
+    check_true(json_get_bool(json_object_get(state, "compiled_result"), "ok", false));
+    check_equal(probe.calls, 1);
+    json_free(summary); summary = NULL;
+    json_free(state); state = NULL;
+
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_source,
+        strlen(compiled_inspect_source), "async_one",
+        checkpoint, 0, NULL, &third), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_wait(third, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_take_result(third, &summary, &state), SALTS_OK);
+    check_true(json_get_bool(state, "compiled_replayed", false));
+    check_equal(probe.calls, 1);
+    json_free(summary);
+    json_free(state);
+    free(checkpoint);
+    turbo_agent_harness_execution_release(first);
+    turbo_agent_harness_execution_release(second);
+    turbo_agent_harness_execution_release(third);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("rejects a concurrent compiled Graph submission while its tool is active") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    turbo_agent_compiler_config_t config;
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_harness_execution_t *first = NULL, *second = NULL;
+    json_value_t *summary = NULL, *state = NULL;
+    probe.block_callback = 1;
+    atomic_init(&probe.entered, 0);
+    atomic_init(&probe.release_callback, 0);
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, turbo_agent_runtime_store_memory_create(), "async-busy-thread");
+    check_not_null(harness);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_source,
+        strlen(compiled_inspect_source), "busy_one",
+        NULL, 0, NULL, &first), SALTS_OK);
+    while (!atomic_load_explicit(&probe.entered, memory_order_acquire))
+      cmeta_thread_yield();
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_source,
+        strlen(compiled_inspect_source), "busy_two",
+        NULL, 0, NULL, &second), SALTS_EBUSY);
+    check_null(second);
+    atomic_store_explicit(&probe.release_callback, 1, memory_order_release);
+    check_equal(turbo_agent_harness_execution_wait(first, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_take_result(first, &summary, &state), SALTS_OK);
+    check_equal(probe.calls, 1);
+    json_free(summary);
+    json_free(state);
+    turbo_agent_harness_execution_release(first);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("honors an expired deadline at the Graph boundary without calling a tool") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    turbo_agent_compiler_config_t config;
+    turbo_agent_harness_run_options_t options;
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_harness_execution_t *execution = NULL;
+    turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_FAILED;
+    json_value_t *summary = NULL, *state = NULL;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, turbo_agent_runtime_store_memory_create(), "async-deadline-thread");
+    check_not_null(harness);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+    turbo_agent_harness_run_options_init(&options);
+    options.deadline_mono_ms = cmeta_monotonic_ms();
+
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_source,
+        strlen(compiled_inspect_source), "expired",
+        NULL, 0, &options, &execution), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_wait(execution, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_get_status(execution, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_TIMED_OUT);
+    check_equal(probe.calls, 0);
+    check_equal(turbo_agent_harness_execution_take_result(execution, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "timed_out");
+    json_free(summary);
+    json_free(state);
+    turbo_agent_harness_execution_release(execution);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("rejects wrong plan/capability before queuing without invoking a callback") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    turbo_agent_compiler_config_t config;
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_harness_execution_t *execution = NULL;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, turbo_agent_runtime_store_memory_create(), "async-deny-thread");
+    check_not_null(harness);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capability_count = 0;
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_source,
+        strlen(compiled_inspect_source), "deny",
+        NULL, 0, NULL, &execution), SALTS_EPROTO);
+    check_null(execution);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, compiled_inspect_bad_args,
+        strlen(compiled_inspect_bad_args), "bad",
+        NULL, 0, NULL, &execution), SALTS_EPROTO);
+    check_null(execution);
+    check_equal(probe.calls, 0);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
   }
 }

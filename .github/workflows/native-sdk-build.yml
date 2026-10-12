@@ -368,3 +368,84 @@ jobs:
             exit 1
           fi
           env -u LD_LIBRARY_PATH ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure
+
+  consume-macos:
+    name: Consume packed NuGet SDK / macos-arm64
+    needs: [metadata, pack]
+    runs-on: macos-15
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: packed
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+      - name: Install consumer toolchain
+        shell: bash
+        run: brew install ninja nasm
+      - name: Restore exact prerequisite SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash cmake/ci/restore-native-sdk.sh macos-arm64 1 1
+      - name: Unpack exact-run package
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          test "$(find packed -maxdepth 1 -name '*.nupkg' -type f | wc -l | tr -d ' ')" -eq 1
+          package="packed/TurboAgent.Native.${PACKAGE_VERSION}.nupkg"
+          python3 packaging/nuget/verify_exact_package.py "$package" \
+            --commit "$GITHUB_SHA" --package-version "$PACKAGE_VERSION"
+          mkdir -p "$RUNNER_TEMP/turboagent-consumer-package"
+          unzip -q "$package" -d "$RUNNER_TEMP/turboagent-consumer-package"
+      - name: Configure, link and run installed macOS consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/turboagent-consumer-package/sdk/macos-arm64"
+          for entry in \
+            "SALTS_ROOT:Salts/SaltsConfig.cmake" \
+            "SALTS_UTILS_ROOT:SaltsUtils/SaltsUtilsConfig.cmake" \
+            "CHTTP_ROOT:Chttp/ChttpConfig.cmake" \
+            "TURBOWASM_ROOT:TurboWasm/TurboWasmConfig.cmake" \
+            "PRAKTOR_ROOT:Praktor/PraktorConfig.cmake" \
+            "TURBOSCRIPT_ROOT:TurboScript/TurboScriptConfig.cmake"; do
+            name="${entry%%:*}"
+            rel="${entry#*:}"
+            root="${!name:?required SDK root is missing: $name}"
+            test -f "$root/lib/cmake/$rel" || { echo "missing exact SDK config: $name/$rel" >&2; exit 1; }
+          done
+          cmake -S packaging/nuget/consumer -B "$RUNNER_TEMP/turboagent-consumer-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_CACHE_REPOSITORY_ROOT/cmake/QigaoVcpkgToolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-osx \
+            -DVCPKG_HOST_TRIPLET=arm64-osx \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/consumer-macos" \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/vcpkg_installed/consumer-macos/arm64-osx" \
+            -DSalts_DIR="$SALTS_ROOT/lib/cmake/Salts" \
+            -DSaltsUtils_DIR="$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils" \
+            -DChttp_DIR="$CHTTP_ROOT/lib/cmake/Chttp" \
+            -DTurboWasm_DIR="$TURBOWASM_ROOT/lib/cmake/TurboWasm" \
+            -DPraktor_DIR="$PRAKTOR_ROOT/lib/cmake/Praktor" \
+            -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
+            -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
+          cmake --build "$RUNNER_TEMP/turboagent-consumer-build"
+          consumer="$RUNNER_TEMP/turboagent-consumer-build/turboagent_installed_consumer"
+          test -f "$consumer"
+          test -n "$(find "$prefix/lib" -maxdepth 1 -name '*runtime_core*.dylib' -print -quit)"
+          file "$consumer"
+          otool -L "$consumer"
+          otool -l "$consumer" > "$RUNNER_TEMP/turboagent-consumer-otool.txt"
+          grep -q LC_RPATH "$RUNNER_TEMP/turboagent-consumer-otool.txt"
+          loader_path="$(cat "$RUNNER_TEMP/turboagent-consumer-build/runtime-library-path.txt")"
+          test -n "$loader_path"
+          # CTest sets only the exact installed provider paths, not ambient dyld paths.
+          env -u DYLD_LIBRARY_PATH ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure

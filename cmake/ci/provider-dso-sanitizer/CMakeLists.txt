@@ -204,6 +204,23 @@ add_dependencies(test_provider_registry_partial_destroy
   provider_dso_instrumented_managed_component
   provider_dso_instrumented_managed_component_n1)
 
+# Repeat Registry teardown with failures on one image or across two images.
+add_executable(test_provider_registry_repeated_close_failures
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_provider_registry_repeated_close_failures.c")
+target_include_directories(test_provider_registry_repeated_close_failures PRIVATE
+  "${_fixture_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(test_provider_registry_repeated_close_failures PRIVATE
+  "PRAKTOR_DSO_MANAGED_COMPONENT_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component>\""
+  "PRAKTOR_DSO_MANAGED_COMPONENT_N1_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component_n1>\"")
+target_link_libraries(test_provider_registry_repeated_close_failures PRIVATE
+  provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
+  Threads::Threads ${CMAKE_DL_LIBS})
+target_link_options(test_provider_registry_repeated_close_failures PRIVATE
+  "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/provider_registry_repeated_close_failures.map")
+add_dependencies(test_provider_registry_repeated_close_failures
+  provider_dso_instrumented_managed_component
+  provider_dso_instrumented_managed_component_n1)
+
 # Integrated test holds a real Managed Component Provider's Generation lease
 # across one injected Registry release failure and later one injected
 # native close failure, ultimately invoking the genuine POSIX loader.
@@ -250,6 +267,8 @@ foreach(target IN ITEMS
     test_provider_dso_close_failure
     test_provider_registry_destroy_barrier
     test_provider_registry_partial_destroy
+  test_provider_registry_repeated_close_failures
+    test_provider_registry_repeated_close_failures
     test_provider_generation_drain_close_failure
     test_provider_multigeneration_isolated_drain)
   target_compile_options(${target} PRIVATE
@@ -326,3 +345,13 @@ add_test(NAME provider_registry_partial_destroy
 set_tests_properties(provider_registry_partial_destroy PROPERTIES
   TIMEOUT 120
   ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")
+
+
+# Two independently reported fail schedules use the same Managed DSO code.
+foreach(_case IN ITEMS "same-image" "across-images")
+  string(REPLACE "-" "_" _suffix "${_case}")
+  set(_test "provider_registry_repeated_close_${_suffix}")
+  add_test(NAME "${_test}" COMMAND test_provider_registry_repeated_close_failures)
+  set_tests_properties("${_test}" PROPERTIES TIMEOUT 120 ENVIRONMENT
+    "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin;TURBO_DSO_CLOSE_FAILURE_SCHEDULE=${_case}")
+endforeach()

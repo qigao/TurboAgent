@@ -163,6 +163,100 @@ jobs:
         shell: cmd
         run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset ci-windows-release
 
+      - name: Test macOS real Provider DSO unload
+        if: matrix.rid == 'macos-arm64'
+        shell: bash
+        run: ctest --preset ci-macos-release -R '^test_turbo_component_dso_lifecycle        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: ctest --preset "$SDK_PRESET"
+
+      - name: Test on Windows
+        if: runner.os == 'Windows' && matrix.tests
+        shell: cmd
+        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release
+
+      - name: Install on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: cmake --build --preset "install-$SDK_PRESET"
+
+      - name: Install on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset install-ci-windows-release
+
+      - name: Record SDK provenance
+        shell: bash
+        env:
+          SDK_RID: ${{ matrix.rid }}
+          WITH_PRAKTOR: ${{ matrix.praktor }}
+          SDK_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          praktor=off
+          if [[ "$WITH_PRAKTOR" == 1 ]]; then praktor=on; fi
+          printf 'version=%s\ncommit=%s\nrid=%s\npraktor_tools=%s\n' \
+            "$SDK_VERSION" "$GITHUB_SHA" "$SDK_RID" "$praktor" \
+            > "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-sdk-${{ matrix.rid }}
+          path: build/sdk
+          if-no-files-found: error
+          compression-level: 9
+
+  pack:
+    name: Pack TurboAgent.Native
+    needs: [metadata, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: turboagent-sdk-*
+          path: package/sdk
+          merge-multiple: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Configure GitHub Packages source
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/nuget.config"
+          printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text --configfile "$config"
+          echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
+
+      - name: Create NuGet package
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          dotnet restore packaging/nuget/TurboAgent.Native.csproj \
+            --configfile "$NUGET_CONFIG" --packages "$RUNNER_TEMP/pack-nuget"
+          dotnet pack packaging/nuget/TurboAgent.Native.csproj \
+            --no-restore --configuration Release --output dist \
+            -p:PackageVersion="$PACKAGE_VERSION" \
+            -p:PackageRoot="$GITHUB_WORKSPACE/package" \
+            -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: dist/*.nupkg
+          if-no-files-found: error
+ --output-on-failure
+
       - name: Test on Unix
         if: runner.os != 'Windows' && matrix.tests
         shell: bash

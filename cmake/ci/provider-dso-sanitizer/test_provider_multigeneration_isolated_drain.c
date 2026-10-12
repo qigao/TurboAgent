@@ -13,6 +13,8 @@
 #include <salts/thread.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifndef PRAKTOR_DSO_MANAGED_COMPONENT_PATH
 #error "Missing Managed Component Provider 43 path"
@@ -313,4 +315,234 @@ spec("independent Managed DSO Generation retirement under scoped release failure
         &registry, refs[0], &info), CMETA_PLUGIN_STALE);
     check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
   }
+
+  it("recovers two failed Generations in either order and fences reused Plugin slots") {
+    const cmeta_plugin_registry_config config = {2u};
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref refs[2] = {{0}}, recycled = {0}, rejected = {0};
+    managed_generation generations[2] = {{0}};
+    salts_component_plugin_runtime runtime = SALTS_COMPONENT_PLUGIN_RUNTIME_INIT;
+    salts_component_plugin_generation *retired = NULL;
+    salts_component_plugin_scope scopes[2] = {
+      SALTS_COMPONENT_PLUGIN_SCOPE_INIT, SALTS_COMPONENT_PLUGIN_SCOPE_INIT
+    };
+    managed_drain_gate gate = {0};
+    managed_drain_worker workers[2] = {{0}};
+    cmeta_thread_t threads[2] = {0};
+    cmeta_plugin_lifecycle_info info = {0};
+    atomic_int destroyed[2], recycled_destroy, entered[2], exited[2];
+    const char *const paths[2] = {
+      PRAKTOR_DSO_MANAGED_COMPONENT_PATH,
+      PRAKTOR_DSO_MANAGED_COMPONENT_N1_PATH
+    };
+    const char *order = getenv("TURBO_DSO_RECOVERY_ORDER");
+    const size_t first = order && strcmp(order, "new-first") == 0 ? 1u : 0u;
+    const size_t last = first == 0u ? 1u : 0u;
+    const int fault_before = provider_release_fault_injected();
+    const int native_release_before = provider_release_fault_native_attempts();
+    const int close_fault_before = provider_close_fault_injected();
+    const int native_close_before = provider_close_fault_native_attempts();
+    const int close_success_before = provider_close_fault_native_successes();
+    int ready = 0;
+    bool quiet = false;
+
+    atomic_init(&recycled_destroy, 0);
+    for (size_t i = 0u; i < 2u; ++i) {
+      atomic_init(&destroyed[i], 0);
+      atomic_init(&entered[i], 0);
+      atomic_init(&exited[i], 0);
+    }
+    check_true(!order || strcmp(order, "old-first") == 0 ||
+               strcmp(order, "new-first") == 0);
+    check_equal(cmeta_plugin_registry_init(&registry, &config), CMETA_PLUGIN_OK);
+    for (size_t i = 0u; i < 2u; ++i) {
+      check_equal(cmeta_plugin_registry_load(
+          &registry, paths[i], &refs[i]), CMETA_PLUGIN_OK);
+      check_equal(cmeta_plugin_registry_start(
+          &registry, refs[i]), CMETA_PLUGIN_OK);
+      check_equal(managed_set_host_destroy_counter(
+          &registry, refs[i], &destroyed[i]), CMETA_PLUGIN_OK);
+      check_equal(managed_build(&generations[i], UINT64_C(43) + i,
+                                &registry, refs[i]), SALTS_COMPONENT_PLUGIN_OK);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, refs[i], &info), CMETA_PLUGIN_OK);
+      check_equal(info.active_leases, (size_t)1u);
+    }
+
+    check_equal(salts_component_plugin_runtime_init(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_publish(
+        &runtime, &generations[0].generation, &retired),
+        SALTS_COMPONENT_PLUGIN_OK);
+    check_null(retired);
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &scopes[0]), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(managed_run_scoped(&scopes[0], &entered[0], &exited[0]), 43);
+    check_equal(salts_component_plugin_runtime_publish(
+        &runtime, &generations[1].generation, &retired),
+        SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &generations[0].generation);
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &scopes[1]), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(managed_run_scoped(&scopes[1], &entered[1], &exited[1]), 44);
+    check_equal(salts_component_plugin_runtime_close(
+        &runtime, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &generations[1].generation);
+    for (size_t i = 0u; i < 2u; ++i) {
+      check_equal(atomic_load_explicit(
+          &entered[i], memory_order_acquire), 1);
+      check_equal(atomic_load_explicit(
+          &exited[i], memory_order_acquire), 1);
+      check_equal(salts_component_plugin_generation_drain(
+          &runtime, &generations[i].generation), SALTS_COMPONENT_PLUGIN_BUSY);
+      check_equal(salts_component_plugin_scope_release(
+          &scopes[i]), SALTS_COMPONENT_PLUGIN_OK);
+    }
+
+    gate.runtime = &runtime;
+    atomic_init(&gate.ready, 0);
+    atomic_init(&gate.go, 0);
+    for (size_t i = 0u; i < 2u; ++i) {
+      workers[i].gate = &gate;
+      workers[i].generation = &generations[i].generation;
+      check_equal(cmeta_thread_create(
+          &threads[i], managed_drain_concurrent, &workers[i]), SALTS_OK);
+    }
+    {
+      const uint64_t deadline = cmeta_monotonic_ms() + UINT64_C(10000);
+      while (atomic_load_explicit(&gate.ready, memory_order_acquire) < 2 &&
+             cmeta_monotonic_ms() < deadline)
+        cmeta_thread_yield();
+    }
+    ready = atomic_load_explicit(&gate.ready, memory_order_acquire);
+    provider_release_fault_arm_two_plugins(refs[0], refs[1]);
+    atomic_store_explicit(&gate.go, 1, memory_order_release);
+    for (size_t i = 0u; i < 2u; ++i)
+      check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+    check_equal(ready, 2);
+    check_equal(provider_release_fault_injected() - fault_before, 2);
+    for (size_t i = 0u; i < 2u; ++i) {
+      check_equal(workers[i].result, SALTS_COMPONENT_PLUGIN_PLUGIN_ERROR);
+      check_equal(generations[i].generation.state,
+                  SALTS_COMPONENT_PLUGIN_GENERATION_FAILED);
+      check_equal(salts_component_plugin_generation_failure(
+          &generations[i].generation)->plugin_status, CMETA_PLUGIN_BUSY);
+      check_equal(generations[i].generation.module_count, (size_t)1u);
+      check_true(cmeta_plugin_lease_valid(generations[i].modules[0].lease));
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, refs[i], &info), CMETA_PLUGIN_OK);
+      check_equal(info.active_leases, (size_t)1u);
+      check_equal(salts_component_plugin_runtime_publish(
+          &runtime, &generations[i].generation, &retired),
+          SALTS_COMPONENT_PLUGIN_INVALID_STATE);
+    }
+    check_equal(salts_component_plugin_runtime_destroy(
+        &runtime), SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &scopes[0]), SALTS_COMPONENT_PLUGIN_INVALID_STATE);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)2u);
+    rejected = (cmeta_plugin_ref){1u, 777u};
+    check_equal(cmeta_plugin_registry_load(
+        &registry, paths[first], &rejected), CMETA_PLUGIN_CAPACITY_EXCEEDED);
+    check_false(cmeta_plugin_ref_valid(rejected));
+
+    /* The Host selects which generation recovers FIRST. The other stays
+     * FAILED and retains precisely its original Plugin Lease. */
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &generations[first].generation), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(generations[first].generation.state,
+                SALTS_COMPONENT_PLUGIN_GENERATION_DRAINED);
+    check_false(cmeta_plugin_lease_valid(generations[first].modules[0].lease));
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, refs[last], &info), CMETA_PLUGIN_OK);
+    check_equal(info.active_leases, (size_t)1u);
+    check_equal(generations[last].generation.state,
+                SALTS_COMPONENT_PLUGIN_GENERATION_FAILED);
+    check_equal(salts_component_plugin_runtime_destroy(
+        &runtime), SALTS_COMPONENT_PLUGIN_BUSY);
+
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, refs[first]), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, refs[first], &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    provider_close_fault_arm(1);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, refs[first]), CMETA_PLUGIN_UNLOAD_FAILED);
+    check_equal(provider_close_fault_injected() - close_fault_before, 1);
+    check_equal(atomic_load_explicit(
+        &destroyed[first], memory_order_acquire), 1);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)2u);
+    rejected = (cmeta_plugin_ref){1u, 888u};
+    check_equal(cmeta_plugin_registry_load(
+        &registry, paths[first], &rejected), CMETA_PLUGIN_CAPACITY_EXCEEDED);
+    check_false(cmeta_plugin_ref_valid(rejected));
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, refs[first]), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)1u);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, refs[first], &info), CMETA_PLUGIN_STALE);
+    check_equal(atomic_load_explicit(
+        &destroyed[first], memory_order_acquire), 1);
+
+    /* Reuse exactly the released Registry slot, but with a NEW generation.
+     * The old Ref can neither observe nor unload the new Plugin occupant. */
+    check_equal(cmeta_plugin_registry_load(
+        &registry, paths[first], &recycled), CMETA_PLUGIN_OK);
+    check_equal(recycled.slot, refs[first].slot);
+    check_true(recycled.generation != refs[first].generation);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, refs[first], &info), CMETA_PLUGIN_STALE);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, refs[first]), CMETA_PLUGIN_STALE);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)2u);
+    check_equal(cmeta_plugin_registry_start(
+        &registry, recycled), CMETA_PLUGIN_OK);
+    check_equal(managed_set_host_destroy_counter(
+        &registry, recycled, &recycled_destroy), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, recycled), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, recycled, &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, recycled), CMETA_PLUGIN_OK);
+    check_equal(atomic_load_explicit(
+        &recycled_destroy, memory_order_acquire), 1);
+    check_equal(atomic_load_explicit(
+        &destroyed[first], memory_order_acquire), 1);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)1u);
+
+    /* Recover the second FAILED Generation only AFTER the first slot was
+     * reused and safely closed. No hidden admission or release retries. */
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &generations[last].generation), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(generations[last].generation.state,
+                SALTS_COMPONENT_PLUGIN_GENERATION_DRAINED);
+    check_false(cmeta_plugin_lease_valid(generations[last].modules[0].lease));
+    check_equal(provider_release_fault_native_attempts() -
+                native_release_before, 5);
+    check_equal(salts_component_plugin_runtime_destroy(
+        &runtime), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, refs[last]), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, refs[last], &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    check_equal(cmeta_plugin_registry_unload(
+        &registry, refs[last]), CMETA_PLUGIN_OK);
+    check_equal(atomic_load_explicit(
+        &destroyed[last], memory_order_acquire), 1);
+    check_equal(atomic_load_explicit(
+        &destroyed[first], memory_order_acquire), 1);
+    check_equal(provider_close_fault_native_attempts() -
+                native_close_before, 3);
+    check_equal(provider_close_fault_native_successes() -
+                close_success_before, 3);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, refs[last], &info), CMETA_PLUGIN_STALE);
+    check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
+  }
+
 }

@@ -196,6 +196,60 @@ static void turboagent_typed_async_complete(
   probe->remote_code = outcome == NULL ? 0 : outcome->remote_code;
 }
 
+/* Worker borrows only immutable MethodPlan/Binding while the test's Server
+ * retains its Plugin generation lease; native workspace is per call. */
+typedef struct turboagent_typed_call_thread {
+  char uri[64];
+  const DataBindRpcMethodPlan *plan;
+  const DataBindServiceNativeBinding *binding;
+  AddRequest request;
+  AddResponse response;
+  int status;
+  chttp_client_rpc_outcome_kind kind;
+  atomic_int finished;
+} turboagent_typed_call_thread;
+
+static void turboagent_typed_call_worker(void *user) {
+  turboagent_typed_call_thread *args = (turboagent_typed_call_thread *)user;
+  chttp_client client = {0};
+  chttp_client_config config = typed_client_config();
+  chttp_client_rpc_call_options options = CHTTP_CLIENT_RPC_CALL_OPTIONS_INIT;
+  chttp_client_rpc_outcome outcome = CHTTP_CLIENT_RPC_OUTCOME_INIT;
+  DataBindNativeOptions native = DATA_BIND_NATIVE_OPTIONS_INIT;
+  unsigned char workspace[4096];
+  crpc_error error = {0};
+  int status;
+  if (args == NULL) return;
+  status = chttp_client_init(&client, &config);
+  if (status == SALTS_OK) {
+    native.workspace = workspace;
+    native.workspace_bytes = sizeof(workspace);
+    native.max_depth = 16u;
+    native.max_items = 64u;
+    native.max_owned_bytes = 1024u;
+    options.connection_uri = args->uri;
+    options.authority = "localhost";
+    options.target = "/rpc";
+    options.request_id = UINT64_C(611);
+    options.deadline_ms = TYPED_TIMEOUT_MS;
+    options.method_plan = args->plan;
+    options.native_binding = args->binding;
+    options.native_options = &native;
+    options.request = &args->request;
+    options.request_bytes = sizeof(args->request);
+    options.response = &args->response;
+    options.response_bytes = sizeof(args->response);
+    status = chttp_client_rpc_call(&client, &options, &outcome, &error);
+    args->kind = outcome.kind;
+    {
+      int teardown = chttp_client_destroy(&client, TYPED_TIMEOUT_MS);
+      if (status == SALTS_OK && teardown != SALTS_OK) status = teardown;
+    }
+  }
+  args->status = status;
+  atomic_store_explicit(&args->finished, 1, memory_order_release);
+}
+
 spec("TurboAgent installed DataBind IDL typed RPC Owner") {
   it("compiles generated MethodPlan, mounts into HTTP Server, executes typed Client") {
     static const char contract_source[] =
@@ -397,6 +451,10 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     crpc_error call_error = {0};
     uint16_t port = 0u;
     char uri[64];
+    turboagent_typed_call_thread pending = {0};
+    cmeta_thread_t blocked = {0};
+    uint64_t deadline = 0u;
+    int entered = 0;
     static const char bad_partial[] =
         "{\"jsonrpc\":\"2.0\",\"method\":\"calc.add\",\"params\":[3,\"not-uint\",2],\"id\":600}";
     static const chttp_header json_headers[] = {
@@ -506,9 +564,46 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
         &probe.invoked, memory_order_acquire), 1);
     check_equal(chttp_client_destroy(&client, TYPED_TIMEOUT_MS), SALTS_OK);
 
-    /* Registry stop is not permission to unload code borrowed by the Server. */
-    check_equal(cmeta_plugin_registry_request_stop(
-        &registry, ref), CMETA_PLUGIN_OK);
+    /* Deterministic concurrent Provider entry vs Server stop/unload:
+     * the native invoke function physically resides inside this DSO, and the
+     * test cannot release the old generation before all borrowed calls end. */
+    pending.plan = plan;
+    pending.binding = &binding;
+    pending.request = (AddRequest){2u, 5u, 3u, 1u};
+    check_true(snprintf(pending.uri, sizeof(pending.uri), "%s", uri) > 0);
+    atomic_init(&pending.finished, 0);
+    atomic_store_explicit(&probe.entered, 0, memory_order_release);
+    atomic_store_explicit(&probe.release, 0, memory_order_release);
+    atomic_store_explicit(&probe.enabled, 1, memory_order_release);
+    check_equal(cmeta_thread_create(
+        &blocked, turboagent_typed_call_worker, &pending), SALTS_OK);
+    deadline = cmeta_monotonic_ms() + 2500u;
+    while (atomic_load_explicit(&probe.entered, memory_order_acquire) == 0 &&
+           cmeta_monotonic_ms() < deadline)
+      cmeta_thread_yield();
+    entered = atomic_load_explicit(&probe.entered, memory_order_acquire);
+    if (entered != 0) {
+      check_equal(cmeta_plugin_registry_request_stop(
+          &registry, ref), CMETA_PLUGIN_OK);
+      check_equal(cmeta_plugin_registry_unload(
+          &registry, ref), CMETA_PLUGIN_BUSY);
+      check_equal(chttp_server_stop(&server, 10u), SALTS_ETIMEDOUT);
+      check_equal(chttp_server_destroy(&server), SALTS_EBUSY);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, ref, &lifecycle), CMETA_PLUGIN_OK);
+      check_equal(lifecycle.active_leases, (size_t)1u);
+    }
+    atomic_store_explicit(&probe.release, 1, memory_order_release);
+    check_equal(cmeta_thread_join(&blocked), SALTS_OK);
+    cmeta_thread_destroy(&blocked);
+    check_equal(entered, 1);
+    check_equal(atomic_load_explicit(&pending.finished, memory_order_acquire), 1);
+    check_equal(pending.status, SALTS_OK);
+    check_equal(pending.kind, CHTTP_CLIENT_RPC_SUCCESS);
+    check_equal(pending.response.sum, (uint32_t)17u);
+
+    /* Stop is not permission to unload the Provider callback while the
+     * Server still retains its Generation pin. */
     check_equal(cmeta_plugin_registry_unload(
         &registry, ref), CMETA_PLUGIN_BUSY);
     check_equal(chttp_server_stop(&server, TYPED_TIMEOUT_MS), SALTS_OK);

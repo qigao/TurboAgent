@@ -370,11 +370,13 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
     const turbo_tool_execution_context_t *context,
     const char *attempt_id, int *out_replayed, int gate_held,
     const char *expected_plan_hash,
+    const turbo_agent_executable_plan_t *admitted_plan,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,
     json_value_t **out_certificate) {
-  turbo_agent_executable_plan_t *plan = NULL;
+  turbo_agent_executable_plan_t *compiled_plan = NULL;
+  const turbo_agent_executable_plan_t *plan = admitted_plan;
   const turbo_tool_registry_t *registry;
   const turbo_tool_registry_t *approved;
   const char *name;
@@ -421,12 +423,15 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
         "Harness has no configured RuntimeTools registry");
     goto done;
   }
-  compiled = turbo_agent_compile_plan_json(
-      compiler_config, registry, source_json, source_json_size, &plan,
-      out_diagnostic);
-  if (compiled != TURBO_AGENT_COMPILE_OK || !plan) {
-    rc = SALTS_EPROTO;
-    goto done;
+  if (!plan) {
+    compiled = turbo_agent_compile_plan_json(
+        compiler_config, registry, source_json, source_json_size, &compiled_plan,
+        out_diagnostic);
+    if (compiled != TURBO_AGENT_COMPILE_OK || !compiled_plan) {
+      rc = SALTS_EPROTO;
+      goto done;
+    }
+    plan = compiled_plan;
   }
 
   if (expected_plan_hash) {
@@ -610,7 +615,7 @@ done:
   turbo_runtime_json_destroy(stored);
   turbo_runtime_json_destroy(result);
   turbo_runtime_json_destroy(certificate);
-  turbo_agent_executable_plan_destroy(plan);
+  turbo_agent_executable_plan_destroy(compiled_plan);
   if (!gate_held) turbo_agent_harness_end_failed_submit(harness);
   return rc;
 }
@@ -626,7 +631,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     json_value_t **out_certificate) {
   return turbo_agent_harness_execute_compiled_inspect_impl(
       harness, compiler_config, source_json, source_json_size, context,
-      NULL, NULL, 0, NULL, out_diagnostic, out_tool_status, out_result, out_certificate);
+      NULL, NULL, 0, NULL, NULL, out_diagnostic, out_tool_status, out_result, out_certificate);
 }
 
 int turbo_agent_harness_execute_compiled_inspect_durable_json(
@@ -642,7 +647,7 @@ int turbo_agent_harness_execute_compiled_inspect_durable_json(
   if (!attempt_id) return SALTS_EINVAL;
   return turbo_agent_harness_execute_compiled_inspect_impl(
       harness, compiler_config, source_json, source_json_size, context,
-      attempt_id, out_replayed, 0, NULL, out_diagnostic, out_tool_status,
+      attempt_id, out_replayed, 0, NULL, NULL, out_diagnostic, out_tool_status,
       out_result, out_certificate);
 }
 
@@ -659,6 +664,7 @@ typedef struct turbo_harness_compiled_graph_s {
   char **owned_capabilities;
   char *owned_source;
   char *owned_attempt;
+  turbo_agent_executable_plan_t *owned_plan; /* frozen while worker is queued */
 } turbo_harness_compiled_graph_t;
 
 static void turbo_harness_compiled_binding_destroy(
@@ -670,6 +676,7 @@ static void turbo_harness_compiled_binding_destroy(
   free(binding->owned_capabilities);
   free(binding->owned_source);
   free(binding->owned_attempt);
+  turbo_agent_executable_plan_destroy(binding->owned_plan);
   free(binding);
 }
 
@@ -738,7 +745,8 @@ static int turbo_harness_compiled_graph_node(turbo_graph_exec_ctx_t *ctx,
   rc = turbo_agent_harness_execute_compiled_inspect_impl(
       binding->harness, binding->compiler_config, binding->source_json,
       binding->source_json_size, NULL, binding->attempt_id, &replayed, 1,
-      binding->plan_hash, &diagnostic, &status, &result, &certificate);
+      binding->plan_hash, binding->owned_plan, &diagnostic, &status,
+      &result, &certificate);
 
   if (turbo_runtime_json_object_set_int64(
           ctx->json_value_state, "compiled_tool_status", (int64_t)status) !=
@@ -1031,6 +1039,10 @@ int turbo_agent_harness_submit_compiled_inspect_graph_json(
     graph_options.skip_initial_interrupt = 1;
   }
 
+  /* Keep the exact admitted projection alive across queue latency.
+   * The worker must not recompile against a changing registry. */
+  binding->owned_plan = plan;
+  plan = NULL;
   execution = (turbo_agent_harness_execution_t *)calloc(1, sizeof(*execution));
   if (!execution) {
     rc = SALTS_ENOMEM;

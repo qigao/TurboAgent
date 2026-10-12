@@ -688,3 +688,9 @@ jobs:
           grep -Eq 'Machine:[[:space:]]*AArch64' "$RUNNER_TEMP/android-consumer-elf-header.txt"
           readelf -d "$consumer" | grep 'NEEDED'
           echo "Android arm64 installed SDK consumer: CROSS-LINK PASS; no device execution claimed"
+
+      - name: Verify relocated Android NuGet SDK and cross-link rejection gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 packaging/nuget/consumer/check_android_relocation.py

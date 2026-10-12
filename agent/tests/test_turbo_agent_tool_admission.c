@@ -243,4 +243,70 @@ spec("model tool argument structure before durable admission") {
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(registry);
   }
+
+  it("validates every canonical tool schema before recording or executing a batch") {
+    admission_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
+    turbo_tool_definition_t definition = {
+        .name = "admission_probe", .description = "Typed admission",
+        .parameters_json = "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"integer\",\"minimum\":1}},\"required\":[\"value\"],\"additionalProperties\":false}", .strict = 1,
+        .handler = admission_tool_handler, .user_data = &probe};
+    turbo_agent_tool_execution_t calls[2];
+    json_value_t *records = NULL;
+    const char *bad[] = {
+        "{\"value\":\"wrong\"}",
+        "{\"value\":0}",
+        "{\"extra\":1}",
+        "{}", "{\"value\":1,\"extra\":true}"};
+
+    check_not_null(registry);
+    check_not_null(runtime);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+      calls[0] = admission_call("valid-first", "{\"value\":7}");
+      calls[1] = admission_call("invalid-second", bad[i]);
+      check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
+          "thread", "run", NULL, NULL, registry, NULL, calls, 2), SALTS_EPROTO);
+      check_equal(probe.callbacks, 0);
+      check_equal(turbo_agent_runtime_store_list_json(runtime, "agent_tool_journal",
+          "run_id", "run", &records), SALTS_OK);
+      check_equal(json_array_size(records), 0);
+      json_free(records);
+      records = NULL;
+    }
+    calls[0] = admission_call("valid-first", "{\"value\":7}");
+    calls[1] = admission_call("valid-second", "{\"value\":8}");
+    check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
+        "thread", "run", NULL, NULL, registry, NULL, calls, 2), SALTS_OK);
+    check_equal(probe.callbacks, 2);
+    free(calls[0].output);
+    free(calls[1].output);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+    turbo_agent_runtime_destroy(runtime);
+  }
+
+  it("fails closed on unsupported schema keywords before any tool side effect") {
+    admission_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_tool_executor_t *executor = NULL;
+    turbo_tool_definition_t definition = {
+        .name = "admission_probe", .description = "Unsupported schema fixture",
+        .parameters_json = "{\"type\":\"object\",\"oneOf\":[{\"type\":\"object\"}]}",
+        .handler = admission_tool_handler, .user_data = &probe};
+    turbo_agent_tool_execution_t call = admission_call("unsupported", "{}");
+
+    check_not_null(registry);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    check_equal(turbo_agent_tool_executor_execute(executor, NULL, NULL,
+        NULL, NULL, NULL, NULL, registry, NULL, &call, 1), SALTS_EPROTO);
+    check_equal(probe.callbacks, 0);
+    turbo_agent_tool_executor_destroy(executor);
+    turbo_tool_registry_destroy(registry);
+  }
 }

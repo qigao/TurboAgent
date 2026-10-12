@@ -63,7 +63,7 @@ restore_sdk() {
     qigao/salts|qigao/salts-utils|qigao/chttp)
       python "$repository_root/cmake/ci/verify-published-native-sdk.py" \
         --repo "$repo" --archive "$nupkg" \
-        --extracted "$dir/package" --rid "$rid" || return 1
+        --extracted "$dir/package" --rid "$rid" >&2 || return 1
       ;;
   esac
   local root="$dir/package/sdk/$rid"

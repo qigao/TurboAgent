@@ -14,6 +14,11 @@ int turbo_agent_session_prepare_resume_options_internal(
     turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
     turbo_agent_runtime_exec_options_t *out_options);
 
+/* Compiled Graph completion: capture canonical run metadata ONLY.
+ * Never run inbox follow-ups or reenter a model-driven Agent workflow. */
+int turbo_agent_session_complete_compiled_internal(
+    turbo_agent_session_t *session, json_value_t **summary, json_value_t **state);
+
 int turbo_agent_session_complete_execution_internal(turbo_agent_session_t *session,
                                                     turbo_graph_t *graph,
                                                     const turbo_graph_run_options_t *graph_options,

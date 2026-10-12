@@ -60,6 +60,7 @@ static int praktor_session_node(turbo_graph_exec_ctx_t *ctx, void *user) {
   turbo_praktor_template_session_run_t *run =
       (turbo_praktor_template_session_run_t *)user;
   turbo_agent_template_outcome_t outcome = TURBO_AGENT_TEMPLATE_OUTCOME_INVALID_ARGUMENT;
+  turbo_tool_execution_context_t tool_context = {0};
   turbo_tool_status_t status;
   json_value_t *result = NULL;
   const char *saved_hash, *saved_thread, *saved_attempt, *saved_approval;
@@ -79,10 +80,19 @@ static int praktor_session_node(turbo_graph_exec_ctx_t *ctx, void *user) {
       !saved_approval || strcmp(saved_approval, run->approval_id) != 0)
     return -1; /* Reject forged/stale resumed identity before all callbacks. */
 
+  /* The controlled Runtime Graph owns this token until the synchronous node
+   * returns. Praktor and each HostTool borrow it only inside this call.
+   * No second cancel source or Plugin-generation owner is created here. */
+  tool_context.struct_size = sizeof(tool_context);
+  tool_context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+  tool_context.cancel_token = ctx->cancel_token;
+  tool_context.deadline_mono_ms = ctx->cancel_token
+      ? turbo_cancel_token_deadline_mono_ms(ctx->cancel_token) : 0;
+  tool_context.thread_id = run->thread_id;
   status = turbo_praktor_template_execute_approved(
       turbo_agent_session_runtime(run->session), run->plan,
       run->thread_id, run->attempt_id, run->approval_id,
-      NULL, &replayed, &outcome, &result);
+      &tool_context, &replayed, &outcome, &result);
   accepted = turbo_runtime_json_object_set_int64(
                  ctx->json_value_state, "praktor_tool_status", (int64_t)status) ==
                  TURBO_RUNTIME_JSON_OK &&

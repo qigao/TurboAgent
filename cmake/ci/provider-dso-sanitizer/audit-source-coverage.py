@@ -38,6 +38,7 @@ expected = [
     agent / "runtime/tests/test_turbo_component_dso_lifecycle.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_dso_close_failure.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_destroy_barrier.c",
+    agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_partial_destroy.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_generation_drain_close_failure.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_multigeneration_isolated_drain.c",
     agent / "praktor_tools/tests/praktor_dso_provider.c",
@@ -68,6 +69,7 @@ libs = [
     build / "test_turbo_component_dso_sanitized",
     build / "test_provider_dso_close_failure",
     build / "test_provider_registry_destroy_barrier",
+    build / "test_provider_registry_partial_destroy",
     build / "test_provider_generation_drain_close_failure",
     build / "test_provider_multigeneration_isolated_drain",
 ]
@@ -272,5 +274,36 @@ for entry in (
     if not re.search(r"(?m)^\S+\s+[TW]\s+" + entry + r"$", destroy_symbols):
         raise SystemExit(f"FAIL: Registry destroy executable missing {entry}")
     print(f"REGISTRY DESTROY DEFINED: {entry}")
+
+
+# Partial Registry teardown must link the exact instrumented first-party
+# Registry and POSIX loader plus the controlled close failure boundary.
+partial_map = build / "provider_registry_partial_destroy.map"
+if not partial_map.is_file():
+    raise SystemExit("FAIL: partial Registry destroy linker map missing")
+partial_link = partial_map.read_text(encoding="utf-8", errors="replace")
+for member in ("plugin_registry.c.o", "plugin_posix.c.o", "close_fault_hook.c.o"):
+    if not re.search(
+        r"libprovider_dso_firstparty_runtime\.a\(" + re.escape(member) + r"\)",
+        partial_link
+    ):
+        raise SystemExit(f"FAIL: partial Registry destroy lacks instrumented {member}")
+    print(f"PARTIAL DESTROY LINKED: {member}")
+partial_symbols = subprocess.run(
+    ["nm", "--defined-only", str(build / "test_provider_registry_partial_destroy")],
+    capture_output=True, text=True, check=True,
+).stdout
+for endpoint in (
+    "cmeta_plugin_registry_destroy",
+    "cmeta_plugin_registry_load",
+    "cmeta_plugin_registry_acquire",
+    "cmeta_plugin_platform_close",
+    "cmeta_plugin_platform_close_real",
+    "provider_close_fault_arm_after",
+):
+    if not re.search(r"(?m)^\S+\s+[TW]\s+" + endpoint + r"$",
+                     partial_symbols):
+        raise SystemExit(f"FAIL: partial destroy image lacks {endpoint}")
+    print(f"PARTIAL DESTROY DEFINED: {endpoint}")
 
 print(f"PASS: {kind} first-party objects, Sanitizer symbols, extracted-archive audit")

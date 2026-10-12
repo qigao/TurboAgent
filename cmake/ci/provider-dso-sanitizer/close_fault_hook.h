@@ -6,6 +6,8 @@
 /* Test-only fault injection at the actual Salts POSIX loader close boundary.
  * This is never included in normal SDK or production Plugin builds. */
 void provider_close_fault_arm(int failures);
+/* Skip N genuine native closes, then simulate a bounded close failure. */
+void provider_close_fault_arm_after(int genuine_closes, int failures);
 int provider_close_fault_injected(void);
 int provider_close_fault_native_attempts(void);
 int provider_close_fault_native_successes(void);

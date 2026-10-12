@@ -185,6 +185,25 @@ target_link_options(test_provider_registry_destroy_barrier PRIVATE
 add_dependencies(test_provider_registry_destroy_barrier
   provider_dso_instrumented_managed)
 
+# Two real Managed ComponentProvider DSOs exercise the exact Registry
+# destroy partial-failure transition. The first genuine dlclose succeeds,
+# the second is rejected by the test-only platform close boundary.
+add_executable(test_provider_registry_partial_destroy
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_provider_registry_partial_destroy.c")
+target_include_directories(test_provider_registry_partial_destroy PRIVATE
+  "${_fixture_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(test_provider_registry_partial_destroy PRIVATE
+  "PRAKTOR_DSO_MANAGED_COMPONENT_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component>\""
+  "PRAKTOR_DSO_MANAGED_COMPONENT_N1_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed_component_n1>\"")
+target_link_libraries(test_provider_registry_partial_destroy PRIVATE
+  provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
+  Threads::Threads ${CMAKE_DL_LIBS})
+target_link_options(test_provider_registry_partial_destroy PRIVATE
+  "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/provider_registry_partial_destroy.map")
+add_dependencies(test_provider_registry_partial_destroy
+  provider_dso_instrumented_managed_component
+  provider_dso_instrumented_managed_component_n1)
+
 # Integrated test holds a real Managed Component Provider's Generation lease
 # across one injected Registry release failure and later one injected
 # native close failure, ultimately invoking the genuine POSIX loader.
@@ -230,6 +249,7 @@ foreach(target IN ITEMS
     test_turbo_component_dso_sanitized
     test_provider_dso_close_failure
     test_provider_registry_destroy_barrier
+    test_provider_registry_partial_destroy
     test_provider_generation_drain_close_failure
     test_provider_multigeneration_isolated_drain)
   target_compile_options(${target} PRIVATE
@@ -243,6 +263,7 @@ set(CMAKE_BUILD_RPATH "${SALTS_ROOT}/lib;${SALTS_ROOT}/bin")
 set_target_properties(
   test_turbo_component_dso_sanitized test_provider_dso_close_failure
   test_provider_registry_destroy_barrier
+  test_provider_registry_partial_destroy
   test_provider_generation_drain_close_failure
   test_provider_multigeneration_isolated_drain
   provider_dso_instrumented_n provider_dso_instrumented_n1
@@ -295,5 +316,13 @@ endforeach()
 add_test(NAME provider_registry_destroy_barrier
   COMMAND test_provider_registry_destroy_barrier)
 set_tests_properties(provider_registry_destroy_barrier PROPERTIES
+  TIMEOUT 120
+  ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")
+
+# One successful DSO close followed by one injected OS close failure;
+# explicit Host retry reuses the freed Slot and finishes Registry destroy.
+add_test(NAME provider_registry_partial_destroy
+  COMMAND test_provider_registry_partial_destroy)
+set_tests_properties(provider_registry_partial_destroy PROPERTIES
   TIMEOUT 120
   ENVIRONMENT "LD_LIBRARY_PATH=${SALTS_ROOT}/lib:${SALTS_ROOT}/bin")

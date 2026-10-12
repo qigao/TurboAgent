@@ -81,6 +81,19 @@ CXX_C_API int turbo_agent_session_submit(cmeta_threadpool_t *executor,
     const turbo_agent_session_submit_options_t *options,
     turbo_agent_execution_t **out_execution);
 
+/**
+ * Submit a specifically admitted compiled Session Graph without invoking Inbox
+ * follow-ups or any model-driven workflow after completion. Existing bounded
+ * executor, Runtime Run/Checkpoint and cancel/terminal machinery are reused.
+ * The caller keeps the graph, its callback data and Session alive through
+ * terminal publication, exactly as for turbo_agent_session_submit().
+ */
+CXX_C_API int turbo_agent_session_submit_compiled(
+    cmeta_threadpool_t *executor, turbo_agent_session_t *session,
+    turbo_graph_t *graph, const json_value_t *input,
+    const turbo_agent_session_submit_options_t *options,
+    turbo_agent_execution_t **out_execution);
+
 #ifdef __cplusplus
 }
 #endif

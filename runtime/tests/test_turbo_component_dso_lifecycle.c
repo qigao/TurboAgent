@@ -236,6 +236,49 @@ static void provider_dso_control_init(
 }
 
 spec("cross-platform real Provider DSO close, drain, unload") {
+  it("rejects malformed UTF-8 module paths before native loader admission") {
+    const cmeta_plugin_registry_config config = {2};
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref ref = {0};
+    cmeta_plugin_lifecycle_info info;
+    bool quiescent = false;
+    const char truncated_utf8[] = {(char)0xc3, '(', 0};
+    const char overlong_utf8[] = {(char)0xc0, (char)0xaf, 0};
+    const char lone_continuation[] = {(char)0x80, 0};
+    const char *const rejected[] = {
+      NULL, "", truncated_utf8, overlong_utf8, lone_continuation
+    };
+
+    check_equal(cmeta_plugin_registry_init(&registry, &config),
+                CMETA_PLUGIN_OK);
+    for (size_t i = 0; i < sizeof(rejected) / sizeof(rejected[0]); ++i) {
+      /* Every rejected request resets an output ref and leaves capacity
+       * available for a legitimate release-pinned Provider DSO. */
+      ref = (cmeta_plugin_ref){1u, 17u};
+      check_equal(cmeta_plugin_registry_load(
+          &registry, rejected[i], &ref), CMETA_PLUGIN_INVALID_ARGUMENT);
+      check_false(cmeta_plugin_ref_valid(ref));
+      check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+    }
+
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N_PATH, &ref), CMETA_PLUGIN_OK);
+    check_true(cmeta_plugin_ref_valid(ref));
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)1u);
+    check_equal(cmeta_plugin_registry_start(&registry, ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, ref, &quiescent), CMETA_PLUGIN_OK);
+    check_true(quiescent);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, ref, &info), CMETA_PLUGIN_OK);
+    check_equal(info.active_leases, (size_t)0u);
+    check_equal(cmeta_plugin_registry_unload(&registry, ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+    check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
+  }
+
   it("pins callback inside N while N+1 executes and unload races with close") {
     const cmeta_plugin_registry_config plugin_config = {2};
     cmeta_plugin_registry registry = {0};

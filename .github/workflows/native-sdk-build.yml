@@ -286,3 +286,51 @@ jobs:
           name: turboagent-native-nuget
           path: dist/*.nupkg
           if-no-files-found: error
+
+  consume-linux:
+    name: Consume packed NuGet SDK / linux-x64
+    needs: [metadata, pack]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: turboagent-native-nuget
+          path: packed
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+      - name: Install consumer toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Restore exact prerequisite SDKs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash cmake/ci/restore-native-sdk.sh linux-x64 1 1
+      - name: Unpack exact-run package
+        env:
+          PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          test "$(find packed -maxdepth 1 -name '*.nupkg' -type f | wc -l)" -eq 1
+          package="packed/TurboAgent.Native.${PACKAGE_VERSION}.nupkg"
+          python3 packaging/nuget/verify_exact_package.py "$package" \
+            --commit "$GITHUB_SHA" --package-version "$PACKAGE_VERSION"
+          mkdir -p "$RUNNER_TEMP/turboagent-consumer-package"
+          unzip -q "$package" -d "$RUNNER_TEMP/turboagent-consumer-package"
+      - name: Configure and build standalone installed consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/turboagent-consumer-package/sdk/linux-x64"
+          cmake -S packaging/nuget/consumer -B "$RUNNER_TEMP/turboagent-consumer-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_CACHE_REPOSITORY_ROOT/cmake/QigaoVcpkgToolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed/linux" \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/vcpkg_installed/linux/x64-linux" \
+            -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
+          cmake --build "$RUNNER_TEMP/turboagent-consumer-build"
+          ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure

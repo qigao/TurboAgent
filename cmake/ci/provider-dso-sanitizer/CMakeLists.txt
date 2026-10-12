@@ -80,18 +80,18 @@ foreach(fixture IN ITEMS provider_dso_instrumented_n provider_dso_instrumented_n
 endforeach()
 target_compile_definitions(provider_dso_instrumented_n PRIVATE
   PRAKTOR_DSO_EPOCH=41
-  "PRAKTOR_DSO_PLUGIN_ID=\\\"test.turboagent.sanitizer.provider.N\\\"")
+  "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.sanitizer.provider.N\"")
 target_compile_definitions(provider_dso_instrumented_n1 PRIVATE
   PRAKTOR_DSO_EPOCH=42
-  "PRAKTOR_DSO_PLUGIN_ID=\\\"test.turboagent.sanitizer.provider.N1\\\"")
+  "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.sanitizer.provider.N1\"")
 
 add_executable(test_turbo_component_dso_sanitized
   "${_test_dir}/test_turbo_component_dso_lifecycle.c")
 target_include_directories(test_turbo_component_dso_sanitized PRIVATE
   "${_fixture_dir}")
 target_compile_definitions(test_turbo_component_dso_sanitized PRIVATE
-  "PRAKTOR_DSO_N_PATH=\\\"$<TARGET_FILE:provider_dso_instrumented_n>\\\""
-  "PRAKTOR_DSO_N1_PATH=\\\"$<TARGET_FILE:provider_dso_instrumented_n1>\\\"")
+  "PRAKTOR_DSO_N_PATH=\"$<TARGET_FILE:provider_dso_instrumented_n>\""
+  "PRAKTOR_DSO_N1_PATH=\"$<TARGET_FILE:provider_dso_instrumented_n1>\"")
 target_link_libraries(test_turbo_component_dso_sanitized PRIVATE
   provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
   Threads::Threads ${CMAKE_DL_LIBS})

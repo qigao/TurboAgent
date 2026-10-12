@@ -799,6 +799,20 @@ int turbo_agent_harness_compiled_inspect_graph_run_json(
         session, graph, initial_state, &graph_options, NULL, NULL,
         out_summary, out_state);
   } else {
+    json_value_t *checkpoint_record = NULL;
+    const char *checkpoint_thread;
+    const char *session_thread = turbo_agent_session_thread_id(session);
+    int fetched = turbo_agent_session_get_checkpoint(
+        session, checkpoint_id, &checkpoint_record);
+    checkpoint_thread = checkpoint_record ?
+        json_get_string(checkpoint_record, "thread_id") : NULL;
+    if (fetched != SALTS_OK || !session_thread || !checkpoint_thread ||
+        strcmp(session_thread, checkpoint_thread) != 0) {
+      turbo_runtime_json_destroy(checkpoint_record);
+      rc = SALTS_EPROTO; /* Exact scope is host-owned; never cross threads. */
+      goto done;
+    }
+    turbo_runtime_json_destroy(checkpoint_record);
     session_options.scope = TURBO_SESSION_SCOPE_CHECKPOINT;
     session_options.input_kind = TURBO_SESSION_INPUT_OVERRIDE;
     session_options.checkpoint_id = checkpoint_id;

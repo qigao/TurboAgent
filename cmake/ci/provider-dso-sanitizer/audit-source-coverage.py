@@ -25,6 +25,7 @@ expected = [
     salts / "cmeta/src/object.c",
     salts / "cmeta/src/data.c",
     salts / "cmeta/src/function.c",
+    salts / "utils/src/vstr.c",
     salts / "plugin/src/plugin.c",
     salts / "plugin/src/plugin_registry.c",
     salts / "plugin/src/plugin_posix.c",
@@ -92,11 +93,22 @@ if re.search(r"libcmeta_platform\.a\((?:thread_posix|clock)\.c\.o\)", link_data)
 
 # CMeta's two newly admitted source objects must actually be extracted
 # into the native test image. Merely compiling an unused object is insufficient.
-for member in ("data.c.o", "function.c.o"):
+for member in ("data.c.o", "function.c.o", "vstr.c.o"):
     pattern = r"libprovider_dso_firstparty_runtime\.a\(" + re.escape(member) + r"\)"
     if not re.search(pattern, link_data):
         raise SystemExit(f"FAIL: instrumented CMeta {member} was not linked")
     print(f"SOURCE LINKED: {member}")
+
+# The linked executable must own Core UTF-8 validation, not just define it
+# in an unused archive. The symbol appears in the non-stripped native binary.
+binary_symbols = subprocess.run(
+    ["nm", "--defined-only", str(libs[-1])],
+    capture_output=True, text=True, check=True
+).stdout
+for symbol_name in ("vstr_utf8_valid", "vstr_utf8_invalid_offset"):
+    if not re.search(r"(?m)^\\S+\\s+[TW]\\s+" + symbol_name + r"$", binary_symbols):
+        raise SystemExit(f"FAIL: Core UTF-8 {symbol_name} not defined in sanitizer executable")
+    print(f"EXECUTABLE DEFINED: {symbol_name}")
 
 # The actual native entrypoints must be defined by the instrumented archive.
 archive = subprocess.run(
@@ -116,6 +128,8 @@ for function in [
     "cmeta_data_desc_equal",
     "cmeta_function_desc_valid",
     "cmeta_function_abi_desc_valid",
+    "vstr_utf8_valid",
+    "vstr_utf8_invalid_offset",
 ]:
     if not re.search(r"(?m)^\S+\s+[TW]\s+" + re.escape(function) + r"$", archive):
         raise SystemExit(f"FAIL: no source-defined {function} in instrumented archive")

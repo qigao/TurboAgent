@@ -11,6 +11,7 @@
 #include "turbo_agent_app.h"
 #include "turbo_agent_execution.h"
 #include "turbo_agent_compiler.h"
+#include "turbo_agent_praktor_lowering.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -203,6 +204,36 @@ CXX_C_API int turbo_agent_harness_submit_compiled_inspect_graph_json(
     int interrupt_before_tool,
     const turbo_agent_harness_run_options_t *options,
     turbo_agent_harness_execution_t **out_execution);
+
+/**
+ * Compile-only, explicit multistep Change/Repair Praktor admission.
+ *
+ * Exactly one of change_source / repair_source must be present. This borrows
+ * host inputs only for the synchronous call and returns one caller-owned JSON
+ * object with the canonical TemplatePlan certificate, deterministic inline
+ * Praktor YAML and its source identity.
+ *
+ * This deliberately DOES NOT create a Run, invoke a tool, queue work or call
+ * Praktor. A plan is only exportable when every step has known canonical
+ * semantic effects, the middle mutation step is approval/checkpoint gated,
+ * and no backend retry is requested before Praktor's executable retry gate is
+ * implemented. The outcome is explicitly marked "executable": false.
+ *
+ * The caller must independently obtain approval and pass a later execution
+ * gate before submitting the plan to a Praktor backend. No raw Agent Loop
+ * fallback, implicit approval, or automatic side-effect settlement.
+ *
+ * The registry and referenced provider metadata must remain quiescent during
+ * compilation. The returned JSON owns all bytes and is independent of the
+ * borrowed plan and callback lifetimes.
+ */
+CXX_C_API int turbo_agent_harness_prepare_praktor_template(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const turbo_agent_change_source_t *change_source,
+    const turbo_agent_repair_source_t *repair_source,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    json_value_t **out_bundle);
 
 /**
  * Resume the harness default workflow.

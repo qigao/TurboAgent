@@ -93,7 +93,7 @@ if re.search(r"libcmeta_platform\.a\((?:thread_posix|clock)\.c\.o\)", link_data)
 # CMeta's two newly admitted source objects must actually be extracted
 # into the native test image. Merely compiling an unused object is insufficient.
 for member in ("data.c.o", "function.c.o"):
-    pattern = r"libprovider_dso_firstparty_runtime\\.a\\(" + re.escape(member) + r"\\)"
+    pattern = r"libprovider_dso_firstparty_runtime\.a\(" + re.escape(member) + r"\)"
     if not re.search(pattern, link_data):
         raise SystemExit(f"FAIL: instrumented CMeta {member} was not linked")
     print(f"SOURCE LINKED: {member}")

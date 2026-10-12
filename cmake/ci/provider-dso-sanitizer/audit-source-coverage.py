@@ -37,6 +37,7 @@ expected = [
     salts / "platform/src/clock.c",
     agent / "runtime/tests/test_turbo_component_dso_lifecycle.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_dso_close_failure.c",
+    agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_destroy_barrier.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_generation_drain_close_failure.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_multigeneration_isolated_drain.c",
     agent / "praktor_tools/tests/praktor_dso_provider.c",
@@ -66,6 +67,7 @@ libs = [
     build / "libprovider_dso_instrumented_managed_component_n1.so",
     build / "test_turbo_component_dso_sanitized",
     build / "test_provider_dso_close_failure",
+    build / "test_provider_registry_destroy_barrier",
     build / "test_provider_generation_drain_close_failure",
     build / "test_provider_multigeneration_isolated_drain",
 ]
@@ -239,5 +241,36 @@ for endpoint in ("salts_component_plugin_generation_drain",
                      multi_symbols):
         raise SystemExit(f"FAIL: multi-Generation image missing {endpoint}")
     print(f"MULTI-GENERATION SOURCE DEFINED: {endpoint}")
+
+
+# The dedicated Registry destruction barrier must use the SAME first-party
+# Registry, real native loader and test-only platform close fault implementation.
+destroy_map = build / "provider_registry_destroy_barrier.map"
+if not destroy_map.is_file():
+    raise SystemExit("FAIL: missing Registry destruction barrier linker map")
+destroy_text = destroy_map.read_text(encoding="utf-8", errors="replace")
+for member in ("plugin_registry.c.o", "plugin_posix.c.o", "close_fault_hook.c.o"):
+    if not re.search(
+        r"libprovider_dso_firstparty_runtime\.a\(" + re.escape(member) + r"\)",
+        destroy_text,
+    ):
+        raise SystemExit(f"FAIL: Registry destroy executable lacks {member}")
+    print(f"REGISTRY DESTROY LINKED: {member}")
+destroy_symbols = subprocess.run(
+    ["nm", "--defined-only", str(build / "test_provider_registry_destroy_barrier")],
+    capture_output=True, text=True, check=True,
+).stdout
+for entry in (
+    "cmeta_plugin_registry_destroy",
+    "cmeta_plugin_registry_acquire",
+    "cmeta_plugin_registry_release",
+    "cmeta_plugin_registry_release_real",
+    "cmeta_plugin_platform_close",
+    "cmeta_plugin_platform_close_real",
+    "provider_close_fault_arm",
+):
+    if not re.search(r"(?m)^\S+\s+[TW]\s+" + entry + r"$", destroy_symbols):
+        raise SystemExit(f"FAIL: Registry destroy executable missing {entry}")
+    print(f"REGISTRY DESTROY DEFINED: {entry}")
 
 print(f"PASS: {kind} first-party objects, Sanitizer symbols, extracted-archive audit")

@@ -20,6 +20,9 @@ if kind not in {"thread", "address"}:
     raise SystemExit("Unsupported sanitizer")
 flag = "-fsanitize=thread" if kind == "thread" else "-fsanitize=address,undefined"
 expected = [
+    salts / "cmeta/src/interface.c",
+    salts / "cmeta/src/component.c",
+    salts / "cmeta/src/object.c",
     salts / "plugin/src/plugin.c",
     salts / "plugin/src/plugin_registry.c",
     salts / "plugin/src/plugin_posix.c",
@@ -77,6 +80,11 @@ for banned in [
 ]:
     if re.search(re.escape(banned) + r"\([^)]*\)", link_data):
         raise SystemExit(f"FAIL: extracted uninstrumented host archive member from {banned}")
+# CMeta implementation in this slice must be chosen from instrumented
+# sources, rather than the uninstrumented released Salts::CMeta archive.
+for owner in ("interface", "component", "object"):
+    if re.search(r"libcmeta_cmeta\.a\(" + owner + r"\.c\.o\)", link_data):
+        raise SystemExit(f"FAIL: pulled released uninstrumented CMeta {owner}.c.o")
 if re.search(r"libcmeta_platform\.a\((?:thread_posix|clock)\.c\.o\)", link_data):
     raise SystemExit("FAIL: pulled uninstrumented POSIX thread/clock implementation")
 
@@ -91,6 +99,9 @@ for function in [
     "salts_component_plugin_scope_release",
     "cmeta_mutex_lock",
     "cmeta_monotonic_ms",
+    "cmeta_interface_desc_equal",
+    "cmeta_component_desc_valid",
+    "cmeta_object_borrow",
 ]:
     if not re.search(r"(?m)^\S+\s+[TW]\s+" + re.escape(function) + r"$", archive):
         raise SystemExit(f"FAIL: no source-defined {function} in instrumented archive")

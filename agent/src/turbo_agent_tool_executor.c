@@ -5,6 +5,7 @@
 #include "turbo_agent_runtime_internal.h"
 #include "turbo_runtime_store.h"
 #include "turbo_agent_util_internal.h"
+#include "turbo_tool_schema.h"
 
 #include <cmeta_crypto.h>
 #include <salts/thread.h>
@@ -286,12 +287,29 @@ turbo_agent_tool_cancel_status(const turbo_cancel_token_t *cancel_token) {
  * Schema/Capability admission is handled separately; this structural gate
  * prevents invalid JSON from reaching a callback or entering the durable log.
  * Callbacks still consume the original, unchanged arguments text. */
-static int turbo_agent_tool_arguments_object_valid(const char *arguments_json) {
-  json_value_t *arguments;
-  int valid;
-  if (!arguments_json) return 0;
+static int turbo_agent_tool_arguments_valid(const turbo_tool_registry_t *registry,
+                                            const char *canonical_tool_name,
+                                            const char *arguments_json) {
+  json_value_t *arguments = NULL;
+  turbo_tool_definition_t definition = {0};
+  size_t index;
+  int valid = 0;
+  if (!registry || !canonical_tool_name || !arguments_json) return 0;
   arguments = json_parse(arguments_json, strlen(arguments_json));
-  valid = arguments && json_type(arguments) == JSON_OBJECT;
+  if (!arguments || json_type(arguments) != JSON_OBJECT) goto done;
+  /* Use the same RuntimeTools schema validator as AgentCompiler; the lookup
+   * consumes only borrowed canonical registry metadata, never a new authority.
+   * All arguments are checked after middleware and before any journal write. */
+  for (index = 0; index < turbo_tool_registry_count(registry); ++index) {
+    if (turbo_tool_registry_get_definition(registry, index, &definition) != TURBO_TOOL_OK)
+      goto done;
+    if (definition.name && strcmp(definition.name, canonical_tool_name) == 0) {
+      valid = turbo_tool_schema_validate_arguments_json_value(
+          &definition, arguments, NULL, 0) == TURBO_TOOL_SCHEMA_VALID;
+      break;
+    }
+  }
+done:
   json_free(arguments);
   return valid;
 }
@@ -557,7 +575,8 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
    * after the Workflow node's initial preflight. */
   for (index = 0; index < call_count; ++index) {
     if (!calls[index].replayed &&
-        !turbo_agent_tool_arguments_object_valid(calls[index].arguments_json)) {
+        !turbo_agent_tool_arguments_valid(
+            registry, calls[index].tool_name, calls[index].arguments_json)) {
       rc = SALTS_EPROTO;
       goto cleanup;
     }

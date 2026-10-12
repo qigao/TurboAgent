@@ -548,16 +548,28 @@ jobs:
           $prefix = Join-Path $env:RUNNER_TEMP 'turboagent-consumer-package/sdk/windows-x64'
           $triplet = $env:QIGAO_VCPKG_WINDOWS_TRIPLET
           if ([string]::IsNullOrWhiteSpace($triplet)) { throw "Windows vcpkg triplet is missing" }
-          $deps = @(
-            (Join-Path $prefix 'bin'),
+          $agentBin = Join-Path $prefix 'bin'
+          if (-not (Test-Path -LiteralPath $agentBin -PathType Container)) {
+            throw "missing installed TurboAgent DLL directory: $agentBin"
+          }
+          $deps = @($agentBin)
+          # A provider SDK may be entirely static (TurboWasm Windows has no
+          # bin/ directory). Include only existing explicit SDK locations.
+          # Missing *required* DLLs still make the real CTest fail closed.
+          $optionalBins = @(
             (Join-Path $env:SALTS_ROOT 'bin'),
             (Join-Path $env:SALTS_UTILS_ROOT 'bin'),
             (Join-Path $env:CHTTP_ROOT 'bin'),
             (Join-Path $env:TURBOWASM_ROOT 'bin'),
             (Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/consumer-windows/$triplet/bin")
           )
-          foreach ($dir in $deps) {
-            if (-not (Test-Path -LiteralPath $dir -PathType Container)) { throw "missing explicit DLL deployment directory: $dir" }
+          foreach ($dir in $optionalBins) {
+            if (Test-Path -LiteralPath $dir -PathType Container) {
+              $deps += $dir
+              Write-Host "Explicit DLL deployment directory: $dir"
+            } else {
+              Write-Host "No DLL deployment directory (static-only allowed): $dir"
+            }
           }
           $exe = Join-Path $env:RUNNER_TEMP 'turboagent-consumer-build/turboagent_installed_consumer.exe'
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "missing linked consumer executable" }

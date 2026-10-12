@@ -236,6 +236,172 @@ static void provider_dso_control_init(
 }
 
 spec("cross-platform real Provider DSO close, drain, unload") {
+
+  it("rejects missing DSOs and duplicate identities without disturbing live N") {
+    const cmeta_plugin_registry_config config = {2};
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref old_ref = {0}, rejected_ref = {0};
+    cmeta_plugin_lifecycle_info lifecycle;
+    provider_generation_fixture generation = {0};
+    salts_component_plugin_runtime runtime = SALTS_COMPONENT_PLUGIN_RUNTIME_INIT;
+    salts_component_plugin_scope scope = SALTS_COMPONENT_PLUGIN_SCOPE_INIT;
+    salts_component_plugin_generation *retired = NULL;
+    provider_dso_host host = {0};
+    provider_dso_call call = {0};
+    bool quiet = false;
+
+    atomic_init(&host.cancel, 0);
+    provider_dso_control_init(&call.control, &host, 0);
+    check_equal(cmeta_plugin_registry_init(&registry, &config), CMETA_PLUGIN_OK);
+
+    /* UTF-8 syntax is valid, but the DSO does not exist. This enters the
+     * platform loader and must restore reservation and output identity. */
+    rejected_ref = (cmeta_plugin_ref){1u, 11u};
+    check_equal(cmeta_plugin_registry_load(
+        &registry, "__turboagent_missing_provider_fixture_98__", &rejected_ref),
+        CMETA_PLUGIN_LOAD_FAILED);
+    check_false(cmeta_plugin_ref_valid(rejected_ref));
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N_PATH, &old_ref), CMETA_PLUGIN_OK);
+    check_true(cmeta_plugin_ref_valid(old_ref));
+    check_equal(cmeta_plugin_registry_start(&registry, old_ref), CMETA_PLUGIN_OK);
+    check_equal(provider_dso_build(&generation, UINT64_C(41),
+                                    &registry, old_ref), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_init(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_publish(
+        &runtime, &generation.generation, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_null(retired);
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(provider_dso_bind(&scope, &call.gate));
+    check_equal(praktor_dso_gate_run(&call.gate, &call.control), 41);
+
+    /* Registry capacity still permits a second load, but the existing
+     * identity must win. dlclose of the rejected duplicate must not
+     * invalidate an already loaded and scope-pinned Provider. */
+    rejected_ref = (cmeta_plugin_ref){1u, 33u};
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N_PATH, &rejected_ref),
+        CMETA_PLUGIN_DUPLICATE_PLUGIN_ID);
+    check_false(cmeta_plugin_ref_valid(rejected_ref));
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)1u);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, old_ref, &lifecycle), CMETA_PLUGIN_OK);
+    check_true(lifecycle.active_leases > 0u);
+    check_equal(praktor_dso_gate_run(&call.gate, &call.control), 41);
+
+    check_equal(salts_component_plugin_runtime_close(
+        &runtime, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &generation.generation);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &generation.generation), SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(salts_component_plugin_scope_release(&scope),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &generation.generation), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_destroy(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, old_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, old_ref, &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    check_equal(cmeta_plugin_registry_unload(&registry, old_ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+    check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
+  }
+
+  it("releases failed candidate leases and permits explicit corrected generation build") {
+    const cmeta_plugin_registry_config config = {1};
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref ref = {0};
+    cmeta_plugin_lifecycle_info lifecycle;
+    provider_generation_fixture generation = {0};
+    const salts_component_plugin_generation_storage storage = {
+      generation.deployments, 1u, generation.instances, 1u,
+      generation.dependencies, 1u, generation.order, 1u,
+      generation.modules, 1u
+    };
+    salts_component_plugin_source wrong = {
+      {0}, "missing-provider-export-98", NULL, NULL
+    };
+    const salts_component_plugin_failure *failure;
+    salts_component_plugin_runtime runtime = SALTS_COMPONENT_PLUGIN_RUNTIME_INIT;
+    salts_component_plugin_generation *retired = NULL;
+    salts_component_plugin_scope scope = SALTS_COMPONENT_PLUGIN_SCOPE_INIT;
+    provider_dso_call call = {0};
+    provider_dso_host host = {0};
+    bool quiet = false;
+
+    atomic_init(&host.cancel, 0);
+    provider_dso_control_init(&call.control, &host, 0);
+    check_equal(cmeta_plugin_registry_init(&registry, &config), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N_PATH, &ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_start(&registry, ref), CMETA_PLUGIN_OK);
+
+    wrong.plugin = ref;
+    /* Candidate acquires one real Plugin lease before discovering that the
+     * selected provider export is absent. It must release that lease and
+     * never publish or retain an abandoned generation. */
+    check_equal(salts_component_plugin_generation_build(
+        &generation.generation, UINT64_C(41), &registry, &storage,
+        NULL, 0u, &wrong, 1u, NULL, 0u),
+        SALTS_COMPONENT_PLUGIN_PLUGIN_ERROR);
+    check_equal(generation.generation.state,
+                SALTS_COMPONENT_PLUGIN_GENERATION_FAILED);
+    failure = salts_component_plugin_generation_failure(&generation.generation);
+    check_not_null(failure);
+    check_equal(failure->source_index, (size_t)0u);
+    check_equal(failure->plugin_status, CMETA_PLUGIN_UNKNOWN_EXPORT);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, ref, &lifecycle), CMETA_PLUGIN_OK);
+    check_equal(lifecycle.active_leases, (size_t)0u);
+    check_equal(salts_component_plugin_runtime_init(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+
+    /* An explicit trusted host correction may rebuild the same unowned
+     * candidate. There is no fallback, implicit retry or a second loader. */
+    check_equal(provider_dso_build(
+        &generation, UINT64_C(42), &registry, ref), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, ref, &lifecycle), CMETA_PLUGIN_OK);
+    check_equal(lifecycle.active_leases, (size_t)1u);
+    check_equal(salts_component_plugin_runtime_publish(
+        &runtime, &generation.generation, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_null(retired);
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_scope_generation_id(&scope),
+                UINT64_C(42));
+    check_true(provider_dso_bind(&scope, &call.gate));
+    check_equal(praktor_dso_gate_run(&call.gate, &call.control), 41);
+    check_equal(salts_component_plugin_runtime_close(
+        &runtime, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &generation.generation);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &generation.generation), SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(salts_component_plugin_scope_release(&scope),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &generation.generation), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, ref, &lifecycle), CMETA_PLUGIN_OK);
+    check_equal(lifecycle.active_leases, (size_t)0u);
+    check_equal(salts_component_plugin_runtime_destroy(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, ref, &quiet), CMETA_PLUGIN_OK);
+    check_true(quiet);
+    check_equal(cmeta_plugin_registry_unload(&registry, ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
+  }
+
   it("rejects malformed UTF-8 module paths before native loader admission") {
     const cmeta_plugin_registry_config config = {2};
     cmeta_plugin_registry registry = {0};

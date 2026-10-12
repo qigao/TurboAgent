@@ -20,11 +20,15 @@ struct turbo_agent_harness_s {
   int submitting;
 };
 
+struct turbo_harness_compiled_graph_s;
+static void turbo_harness_compiled_binding_destroy(struct turbo_harness_compiled_graph_s *binding);
+
 struct turbo_agent_harness_execution_s {
   atomic_size_t ref_count;
   turbo_agent_harness_t *harness;
   turbo_graph_t *graph;
   turbo_agent_execution_t *execution;
+  struct turbo_harness_compiled_graph_s *compiled_binding;
   int terminal_before_publish;
 };
 
@@ -214,6 +218,7 @@ void turbo_agent_harness_execution_release(turbo_agent_harness_execution_t *exec
   atomic_thread_fence(memory_order_acquire);
   turbo_agent_execution_release(execution->execution);
   turbo_graph_destroy(execution->graph);
+  turbo_harness_compiled_binding_destroy(execution->compiled_binding);
   turbo_agent_harness_release(execution->harness);
   free(execution);
 }
@@ -648,7 +653,72 @@ typedef struct turbo_harness_compiled_graph_s {
   size_t source_json_size;
   const char *attempt_id;
   char plan_hash[17];
+  /* These members are populated only for queued/async Graph executions.
+   * Synchronous calls retain their borrowed stack-bound inputs. */
+  turbo_agent_compiler_config_t owned_config;
+  char **owned_capabilities;
+  char *owned_source;
+  char *owned_attempt;
 } turbo_harness_compiled_graph_t;
+
+static void turbo_harness_compiled_binding_destroy(
+    turbo_harness_compiled_graph_t *binding) {
+  size_t i;
+  if (!binding) return;
+  for (i = 0; i < binding->owned_config.allowed_capability_count; ++i)
+    free(binding->owned_capabilities ? binding->owned_capabilities[i] : NULL);
+  free(binding->owned_capabilities);
+  free(binding->owned_source);
+  free(binding->owned_attempt);
+  free(binding);
+}
+
+static turbo_harness_compiled_graph_t *
+turbo_harness_compiled_binding_clone(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *config,
+    const char *source, size_t source_size, const char *attempt) {
+  turbo_harness_compiled_graph_t *binding;
+  size_t i;
+  if (!config || !source || !attempt || !source_size ||
+      source_size > 1024u * 1024u ||
+      config->allowed_capability_count > 64 ||
+      (config->allowed_capability_count && !config->allowed_capabilities))
+    return NULL;
+  binding = (turbo_harness_compiled_graph_t *)calloc(1, sizeof(*binding));
+  if (!binding) return NULL;
+  binding->owned_config = *config;
+  binding->owned_source = (char *)malloc(source_size + 1);
+  binding->owned_attempt = (char *)malloc(strlen(attempt) + 1);
+  if (!binding->owned_source || !binding->owned_attempt) goto fail;
+  memcpy(binding->owned_source, source, source_size);
+  binding->owned_source[source_size] = '\0';
+  strcpy(binding->owned_attempt, attempt);
+  if (config->allowed_capability_count) {
+    binding->owned_capabilities =
+        (char **)calloc(config->allowed_capability_count, sizeof(char *));
+    if (!binding->owned_capabilities) goto fail;
+    for (i = 0; i < config->allowed_capability_count; ++i) {
+      const char *cap = config->allowed_capabilities[i];
+      size_t length;
+      if (!cap || !(length = strlen(cap)) || length > 128u) goto fail;
+      binding->owned_capabilities[i] = (char *)malloc(length + 1u);
+      if (!binding->owned_capabilities[i]) goto fail;
+      memcpy(binding->owned_capabilities[i], cap, length + 1u);
+    }
+  }
+  binding->owned_config.allowed_capabilities =
+      (const char *const *)binding->owned_capabilities;
+  binding->harness = harness;
+  binding->compiler_config = &binding->owned_config;
+  binding->source_json = binding->owned_source;
+  binding->source_json_size = source_size;
+  binding->attempt_id = binding->owned_attempt;
+  return binding;
+fail:
+  turbo_harness_compiled_binding_destroy(binding);
+  return NULL;
+}
 
 static int turbo_harness_compiled_graph_node(turbo_graph_exec_ctx_t *ctx,
                                              void *user_data) {

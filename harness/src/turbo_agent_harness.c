@@ -3,8 +3,10 @@
 #include <json_parser.h>
 
 #include "turbo_agent_session_execution.h"
+#include "turbo_tool_schema.h"
 
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -263,6 +265,137 @@ static void turbo_agent_harness_end_failed_submit(turbo_agent_harness_t *harness
   cmeta_mutex_lock(&harness->mutex);
   harness->submitting = 0;
   cmeta_mutex_unlock(&harness->mutex);
+}
+
+static int turbo_agent_harness_compiled_reject(
+    turbo_agent_compile_diagnostic_t *diagnostic,
+    turbo_agent_compile_status_t status, const char *message) {
+  if (diagnostic) {
+    diagnostic->status = status;
+    snprintf(diagnostic->message, sizeof(diagnostic->message), "%s",
+             message ? message : "compiled Inspect admission rejected");
+  }
+  return SALTS_EPROTO;
+}
+
+/* One synchronous, read-only slice of compiled Harness execution. The async
+ * Session Run/Checkpoint/Journal integration is tracked separately in #72. */
+int turbo_agent_harness_execute_compiled_inspect_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate) {
+  turbo_agent_executable_plan_t *plan = NULL;
+  const turbo_tool_registry_t *registry;
+  const turbo_tool_registry_t *approved;
+  const char *name;
+  const char *result_schema_json = NULL;
+  const json_value_t *result_schema = NULL;
+  turbo_tool_effect_flags_t effects = TURBO_TOOL_EFFECT_UNKNOWN;
+  turbo_tool_status_t tool_status;
+  turbo_agent_compile_status_t compiled;
+  json_value_t *result = NULL;
+  json_value_t *certificate = NULL;
+  int strict_result = 0;
+  int rc;
+
+  if (out_result) *out_result = NULL;
+  if (out_certificate) *out_certificate = NULL;
+  if (out_tool_status) *out_tool_status = TURBO_TOOL_INVALID_ARGUMENT;
+  if (out_diagnostic) memset(out_diagnostic, 0, sizeof(*out_diagnostic));
+  if (!harness || !compiler_config || !compiler_config->deny_unlisted_capabilities ||
+      !source_json || !source_json_size || !out_result || !out_certificate ||
+      !out_tool_status ||
+      (context && (context->abi_version != TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION ||
+                   context->struct_size < sizeof(*context)))) {
+    return SALTS_EINVAL;
+  }
+
+  rc = turbo_agent_harness_begin_submit(harness);
+  if (rc != SALTS_OK) return rc;
+
+  registry = turbo_agent_app_tool_registry(harness->app);
+  if (!registry) {
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
+        "Harness has no configured RuntimeTools registry");
+    goto done;
+  }
+  compiled = turbo_agent_compile_plan_json(
+      compiler_config, registry, source_json, source_json_size, &plan,
+      out_diagnostic);
+  if (compiled != TURBO_AGENT_COMPILE_OK || !plan) {
+    rc = SALTS_EPROTO;
+    goto done;
+  }
+
+  approved = turbo_agent_executable_plan_approved_tools(plan);
+  name = turbo_agent_executable_plan_tool_name(plan);
+  if (!approved || !name ||
+      turbo_tool_registry_get_effects(approved, name, &effects) != TURBO_TOOL_OK ||
+      !(effects == TURBO_TOOL_EFFECT_PURE ||
+        ((effects & TURBO_TOOL_EFFECT_READ) &&
+         (effects & ~(TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK)) == 0))) {
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
+        "Inspect requires declared PURE or READ(+NETWORK) effects");
+    goto done;
+  }
+  if (turbo_tool_registry_get_result_contract(
+          approved, name, &result_schema_json, &result_schema, &strict_result) !=
+          TURBO_TOOL_OK || !result_schema_json || !result_schema || !strict_result) {
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID,
+        "compiled Inspect requires a declared strict result schema");
+    goto done;
+  }
+
+  certificate = turbo_agent_executable_plan_certificate_json_value(plan);
+  if (!certificate) {
+    rc = SALTS_ENOMEM;
+    goto done;
+  }
+  *out_certificate = certificate;
+  certificate = NULL;
+
+  if (context && context->cancel_token) {
+    rc = turbo_cancel_token_check(context->cancel_token);
+    if (rc != SALTS_OK) {
+      *out_tool_status = rc == SALTS_ETIMEDOUT ?
+          TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
+      goto done;
+    }
+  }
+
+  tool_status = turbo_agent_execute_compiled_plan(plan, context, &result);
+  *out_tool_status = tool_status;
+  if (tool_status != TURBO_TOOL_OK) {
+    rc = SALTS_EIO;
+    goto done;
+  }
+  if (!result ||
+      turbo_tool_schema_validate_result_json_value(
+          approved, name, result, NULL, 0) != TURBO_TOOL_SCHEMA_VALID) {
+    *out_tool_status = TURBO_TOOL_ERROR;
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID,
+        "compiled Inspect returned a result violating its admitted schema");
+    goto done;
+  }
+  *out_result = result;
+  result = NULL;
+  rc = SALTS_OK;
+
+done:
+  turbo_runtime_json_destroy(result);
+  turbo_runtime_json_destroy(certificate);
+  turbo_agent_executable_plan_destroy(plan);
+  turbo_agent_harness_end_failed_submit(harness);
+  return rc;
 }
 
 static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,

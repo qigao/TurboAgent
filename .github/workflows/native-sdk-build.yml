@@ -371,6 +371,12 @@ jobs:
           fi
           env -u LD_LIBRARY_PATH ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure
 
+      - name: Verify relocated SDK and fail-closed Linux consumer negatives
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 packaging/nuget/consumer/check_relocation.py
+
   consume-macos:
     name: Consume packed NuGet SDK / macos-arm64
     needs: [metadata, pack]

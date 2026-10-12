@@ -37,6 +37,8 @@ def execute(argv: list[str], *, should_fail: bool = False, failure_text: str | N
             )
         print(f"expected rejection: {failure_text or argv[-1]}")
         return result
+    if allow_failure:
+        return result
     if result.returncode != 0:
         raise RuntimeError(f"consumer command failed (exit {result.returncode}): {argv}\n{result.stdout}")
     print(f"PASS: {argv[0]} {argv[1] if len(argv) > 1 else ''}")

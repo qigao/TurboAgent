@@ -353,4 +353,14 @@ jobs:
             -DTurboScript_DIR="$TURBOSCRIPT_ROOT/lib/cmake/TurboScript" \
             -DEXPECTED_TURBOAGENT_PREFIX="$prefix"
           cmake --build "$RUNNER_TEMP/turboagent-consumer-build"
-          ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure
+          consumer="$RUNNER_TEMP/turboagent-consumer-build/turboagent_installed_consumer"
+          test -f "$prefix/lib/libruntime_core.so"
+          # Observe the real ELF loader graph and reject unresolved dependencies.
+          # Do not inherit a runner-wide LD_LIBRARY_PATH fallback.
+          readelf -d "$consumer" | grep -E '(RPATH|RUNPATH)'
+          env -u LD_LIBRARY_PATH ldd "$consumer" | tee "$RUNNER_TEMP/turboagent-consumer-ldd.txt"
+          if grep -q 'not found' "$RUNNER_TEMP/turboagent-consumer-ldd.txt"; then
+            echo "installed consumer has unresolved shared library dependencies" >&2
+            exit 1
+          fi
+          env -u LD_LIBRARY_PATH ctest --test-dir "$RUNNER_TEMP/turboagent-consumer-build" --output-on-failure

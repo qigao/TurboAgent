@@ -67,6 +67,15 @@ jobs:
           echo "SALTS_ROOT=$sdk" >> "$GITHUB_ENV"
           printf 'Salts source SHA: %s\nSalts SDK tag: %s\n' "$actual" "$SALTS_SDK_TAG"
 
+      - name: Install pinned SIMDe headers for source Core UTF-8 validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libsimde-dev=0.7.2-6
+          test -f /usr/include/simde/x86/sse2.h
+          dpkg-query -W -f='SIMDe ${Version}\n' libsimde-dev
+
       - name: Configure isolated full-source instrumentation
         shell: bash
         env:

@@ -106,7 +106,7 @@ binary_symbols = subprocess.run(
     capture_output=True, text=True, check=True
 ).stdout
 for symbol_name in ("vstr_utf8_valid", "vstr_utf8_invalid_offset"):
-    if not re.search(r"(?m)^\\S+\\s+[TW]\\s+" + symbol_name + r"$", binary_symbols):
+    if not re.search(r"(?m)^\S+\s+[TW]\s+" + symbol_name + r"$", binary_symbols):
         raise SystemExit(f"FAIL: Core UTF-8 {symbol_name} not defined in sanitizer executable")
     print(f"EXECUTABLE DEFINED: {symbol_name}")
 

@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
+# Catch wrong Android ABI before compiler/NDK checks, so a conflicting target
+# triplet cannot be mistaken for a valid arm64 installed SDK consumer.
+if(EXPECTED_RID STREQUAL "android-arm64-v8a" AND
+   DEFINED ANDROID_ABI AND NOT ANDROID_ABI STREQUAL "arm64-v8a")
+  message(FATAL_ERROR "Consumer Android ABI mismatch: ${ANDROID_ABI}, expected arm64-v8a")
+endif()
 project(TurboAgentInstalledConsumer LANGUAGES C)
 
 # Explicitly define the policy used for upper-case SDK *_ROOT variables.

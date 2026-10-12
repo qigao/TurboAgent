@@ -13,12 +13,14 @@ from collections import Counter
 
 RIDS = ("linux-x64", "windows-x64", "macos-arm64", "android-arm64-v8a")
 BINARY_SUFFIXES = (".so", ".a", ".dylib", ".dll", ".lib")
-REQUIRED_META = {"version", "commit", "rid", "praktor_tools"}
+REQUIRED_META = {"version", "commit", "source_head", "rid", "praktor_tools"}
 
 
-def validate(package: pathlib.Path, sha: str, version: str) -> None:
+def validate(package: pathlib.Path, sha: str, source_head: str, version: str) -> None:
     if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
         raise ValueError("expected a full 40-character commit SHA")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", source_head):
+        raise ValueError("expected a full 40-character source HEAD SHA")
     if not package.is_file():
         raise ValueError(f"package does not exist: {package}")
     with zipfile.ZipFile(package) as archive:
@@ -56,7 +58,9 @@ def validate(package: pathlib.Path, sha: str, version: str) -> None:
             if not REQUIRED_META.issubset(metadata):
                 raise ValueError(f"missing manifest fields for {rid}")
             if metadata["commit"].lower() != sha.lower():
-                raise ValueError(f"wrong commit for {rid}: {metadata['commit']}")
+                raise ValueError(f"wrong tested commit for {rid}: {metadata['commit']}")
+            if metadata["source_head"].lower() != source_head.lower():
+                raise ValueError(f"wrong PR source HEAD for {rid}: {metadata['source_head']}")
             if metadata["version"] != version.split("-ci.")[0]:
                 raise ValueError(f"version mismatch for {rid}: {metadata['version']}")
             if metadata["rid"] != rid:
@@ -81,11 +85,12 @@ def validate(package: pathlib.Path, sha: str, version: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("package", type=pathlib.Path)
-    parser.add_argument("--commit", required=True)
+    parser.add_argument("--commit", required=True, help="Commit checked out and tested by CI")
+    parser.add_argument("--source-head", required=True, help="PR source HEAD or push commit")
     parser.add_argument("--package-version", required=True)
     args = parser.parse_args()
     try:
-        validate(args.package, args.commit, args.package_version)
+        validate(args.package, args.commit, args.source_head, args.package_version)
     except (ValueError, OSError, zipfile.BadZipFile, UnicodeError) as exc:
         print(f"NuGet package validation FAILED: {exc}", file=sys.stderr)
         return 1

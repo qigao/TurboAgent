@@ -85,7 +85,7 @@ if(BUILD_TESTS)
       Salts::ComponentPluginABI Salts::PluginABI)
     target_compile_definitions(praktor_dso_fixture_async_managed PRIVATE
       PRAKTOR_DSO_MANAGED_LIFECYCLE=1 PRAKTOR_DSO_EPOCH=45
-      "PRAKTOR_DSO_PLUGIN_ID=\\\"test.turboagent.praktor.async.M45\\\"")
+      "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.praktor.async.M45\"")
     set_target_properties(praktor_dso_fixture_async_managed PROPERTIES
       C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
       FOLDER "Praktor Tools/tests/fixtures")
@@ -99,7 +99,7 @@ if(BUILD_TESTS)
     target_include_directories(test_turbo_praktor_dso_compiled_harness PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     target_compile_definitions(test_turbo_praktor_dso_compiled_harness PRIVATE
-      "PRAKTOR_DSO_ASYNC_MANAGED_PATH=\\\"$<TARGET_FILE:praktor_dso_fixture_async_managed>\\\"")
+      "PRAKTOR_DSO_ASYNC_MANAGED_PATH=\"$<TARGET_FILE:praktor_dso_fixture_async_managed>\"")
     add_dependencies(test_turbo_praktor_dso_compiled_harness
       praktor_dso_fixture_async_managed)
     set_tests_properties(test_turbo_praktor_dso_compiled_harness PROPERTIES

@@ -253,6 +253,120 @@ spec("turbo tool schema helpers") {
     }
   }
 
+  describe("explicit canonical result contracts") {
+    it("validates strict v6 result schemas across wire alias and registry projection") {
+      turbo_tool_registry_t *registry = turbo_tool_registry_create();
+      turbo_tool_registry_t *projection = NULL;
+      turbo_tool_definition_v6_t definition = {0};
+      const char *names[] = {"contract.result"};
+      turbo_tool_effect_flags_t effects = 0;
+      json_value_t *valid = json_parse("{\"ok\":true}", strlen("{\"ok\":true}"));
+      json_value_t *extra = json_parse("{\"ok\":true,\"extra\":1}", strlen("{\"ok\":true,\"extra\":1}"));
+      json_value_t *wrong = json_parse("{\"ok\":\"yes\"}", strlen("{\"ok\":\"yes\"}"));
+      json_value_t *missing = json_create_object();
+      char diagnostic[128] = {0};
+
+      check_not_null(registry);
+      check_not_null(valid);
+      check_not_null(extra);
+      check_not_null(wrong);
+      check_not_null(missing);
+      definition.struct_size = sizeof(definition);
+      definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+      definition.definition.name = "contract.result";
+      definition.definition.description = "Result validation fixture";
+      definition.definition.parameters_json = "{\"type\":\"object\"}";
+      definition.definition.json_value_handler = fake_tool_json_value_handler;
+      definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+      definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+      definition.result_schema_json = "{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"]}";
+      definition.strict_result = 1;
+      definition.effect_flags = TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK;
+      check_equal(turbo_tool_registry_add_v6(registry, &definition), TURBO_TOOL_OK);
+
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          registry, "contract_result", valid, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_VALID);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          registry, "contract.result", extra, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_VALUE_INVALID);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          registry, "contract.result", wrong, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_VALUE_INVALID);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          registry, "contract.result", missing, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_VALUE_INVALID);
+      check_equal(turbo_tool_registry_get_effects(registry, "contract.result", &effects),
+                  TURBO_TOOL_OK);
+      check_equal(effects, TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK);
+      check_equal(turbo_tool_registry_project(registry, names, 1, &projection),
+                  TURBO_TOOL_OK);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          projection, "contract_result", valid, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_VALID);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          projection, "contract_result", extra, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_VALUE_INVALID);
+
+      json_free(missing);
+      json_free(wrong);
+      json_free(extra);
+      json_free(valid);
+      turbo_tool_registry_destroy(projection);
+      turbo_tool_registry_destroy(registry);
+    }
+
+    it("distinguishes undeclared/unsupported schemas and leaves direct execution opt-in") {
+      turbo_tool_registry_t *registry = turbo_tool_registry_create();
+      turbo_tool_definition_v5_t typed = {0};
+      turbo_tool_definition_t legacy = {
+          .name = "legacy", .description = "Opaque tool",
+          .parameters_json = "{\"type\":\"object\"}",
+          .json_value_handler = fake_tool_json_value_handler};
+      json_value_t *value = json_create_object();
+      json_value_t *output = NULL;
+      char diagnostic[128] = {0};
+
+      check_not_null(registry);
+      check_not_null(value);
+      check_equal(turbo_tool_registry_add(registry, &legacy), TURBO_TOOL_OK);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          registry, "legacy", value, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_INVALID_ARGUMENT);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          registry, "not_registered", value, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_INVALID_ARGUMENT);
+
+      typed.struct_size = sizeof(typed);
+      typed.abi_version = TURBO_TOOL_DEFINITION_V5_ABI_VERSION;
+      typed.definition = legacy;
+      typed.definition.name = "unsupported";
+      typed.result_schema_json = "{\"type\":\"object\",\"oneOf\":[{\"type\":\"object\"}]}";
+      typed.strict_result = 1;
+      check_equal(turbo_tool_registry_add_v5(registry, &typed), TURBO_TOOL_OK);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          registry, "unsupported", value, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_UNSUPPORTED);
+
+      /* A descriptive result contract does not silently change trusted
+       * low-level RuntimeTools execution. Consumers explicitly call the
+       * validator at their selected execution/verification boundary. */
+      typed.definition.name = "strict_string";
+      typed.result_schema_json = "{\"type\":\"string\"}";
+      check_equal(turbo_tool_registry_add_v5(registry, &typed), TURBO_TOOL_OK);
+      check_equal(turbo_tool_registry_execute_json_value(
+          registry, "strict_string", value, &output), TURBO_TOOL_OK);
+      check_not_null(output);
+      check_equal(turbo_tool_schema_validate_result_json_value(
+          registry, "strict_string", output, diagnostic, sizeof(diagnostic)),
+          TURBO_TOOL_SCHEMA_VALUE_INVALID);
+
+      json_free(output);
+      json_free(value);
+      turbo_tool_registry_destroy(registry);
+    }
+  }
+
   describe("provider schema builders") {
 
     group("Responses wire names") {

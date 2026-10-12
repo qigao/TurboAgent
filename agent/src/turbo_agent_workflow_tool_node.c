@@ -77,14 +77,24 @@ static int turbo_agent_tool_calls_preflight(const turbo_tool_registry_t *registr
     for (previous = 0; previous < index; ++previous) {
       if (strcmp(calls[previous].call_id, calls[index].call_id) == 0) return SALTS_EPROTO;
     }
-    calls[index].status = turbo_tool_registry_get_execution_policy(registry, calls[index].tool_name,
-                                                                   &calls[index].policy);
-    if (calls[index].status == TURBO_TOOL_NOT_FOUND) {
-      calls[index].policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
-      calls[index].policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
-      calls[index].replayed = 1;
-      continue;
+    /* The model-visible name may be a sanitized wire alias. Resolve it once
+     * to the canonical RuntimeTools identity before policy, approval, trace
+     * and Journal decisions. Never make an ambiguous alias executable. */
+    {
+      const char *canonical_name = NULL;
+      calls[index].status = turbo_tool_registry_resolve_name(
+          registry, calls[index].tool_name, &canonical_name);
+      if (calls[index].status == TURBO_TOOL_NOT_FOUND) {
+        calls[index].policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+        calls[index].policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
+        calls[index].replayed = 1;
+        continue;
+      }
+      if (calls[index].status != TURBO_TOOL_OK || !canonical_name) return SALTS_EPROTO;
+      calls[index].tool_name = canonical_name;
     }
+    calls[index].status = turbo_tool_registry_get_execution_policy(
+        registry, calls[index].tool_name, &calls[index].policy);
     if (calls[index].status != TURBO_TOOL_OK) return SALTS_EPROTO;
     if (turbo_agent_policy_check_tool(policy, registry, calls[index].tool_name,
                                       &calls[index].policy_reason) != TURBO_AGENT_POLICY_ALLOW) {

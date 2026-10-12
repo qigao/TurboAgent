@@ -72,12 +72,12 @@ static int approved_store_record(
     const char *key, const char *thread_id, const char *attempt_id,
     const char *approval_id, const char *hash, const char *phase,
     turbo_tool_status_t status, turbo_agent_template_outcome_t outcome,
-    const json_value_t *result) {
+    const json_value_t *result, int insert_only) {
   json_value_t *record = json_create_object();
   char *encoded = NULL;
   size_t bytes = 0;
-  int ok = 0;
-  if (!record) return 0;
+  int rc = SALTS_ENOMEM;
+  if (!record) return SALTS_ENOMEM;
   if (turbo_runtime_json_object_set_int64(record, "schema_version", 1) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "id", key) !=
@@ -101,11 +101,13 @@ static int approved_store_record(
     goto done;
   encoded = json_serialize(record, &bytes);
   if (!encoded || bytes > PRAKTOR_APPROVED_MAX_RECORD_BYTES) goto done;
-  ok = turbo_agent_runtime_store_put_json(runtime, collection, key, record) == 0;
+  rc = insert_only
+      ? turbo_agent_runtime_store_put_json_if_absent(runtime, collection, key, record)
+      : turbo_agent_runtime_store_put_json(runtime, collection, key, record);
 done:
   if (encoded) json_serialize_free(encoded);
   turbo_runtime_json_destroy(record);
-  return ok;
+  return rc;
 }
 
 /* Trusted host alone calls this after reviewing the same plan certificate;
@@ -129,11 +131,12 @@ turbo_tool_status_t turbo_praktor_template_approval_commit(
     return same ? TURBO_TOOL_OK : TURBO_TOOL_INVALID_ARGUMENT;
   }
   if (rc != SALTS_ENOENT) return TURBO_TOOL_ERROR;
-  return approved_store_record(
+  rc = approved_store_record(
       runtime, PRAKTOR_APPROVAL_COLLECTION, key, thread_id, attempt_id,
       approval_id, hash, "approved", TURBO_TOOL_OK,
-      TURBO_AGENT_TEMPLATE_OUTCOME_INVALID_ARGUMENT, NULL)
-      ? TURBO_TOOL_OK : TURBO_TOOL_ERROR;
+      TURBO_AGENT_TEMPLATE_OUTCOME_INVALID_ARGUMENT, NULL, 1);
+  return rc == SALTS_OK ? TURBO_TOOL_OK :
+         rc == SALTS_EALREADY ? TURBO_TOOL_INVALID_ARGUMENT : TURBO_TOOL_ERROR;
 }
 
 turbo_tool_status_t turbo_praktor_template_execute_approved(
@@ -236,11 +239,15 @@ turbo_tool_status_t turbo_praktor_template_execute_approved(
     status = TURBO_TOOL_CANCELLED;
     goto done; /* Not started; no tool callback and no retry hazard. */
   }
-  if (!approved_store_record(
-          runtime, PRAKTOR_ATTEMPT_COLLECTION, key, thread_id, attempt_id,
-          approval_id, hash, "started", TURBO_TOOL_UNKNOWN_SIDE_EFFECT,
-          TURBO_AGENT_TEMPLATE_OUTCOME_INVALID_ARGUMENT, NULL)) {
-    status = TURBO_TOOL_ERROR;
+  rc = approved_store_record(
+      runtime, PRAKTOR_ATTEMPT_COLLECTION, key, thread_id, attempt_id,
+      approval_id, hash, "started", TURBO_TOOL_UNKNOWN_SIDE_EFFECT,
+      TURBO_AGENT_TEMPLATE_OUTCOME_INVALID_ARGUMENT, NULL, 1);
+  if (rc != SALTS_OK) {
+    /* A competing claimant may already be inside Praktor. Never execute
+     * a second callback, even if the first claimant has not yet committed. */
+    status = rc == SALTS_EALREADY ?
+        TURBO_TOOL_UNKNOWN_SIDE_EFFECT : TURBO_TOOL_ERROR;
     goto done;
   }
 
@@ -256,10 +263,10 @@ turbo_tool_status_t turbo_praktor_template_execute_approved(
     status = TURBO_TOOL_ERROR;
     outcome = TURBO_AGENT_TEMPLATE_OUTCOME_EXECUTION_FAILED;
   }
-  if (!approved_store_record(
+  if (approved_store_record(
           runtime, PRAKTOR_ATTEMPT_COLLECTION, key, thread_id, attempt_id,
           approval_id, hash, "committed", status, outcome,
-          status == TURBO_TOOL_OK ? result : NULL)) {
+          status == TURBO_TOOL_OK ? result : NULL, 0) != SALTS_OK) {
     status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
     goto done; /* STARTED persists: never return an uncommitted output. */
   }

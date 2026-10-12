@@ -749,6 +749,51 @@ spec("Harness bounded asynchronous compiled Inspect") {
     cmeta_threadpool_destroy(pool);
   }
 
+  it("retains frozen plan and copied source/capabilities after the caller mutates buffers") {
+    compiled_inspect_probe_t probe = {0};
+    char source_copy[sizeof(compiled_inspect_source)];
+    char capability_copy[] = "runtime_tools";
+    const char *allowed[] = {capability_copy};
+    turbo_agent_compiler_config_t config;
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_harness_execution_t *execution = NULL;
+    json_value_t *summary = NULL, *state = NULL;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, turbo_agent_runtime_store_memory_create(), "async-owned-thread");
+    check_not_null(harness);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed;
+    config.allowed_capability_count = 1;
+    memcpy(source_copy, compiled_inspect_source, sizeof(source_copy));
+
+    check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
+        harness, &config, source_copy, strlen(source_copy), "owned_one",
+        NULL, 0, NULL, &execution), SALTS_OK);
+    memset(source_copy, 'x', sizeof(source_copy) - 1);
+    memset(capability_copy, 'x', sizeof(capability_copy) - 1);
+    check_equal(turbo_agent_harness_execution_wait(execution, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_agent_harness_execution_take_result(
+        execution, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "completed");
+    check_true(json_get_bool(json_object_get(state, "compiled_result"), "ok", false));
+    check_equal(probe.calls, 1);
+
+    json_free(summary);
+    json_free(state);
+    turbo_agent_harness_execution_release(execution);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
   it("rejects a concurrent compiled Graph submission while its tool is active") {
     const char *allowed[] = {"runtime_tools"};
     compiled_inspect_probe_t probe = {0};

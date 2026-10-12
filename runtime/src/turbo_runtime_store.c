@@ -226,6 +226,32 @@ int turbo_agent_runtime_store_put_json(turbo_agent_runtime_t *runtime, const cha
   return rc;
 }
 
+int turbo_agent_runtime_store_put_json_if_absent(
+    turbo_agent_runtime_t *runtime, const char *collection, const char *id,
+    const json_value_t *record_json) {
+  char *payload = NULL;
+  char *existing = NULL;
+  int rc;
+  if (!runtime || !collection || !id || !record_json ||
+      !runtime->store.get || !runtime->store.put)
+    return SALTS_EINVAL;
+  payload = json_serialize(record_json, NULL);
+  if (!payload) return SALTS_ENOMEM;
+
+  cmeta_mutex_lock(&runtime->store_mutex);
+  rc = runtime->store.get(runtime->store.user_data, collection, id, &existing);
+  if (rc == SALTS_OK) {
+    rc = existing ? SALTS_EALREADY : SALTS_EPROTO;
+  } else if (rc == SALTS_ENOENT) {
+    rc = runtime->store.put(runtime->store.user_data, collection, id, payload);
+  }
+  cmeta_mutex_unlock(&runtime->store_mutex);
+
+  free(existing);
+  json_serialize_free(payload);
+  return rc;
+}
+
 int turbo_agent_runtime_store_get_json_status(turbo_agent_runtime_t *runtime, const char *collection,
                                        const char *id, json_value_t **out_record_json) {
   char *serialized = NULL;

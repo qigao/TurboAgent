@@ -19,7 +19,7 @@ add_test(NAME test_turboagent_typed_rpc COMMAND test_turboagent_typed_rpc)
 set_tests_properties(test_turboagent_typed_rpc PROPERTIES TIMEOUT 30)
 
 # Provider callback is compiled only inside an unloadable shared library;
-// test host sees it exclusively through a reflected Plugin export.
+# Test host only obtains the Provider address through a reflected Plugin export.
 add_library(turboagent_rpc_provider_dso SHARED turboagent_rpc_provider_dso.c)
 target_link_libraries(turboagent_rpc_provider_dso PRIVATE
   Salts::PluginABI Salts::Platform Salts::DataBind)

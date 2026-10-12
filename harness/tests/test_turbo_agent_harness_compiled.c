@@ -3,6 +3,8 @@
 #include "turbo_agent_harness.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
+#include "turbo_runtime_store_sqlite.h"
+#include <stdio.h>
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -72,12 +74,14 @@ static turbo_tool_status_t register_compiled_inspect(
   return turbo_tool_registry_add_v6(registry, &definition);
 }
 
-static turbo_agent_harness_t *make_compiled_harness(
-    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry) {
+static turbo_agent_harness_t *make_compiled_harness_with_store(
+    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry,
+    turbo_agent_runtime_store_t store, const char *thread_id) {
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t config;
-  session_config.runtime_store = turbo_agent_runtime_store_memory_create();
+  session_config.runtime_store = store;
+  session_config.thread_id = thread_id;
   session_config.agent_config.model = "gpt-5.4";
   session_config.agent_config.transport_fn = compiled_harness_transport;
   session_config.agent_config.tool_registry = registry;
@@ -86,6 +90,12 @@ static turbo_agent_harness_t *make_compiled_harness(
   config.app_config = &app_config;
   config.executor = pool;
   return turbo_agent_harness_create(&config);
+}
+
+static turbo_agent_harness_t *make_compiled_harness(
+    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry) {
+  return make_compiled_harness_with_store(
+      pool, registry, turbo_agent_runtime_store_memory_create(), NULL);
 }
 
 static int run_compiled_inspect(turbo_agent_harness_t *harness,
@@ -102,6 +112,20 @@ static int run_compiled_inspect(turbo_agent_harness_t *harness,
   return turbo_agent_harness_execute_compiled_inspect_json(
       harness, &config, source, strlen(source), NULL, diagnostic,
       tool_status, result, certificate);
+}
+
+static int run_durable_inspect(turbo_agent_harness_t *harness,
+                               const char *source, const char *attempt_id,
+                               int *replayed, turbo_tool_status_t *status,
+                               json_value_t **result, json_value_t **certificate) {
+  const char *allowed[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = allowed;
+  config.allowed_capability_count = 1;
+  return turbo_agent_harness_execute_compiled_inspect_durable_json(
+      harness, &config, source, strlen(source), NULL, attempt_id, replayed,
+      NULL, status, result, certificate);
 }
 
 spec("Harness Phase-1 compiled Inspect boundary") {
@@ -237,6 +261,164 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(probe.calls, 1);
 
     json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+}
+
+
+spec("Harness durable compiled Inspect attempt") {
+  it("replays committed results across bounded SQLite reopen without another callback") {
+    static const char changed_source[] =
+        "{\"template_id\":\"inspect\",\"step_id\":\"read-1\","
+        "\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"value\\\":\\\"changed\\\"}\"}";
+    compiled_inspect_probe_t probe = {0};
+    turbo_runtime_sqlite_config_t sqlite_config;
+    turbo_agent_runtime_store_t store = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_agent_harness_t *harness;
+    turbo_agent_runtime_t *runtime;
+    json_value_t *result = NULL, *certificate = NULL, *record = NULL;
+    char *directory = tt_make_temp_dir("compiled-inspect-attempt");
+    char path[1024];
+    int replayed = -1;
+    turbo_tool_status_t tool_status = TURBO_TOOL_ERROR;
+
+    check_not_null(directory);
+    check_true(snprintf(path, sizeof(path), "%s/attempts.db", directory) <
+               (int)sizeof(path));
+    turbo_runtime_sqlite_config_init(&sqlite_config);
+    sqlite_config.path = path;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, store, "compiled-test-thread");
+    check_not_null(harness);
+    runtime = turbo_agent_session_runtime(
+        turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    check_not_null(runtime);
+
+    check_equal(run_durable_inspect(harness, compiled_inspect_source, "run_one",
+        &replayed, &tool_status, &result, &certificate), SALTS_OK);
+    check_equal(replayed, 0);
+    check_equal(tool_status, TURBO_TOOL_OK);
+    check_true(json_get_bool(result, "ok", false));
+    check_equal(probe.calls, 1);
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "compiled_inspect_attempts", "compiled-test-thread:run_one",
+        &record), SALTS_OK);
+    check_equal(json_get_string(record, "phase"), "committed");
+    json_free(record); record = NULL;
+
+    check_equal(run_durable_inspect(harness, compiled_inspect_source, "run_one",
+        &replayed, &tool_status, &result, &certificate), SALTS_OK);
+    check_equal(replayed, 1);
+    check_equal(probe.calls, 1);
+    check_true(json_get_bool(result, "ok", false));
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+
+    /* Same attempt key with a different compiled source is identity collision,
+     * not an invitation to execute a new tool call. */
+    check_equal(run_durable_inspect(harness, changed_source, "run_one",
+        &replayed, &tool_status, &result, &certificate), SALTS_EPROTO);
+    check_equal(replayed, 0);
+    check_equal(probe.calls, 1);
+    json_free(certificate); certificate = NULL;
+
+    /* A rejected plan does not create a durable STARTED record. */
+    check_equal(run_durable_inspect(harness, compiled_inspect_bad_args, "bad_plan",
+        &replayed, &tool_status, &result, &certificate), SALTS_EPROTO);
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "compiled_inspect_attempts", "compiled-test-thread:bad_plan",
+        &record), SALTS_ENOENT);
+    check_equal(probe.calls, 1);
+
+    turbo_agent_harness_release(harness);
+    cmeta_threadpool_destroy(pool);
+    pool = cmeta_threadpool_create_with_config(&pool_config);
+    sqlite_config.create_if_missing = 0;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, store, "compiled-test-thread");
+    check_not_null(harness);
+    check_equal(run_durable_inspect(harness, compiled_inspect_source, "run_one",
+        &replayed, &tool_status, &result, &certificate), SALTS_OK);
+    check_equal(replayed, 1);
+    check_equal(probe.calls, 1);
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+
+    runtime = turbo_agent_session_runtime(
+        turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "compiled_inspect_attempts", "compiled-test-thread:run_one",
+        &record), SALTS_OK);
+    check_equal(turbo_runtime_json_object_set_string(
+        record, "phase", "started"), TURBO_RUNTIME_JSON_OK);
+    check_equal(turbo_agent_runtime_store_put_json(
+        runtime, "compiled_inspect_attempts", "compiled-test-thread:run_one",
+        record), SALTS_OK);
+    json_free(record); record = NULL;
+
+    check_equal(run_durable_inspect(harness, compiled_inspect_source, "run_one",
+        &replayed, &tool_status, &result, &certificate), SALTS_EBUSY);
+    check_equal(replayed, 0);
+    check_equal(tool_status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_equal(probe.calls, 1);
+    json_free(certificate);
+
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+    tt_remove_tree(directory);
+    free(directory);
+  }
+
+  it("persists invalid results as terminal errors and never retries them") {
+    compiled_inspect_probe_t probe = {.produce_invalid_result = 1};
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_agent_harness_t *harness;
+    json_value_t *result = NULL, *certificate = NULL;
+    int replayed = -1;
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(
+        pool, registry, store, "compiled-test-thread");
+    check_not_null(harness);
+    check_equal(run_durable_inspect(harness, compiled_inspect_source, "failed_result",
+        &replayed, &tool_status, &result, &certificate), SALTS_EPROTO);
+    check_equal(probe.calls, 1);
+    check_equal(tool_status, TURBO_TOOL_ERROR);
+    check_equal(replayed, 0);
+    check_null(result);
+    check_not_null(certificate);
+    json_free(certificate); certificate = NULL;
+
+    check_equal(run_durable_inspect(harness, compiled_inspect_source, "failed_result",
+        &replayed, &tool_status, &result, &certificate), SALTS_EPROTO);
+    check_equal(replayed, 1);
+    check_equal(tool_status, TURBO_TOOL_ERROR);
+    check_equal(probe.calls, 1);
+    check_null(result);
+    json_free(certificate);
+
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);

@@ -508,6 +508,30 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
       return SALTS_EMSGSIZE;
   }
   cmeta_mutex_lock(&executor->batch_mutex);
+  /* The executor is also called directly by trusted host code. Never trust
+   * a caller-supplied alias or execution policy as the durable identity:
+   * RuntimeTools' registered canonical name and policy are authoritative. */
+  for (index = 0; index < call_count; ++index) {
+    const char *canonical_name = NULL;
+    turbo_tool_execution_policy_t registered_policy = {0};
+    turbo_tool_status_t status;
+    if (calls[index].replayed) continue;
+    status = turbo_tool_registry_resolve_name(
+        registry, calls[index].tool_name, &canonical_name);
+    if (status == TURBO_TOOL_NOT_FOUND) {
+      calls[index].status = TURBO_TOOL_NOT_FOUND;
+      calls[index].replayed = 1;
+      continue;
+    }
+    if (status != TURBO_TOOL_OK || !canonical_name ||
+        turbo_tool_registry_get_execution_policy(
+            registry, canonical_name, &registered_policy) != TURBO_TOOL_OK) {
+      rc = SALTS_EPROTO;
+      goto cleanup;
+    }
+    calls[index].tool_name = canonical_name;
+    calls[index].policy = registered_policy;
+  }
   for (index = 0; index < call_count; ++index) {
     const char *reason = NULL;
     const char *const *required_capabilities = NULL;

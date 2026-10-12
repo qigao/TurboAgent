@@ -746,6 +746,12 @@ turbo_tool_execution_policy_t turbo_agent_executable_plan_execution_policy(
   return plan ? plan->execution_policy : empty;
 }
 
+const turbo_tool_registry_t *turbo_agent_executable_plan_approved_tools(
+    const turbo_agent_executable_plan_t *plan) {
+  return plan ? plan->projection : NULL;
+}
+
+
 turbo_agent_compile_status_t
 turbo_agent_executable_plan_required_capabilities(
     const turbo_agent_executable_plan_t *plan,

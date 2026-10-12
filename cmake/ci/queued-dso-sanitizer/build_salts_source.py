@@ -78,6 +78,12 @@ def main() -> None:
         "-DCMETA_BUILD_NATIVE_THUNKS=OFF",
         "-DCMAKE_SUPPRESS_REGENERATION=ON",
         "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        # Salts::Core and TurboAgent::Provider both use CSTL descriptors.
+        # Keeping CSTL static in *both* instrumented DSOs defines identical
+        # ASan global identities twice, a genuine ODR ownership error.
+        # This isolated sanitizer SDK uses one shared CSTL owner, never a
+        # suppressed ASan diagnostic or an ABI-5 compatibility fallback.
+        "-DBUILD_SHARED_LIBS=ON",
         f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
         f"-DCMAKE_INSTALL_PREFIX={target}",
         "-DVCPKG_TARGET_TRIPLET=x64-linux",
@@ -129,6 +135,23 @@ def main() -> None:
         covered[rel] = found
         print(f"SOURCE INSTRUMENTED: {rel}", flush=True)
 
+    cstl_shared = sorted((target / "lib").glob("libcmeta_cstl.so*"))
+    if not cstl_shared:
+        raise RuntimeError(
+            "shared CSTL descriptor owner absent; static embedding risks ODR"
+        )
+    core_library = target / "lib" / "libsalts.so.2.3"
+    if not core_library.is_file():
+        raise RuntimeError(f"source-built shared Salts Core absent: {core_library}")
+    dependencies = subprocess.check_output(
+        ["readelf", "-d", str(core_library)], text=True
+    )
+    if "libcmeta_cstl.so" not in dependencies:
+        raise RuntimeError(
+            "Salts::Core must depend on one shared CSTL metadata owner"
+        )
+    print("SINGLE CSTL METADATA OWNER: shared Salts::CSTL", flush=True)
+
     for filename in ARCHIVES:
         archive = target / "lib" / filename
         if not archive.is_file():
@@ -146,6 +169,8 @@ def main() -> None:
         "source_objects": covered,
         "archives": list(ARCHIVES),
         "public_headers_byte_identical_to_rc15": True,
+        "cstl_descriptor_owner": "test-only shared Salts::CSTL",
+        "salts_core_needs_shared_cstl": True,
         "vcpkg_cache_contract": os.environ.get("VCPKG_CACHE_REVISION", "unset"),
         "vcpkg_scripts_revision": os.environ.get("VCPKG_SCRIPTS_REVISION", "unset"),
     }

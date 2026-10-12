@@ -13,6 +13,36 @@ if(NOT DEFINED EXPECTED_TURBOAGENT_PREFIX OR NOT IS_DIRECTORY "${EXPECTED_TURBOA
 endif()
 file(REAL_PATH "${EXPECTED_TURBOAGENT_PREFIX}" _expected)
 
+# Fail closed if the caller selects an SDK RID different from the target OS,
+# or if the extracted prefix carries an unexpected platform manifest. The
+# architecture itself remains verified by native compilation/linking and
+# platform-specific binary inspection (dumpbin/file/readelf).
+if(NOT DEFINED EXPECTED_RID OR "${EXPECTED_RID}" STREQUAL "")
+  message(FATAL_ERROR "EXPECTED_RID must name the exact packaged platform")
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(_native_rid "linux-x64")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set(_native_rid "macos-arm64")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  set(_native_rid "windows-x64")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
+  set(_native_rid "android-arm64-v8a")
+else()
+  message(FATAL_ERROR "Unsupported SDK consumer platform: ${CMAKE_SYSTEM_NAME}")
+endif()
+if(NOT EXPECTED_RID STREQUAL _native_rid)
+  message(FATAL_ERROR "Consumer RID mismatch: ${EXPECTED_RID} on ${CMAKE_SYSTEM_NAME}")
+endif()
+set(_rid_manifest "${_expected}/turboagent-sdk-manifest.txt")
+if(NOT EXISTS "${_rid_manifest}")
+  message(FATAL_ERROR "Missing installed SDK RID manifest: ${_rid_manifest}")
+endif()
+file(STRINGS "${_rid_manifest}" _rid_lines REGEX "^rid=")
+if(NOT "${_rid_lines}" STREQUAL "rid=${EXPECTED_RID}")
+  message(FATAL_ERROR "Installed SDK RID manifest mismatch: ${_rid_lines}, expected ${EXPECTED_RID}")
+endif()
+
 # Check every explicitly supplied SDK config, including optional components
 # not imported by the current feature profile. This also makes unused *_DIR
 # arguments an error instead of silently accepting misleading configuration.

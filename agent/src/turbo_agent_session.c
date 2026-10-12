@@ -548,6 +548,12 @@ int turbo_agent_session_prepare_resume_options_internal(
   return SALTS_OK;
 }
 
+int turbo_agent_session_complete_compiled_internal(
+    turbo_agent_session_t *session, json_value_t **summary, json_value_t **state) {
+  if (!session || !summary || !*summary || !state || !*state) return SALTS_EINVAL;
+  return turbo_agent_session_capture_summary(session, *summary);
+}
+
 int turbo_agent_session_complete_execution_internal(
     turbo_agent_session_t *session, turbo_graph_t *graph,
     const turbo_graph_run_options_t *graph_options,

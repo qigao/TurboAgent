@@ -20,11 +20,15 @@ struct turbo_agent_harness_s {
   int submitting;
 };
 
+struct turbo_harness_compiled_graph_s;
+static void turbo_harness_compiled_binding_destroy(struct turbo_harness_compiled_graph_s *binding);
+
 struct turbo_agent_harness_execution_s {
   atomic_size_t ref_count;
   turbo_agent_harness_t *harness;
   turbo_graph_t *graph;
   turbo_agent_execution_t *execution;
+  struct turbo_harness_compiled_graph_s *compiled_binding;
   int terminal_before_publish;
 };
 
@@ -214,6 +218,7 @@ void turbo_agent_harness_execution_release(turbo_agent_harness_execution_t *exec
   atomic_thread_fence(memory_order_acquire);
   turbo_agent_execution_release(execution->execution);
   turbo_graph_destroy(execution->graph);
+  turbo_harness_compiled_binding_destroy(execution->compiled_binding);
   turbo_agent_harness_release(execution->harness);
   free(execution);
 }
@@ -365,11 +370,13 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
     const turbo_tool_execution_context_t *context,
     const char *attempt_id, int *out_replayed, int gate_held,
     const char *expected_plan_hash,
+    const turbo_agent_executable_plan_t *admitted_plan,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,
     json_value_t **out_certificate) {
-  turbo_agent_executable_plan_t *plan = NULL;
+  turbo_agent_executable_plan_t *compiled_plan = NULL;
+  const turbo_agent_executable_plan_t *plan = admitted_plan;
   const turbo_tool_registry_t *registry;
   const turbo_tool_registry_t *approved;
   const char *name;
@@ -416,12 +423,15 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
         "Harness has no configured RuntimeTools registry");
     goto done;
   }
-  compiled = turbo_agent_compile_plan_json(
-      compiler_config, registry, source_json, source_json_size, &plan,
-      out_diagnostic);
-  if (compiled != TURBO_AGENT_COMPILE_OK || !plan) {
-    rc = SALTS_EPROTO;
-    goto done;
+  if (!plan) {
+    compiled = turbo_agent_compile_plan_json(
+        compiler_config, registry, source_json, source_json_size, &compiled_plan,
+        out_diagnostic);
+    if (compiled != TURBO_AGENT_COMPILE_OK || !compiled_plan) {
+      rc = SALTS_EPROTO;
+      goto done;
+    }
+    plan = compiled_plan;
   }
 
   if (expected_plan_hash) {
@@ -605,7 +615,7 @@ done:
   turbo_runtime_json_destroy(stored);
   turbo_runtime_json_destroy(result);
   turbo_runtime_json_destroy(certificate);
-  turbo_agent_executable_plan_destroy(plan);
+  turbo_agent_executable_plan_destroy(compiled_plan);
   if (!gate_held) turbo_agent_harness_end_failed_submit(harness);
   return rc;
 }
@@ -621,7 +631,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     json_value_t **out_certificate) {
   return turbo_agent_harness_execute_compiled_inspect_impl(
       harness, compiler_config, source_json, source_json_size, context,
-      NULL, NULL, 0, NULL, out_diagnostic, out_tool_status, out_result, out_certificate);
+      NULL, NULL, 0, NULL, NULL, out_diagnostic, out_tool_status, out_result, out_certificate);
 }
 
 int turbo_agent_harness_execute_compiled_inspect_durable_json(
@@ -637,7 +647,7 @@ int turbo_agent_harness_execute_compiled_inspect_durable_json(
   if (!attempt_id) return SALTS_EINVAL;
   return turbo_agent_harness_execute_compiled_inspect_impl(
       harness, compiler_config, source_json, source_json_size, context,
-      attempt_id, out_replayed, 0, NULL, out_diagnostic, out_tool_status,
+      attempt_id, out_replayed, 0, NULL, NULL, out_diagnostic, out_tool_status,
       out_result, out_certificate);
 }
 
@@ -648,7 +658,74 @@ typedef struct turbo_harness_compiled_graph_s {
   size_t source_json_size;
   const char *attempt_id;
   char plan_hash[17];
+  /* These members are populated only for queued/async Graph executions.
+   * Synchronous calls retain their borrowed stack-bound inputs. */
+  turbo_agent_compiler_config_t owned_config;
+  char **owned_capabilities;
+  char *owned_source;
+  char *owned_attempt;
+  turbo_agent_executable_plan_t *owned_plan; /* frozen while worker is queued */
 } turbo_harness_compiled_graph_t;
+
+static void turbo_harness_compiled_binding_destroy(
+    turbo_harness_compiled_graph_t *binding) {
+  size_t i;
+  if (!binding) return;
+  for (i = 0; i < binding->owned_config.allowed_capability_count; ++i)
+    free(binding->owned_capabilities ? binding->owned_capabilities[i] : NULL);
+  free(binding->owned_capabilities);
+  free(binding->owned_source);
+  free(binding->owned_attempt);
+  turbo_agent_executable_plan_destroy(binding->owned_plan);
+  free(binding);
+}
+
+static turbo_harness_compiled_graph_t *
+turbo_harness_compiled_binding_clone(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *config,
+    const char *source, size_t source_size, const char *attempt) {
+  turbo_harness_compiled_graph_t *binding;
+  size_t i;
+  if (!config || !source || !attempt || !source_size ||
+      source_size > 1024u * 1024u ||
+      config->allowed_capability_count > 64 ||
+      (config->allowed_capability_count && !config->allowed_capabilities))
+    return NULL;
+  binding = (turbo_harness_compiled_graph_t *)calloc(1, sizeof(*binding));
+  if (!binding) return NULL;
+  binding->owned_config = *config;
+  binding->owned_source = (char *)malloc(source_size + 1);
+  binding->owned_attempt = (char *)malloc(strlen(attempt) + 1);
+  if (!binding->owned_source || !binding->owned_attempt) goto fail;
+  memcpy(binding->owned_source, source, source_size);
+  binding->owned_source[source_size] = '\0';
+  strcpy(binding->owned_attempt, attempt);
+  if (config->allowed_capability_count) {
+    binding->owned_capabilities =
+        (char **)calloc(config->allowed_capability_count, sizeof(char *));
+    if (!binding->owned_capabilities) goto fail;
+    for (i = 0; i < config->allowed_capability_count; ++i) {
+      const char *cap = config->allowed_capabilities[i];
+      size_t length;
+      if (!cap || !(length = strlen(cap)) || length > 128u) goto fail;
+      binding->owned_capabilities[i] = (char *)malloc(length + 1u);
+      if (!binding->owned_capabilities[i]) goto fail;
+      memcpy(binding->owned_capabilities[i], cap, length + 1u);
+    }
+  }
+  binding->owned_config.allowed_capabilities =
+      (const char *const *)binding->owned_capabilities;
+  binding->harness = harness;
+  binding->compiler_config = &binding->owned_config;
+  binding->source_json = binding->owned_source;
+  binding->source_json_size = source_size;
+  binding->attempt_id = binding->owned_attempt;
+  return binding;
+fail:
+  turbo_harness_compiled_binding_destroy(binding);
+  return NULL;
+}
 
 static int turbo_harness_compiled_graph_node(turbo_graph_exec_ctx_t *ctx,
                                              void *user_data) {
@@ -668,7 +745,8 @@ static int turbo_harness_compiled_graph_node(turbo_graph_exec_ctx_t *ctx,
   rc = turbo_agent_harness_execute_compiled_inspect_impl(
       binding->harness, binding->compiler_config, binding->source_json,
       binding->source_json_size, NULL, binding->attempt_id, &replayed, 1,
-      binding->plan_hash, &diagnostic, &status, &result, &certificate);
+      binding->plan_hash, binding->owned_plan, &diagnostic, &status,
+      &result, &certificate);
 
   if (turbo_runtime_json_object_set_int64(
           ctx->json_value_state, "compiled_tool_status", (int64_t)status) !=
@@ -826,6 +904,217 @@ done:
   turbo_graph_destroy(graph);
   turbo_agent_executable_plan_destroy(plan);
   turbo_agent_harness_end_failed_submit(harness);
+  return rc;
+}
+
+/* Async compiled Inspect: follow the standard Harness execution lifecycle.
+ * It admits the frozen plan synchronously, then queues only its canonical
+ * Session Graph. All callback data live in execution->compiled_binding. */
+int turbo_agent_harness_submit_compiled_inspect_graph_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const char *attempt_id, const char *checkpoint_id,
+    int interrupt_before_tool,
+    const turbo_agent_harness_run_options_t *options,
+    turbo_agent_harness_execution_t **out_execution) {
+  turbo_agent_session_t *session;
+  const turbo_tool_registry_t *registry;
+  turbo_agent_executable_plan_t *plan = NULL;
+  turbo_harness_compiled_graph_t *binding = NULL;
+  turbo_agent_harness_execution_t *execution = NULL;
+  turbo_agent_execution_t *active_ref = NULL;
+  turbo_graph_t *graph = NULL;
+  json_value_t *initial_state = NULL;
+  json_value_t *checkpoint_record = NULL;
+  const turbo_tool_registry_t *approved;
+  const char *name, *result_schema_json = NULL;
+  const json_value_t *result_schema = NULL;
+  turbo_agent_compile_diagnostic_t diagnostic = {0};
+  turbo_tool_effect_flags_t effects = TURBO_TOOL_EFFECT_UNKNOWN;
+  turbo_agent_session_submit_options_t submit_options;
+  turbo_agent_session_exec_options_t session_options = {0};
+  turbo_graph_run_options_t graph_options = {0};
+  const char *interrupt_names[] = {"compiled_execute"};
+  char semantic_id[64];
+  int strict_result = 0;
+  int rc;
+
+  if (!out_execution) return SALTS_EINVAL;
+  *out_execution = NULL;
+  if (!harness || !compiler_config || !compiler_config->deny_unlisted_capabilities ||
+      !source_json || !source_json_size || !turbo_harness_inspect_key_component(attempt_id, 64) ||
+      (checkpoint_id && (!checkpoint_id[0] || interrupt_before_tool)) ||
+      !turbo_agent_harness_run_options_valid(options) ||
+      (options && (options->graph_options || options->session_options)))
+    return SALTS_EINVAL;
+
+  rc = turbo_agent_harness_begin_submit(harness);
+  if (rc != SALTS_OK) return rc;
+
+  session = turbo_agent_app_session(harness->app);
+  registry = turbo_agent_app_tool_registry(harness->app);
+  if (!session || !registry) {
+    rc = SALTS_EINVAL;
+    goto fail;
+  }
+
+  binding = turbo_harness_compiled_binding_clone(
+      harness, compiler_config, source_json, source_json_size, attempt_id);
+  if (!binding) {
+    rc = SALTS_ENOMEM;
+    goto fail;
+  }
+  if (turbo_agent_compile_plan_json(
+          binding->compiler_config, registry, binding->source_json,
+          binding->source_json_size, &plan, &diagnostic) != TURBO_AGENT_COMPILE_OK ||
+      !plan) {
+    rc = SALTS_EPROTO;
+    goto fail;
+  }
+  approved = turbo_agent_executable_plan_approved_tools(plan);
+  name = turbo_agent_executable_plan_tool_name(plan);
+  if (!approved || !name ||
+      turbo_tool_registry_get_effects(approved, name, &effects) != TURBO_TOOL_OK ||
+      !(effects == TURBO_TOOL_EFFECT_PURE ||
+        ((effects & TURBO_TOOL_EFFECT_READ) &&
+         !(effects & ~(TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK)))) ||
+      turbo_tool_registry_get_result_contract(
+          approved, name, &result_schema_json, &result_schema, &strict_result) !=
+          TURBO_TOOL_OK || !result_schema_json || !result_schema || !strict_result) {
+    rc = SALTS_EPROTO;
+    goto fail;
+  }
+
+  snprintf(binding->plan_hash, sizeof(binding->plan_hash), "%016llx",
+           (unsigned long long)turbo_agent_executable_plan_hash(plan));
+  if (snprintf(semantic_id, sizeof(semantic_id), "compiled-inspect-v1-%s",
+               binding->plan_hash) < 0) {
+    rc = SALTS_EINVAL;
+    goto fail;
+  }
+  graph = turbo_graph_create("compiled-inspect-run");
+  if (!graph ||
+      turbo_graph_add_json_value_node_ex(
+          graph, "compiled_execute", semantic_id,
+          turbo_harness_compiled_graph_node, binding) != TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_set_entry(graph, "compiled_execute") != TURBO_GRAPH_EXEC_OK) {
+    rc = SALTS_EIO;
+    goto fail;
+  }
+
+  if (!checkpoint_id) {
+    initial_state = json_create_object();
+    if (!initial_state ||
+        turbo_runtime_json_object_set_string(
+            initial_state, "compiled_plan_hash", binding->plan_hash) !=
+            TURBO_RUNTIME_JSON_OK ||
+        turbo_runtime_json_object_set_string(
+            initial_state, "compiled_attempt_id", binding->attempt_id) !=
+            TURBO_RUNTIME_JSON_OK ||
+        turbo_runtime_json_object_set_string(
+            initial_state, "compiled_tool_name", name) !=
+            TURBO_RUNTIME_JSON_OK) {
+      rc = SALTS_ENOMEM;
+      goto fail;
+    }
+    if (interrupt_before_tool) {
+      graph_options.interrupt_before_nodes = interrupt_names;
+      graph_options.interrupt_before_count = 1;
+    }
+  } else {
+    const char *checkpoint_thread;
+    const char *session_thread = turbo_agent_session_thread_id(session);
+    if (turbo_agent_session_get_checkpoint(
+            session, checkpoint_id, &checkpoint_record) != SALTS_OK ||
+        !checkpoint_record ||
+        !(checkpoint_thread = json_get_string(checkpoint_record, "thread_id")) ||
+        !session_thread || strcmp(session_thread, checkpoint_thread) != 0) {
+      rc = SALTS_EPROTO;
+      goto fail;
+    }
+    session_options.scope = TURBO_SESSION_SCOPE_CHECKPOINT;
+    session_options.input_kind = TURBO_SESSION_INPUT_OVERRIDE;
+    session_options.checkpoint_id = checkpoint_id;
+    graph_options.skip_initial_interrupt = 1;
+  }
+
+  /* Keep the exact admitted projection alive across queue latency.
+   * The worker must not recompile against a changing registry. */
+  binding->owned_plan = plan;
+  plan = NULL;
+  execution = (turbo_agent_harness_execution_t *)calloc(1, sizeof(*execution));
+  if (!execution) {
+    rc = SALTS_ENOMEM;
+    goto fail;
+  }
+  atomic_init(&execution->ref_count, 2);
+  execution->harness = turbo_agent_harness_retain(harness);
+  execution->graph = graph;
+  graph = NULL;
+  execution->compiled_binding = binding;
+  binding = NULL;
+  if (!execution->harness) {
+    rc = SALTS_ERANGE;
+    goto fail_execution;
+  }
+
+  turbo_agent_session_submit_options_init(&submit_options);
+  submit_options.operation = checkpoint_id ?
+      TURBO_AGENT_SESSION_RESUME : TURBO_AGENT_SESSION_START;
+  submit_options.graph_options = &graph_options;
+  submit_options.session_options = checkpoint_id ? &session_options : NULL;
+  submit_options.terminal = turbo_agent_harness_terminal;
+  submit_options.terminal_user_data = execution;
+  if (options) {
+    submit_options.deadline_mono_ms = options->deadline_mono_ms;
+    submit_options.event_sink = options->event_sink;
+    submit_options.event_sink_user_data = options->event_sink_user_data;
+  }
+  rc = turbo_agent_session_submit_compiled(
+      harness->executor, session, execution->graph, initial_state,
+      &submit_options, &execution->execution);
+  if (rc != SALTS_OK) goto fail_execution;
+
+  active_ref = turbo_agent_execution_retain(execution->execution);
+  if (!active_ref) {
+    (void)turbo_agent_execution_cancel(
+        execution->execution, TURBO_CANCEL_SHUTDOWN);
+    rc = SALTS_ERANGE;
+    goto fail_running;
+  }
+  cmeta_mutex_lock(&harness->mutex);
+  harness->submitting = 0;
+  if (!execution->terminal_before_publish) {
+    harness->active_execution = active_ref;
+    active_ref = NULL;
+  }
+  cmeta_mutex_unlock(&harness->mutex);
+  turbo_agent_execution_release(active_ref);
+
+  turbo_runtime_json_destroy(checkpoint_record);
+  turbo_runtime_json_destroy(initial_state);
+  turbo_agent_executable_plan_destroy(plan);
+  *out_execution = execution;
+  return SALTS_OK;
+
+fail_running:
+  turbo_agent_harness_end_failed_submit(harness);
+  turbo_agent_harness_execution_release(execution);
+  goto cleanup;
+fail_execution:
+  turbo_agent_harness_execution_release(execution);
+  turbo_agent_harness_execution_release(execution);
+  turbo_agent_harness_end_failed_submit(harness);
+  goto cleanup;
+fail:
+  turbo_agent_harness_end_failed_submit(harness);
+cleanup:
+  turbo_graph_destroy(graph);
+  turbo_harness_compiled_binding_destroy(binding);
+  turbo_runtime_json_destroy(initial_state);
+  turbo_runtime_json_destroy(checkpoint_record);
+  turbo_agent_executable_plan_destroy(plan);
   return rc;
 }
 

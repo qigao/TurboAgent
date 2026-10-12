@@ -114,12 +114,16 @@ typedef struct turbo_agent_session_completion_s {
   void *event_sink_user_data;
   turbo_agent_session_terminal_fn terminal;
   void *terminal_user_data;
+  int compiled_only;
 } turbo_agent_session_completion_t;
 
 static int turbo_agent_session_complete(void *user_data, turbo_graph_t *graph,
     const turbo_graph_run_options_t *graph_options, turbo_cancel_token_t *cancel_token,
     json_value_t **summary, json_value_t **state) {
   turbo_agent_session_completion_t *completion = user_data;
+  if (completion->compiled_only)
+    return turbo_agent_session_complete_compiled_internal(
+        completion->session, summary, state);
   return turbo_agent_session_complete_execution_internal(completion->session, graph,
       graph_options, completion->event_sink, completion->event_sink_user_data,
       cancel_token, summary, state);
@@ -142,9 +146,9 @@ void turbo_agent_session_submit_options_init(turbo_agent_session_submit_options_
   options->operation = TURBO_AGENT_SESSION_START;
 }
 
-int turbo_agent_session_submit(cmeta_threadpool_t *executor,
+static int turbo_agent_session_submit_common(cmeta_threadpool_t *executor,
     turbo_agent_session_t *session, turbo_graph_t *graph, const json_value_t *input,
-    const turbo_agent_session_submit_options_t *options,
+    const turbo_agent_session_submit_options_t *options, int compiled_only,
     turbo_agent_execution_t **out_execution) {
   turbo_agent_session_submit_options_t defaults;
   turbo_agent_session_completion_t *completion;
@@ -187,6 +191,7 @@ int turbo_agent_session_submit(cmeta_threadpool_t *executor,
   completion->event_sink_user_data = options->event_sink_user_data;
   completion->terminal = options->terminal;
   completion->terminal_user_data = options->terminal_user_data;
+  completion->compiled_only = compiled_only;
   execution_options.deadline_mono_ms = options->deadline_mono_ms;
   hooks.complete = turbo_agent_session_complete;
   hooks.terminal = turbo_agent_session_terminal;
@@ -205,6 +210,22 @@ int turbo_agent_session_submit(cmeta_threadpool_t *executor,
   /* Accepted work may already have freed completion before submit returns. */
   if (rc != SALTS_OK) free(completion);
   return rc;
+}
+
+int turbo_agent_session_submit(cmeta_threadpool_t *executor,
+    turbo_agent_session_t *session, turbo_graph_t *graph, const json_value_t *input,
+    const turbo_agent_session_submit_options_t *options,
+    turbo_agent_execution_t **out_execution) {
+  return turbo_agent_session_submit_common(
+      executor, session, graph, input, options, 0, out_execution);
+}
+
+int turbo_agent_session_submit_compiled(cmeta_threadpool_t *executor,
+    turbo_agent_session_t *session, turbo_graph_t *graph, const json_value_t *input,
+    const turbo_agent_session_submit_options_t *options,
+    turbo_agent_execution_t **out_execution) {
+  return turbo_agent_session_submit_common(
+      executor, session, graph, input, options, 1, out_execution);
 }
 
 /* === Preset execution =============================================== */

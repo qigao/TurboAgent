@@ -57,15 +57,15 @@ if(BUILD_TESTS)
     endforeach()
     target_compile_definitions(praktor_dso_fixture_n PRIVATE
       PRAKTOR_DSO_EPOCH=41
-      "PRAKTOR_DSO_PLUGIN_ID=\\\"test.turboagent.praktor.provider.N\\\"")
+      "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.praktor.provider.N\"")
     target_compile_definitions(praktor_dso_fixture_n1 PRIVATE
       PRAKTOR_DSO_EPOCH=42
-      "PRAKTOR_DSO_PLUGIN_ID=\\\"test.turboagent.praktor.provider.N1\\\"")
+      "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.praktor.provider.N1\"")
     target_include_directories(test_turbo_praktor_dso_replacement PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     target_compile_definitions(test_turbo_praktor_dso_replacement PRIVATE
-      "PRAKTOR_DSO_N_PATH=\\\"$<TARGET_FILE:praktor_dso_fixture_n>\\\""
-      "PRAKTOR_DSO_N1_PATH=\\\"$<TARGET_FILE:praktor_dso_fixture_n1>\\\"")
+      "PRAKTOR_DSO_N_PATH=\"$<TARGET_FILE:praktor_dso_fixture_n>\""
+      "PRAKTOR_DSO_N1_PATH=\"$<TARGET_FILE:praktor_dso_fixture_n1>\"")
     add_dependencies(test_turbo_praktor_dso_replacement
       praktor_dso_fixture_n praktor_dso_fixture_n1)
     set_tests_properties(test_turbo_praktor_dso_replacement PROPERTIES TIMEOUT 60)

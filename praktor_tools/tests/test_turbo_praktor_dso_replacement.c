@@ -369,7 +369,7 @@ spec("real Provider DSO generation N to N+1 hot replacement") {
                                      memory_order_acquire), 0);
     check_equal(turbo_agent_runtime_store_get_json_status(
         turbo_agent_session_runtime(old_session), "praktor_template_attempts",
-        "021_dso_generation_N_attempt_N", &old_attempt), SALTS_OK);
+        "016_dso_generation_N_attempt_N", &old_attempt), SALTS_OK);
     check_equal(json_get_string(old_attempt, "phase"), "committed");
     json_free(old_attempt);
 

@@ -39,6 +39,7 @@ expected = [
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_dso_close_failure.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_destroy_barrier.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_partial_destroy.c",
+    agent / "cmake/ci/provider-dso-sanitizer/test_provider_registry_repeated_close_failures.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_generation_drain_close_failure.c",
     agent / "cmake/ci/provider-dso-sanitizer/test_provider_multigeneration_isolated_drain.c",
     agent / "praktor_tools/tests/praktor_dso_provider.c",
@@ -70,6 +71,7 @@ libs = [
     build / "test_provider_dso_close_failure",
     build / "test_provider_registry_destroy_barrier",
     build / "test_provider_registry_partial_destroy",
+    build / "test_provider_registry_repeated_close_failures",
     build / "test_provider_generation_drain_close_failure",
     build / "test_provider_multigeneration_isolated_drain",
 ]
@@ -305,5 +307,34 @@ for endpoint in (
                      partial_symbols):
         raise SystemExit(f"FAIL: partial destroy image lacks {endpoint}")
     print(f"PARTIAL DESTROY DEFINED: {endpoint}")
+
+
+# Repeated close failures must exercise the source-backed Registry and
+# authentic native loader through the test-only deterministic schedule shim.
+repeated_map = build / "provider_registry_repeated_close_failures.map"
+if not repeated_map.is_file():
+    raise SystemExit("FAIL: repeated Registry close linker map missing")
+repeated_link = repeated_map.read_text(encoding="utf-8", errors="replace")
+for member in ("plugin_registry.c.o", "plugin_posix.c.o", "close_fault_hook.c.o"):
+    if not re.search(
+        r"libprovider_dso_firstparty_runtime\.a\(" + re.escape(member) + r"\)",
+        repeated_link,
+    ):
+        raise SystemExit(f"FAIL: repeated destroy image lacks instrumented {member}")
+    print(f"REPEATED CLOSE SOURCE LINKED: {member}")
+repeated_symbols = subprocess.run(
+    ["nm", "--defined-only",
+     str(build / "test_provider_registry_repeated_close_failures")],
+    capture_output=True, text=True, check=True,
+).stdout
+for endpoint in ("cmeta_plugin_registry_destroy", "cmeta_plugin_registry_load",
+                 "cmeta_plugin_registry_acquire", "cmeta_plugin_platform_close",
+                 "cmeta_plugin_platform_close_real",
+                 "provider_close_fault_arm_sequence",
+                 "provider_close_fault_sequence_calls"):
+    if not re.search(r"(?m)^\S+\s+[TW]\s+" + endpoint + r"$",
+                     repeated_symbols):
+        raise SystemExit(f"FAIL: repeated close image lacks {endpoint}")
+    print(f"REPEATED CLOSE SOURCE DEFINED: {endpoint}")
 
 print(f"PASS: {kind} first-party objects, Sanitizer symbols, extracted-archive audit")

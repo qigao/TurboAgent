@@ -175,10 +175,22 @@ jobs:
           SDK_PRESET: ${{ matrix.preset }}
         run: ctest --preset "$SDK_PRESET"
 
+      - name: Stress Provider DSO terminal/unload (Unix)
+        if: matrix.rid == 'linux-x64' || matrix.rid == 'macos-arm64'
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: ctest --preset "$SDK_PRESET" -R test_turbo_component_dso_lifecycle --repeat until-fail:25 --output-on-failure
+
       - name: Test on Windows
         if: runner.os == 'Windows' && matrix.tests
         shell: cmd
         run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release
+
+      - name: Stress Provider DSO terminal/unload (Windows)
+        if: matrix.rid == 'windows-x64'
+        shell: cmd
+        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release -R test_turbo_component_dso_lifecycle --repeat until-fail:25 --output-on-failure
 
       - name: Install on Unix
         if: runner.os != 'Windows'

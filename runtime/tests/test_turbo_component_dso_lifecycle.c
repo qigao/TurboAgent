@@ -110,6 +110,80 @@ static void provider_dso_concurrent_unload(void *arg) {
       race->registry, race->old_ref);
 }
 
+
+/* Race only the public, synchronized ComponentPlugin APIs. The scope is
+ * released after the native callback thread joins: unloading code that is
+ * still on a stack is never an admissible outcome. */
+typedef struct provider_dso_terminal_race {
+  salts_component_plugin_runtime *runtime;
+  salts_component_plugin_generation *generation;
+  salts_component_plugin_scope *scope;
+  cmeta_plugin_registry *registry;
+  cmeta_plugin_ref ref;
+  atomic_int initial_busy_ready;
+  atomic_int release_gate;
+  salts_component_plugin_status initial_drain;
+  cmeta_plugin_status initial_unload;
+  salts_component_plugin_status scope_release;
+  salts_component_plugin_status final_drain;
+  cmeta_plugin_status poll_result;
+  cmeta_plugin_status final_unload;
+  int busy_polls;
+  atomic_int timed_out;
+  bool quiescent;
+} provider_dso_terminal_race;
+
+static void provider_dso_terminal_drainer(void *arg) {
+  provider_dso_terminal_race *race = (provider_dso_terminal_race *)arg;
+  uint64_t stop;
+  race->initial_drain = salts_component_plugin_generation_drain(
+      race->runtime, race->generation);
+  race->initial_unload = cmeta_plugin_registry_unload(
+      race->registry, race->ref);
+  atomic_store_explicit(&race->initial_busy_ready, 1, memory_order_release);
+  stop = cmeta_monotonic_ms() + UINT64_C(10000);
+  while (!atomic_load_explicit(&race->release_gate, memory_order_acquire) &&
+         cmeta_monotonic_ms() < stop)
+    cmeta_thread_yield();
+  if (!atomic_load_explicit(&race->release_gate, memory_order_acquire)) {
+    atomic_store_explicit(&race->timed_out, 1, memory_order_release);
+    return;
+  }
+  /* Race the last scope release. BUSY is expected until the count reaches
+   * zero; OK can occur only after Salts has settled the generation. */
+  race->final_drain = SALTS_COMPONENT_PLUGIN_BUSY;
+  while (cmeta_monotonic_ms() < stop) {
+    race->final_drain = salts_component_plugin_generation_drain(
+        race->runtime, race->generation);
+    if (race->final_drain != SALTS_COMPONENT_PLUGIN_BUSY) break;
+    ++race->busy_polls;
+    cmeta_thread_yield();
+  }
+  if (race->final_drain == SALTS_COMPONENT_PLUGIN_BUSY) {
+    atomic_store_explicit(&race->timed_out, 1, memory_order_release);
+    return;
+  }
+  if (race->final_drain != SALTS_COMPONENT_PLUGIN_OK) return;
+  race->poll_result = cmeta_plugin_registry_poll_quiescent(
+      race->registry, race->ref, &race->quiescent);
+  if (race->poll_result == CMETA_PLUGIN_OK && race->quiescent)
+    race->final_unload = cmeta_plugin_registry_unload(
+        race->registry, race->ref);
+}
+
+static void provider_dso_terminal_releaser(void *arg) {
+  provider_dso_terminal_race *race = (provider_dso_terminal_race *)arg;
+  const uint64_t stop = cmeta_monotonic_ms() + UINT64_C(10000);
+  while (!atomic_load_explicit(&race->release_gate, memory_order_acquire) &&
+         cmeta_monotonic_ms() < stop)
+    cmeta_thread_yield();
+  if (!atomic_load_explicit(&race->release_gate, memory_order_acquire)) {
+    atomic_store_explicit(&race->timed_out, 1, memory_order_release);
+    return;
+  }
+  race->scope_release = salts_component_plugin_scope_release(race->scope);
+}
+
 static void provider_dso_control_init(
     praktor_dso_control *control, provider_dso_host *host,
     int block_until_cancel) {
@@ -277,4 +351,97 @@ spec("cross-platform real Provider DSO close, drain, unload") {
         &registry, new_ref), CMETA_PLUGIN_OK);
     check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
   }
+  it("races final scope release against drain and real module unload after callback terminal") {
+    const cmeta_plugin_registry_config plugin_config = {1};
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref ref = {0};
+    provider_generation_fixture n = {0};
+    salts_component_plugin_runtime runtime = SALTS_COMPONENT_PLUGIN_RUNTIME_INIT;
+    salts_component_plugin_generation *retired = NULL;
+    salts_component_plugin_scope scope = SALTS_COMPONENT_PLUGIN_SCOPE_INIT;
+    provider_dso_host host = {0};
+    provider_dso_call call = {0};
+    provider_dso_terminal_race race = {0};
+    cmeta_thread_t callback_thread = {0};
+    cmeta_thread_t drainer = {0}, releaser = {0};
+    int entered, busy_ready;
+    const uint64_t stop = cmeta_monotonic_ms() + UINT64_C(10000);
+
+    atomic_init(&host.cancel, 0);
+    provider_dso_control_init(&call.control, &host, 1);
+    check_equal(cmeta_plugin_registry_init(&registry, &plugin_config),
+                CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_load(
+        &registry, PRAKTOR_DSO_N_PATH, &ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_start(&registry, ref), CMETA_PLUGIN_OK);
+    check_equal(provider_dso_build(&n, UINT64_C(41), &registry, ref),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_init(&runtime),
+                SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_publish(
+        &runtime, &n.generation, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_null(retired);
+    check_equal(salts_component_plugin_scope_acquire(
+        &runtime, &scope), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(provider_dso_bind(&scope, &call.gate));
+    check_equal(cmeta_thread_create(
+        &callback_thread, provider_dso_invoke, &call), SALTS_OK);
+    while (!atomic_load_explicit(&call.control.entered, memory_order_acquire) &&
+           cmeta_monotonic_ms() < stop)
+      cmeta_thread_yield();
+    entered = atomic_load_explicit(
+        &call.control.entered, memory_order_acquire);
+    check_true(entered);
+
+    check_equal(salts_component_plugin_runtime_close(
+        &runtime, &retired), SALTS_COMPONENT_PLUGIN_OK);
+    check_true(retired == &n.generation);
+    check_equal(cmeta_plugin_registry_request_stop(
+        &registry, ref), CMETA_PLUGIN_OK);
+
+    race.runtime = &runtime;
+    race.generation = &n.generation;
+    race.scope = &scope;
+    race.registry = &registry;
+    race.ref = ref;
+    atomic_init(&race.initial_busy_ready, 0);
+    atomic_init(&race.release_gate, 0);
+    atomic_init(&race.timed_out, 0);
+    check_equal(cmeta_thread_create(
+        &drainer, provider_dso_terminal_drainer, &race), SALTS_OK);
+    while (!atomic_load_explicit(&race.initial_busy_ready,
+                                 memory_order_acquire) &&
+           cmeta_monotonic_ms() < stop)
+      cmeta_thread_yield();
+    busy_ready = atomic_load_explicit(
+        &race.initial_busy_ready, memory_order_acquire);
+    check_true(busy_ready);
+    check_equal(race.initial_drain, SALTS_COMPONENT_PLUGIN_BUSY);
+    check_equal(race.initial_unload, CMETA_PLUGIN_BUSY);
+
+    /* The completion itself does NOT retire an application-owned scope. */
+    atomic_store_explicit(&host.cancel, 1, memory_order_release);
+    check_equal(cmeta_thread_join(&callback_thread), SALTS_OK);
+    check_equal(call.result, -41);
+    check_true(atomic_load_explicit(
+        &call.control.exited, memory_order_acquire));
+    check_equal(salts_component_plugin_generation_drain(
+        &runtime, &n.generation), SALTS_COMPONENT_PLUGIN_BUSY);
+
+    check_equal(cmeta_thread_create(
+        &releaser, provider_dso_terminal_releaser, &race), SALTS_OK);
+    atomic_store_explicit(&race.release_gate, 1, memory_order_release);
+    check_equal(cmeta_thread_join(&releaser), SALTS_OK);
+    check_equal(cmeta_thread_join(&drainer), SALTS_OK);
+    check_equal(atomic_load_explicit(&race.timed_out, memory_order_acquire), 0);
+    check_equal(race.scope_release, SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(race.final_drain, SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(race.poll_result, CMETA_PLUGIN_OK);
+    check_true(race.quiescent);
+    check_equal(race.final_unload, CMETA_PLUGIN_OK);
+    check_equal(salts_component_plugin_runtime_destroy(
+        &runtime), SALTS_COMPONENT_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
+  }
+
 }

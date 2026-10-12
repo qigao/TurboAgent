@@ -130,7 +130,7 @@ spec("approved Praktor asynchronous Session Checkpoint") {
         registry, "praktor_session_A", turbo_agent_runtime_store_memory_create());
     json_value_t *args = json_create_object();
     turbo_agent_template_plan_t *plan = session_plan(registry, args);
-    turbo_praktor_template_session_run_t *first = NULL, *second = NULL, *third = NULL;
+    turbo_praktor_template_session_run_t *first = NULL, *second = NULL, *third = NULL, *denied = NULL;
     turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_FAILED;
     json_value_t *summary = NULL, *state = NULL;
     char *checkpoint_id = NULL;
@@ -156,6 +156,29 @@ spec("approved Praktor asynchronous Session Checkpoint") {
     json_free(summary); json_free(state);
     summary = state = NULL;
     turbo_praktor_template_session_run_release(first);
+
+    /* Exact checkpoint without an approved host receipt must never reach
+     * Praktor. A second resume with a wrong attempt/approval identity is
+     * equally forbidden, even though the compiled plan hash is unchanged. */
+    check_equal(turbo_praktor_template_session_submit(
+        pool, session, plan, "first_attempt", "host_approval_1",
+        checkpoint_id, 0, 0, &denied), SALTS_OK);
+    check_equal(turbo_praktor_template_session_run_wait(denied, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_praktor_template_session_run_status(denied, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_FAILED);
+    check_equal(probe.inspect + probe.change + probe.verify, 0);
+    turbo_praktor_template_session_run_release(denied);
+    denied = NULL;
+
+    check_equal(turbo_praktor_template_session_submit(
+        pool, session, plan, "forged_attempt", "host_approval_1",
+        checkpoint_id, 0, 0, &denied), SALTS_OK);
+    check_equal(turbo_praktor_template_session_run_wait(denied, UINT64_MAX), SALTS_OK);
+    check_equal(turbo_praktor_template_session_run_status(denied, &status), SALTS_OK);
+    check_equal(status, TURBO_AGENT_EXECUTION_FAILED);
+    check_equal(probe.inspect + probe.change + probe.verify, 0);
+    turbo_praktor_template_session_run_release(denied);
+    denied = NULL;
 
     check_equal(turbo_praktor_template_approval_commit(
         turbo_agent_session_runtime(session), plan, "praktor_session_A",

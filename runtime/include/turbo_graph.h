@@ -42,6 +42,10 @@ typedef struct turbo_graph_exec_ctx_s {
   int stop;
   turbo_event_sink_json_value_fn event_sink;
   void *event_sink_user_data;
+  /** Borrowed cancellation/deadline token for this synchronous node callback.
+   * NULL for non-controlled Graph execution. Providers must not retain it;
+   * cancellation is cooperative and never authorizes a tool invocation. */
+  const turbo_cancel_token_t *cancel_token;
 } turbo_graph_exec_ctx_t;
 
 typedef int (*turbo_graph_node_fn)(turbo_graph_exec_ctx_t *ctx, void *user_data);

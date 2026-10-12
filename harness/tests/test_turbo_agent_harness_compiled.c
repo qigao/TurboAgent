@@ -778,8 +778,13 @@ spec("Harness bounded asynchronous compiled Inspect") {
         harness, &config, compiled_inspect_source,
         strlen(compiled_inspect_source), "busy_one",
         NULL, 0, NULL, &first), SALTS_OK);
-    while (!atomic_load_explicit(&probe.entered, memory_order_acquire))
-      cmeta_thread_yield();
+    {
+      const uint64_t deadline = cmeta_monotonic_ms() + UINT64_C(10000);
+      while (!atomic_load_explicit(&probe.entered, memory_order_acquire) &&
+             cmeta_monotonic_ms() < deadline)
+        cmeta_thread_yield();
+      check_true(atomic_load_explicit(&probe.entered, memory_order_acquire));
+    }
     check_equal(turbo_agent_harness_submit_compiled_inspect_graph_json(
         harness, &config, compiled_inspect_source,
         strlen(compiled_inspect_source), "busy_two",

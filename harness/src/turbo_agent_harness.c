@@ -1118,6 +1118,165 @@ cleanup:
   return rc;
 }
 
+enum { TURBO_HARNESS_PRAKTOR_MAX_YAML_BYTES = 256 * 1024 };
+
+/* Compile-only review gate for three-step Change/Repair templates. The
+ * compiler supplies the canonical names and frozen effect facts; this gate
+ * never consults the model's original untrusted tool-name strings. */
+static int turbo_harness_praktor_certificate_admitted(
+    const json_value_t *certificate) {
+  const json_value_t *dag = certificate ? json_object_get(certificate, "dag") : NULL;
+  const json_value_t *steps = dag ? json_object_get(dag, "steps") : NULL;
+  size_t i;
+  if (!steps || json_type(steps) != JSON_ARRAY ||
+      json_array_size(steps) != 3) return 0;
+  for (i = 0; i < 3; ++i) {
+    const json_value_t *step = json_array_get(steps, i);
+    int64_t effects, retry, flags;
+    if (!step || json_type(step) != JSON_OBJECT ||
+        !json_get_string(step, "tool")) return 0;
+    effects = turbo_runtime_json_value_as_int64(
+        json_object_get(step, "effect_flags"), -1);
+    retry = turbo_runtime_json_value_as_int64(
+        json_object_get(step, "retry_limit"), -1);
+    flags = turbo_runtime_json_value_as_int64(
+        json_object_get(step, "flags"), -1);
+    if (retry != 0 || effects <= 0 ||
+        (effects & TURBO_TOOL_EFFECT_UNKNOWN) ||
+        (effects & ~((int64_t)TURBO_TOOL_EFFECT_KNOWN_MASK)))
+      return 0; /* No implicit retry or guessed optimizer authority. */
+    if (i != 1) {
+      if (flags != TURBO_AGENT_DAG_STEP_NONE ||
+          !(effects == TURBO_TOOL_EFFECT_PURE ||
+            ((effects & TURBO_TOOL_EFFECT_READ) &&
+             !(effects & ~(TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK)))))
+        return 0;
+    } else {
+      if (flags != (TURBO_AGENT_DAG_STEP_APPROVAL_BEFORE |
+                    TURBO_AGENT_DAG_STEP_CHECKPOINT_AFTER) ||
+          (effects & TURBO_TOOL_EFFECT_PURE) ||
+          !(effects & (TURBO_TOOL_EFFECT_WRITE |
+                       TURBO_TOOL_EFFECT_EXTERNAL_MUTATION)))
+        return 0;
+    }
+  }
+  return 1;
+}
+
+int turbo_agent_harness_prepare_praktor_template(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const turbo_agent_change_source_t *change_source,
+    const turbo_agent_repair_source_t *repair_source,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    json_value_t **out_bundle) {
+  const turbo_tool_registry_t *registry;
+  turbo_agent_template_plan_t *plan = NULL;
+  turbo_agent_praktor_inline_source_t *lowered = NULL;
+  turbo_agent_praktor_lowering_diagnostic_t lower_diag = {0};
+  turbo_agent_compile_status_t status;
+  json_value_t *certificate = NULL, *bundle = NULL, *bool_value = NULL;
+  const char *yaml, *source_id;
+  size_t yaml_size;
+  int rc;
+
+  if (out_bundle) *out_bundle = NULL;
+  if (out_diagnostic) memset(out_diagnostic, 0, sizeof(*out_diagnostic));
+  if (!harness || !compiler_config ||
+      !compiler_config->deny_unlisted_capabilities || !out_bundle ||
+      (!!change_source == !!repair_source)) return SALTS_EINVAL;
+
+  rc = turbo_agent_harness_begin_submit(harness);
+  if (rc != SALTS_OK) return rc;
+
+  registry = turbo_agent_app_tool_registry(harness->app);
+  if (!registry) {
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
+        "Harness has no RuntimeTools registry");
+    goto done;
+  }
+  status = change_source
+      ? turbo_agent_compile_change_template(
+            compiler_config, registry, change_source, &plan, out_diagnostic)
+      : turbo_agent_compile_repair_template(
+            compiler_config, registry, repair_source, &plan, out_diagnostic);
+  if (status != TURBO_AGENT_COMPILE_OK || !plan) {
+    rc = SALTS_EPROTO;
+    goto done;
+  }
+
+  certificate = turbo_agent_template_plan_certificate_json_value(plan);
+  if (!certificate) {
+    rc = SALTS_ENOMEM;
+    goto done;
+  }
+  if (!turbo_harness_praktor_certificate_admitted(certificate)) {
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
+        "Praktor preview requires declared effects, approval and zero retries");
+    goto done;
+  }
+  if (turbo_agent_template_lower_praktor_inline(
+          plan, &lowered, &lower_diag) != TURBO_AGENT_PRAKTOR_LOWERING_OK ||
+      !lowered) {
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
+        lower_diag.message[0] ? lower_diag.message : "Praktor lowering rejected");
+    goto done;
+  }
+
+  yaml = turbo_agent_praktor_inline_source_yaml(lowered);
+  yaml_size = turbo_agent_praktor_inline_source_yaml_size(lowered);
+  source_id = turbo_agent_praktor_inline_source_id(lowered);
+  if (!yaml || !source_id || !yaml_size ||
+      yaml_size > TURBO_HARNESS_PRAKTOR_MAX_YAML_BYTES ||
+      strlen(yaml) != yaml_size ||
+      turbo_agent_praktor_inline_source_plan_hash(lowered) !=
+          turbo_agent_template_plan_hash(plan)) {
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_PLAN_LIMIT,
+        "lowered source is oversized or does not match frozen plan identity");
+    goto done;
+  }
+
+  bundle = json_create_object();
+  bool_value = json_create_bool(0);
+  if (!bundle || !bool_value ||
+      turbo_runtime_json_object_set_string(bundle, "backend", "praktor_inline") !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(bundle, "source_id", source_id) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(bundle, "yaml", yaml) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(bundle, "yaml_bytes", (int64_t)yaml_size) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set(bundle, "executable", bool_value) !=
+          TURBO_RUNTIME_JSON_OK) {
+    rc = SALTS_ENOMEM;
+    goto done;
+  }
+  bool_value = NULL;
+  if (turbo_runtime_json_object_set(bundle, "certificate", certificate) !=
+      TURBO_RUNTIME_JSON_OK) {
+    rc = SALTS_ENOMEM;
+    goto done;
+  }
+  certificate = NULL;
+  *out_bundle = bundle;
+  bundle = NULL;
+  rc = SALTS_OK;
+
+done:
+  turbo_runtime_json_destroy(bool_value);
+  turbo_runtime_json_destroy(bundle);
+  turbo_runtime_json_destroy(certificate);
+  turbo_agent_praktor_inline_source_destroy(lowered);
+  turbo_agent_template_plan_destroy(plan);
+  turbo_agent_harness_end_failed_submit(harness);
+  return rc;
+}
+
 static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,
                                       turbo_agent_session_operation_t operation,
                                       const json_value_t *input,

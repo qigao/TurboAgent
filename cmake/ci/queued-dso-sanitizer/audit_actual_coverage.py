@@ -52,8 +52,9 @@ def object_path(row: dict[str, str]) -> Path | None:
 
 
 def main() -> None:
-    if len(sys.argv) != 5:
-        refuse("usage: audit.py <build> <repo-root> <thread|address> <sdk-provenance>")
+    if len(sys.argv) not in (5, 7):
+        refuse("usage: audit.py <build> <repo-root> <thread|address> "
+               "<sdk-provenance> [<salts-source-build> <salts-source-root>]")
     build, root = (Path(sys.argv[i]).resolve() for i in (1, 2))
     kind = sys.argv[3]
     provenance = Path(sys.argv[4]).resolve()
@@ -131,6 +132,56 @@ def main() -> None:
     if not any(x in maps for x in ("libturbo_agent_harness.so", "libpraktor_tools.so")):
         refuse("linked test map lacks actual TurboAgent runtime shared libraries")
 
+    # The integrated phase must prove actual linker extraction of the exact
+    # source-built Plugin/ComponentPlugin/Loader archives, not merely that
+    # an instrumented Salts archive happened to exist on disk.
+    salts_in_process = False
+    salts_report = None
+    if len(sys.argv) == 7:
+        salts_build = Path(sys.argv[5]).resolve()
+        salts_source = Path(sys.argv[6]).resolve()
+        built_report = Path(os.environ["RUNNER_TEMP"]).resolve() / (
+            "queued-salts-source-" + kind + ".json"
+        )
+        if not built_report.is_file():
+            refuse("exact Salts source-build audit is absent")
+        salts_report = json.loads(built_report.read_text(encoding="utf-8"))
+        installed_source = Path(
+            salts_report["installed_source_sdk"]
+        ).resolve()
+        if installed_source != Path(os.environ["SALTS_ROOT"]).resolve():
+            refuse("linked Salts_ROOT does not identify the source-built SDK")
+        if salts_report.get("salts_source_commit") != sdk["salts_source_sha"]:
+            refuse("source-built Salts commit differs from release source pin")
+        if not salts_source.is_dir() or not salts_build.is_dir():
+            refuse("missing source-build paths")
+
+        source_maps = [maps]
+        extra = build / "praktor_tools/praktor_tools_sanitizer.map"
+        if not extra.is_file():
+            refuse("source-built Salts integration linker map absent")
+        source_maps.append(extra.read_text(
+            encoding="utf-8", errors="replace"
+        ))
+        all_maps = "\n".join(source_maps)
+        wanted = (
+            ("libcmeta_plugin.a", "plugin_registry.c.o"),
+            ("libcmeta_plugin.a", "plugin_posix.c.o"),
+            ("libsalts_component_plugin.a", "component_plugin.c.o"),
+            ("libsalts_component_plugin.a", "component_plugin_runtime.c.o"),
+        )
+        for lib, member in wanted:
+            pat = re.escape(lib) + r"\(" + re.escape(member) + r"\)"
+            if not re.search(pat, all_maps):
+                refuse(f"source-built Salts archive member not extracted: {lib}({member})")
+            if installed_source.as_posix() not in all_maps:
+                refuse("linker map does not contain exact source SDK prefix")
+            print(f"INTEGRATED SALTS SOURCE OBJECT: {lib}({member})", flush=True)
+        old_sdk = Path(salts_report["original_release_sdk"]).resolve()
+        if old_sdk.as_posix() in all_maps:
+            refuse("source-integrated executable still links old released Salts SDK")
+        salts_in_process = True
+
     report = {
         "test_target": "test_turbo_praktor_dso_compiled_harness",
         "sanitizer": kind, "expected_flags": list(expected_flags),
@@ -138,11 +189,16 @@ def main() -> None:
         "firstparty_sources": actually_built,
         "critical_sources": sorted(EXPECTED),
         "instrumented_images": list(INSTRUMENTED_IMAGES),
-        "upstream_salts_registry_component_loader_source_in_this_process": False,
+        "upstream_salts_registry_component_loader_source_in_this_process": salts_in_process,
+        "upstream_salts_source_build": salts_report,
         "upstream_dependency_status": (
+            "Salts Plugin/ComponentPlugin/Loader linked from exact source-built "
+            "instrumented SDK, with extracted archive members in actual maps. "
+            "Other released SDKs (SaltsUtils, CHttp, TurboScript, Praktor, "
+            "TurboWasm) remain external uninstrumented dependencies."
+            if salts_in_process else
             "Salts Plugin/ComponentPlugin linked from exact released SDK; "
-            "NOT part of this process's source-sanitizer coverage. "
-            "Do not call #119 full-source-qualified yet."
+            "NOT part of this process's source-sanitizer coverage."
         ),
         "sdk_provenance": sdk,
         "tested_commit": os.environ.get("GITHUB_SHA", "unknown"),
@@ -153,7 +209,10 @@ def main() -> None:
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8")
     print(f"SANITIZER SOURCE COVERAGE: {len(actually_built)} actual objects, {kind}")
-    print("UPSTREAM SALTS REGISTRY/LOADER: UNINSTRUMENTED RELEASE SDK, GAP OPEN")
+    print("UPSTREAM SALTS REGISTRY/LOADER: " +
+          ("SOURCE-INSTRUMENTED SAME PROCESS, critical members extracted"
+           if salts_in_process else
+           "UNINSTRUMENTED RELEASE SDK, GAP OPEN"))
     print(f"COVERAGE EVIDENCE: {path}", flush=True)
 
 

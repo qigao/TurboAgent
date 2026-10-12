@@ -464,7 +464,8 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
       rc = SALTS_EINVAL;
       goto done;
     }
-    width = snprintf(record_id, sizeof(record_id), "%s:%s", thread_id, attempt_id);
+    width = snprintf(record_id, sizeof(record_id), "%03u_%s_%s",
+                     (unsigned)strlen(thread_id), thread_id, attempt_id);
     if (width < 0 || (size_t)width >= sizeof(record_id)) {
       rc = SALTS_EINVAL;
       goto done;

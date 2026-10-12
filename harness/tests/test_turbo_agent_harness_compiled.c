@@ -37,7 +37,8 @@ static int compiled_inspect_handler(const json_value_t *arguments,
     return *out_result ? 0 : -1;
   }
   result = json_create_object();
-  if (!result || json_object_set_bool(result, "ok", true) != 0) {
+  if (!result || turbo_runtime_json_object_set(result, "ok", json_create_bool(1)) !=
+                     TURBO_RUNTIME_JSON_OK) {
     json_free(result);
     return -1;
   }
@@ -55,8 +56,8 @@ static turbo_tool_status_t register_compiled_inspect(
   definition.definition.name = "repo.inspect";
   definition.definition.description = "Read-only Harness tool";
   definition.definition.parameters_json =
-      "{\\"type\\":\\"object\\",\\"properties\\":{\\"value\\":{\\"type\\":\\"string\\"}},"
-      "\\"required\\":[\\"value\\"],\\"additionalProperties\\":false}";
+      "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},"
+      "\"required\":[\"value\"],\"additionalProperties\":false}";
   definition.definition.json_value_handler = compiled_inspect_handler;
   definition.definition.user_data = probe;
   definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
@@ -64,8 +65,8 @@ static turbo_tool_status_t register_compiled_inspect(
   definition.required_capabilities = required;
   definition.required_capability_count = 1;
   definition.result_schema_json =
-      "{\\"type\\":\\"object\\",\\"properties\\":{\\"ok\\":{\\"type\\":\\"boolean\\"}},"
-      "\\"required\\":[\\"ok\\"],\\"additionalProperties\\":false}";
+      "{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},"
+      "\"required\":[\"ok\"],\"additionalProperties\":false}";
   definition.strict_result = strict_result;
   definition.effect_flags = effects;
   return turbo_tool_registry_add_v6(registry, &definition);
@@ -77,7 +78,7 @@ static turbo_agent_harness_t *make_compiled_harness(
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t config;
   session_config.runtime_store = turbo_agent_runtime_store_memory_create();
-  session_config.agent_config.model = "test";
+  session_config.agent_config.model = "gpt-5.4";
   session_config.agent_config.transport_fn = compiled_harness_transport;
   session_config.agent_config.tool_registry = registry;
   app_config.session_config = &session_config;

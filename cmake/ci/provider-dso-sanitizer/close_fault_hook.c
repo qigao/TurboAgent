@@ -4,6 +4,7 @@
 #include <stdatomic.h>
 
 static atomic_int pending;
+static atomic_int genuine_closes_before_fault;
 static atomic_int injected;
 static atomic_int attempts;
 static atomic_int successes;
@@ -14,6 +15,13 @@ cmeta_plugin_status cmeta_plugin_platform_close_real(
     cmeta_plugin_library *library);
 
 void provider_close_fault_arm(int failures) {
+  atomic_store_explicit(&genuine_closes_before_fault, 0, memory_order_release);
+  atomic_store_explicit(&pending, failures, memory_order_release);
+}
+
+void provider_close_fault_arm_after(int genuine_closes, int failures) {
+  atomic_store_explicit(
+      &genuine_closes_before_fault, genuine_closes, memory_order_release);
   atomic_store_explicit(&pending, failures, memory_order_release);
 }
 
@@ -31,14 +39,27 @@ int provider_close_fault_native_successes(void) {
 
 cmeta_plugin_status cmeta_plugin_platform_close(
     cmeta_plugin_library *library) {
+  /* This branch deliberately forwards the first N closes to the
+   * genuine POSIX loader. The next close will fail without touching the
+   * library handle. Used to verify partial Registry destroy rollback. */
+  int skip = atomic_load_explicit(
+      &genuine_closes_before_fault, memory_order_acquire);
+  int passthrough = 0;
+  while (skip > 0) {
+    if (atomic_compare_exchange_weak_explicit(
+            &genuine_closes_before_fault, &skip, skip - 1,
+            memory_order_acq_rel, memory_order_acquire)) {
+      passthrough = 1;
+      break;
+    }
+  }
   int count = atomic_load_explicit(&pending, memory_order_acquire);
-  while (count > 0) {
+  while (!passthrough && count > 0) {
     if (atomic_compare_exchange_weak_explicit(
             &pending, &count, count - 1,
             memory_order_acq_rel, memory_order_acquire)) {
       atomic_fetch_add_explicit(&injected, 1, memory_order_relaxed);
-      /* No close, no handle mutation: emulate a failed OS close in the
-       * same return contract as the actual Salts POSIX loader. */
+      /* Simulated close failure: no native close and no handle mutation. */
       return CMETA_PLUGIN_UNLOAD_FAILED;
     }
   }

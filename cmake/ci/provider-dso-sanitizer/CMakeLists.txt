@@ -137,7 +137,7 @@ add_executable(test_provider_dso_close_failure
 target_include_directories(test_provider_dso_close_failure PRIVATE
   "${_fixture_dir}" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(test_provider_dso_close_failure PRIVATE
-  "PRAKTOR_DSO_MANAGED_PATH=\\"$<TARGET_FILE:provider_dso_instrumented_managed>\\"")
+  "PRAKTOR_DSO_MANAGED_PATH=\"$<TARGET_FILE:provider_dso_instrumented_managed>\"")
 target_link_libraries(test_provider_dso_close_failure PRIVATE
   provider_dso_firstparty_runtime Salts::TinyTest Salts::Core
   Threads::Threads ${CMAKE_DL_LIBS})

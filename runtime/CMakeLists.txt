@@ -48,3 +48,46 @@ if(BUILD_TESTS)
     FOLDER "Runtime/tests")
   target_link_libraries(test_turbo_runtime_store_sqlite PRIVATE unofficial::sqlite3::sqlite3)
 endif()
+
+
+# Qualify native Salts Provider DSO unload independently of the optional
+# PraktorTools library. In particular, Windows Praktor is OFF and macOS only
+# builds a targeted runtime test rather than enabling the whole test suite.
+if(BUILD_TESTS OR ENABLE_PROVIDER_DSO_CONFORMANCE)
+  if(NOT ANDROID)
+    set(_provider_dso_fixture_dir "${CMAKE_SOURCE_DIR}/praktor_tools/tests")
+    add_library(turboagent_component_dso_n SHARED
+      "${_provider_dso_fixture_dir}/praktor_dso_provider.c")
+    add_library(turboagent_component_dso_n1 SHARED
+      "${_provider_dso_fixture_dir}/praktor_dso_provider.c")
+    foreach(_fixture IN ITEMS turboagent_component_dso_n turboagent_component_dso_n1)
+      target_include_directories(${_fixture} PRIVATE "${_provider_dso_fixture_dir}")
+      target_link_libraries(${_fixture} PRIVATE
+        Salts::ComponentPluginABI Salts::PluginABI)
+      set_target_properties(${_fixture} PROPERTIES
+        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+        FOLDER "Runtime/tests/fixtures")
+    endforeach()
+    target_compile_definitions(turboagent_component_dso_n PRIVATE
+      PRAKTOR_DSO_EPOCH=41
+      "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.component.provider.N\"")
+    target_compile_definitions(turboagent_component_dso_n1 PRIVATE
+      PRAKTOR_DSO_EPOCH=42
+      "PRAKTOR_DSO_PLUGIN_ID=\"test.turboagent.component.provider.N1\"")
+
+    cmake_add_test(
+      SOURCES tests/test_turbo_component_dso_lifecycle.c
+      LIBS Salts::ComponentPlugin Salts::Plugin Salts::Core Salts::TinyTest
+      INCLUDES "${_provider_dso_fixture_dir}"
+      FOLDER "Runtime/tests")
+    target_compile_definitions(test_turbo_component_dso_lifecycle PRIVATE
+      "PRAKTOR_DSO_N_PATH=\"$<TARGET_FILE:turboagent_component_dso_n>\""
+      "PRAKTOR_DSO_N1_PATH=\"$<TARGET_FILE:turboagent_component_dso_n1>\"")
+    add_dependencies(test_turbo_component_dso_lifecycle
+      turboagent_component_dso_n turboagent_component_dso_n1)
+    set_tests_properties(test_turbo_component_dso_lifecycle
+      PROPERTIES TIMEOUT 60)
+    unset(_fixture)
+    unset(_provider_dso_fixture_dir)
+  endif()
+endif()

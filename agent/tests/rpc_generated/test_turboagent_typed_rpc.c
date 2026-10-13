@@ -147,6 +147,32 @@ static bool DATA_BIND_NATIVE_CALL turboagent_typed_invoke(
 }
 
 
+/* An independently reflected CMeta callable is not a valid execution ABI
+ * for the immutable generated Calc.Add MethodPlan. */
+FunctionDeclAsAbiResult(
+    value, int, &cmeta_type_int, CMETA_ABI_SCALAR,
+    CMETA_RESULT_VALUE, turboagent_typed_other,
+    (const AddRequest *, request, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &ADD_REQUEST_PTR_TYPE, CMETA_ABI_OBJECT_POINTER),
+    (AddResponse *, response, CMETA_PARAM_OUT | CMETA_PARAM_BORROWED,
+     &ADD_RESPONSE_PTR_TYPE, CMETA_ABI_OBJECT_POINTER));
+
+int turboagent_typed_other(const AddRequest *request, AddResponse *response) {
+  return turboagent_typed_add(request, response);
+}
+
+static bool DATA_BIND_NATIVE_CALL turboagent_typed_other_invoke(
+    void *context, void *return_storage, void *const *params,
+    size_t param_count) {
+  (void)context;
+  if (return_storage == NULL || params == NULL || param_count != 2u ||
+      params[0] == NULL || params[1] == NULL)
+    return false;
+  *(int *)return_storage = turboagent_typed_other(
+      (const AddRequest *)params[0], (AddResponse *)params[1]);
+  return true;
+}
+
 static chttp_client_config typed_client_config(void) {
   const chttp_server_config server = agent_http_test_server_config();
   chttp_client_config config = {0};
@@ -269,6 +295,10 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
             &ADD_REQUEST_NATIVE, &ADD_RESPONSE_NATIVE);
     DataBindNativeExecution execution =
         (DataBindNativeExecution)DATA_BIND_NATIVE_EXECUTION_INIT;
+    DataBindNativeExecution missing_invoke =
+        (DataBindNativeExecution)DATA_BIND_NATIVE_EXECUTION_INIT;
+    DataBindNativeExecution wrong_function =
+        (DataBindNativeExecution)DATA_BIND_NATIVE_EXECUTION_INIT;
     chttp_server server = {0};
     chttp_server_config server_config = agent_http_test_server_config();
     chttp_server_rpc_config rpc_config = CHTTP_SERVER_RPC_CONFIG_INIT;
@@ -317,6 +347,17 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     mount.execution = &execution;
     check_equal(chttp_server_init(&server, &server_config), SALTS_OK);
     check_equal(chttp_server_rpc_configure(&server, &rpc_config), SALTS_OK);
+    /* Invalid native execution is rejected before method admission. */
+    missing_invoke = execution;
+    missing_invoke.invoke = NULL;
+    mount.execution = &missing_invoke;
+    check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_EINVAL);
+    wrong_function.function = FunctionMeta(turboagent_typed_other);
+    wrong_function.abi = FunctionAbi(turboagent_typed_other);
+    wrong_function.invoke = turboagent_typed_other_invoke;
+    mount.execution = &wrong_function;
+    check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_EINVAL);
+    mount.execution = &execution;
     check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_OK);
     check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_EALREADY);
     check_equal(chttp_server_start(&server), SALTS_OK);
@@ -457,6 +498,8 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     int entered = 0;
     static const char bad_partial[] =
         "{\"jsonrpc\":\"2.0\",\"method\":\"calc.add\",\"params\":[3,\"not-uint\",2],\"id\":600}";
+    static const char bad_native_result[] =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"calc.add\",\"params\":[80,22,1],\"id\":602}";
     static const chttp_header json_headers[] = {
         {"Content-Type", "application/json"}, {"Accept", "application/json"}};
     chttp_response invalid_response = {0};
@@ -557,11 +600,23 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     check_true(turboagent_rpc_body_contains(&invalid_response, "\"code\":-32602"));
     check_equal(atomic_load_explicit(&probe.invoked, memory_order_acquire), 0);
     chttp_response_destroy(&invalid_response);
+    /* Provider native output sum=102 violates @Max(100); no successful
+     * response is published, and the next valid request reuses the slot. */
+    invalid_post.body = bad_native_result;
+    invalid_post.body_size = sizeof(bad_native_result) - 1u;
+    check_equal(chttp_post(&client, &invalid_post, &invalid_response,
+                           &invalid_error), SALTS_OK);
+    check_equal(invalid_response.status_code, 200u);
+    check_true(turboagent_rpc_body_contains(
+        &invalid_response, "\"code\":-32603"));
+    check_equal(atomic_load_explicit(&probe.invoked, memory_order_acquire), 1);
+    chttp_response_destroy(&invalid_response);
+    check_equal(response.sum, (uint32_t)0u);
     check_equal(chttp_client_rpc_call(&client, &call, &outcome, &call_error), SALTS_OK);
     check_equal(outcome.kind, CHTTP_CLIENT_RPC_SUCCESS);
     check_equal(response.sum, (uint32_t)11u);
     check_equal(atomic_load_explicit(
-        &probe.invoked, memory_order_acquire), 1);
+        &probe.invoked, memory_order_acquire), 2);
     check_equal(chttp_client_destroy(&client, TYPED_TIMEOUT_MS), SALTS_OK);
 
     /* A *typed asynchronous* RPC enters the actual dynamically loaded

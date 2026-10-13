@@ -30,7 +30,11 @@ if(BUILD_TESTS AND ENABLE_CODING_TOOLS)
   target_compile_definitions(test_turbo_cli_storage PRIVATE
     CLI_STORAGE_FIXTURE="$<TARGET_FILE:cli_storage_fixture>")
   add_dependencies(test_turbo_cli_storage cli_storage_fixture)
-  set_tests_properties(test_turbo_cli_storage PROPERTIES TIMEOUT 30)
+  # Journal discovery exercises many bounded synchronous SQLite fixture cases.
+  # On Windows CI the full suite exceeded 30s (individual checks succeeded);
+  # allow the suite to finish without changing any per-operation admission
+  # limits, removing assertions, or retrying failed tests.
+  set_tests_properties(test_turbo_cli_storage PROPERTIES TIMEOUT 90)
   target_include_directories(test_turbo_cli_diagnostics PRIVATE "${PROJECT_SOURCE_DIR}/agent/tests")
   target_include_directories(test_turbo_cli_vector PRIVATE "${PROJECT_SOURCE_DIR}/agent/tests")
   target_link_libraries(test_turbo_cli_vector PRIVATE CHttp::Server unofficial::sqlite3::sqlite3)

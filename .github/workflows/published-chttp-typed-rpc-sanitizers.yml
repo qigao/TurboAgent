@@ -1,0 +1,135 @@
+name: Published CHttp typed Provider DSO mixed sanitizers (partial source closure)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/published-chttp-typed-rpc-sanitizers.yml'
+      - 'agent/tests/rpc_generated/**'
+      - 'cmake/ci/chttp-rpc-sanitizer/**'
+      - 'cmake/ci/restore-native-sdk.sh'
+      - 'cmake/ci/verify-published-native-sdk.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: turboagent-chttp-typed-dso-sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  published-source:
+    if: github.repository == 'qigao/TurboAgent' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 121 && github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/test/chttp-rc5-installed-consumer-246'))
+    name: Published SDK + instrumented TurboAgent and Provider DSO / ${{ matrix.sanitizer }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [thread, address]
+    env:
+      CC: gcc
+      CXX: g++
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+      - name: Install native Linux tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build nasm
+      - name: Restore immutable released Salts, SaltsUtils, CHttp and tool SDKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s cmake/ci -p test_verify_published_native_sdk.py -v
+          bash cmake/ci/restore-native-sdk.sh linux-x64 1 1
+      - name: Verify installed SDK roots after GITHUB_ENV propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CHTTP_ROOT"
+          test -n "$SALTS_ROOT"
+          test -n "$SALTS_UTILS_ROOT"
+          test -f "$CHTTP_ROOT/lib/cmake/Chttp/ChttpConfig.cmake"
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+      - name: Configure source instrumentation of external test and real Provider DSO
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+        run: |
+          set -euo pipefail
+          if test "$KIND" = thread; then
+            cmake --preset ci-linux-release -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              -DENABLE_SANITIZER_THREAD=ON -DENABLE_SANITIZER_ADDRESS=OFF \
+              -DENABLE_SANITIZER_UNDEFINED=OFF -DENABLE_SANITIZER_LEAK=OFF
+          else
+            cmake --preset ci-linux-release -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              -DENABLE_SANITIZER_THREAD=OFF -DENABLE_SANITIZER_ADDRESS=ON \
+              -DENABLE_SANITIZER_UNDEFINED=ON -DENABLE_SANITIZER_LEAK=OFF
+          fi
+      - name: Build instrumented typed RPC test and dynamically loaded Provider
+        run: |
+          set -euo pipefail
+          cmake --build --preset ci-linux-release --target test_turboagent_typed_rpc --parallel 2
+      - name: Audit actual compiler and link commands
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+        run: |
+          set -euo pipefail
+          python3 cmake/ci/chttp-rpc-sanitizer/audit_source_coverage.py \
+            build/ci-linux-release "$KIND" \
+            | tee "$RUNNER_TEMP/chttp-typed-dso-sanitizer-$KIND.json"
+          # CHttp.Native/Salts.Native are released, UNINSTRUMENTED libraries.
+          # This test audits ONLY the first-party test + Provider DSO closure.
+      - name: Execute instrumented real DSO/typed RPC cancellation race 10x
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctest --preset ci-linux-release -R '^test_turboagent_typed_rpc$' \
+            --repeat until-fail:10 --output-on-failure
+      - name: Preserve exact sanitizer evidence and upstream coverage limitation
+        if: always()
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/chttp-typed-dso-$KIND"
+          mkdir -p "$root"
+          {
+            echo "source_head=$GITHUB_SHA"
+            echo "sanitizer=$KIND"
+            echo "upstream_chttp_and_salts_source_instrumentation=NOT_COVERED"
+            echo "exact_sdk_versions=Salts.Native:2.3.0-rc.15,SaltsUtils.Native:4.3.0-rc.10,CHttp.Native:2.1.0-rc.5"
+          } > "$root/provenance.txt"
+          for item in "$RUNNER_TEMP/chttp-typed-dso-sanitizer-$KIND.json" \
+            build/ci-linux-release/compile_commands.json \
+            build/ci-linux-release/Testing/Temporary/LastTest.log; do
+            if test -f "$item"; then cp "$item" "$root/$(basename "$item")"; fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: published-chttp-typed-dso-source-slice-${{ matrix.sanitizer }}
+          path: ${{ runner.temp }}/chttp-typed-dso-${{ matrix.sanitizer }}
+          if-no-files-found: error

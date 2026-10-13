@@ -88,11 +88,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Exercise immutable SDK release rejection contracts offline
+        shell: bash
+        run: python -m unittest discover -s cmake/ci -p test_verify_published_native_sdk.py -v
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
         with:
           mode: read
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
 
       - name: Prepare Linux toolchain
         if: runner.os == 'Linux'
@@ -170,10 +178,26 @@ jobs:
           SDK_PRESET: ${{ matrix.preset }}
         run: ctest --preset "$SDK_PRESET"
 
+      # A failed step never retries a failed operation; this executes a fresh
+      # fully owned native test process and fails on the first bad outcome.
+      - name: Repeat real Provider DSO typed RPC cancellation on Linux (20x)
+        if: runner.os == 'Linux' && matrix.tests && github.event_name == 'pull_request' && github.event.pull_request.number == 121
+        shell: bash
+        env:
+          SDK_PRESET: ${{ matrix.preset }}
+        run: |
+          set -euo pipefail
+          ctest --preset "$SDK_PRESET" -R "^test_turboagent_typed_rpc$" --repeat until-fail:20 --output-on-failure
+
       - name: Test on Windows
         if: runner.os == 'Windows' && matrix.tests
         shell: cmd
         run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release
+
+      - name: Repeat real Provider DSO typed RPC cancellation on Windows (20x)
+        if: runner.os == 'Windows' && matrix.tests && github.event_name == 'pull_request' && github.event.pull_request.number == 121
+        shell: cmd
+        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release -R "^test_turboagent_typed_rpc$" --repeat until-fail:20 --output-on-failure
 
       - name: Install on Unix
         if: runner.os != 'Windows'

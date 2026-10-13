@@ -14,16 +14,30 @@ function Restore-Sdk(
   [string]$Name,
   [string]$ConfigRelative
 ) {
-  # Include prereleases and select by publication time across all pages.
-  $releaseJson = & gh api "repos/$Repo/releases?per_page=100" --paginate --slurp
-  if ($LASTEXITCODE -ne 0) {
-    throw "failed to query releases for $Repo"
-  }
-  $releases = foreach ($page in (($releaseJson -join "`n") | ConvertFrom-Json)) { $page }
-  $tag = ($releases | Where-Object { $_.draft -eq $false -and $_.published_at } |
-    Sort-Object published_at | Select-Object -Last 1).tag_name
-  if ([string]::IsNullOrWhiteSpace($tag)) {
-    throw "failed to resolve latest published release for $Repo"
+  # Exact published CHttp 2.1.0-rc.5 Owner epoch, with no fallback.
+  switch ($Repo) {
+    'qigao/salts' {
+      $tag = 'v2.3.0-rc.15'
+      $Pattern = 'Salts.Native.2.3.0-rc.15.nupkg'
+    }
+    'qigao/salts-utils' {
+      $tag = 'v4.3.0-rc.10'
+      $Pattern = 'SaltsUtils.Native.4.3.0-rc.10.nupkg'
+    }
+    'qigao/chttp' {
+      $tag = 'v2.1.0-rc.5'
+      $Pattern = 'CHttp.Native.2.1.0-rc.5.nupkg'
+    }
+    default {
+      $releaseJson = & gh api "repos/$Repo/releases?per_page=100" --paginate --slurp
+      if ($LASTEXITCODE -ne 0) { throw "failed to query releases for $Repo" }
+      $releases = foreach ($page in (($releaseJson -join "`n") | ConvertFrom-Json)) { $page }
+      $tag = ($releases | Where-Object { $_.draft -eq $false -and $_.published_at } |
+        Sort-Object published_at | Select-Object -Last 1).tag_name
+      if ([string]::IsNullOrWhiteSpace($tag)) {
+        throw "failed to resolve latest published release for $Repo"
+      }
+    }
   }
   $tag = $tag.Trim()
   [Console]::Error.WriteLine("Restoring $Repo@$tag ($Rid)")
@@ -48,6 +62,16 @@ function Restore-Sdk(
   $zip = "$($nupkg.FullName).zip"
   Copy-Item -LiteralPath $nupkg.FullName -Destination $zip -Force
   Expand-Archive -LiteralPath $zip -DestinationPath $package -Force
+  if ($Repo -in @('qigao/salts', 'qigao/salts-utils', 'qigao/chttp')) {
+    # A PowerShell function emits child stdout into its return value.
+    # Keep attestation output in the log, not the SDK root assignment.
+    $attestation = @(& python (Join-Path $PSScriptRoot 'verify-published-native-sdk.py') `
+      --repo $Repo --archive $nupkg.FullName --extracted $package --rid $Rid 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+      throw ('published SDK verification failed for ' + $Repo + '@' + $tag + ': ' + ($attestation -join ' '))
+    }
+    [Console]::Error.WriteLine(($attestation -join [Environment]::NewLine))
+  }
 
   $root = Join-Path $package ("sdk\" + $Rid)
   $config = Join-Path $root $ConfigRelative

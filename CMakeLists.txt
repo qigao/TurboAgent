@@ -121,11 +121,30 @@ endif()
 add_subdirectory(runtime)
 add_subdirectory(provider)
 add_subdirectory(agent)
+# Installed CHttp + installed SaltsUtils IDLC conformance, never a second RPC owner.
+if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
+  add_subdirectory(agent/tests/rpc_generated)
+endif()
 add_subdirectory(harness)
 add_subdirectory(cli)
 if(ENABLE_WASM_TOOLS)
   add_subdirectory(llm_sandbox)
 endif()
+# Compile and link direct C11/C++17 consumers of the installed CHttp Owner
+# RPC ABI. The existing TurboAgent HTTP/remote runtime tests exercise real
+# request/cancel/drain behavior against loopback Servers.
+if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(turboagent_chttp_rc5_c11 cmake/ci/chttp-rc5-api-smoke.c)
+  target_link_libraries(turboagent_chttp_rc5_c11 PRIVATE CHttp::Server CHttp::Client)
+  add_test(NAME turboagent.chttp_rc5_c11 COMMAND turboagent_chttp_rc5_c11)
+
+  add_executable(turboagent_chttp_rc5_cxx17 cmake/ci/chttp-rc5-api-smoke.cpp)
+  target_link_libraries(turboagent_chttp_rc5_cxx17 PRIVATE CHttp::Server CHttp::Client)
+  add_test(NAME turboagent.chttp_rc5_cxx17 COMMAND turboagent_chttp_rc5_cxx17)
+  set_tests_properties(turboagent.chttp_rc5_c11 turboagent.chttp_rc5_cxx17
+                       PROPERTIES TIMEOUT 20)
+endif()
+
 # Package Configuration
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)

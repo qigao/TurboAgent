@@ -314,6 +314,11 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     DataBindRpcFieldProjection unknown =
         (DataBindRpcFieldProjection)DATA_BIND_RPC_FIELD_PROJECTION_INIT;
     DataBindRpcFieldProjection duplicates[2];
+    DataBindRpcErrorMapping zero_code = {
+        sizeof(DataBindRpcErrorMapping), "NotThrown", 0};
+    DataBindRpcErrorMapping duplicate_error_types[2] = {
+        {sizeof(DataBindRpcErrorMapping), "NotThrown", -32004},
+        {sizeof(DataBindRpcErrorMapping), "NotThrown", -32005}};
     DataBindRpcMethodPlan *plan = NULL;
 
     check_not_null(generated);
@@ -365,6 +370,49 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
 
     invalid = *generated;
     invalid.ingress_format = DATA_BIND_FORMAT_NONE;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    invalid = *generated;
+    invalid.egress_format = DATA_BIND_FORMAT_NONE;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    invalid = *generated;
+    invalid.wire_method = "";
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    /* Typed errors not declared by the Service must never be silently
+     * converted into a success projection. These structural malformed
+     * cases are rejected independently of any allocator and with a NULL
+     * MethodPlan output. A structurally valid-but-unowned error's incorrect
+     * OOM classification is tracked separately by SaltsUtils #642. */
+    invalid = *generated;
+    invalid.error_count = 1u;
+    invalid.errors = NULL;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    invalid = *generated;
+    invalid.errors = &zero_code;
+    invalid.error_count = 1u;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    invalid = *generated;
+    invalid.errors = duplicate_error_types;
+    invalid.error_count = 2u;
     check_equal(data_bind_rpc_method_plan_compile_service(
         contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
         DATA_BIND_ERR_INVALID_ARG);

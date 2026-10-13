@@ -195,6 +195,62 @@ jobs:
           cmake --install "$GRAPH_ROOT/build-chttp"
           test -f "$CHTTP_ROOT/lib/cmake/Chttp/ChttpConfig.cmake"
 
+      # The published host compiler is a BUILD-TIME GENERATOR only, never a
+      # linked RPC/CNet/DataBind/CHttp runtime. ASan correctly detects ODR
+      # duplicate globals when the source-instrumented salts-idlc embeds
+      # static CSTL alongside instrumented libsalts.so. Keep detection ON:
+      # run a separately attested release host-tool binary with its own exact
+      # release host libraries; instrument every actual native test library.
+      - name: Qualify immutable separate build-time IDLC host tool
+        if: matrix.sanitizer == 'address'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          host="$GRAPH_ROOT/host-only"
+          for item in salts salts-utils; do
+            case "$item" in
+              salts)
+                project=qigao/salts
+                tag=v2.3.0-rc.15
+                archive=Salts.Native.2.3.0-rc.15.nupkg
+                ;;
+              salts-utils)
+                project=qigao/salts-utils
+                tag=v4.3.0-rc.10
+                archive=SaltsUtils.Native.4.3.0-rc.10.nupkg
+                ;;
+            esac
+            mkdir -p "$host/$item/archive" "$host/$item/extracted"
+            gh release download "$tag" --repo "$project" --pattern "$archive" \
+              --dir "$host/$item/archive"
+            unzip -q "$host/$item/archive/$archive" -d "$host/$item/extracted"
+            python3 cmake/ci/verify-published-native-sdk.py \
+              --repo "$project" --archive "$host/$item/archive/$archive" \
+              --extracted "$host/$item/extracted" --rid linux-x64
+          done
+          host_salts="$host/salts/extracted/sdk/linux-x64"
+          host_utils="$host/salts-utils/extracted/sdk/linux-x64"
+          test -x "$host_utils/bin/salts-idlc"
+          test -f "$host_salts/lib/cmake/Salts/SaltsConfig.cmake"
+          # A hermetic wrapper overwrites the generator process's library
+          # closure only. Normal runtime build imports remain source-prefixed.
+          mkdir -p "$host/wrapper/bin"
+          cat > "$host/wrapper/bin/salts-idlc-host" <<'HOST_IDLC'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBOAGENT_HOST_IDLC_UTILS/lib:$TURBOAGENT_HOST_IDLC_UTILS/bin:$TURBOAGENT_HOST_IDLC_SALTS/lib:${LD_LIBRARY_PATH:-}"
+          exec "$TURBOAGENT_HOST_IDLC_UTILS/bin/salts-idlc" "$@"
+          HOST_IDLC
+          chmod +x "$host/wrapper/bin/salts-idlc-host"
+          {
+            echo "TURBOAGENT_HOST_IDLC_UTILS=$host_utils"
+            echo "TURBOAGENT_HOST_IDLC_SALTS=$host_salts"
+            echo "TURBOAGENT_HOST_IDLC_WRAPPER=$host/wrapper/bin/salts-idlc-host"
+          } >> "$GITHUB_ENV"
+          echo "asan_codegen_host_only=attested_published_tool_not_linked" >> "$GRAPH_ROOT/provenance.txt"
+
       - name: Build instrumented external TurboAgent IDL / real Provider DSO
         shell: bash
         run: |
@@ -202,6 +258,7 @@ jobs:
           cmake --preset ci-linux-release -S "$GITHUB_WORKSPACE" \
             -B "$GRAPH_ROOT/build-turboagent" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH="$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT" \
+            ${TURBOAGENT_HOST_IDLC_WRAPPER:+-DSaltsUtils_IDLC_EXECUTABLE=$TURBOAGENT_HOST_IDLC_WRAPPER} \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBUILD_TESTS=ON -DENABLE_WASM_TOOLS=OFF -DENABLE_PRAKTOR_TOOLS=OFF \

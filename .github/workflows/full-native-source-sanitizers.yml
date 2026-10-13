@@ -143,6 +143,7 @@ jobs:
             -DENABLE_SANITIZER_THREAD="$SAN_THREAD" \
             -DENABLE_SANITIZER_ADDRESS="$SAN_ADDRESS" \
             -DENABLE_SANITIZER_UNDEFINED="$SAN_UNDEFINED" \
+            -DCMAKE_PROJECT_INCLUDE="$GITHUB_WORKSPACE/cmake/ci/chttp-rpc-sanitizer/qualify_private_vendor_symbols.cmake" \
             -DCMAKE_C_FLAGS="$SAN_FLAGS" -DCMAKE_CXX_FLAGS="$SAN_FLAGS" \
             -DCMAKE_SHARED_LINKER_FLAGS="$SAN_LINK" \
             -DCMAKE_EXE_LINKER_FLAGS="$SAN_LINK"
@@ -165,6 +166,7 @@ jobs:
             -DENABLE_SANITIZER_THREAD="$SAN_THREAD" \
             -DENABLE_SANITIZER_ADDRESS="$SAN_ADDRESS" \
             -DENABLE_SANITIZER_UNDEFINED="$SAN_UNDEFINED" \
+            -DCMAKE_PROJECT_INCLUDE="$GITHUB_WORKSPACE/cmake/ci/chttp-rpc-sanitizer/qualify_private_vendor_symbols.cmake" \
             -DCMAKE_C_FLAGS="$SAN_FLAGS" -DCMAKE_CXX_FLAGS="$SAN_FLAGS" \
             -DCMAKE_SHARED_LINKER_FLAGS="$SAN_LINK" \
             -DCMAKE_EXE_LINKER_FLAGS="$SAN_LINK"
@@ -252,84 +254,28 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "asan_codegen_host_only=attested_published_tool_not_linked" >> "$GRAPH_ROOT/provenance.txt"
 
-      # The idlc executable is a BUILD-HOST program, not a native RPC
-      # runtime component.  Its CMeta/CSTL objects otherwise occur both
-      # inside idlc and an ASan-instrumented libsalts.so, which correctly
-      # trips ASan's global ODR check before any test binary is built.
-      # Build a second strictly uninstrumented exact-tag HOST tool graph.
-      # Keep all four required RPC runtime/source builds fully instrumented.
-      - name: Build isolated exact-tag unsanitized host IDLC (address only)
-        if: matrix.sanitizer == 'address'
+      - name: Verify private vendored crypto globals are not exported from native DSOs
         shell: bash
         run: |
           set -euo pipefail
-          host="$GRAPH_ROOT/host-codegen"
-          host_salts="$host/prefix/salts"
-          host_utils="$host/prefix/salts-utils"
-          host_utils_build="$host/build-utils"
-          mkdir -p "$host/bin"
-          cmake --preset linux-dev-ci \
-            -S "$GITHUB_WORKSPACE/build/full-native-source/salts" \
-            -B "$host/build-salts" -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$host_salts" \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF \
-            -DENABLE_SANITIZER_THREAD=OFF -DENABLE_SANITIZER_ADDRESS=OFF \
-            -DENABLE_SANITIZER_UNDEFINED=OFF \
-            -DCMAKE_C_FLAGS='' -DCMAKE_CXX_FLAGS='' \
-            -DCMAKE_SHARED_LINKER_FLAGS='' -DCMAKE_EXE_LINKER_FLAGS=''
-          cmake --build "$host/build-salts" --parallel 2
-          cmake --install "$host/build-salts"
-          test -f "$host_salts/lib/cmake/Salts/SaltsConfig.cmake"
-
-          (
-            export SALTS_ROOT="$host_salts"
-            export SALTS_UTILS_ROOT="$host_utils"
-            export DATABIND_ROOT="$host_utils"
-            export LD_LIBRARY_PATH="$host_salts/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib"
-            cmake --preset ci-linux-release-user \
-              -S "$GITHUB_WORKSPACE/build/full-native-source/salts-utils" \
-              -B "$host_utils_build" -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX="$host_utils" \
-              -DCMAKE_PREFIX_PATH="$host_salts" \
-              -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-              -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF \
-              -DENABLE_SANITIZER_THREAD=OFF -DENABLE_SANITIZER_ADDRESS=OFF \
-              -DENABLE_SANITIZER_UNDEFINED=OFF \
-              -DCMAKE_C_FLAGS='' -DCMAKE_CXX_FLAGS='' \
-              -DCMAKE_SHARED_LINKER_FLAGS='' -DCMAKE_EXE_LINKER_FLAGS=''
-            cmake --build "$host_utils_build" --target salts_idlc --parallel 2
-          )
-          test -x "$host_utils_build/bin/salts-idlc"
-          # This wrapper explicitly overrides the environment CMake uses to
-          # run installed IDLC; sanitized RPC runtime prefixes cannot leak
-          # into the host compiler's dynamic link closure.
-          cat > "$host/bin/salts-idlc-host" <<EOF
-          #!/usr/bin/env bash
-          set -euo pipefail
-          export LD_LIBRARY_PATH="$host_utils_build/bin:$host_utils_build/lib:$host_salts/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib"
-          exec "$host_utils_build/bin/salts-idlc" "\$@"
-          EOF
-          chmod +x "$host/bin/salts-idlc-host"
-          env LD_LIBRARY_PATH="$host_utils_build/bin:$host_utils_build/lib:$host_salts/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib" \
-            ldd "$host_utils_build/bin/salts-idlc" | tee "$GRAPH_ROOT/host-idlc-links.txt"
-          if grep -Eq 'lib(asan|ubsan|tsan)' "$GRAPH_ROOT/host-idlc-links.txt"; then
-            echo 'Host-only IDL compiler unexpectedly uses sanitizer runtime' >&2
-            exit 1
-          fi
-          test "$(git -C build/full-native-source/salts rev-parse HEAD)" = '21bdb1145fbb2b39ee3fa644173ec037adba7b87'
-          test "$(git -C build/full-native-source/salts-utils rev-parse HEAD)" = '1410c9fd479f9faab31503523d8e31cc506b5b25'
-          echo 'host_codegen=separate_exact_source_unsanitized_no_runtime_substitution' \
-            >> "$GRAPH_ROOT/provenance.txt"
+          # Exact-tag source builds link separate private Monocypher archives.
+          # Their crypto_argon2_no_extras storage must never be globally
+          # interposable across CNet and DataBind; keep ASan ODR checking ON.
+          test -f "$SALTS_ROOT/lib/libcnet.so"
+          test -f "$SALTS_UTILS_ROOT/lib/libdata_bind.so"
+          for lib in "$SALTS_ROOT/lib/libcnet.so" "$SALTS_UTILS_ROOT/lib/libdata_bind.so"; do
+            if nm -D --defined-only "$lib" | grep -Fq 'crypto_argon2_no_extras'; then
+              echo "Unisolated duplicate vendor crypto global in $lib" >&2
+              exit 1
+            fi
+          done
+          echo 'private_monocypher_elf_visibility=hidden' >> "$GRAPH_ROOT/provenance.txt"
+          echo 'asan_odr_detection=supported_and_not_disabled' >> "$GRAPH_ROOT/provenance.txt"
 
       - name: Build instrumented external TurboAgent IDL / real Provider DSO
         shell: bash
         run: |
           set -euo pipefail
-          idlc_args=()
-          if [ "$SAN_ADDRESS" = ON ]; then
-            idlc_args+=("-DSaltsUtils_IDLC_EXECUTABLE=$GRAPH_ROOT/host-codegen/bin/salts-idlc-host")
-          fi
           cmake --preset ci-linux-release -S "$GITHUB_WORKSPACE" \
             -B "$GRAPH_ROOT/build-turboagent" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH="$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT" \
@@ -343,8 +289,7 @@ jobs:
             -DENABLE_SANITIZER_UNDEFINED="$SAN_UNDEFINED" -DENABLE_SANITIZER_LEAK=OFF \
             -DCMAKE_C_FLAGS="$SAN_FLAGS" -DCMAKE_CXX_FLAGS="$SAN_FLAGS" \
             -DCMAKE_SHARED_LINKER_FLAGS="$SAN_LINK" \
-            -DCMAKE_EXE_LINKER_FLAGS="$SAN_LINK" \
-            "${idlc_args[@]}"
+            -DCMAKE_EXE_LINKER_FLAGS="$SAN_LINK"
           cmake --build "$GRAPH_ROOT/build-turboagent" \
             --target test_turboagent_typed_rpc --parallel 2
 
@@ -378,7 +323,6 @@ jobs:
           if-no-files-found: warn
           path: |
             ${{ env.GRAPH_ROOT }}/provenance.txt
-            ${{ env.GRAPH_ROOT }}/host-idlc-links.txt
             ${{ env.GRAPH_ROOT }}/full-source-audit.json
             ${{ env.GRAPH_ROOT }}/actual-linked-native-libraries.txt
             ${{ env.GRAPH_ROOT }}/build-salts/compile_commands.json

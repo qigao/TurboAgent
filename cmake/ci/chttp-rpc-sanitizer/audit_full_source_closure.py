@@ -103,7 +103,7 @@ def audit_links(build, flags, prefixes):
     )
     lines = result.stdout.splitlines()
     exe = [line for line in lines if re.search(
-        r"-o (?:[^ ]*/)?bin/test_turboagent_typed_rpc(?:\\s|$)", line)]
+        r"-o (?:[^ ]*/)?bin/test_turboagent_typed_rpc(?:\s|$)", line)]
     dylib = [line for line in lines
              if "-shared" in line and "turboagent_rpc_provider_dso" in line]
     require(len(exe) == 1 and all(f in exe[0] for f in flags),

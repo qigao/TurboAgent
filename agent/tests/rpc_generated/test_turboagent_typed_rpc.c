@@ -1082,6 +1082,39 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     check_equal(chttp_async_client_stop(&client, TYPED_TIMEOUT_MS), SALTS_OK);
     check_equal(chttp_async_client_destroy(&client), SALTS_OK);
 
+    /* A separate Owner must not admit the stopped generation, even while the
+     * first Owner still pins its active DSO. Failed admission must not steal
+     * or leak another lease, nor register an executable native method. */
+    {
+      chttp_server rejected_server = {0};
+      chttp_server_config rejected_config = agent_http_test_server_config();
+      chttp_server_rpc_config rejected_rpc = CHTTP_SERVER_RPC_CONFIG_INIT;
+      chttp_server_rpc_mount_options rejected_mount = mount;
+      cmeta_plugin_lifecycle_info after_refusal = {0};
+
+      rejected_rpc.method_capacity = 1u;
+      rejected_rpc.max_inflight_calls = 1u;
+      rejected_rpc.native_max_items = 64u;
+      rejected_rpc.native_max_owned_bytes = 1024u;
+      check_equal(chttp_server_init(
+          &rejected_server, &rejected_config), SALTS_OK);
+      check_equal(chttp_server_rpc_configure(
+          &rejected_server, &rejected_rpc), SALTS_OK);
+      /* A missing generation half is an ABI error, not an unleased mount. */
+      rejected_mount.plugin_ref = (cmeta_plugin_ref){0};
+      check_equal(chttp_server_rpc_mount(
+          &rejected_server, &rejected_mount), SALTS_EINVAL);
+      rejected_mount = mount;
+      check_equal(chttp_server_rpc_mount(
+          &rejected_server, &rejected_mount), SALTS_EBUSY);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, ref, &after_refusal), CMETA_PLUGIN_OK);
+      check_equal(after_refusal.active_leases, (size_t)1u);
+      check_equal(chttp_server_stop(
+          &rejected_server, TYPED_TIMEOUT_MS), SALTS_OK);
+      check_equal(chttp_server_destroy(&rejected_server), SALTS_OK);
+    }
+
     /* The old Provider still belongs to Server until final drain/destroy.
      * Only the final quiescent unload may call native dlclose/FreeLibrary. */
     check_equal(chttp_server_stop(&server, TYPED_TIMEOUT_MS), SALTS_OK);

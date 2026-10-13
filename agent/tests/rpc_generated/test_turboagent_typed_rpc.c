@@ -726,4 +726,217 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     data_bind_rpc_method_plan_free(plan);
     data_bind_free(contract);
   }
+  it("holds a real Provider Generation through typed cancel, Server stop and DSO unload") {
+    static const char schema[] =
+        "message AddRequest { @Min(1) uint32 left; uint32 right;"
+        " optional uint32 scale default 1; }"
+        "message AddResponse { @Max(100) uint32 sum; }"
+        "service Calc { Add: AddRequest -> AddResponse; }";
+    DataBind *contract = NULL;
+    DataBindError parse_error = DATA_BIND_ERROR_INIT;
+    DataBindBindingPlanDiagnostic diagnostic =
+        DATA_BIND_BINDING_PLAN_DIAGNOSTIC_INIT;
+    DataBindRpcMethodPlan *plan = NULL;
+    const DataBindRpcProjectionConfig *projection;
+    DataBindServiceNativeBinding binding =
+        DATA_BIND_SERVICE_NATIVE_BINDING_INIT(
+            FunctionMeta(turboagent_typed_add),
+            &ADD_REQUEST_NATIVE, &ADD_RESPONSE_NATIVE);
+    DataBindNativeExecution execution =
+        (DataBindNativeExecution)DATA_BIND_NATIVE_EXECUTION_INIT;
+    cmeta_plugin_registry registry = {0};
+    cmeta_plugin_ref ref = {0};
+    cmeta_plugin_lease discovery = {0};
+    cmeta_plugin_lifecycle_info lifecycle = {0};
+    const cmeta_plugin_registry_config registry_config = {.capacity = 1u};
+    const cmeta_plugin_manifest *manifest = NULL;
+    const cmeta_plugin_export *entry = NULL;
+    const turboagent_rpc_provider_dso_offer *offer = NULL;
+    turboagent_rpc_provider_dso_probe provider = {0};
+    chttp_server server = {0};
+    chttp_server_config server_config = agent_http_test_server_config();
+    chttp_server_rpc_config server_rpc = CHTTP_SERVER_RPC_CONFIG_INIT;
+    chttp_server_rpc_mount_options mount = CHTTP_SERVER_RPC_MOUNT_OPTIONS_INIT;
+    chttp_async_client client = {0};
+    chttp_client_config client_config = typed_client_config();
+    chttp_client_rpc_call_options call = CHTTP_CLIENT_RPC_CALL_OPTIONS_INIT;
+    DataBindNativeOptions native = DATA_BIND_NATIVE_OPTIONS_INIT;
+    unsigned char workspace[4096];
+    AddRequest request = {3u, 4u, 2u, 1u};
+    AddResponse response = {.sum = UINT32_C(0xdecafbad)};
+    turboagent_typed_async_probe completed = {0};
+    chttp_request handle = {0};
+    uint16_t port = 0u;
+    char uri[64];
+    uint64_t deadline;
+    int entered = 0;
+    int poll_status = SALTS_OK;
+    int cancel_status = SALTS_EINVAL;
+    int duplicate_status = SALTS_EINVAL;
+    cmeta_plugin_status stop_status = CMETA_PLUGIN_BUSY;
+    cmeta_plugin_status unload_status = CMETA_PLUGIN_OK;
+    cmeta_plugin_status lifecycle_status = CMETA_PLUGIN_BUSY;
+    int short_stop = SALTS_OK;
+    int early_destroy = SALTS_OK;
+    size_t leases_during_stop = 0u;
+    bool quiescent = false;
+
+    projection = data_bind_rpc_projection_artifact_find(
+        &databind_turboagent_typed_rpc_rpc_projection, "Calc", "Add");
+    check_not_null(projection);
+    check_equal(data_bind_create_from_text(
+        schema, sizeof(schema)-1u, &contract, &parse_error), DATA_BIND_OK);
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", projection, &binding, &plan, &diagnostic),
+        DATA_BIND_OK);
+    check_not_null(plan);
+
+    /* An independent second plugin registry owns a new real dynamic DSO
+     * generation. No callback address is linked into the host executable. */
+    check_equal(cmeta_plugin_registry_init(&registry, &registry_config),
+                CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_load(
+        &registry, TURBOAGENT_RPC_PROVIDER_DSO_PATH, &ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_start(&registry, ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_acquire(
+        &registry, ref, &discovery, &manifest), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_manifest_find_export(
+        manifest, TURBOAGENT_RPC_PROVIDER_DSO_EXPORT, &entry), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_export_require_function(
+        entry, TURBOAGENT_RPC_PROVIDER_DSO_CONTRACT,
+        TURBOAGENT_RPC_PROVIDER_DSO_VERSION, 0u), CMETA_PLUGIN_OK);
+    check_true(cmeta_function_abi_contract_compatible(
+        FunctionAbi(turboagent_rpc_provider_dso_get_offer),
+        entry->value.function.abi));
+    check_true(entry->value.function.invoke(
+        entry->value.function.context, &offer, NULL, 0u));
+    check_not_null(offer);
+    check_true(offer->invoke != NULL);
+    atomic_init(&provider.enabled, 1);
+    atomic_init(&provider.entered, 0);
+    atomic_init(&provider.release, 0);
+    atomic_init(&provider.invoked, 0);
+    execution.function = FunctionMeta(turboagent_typed_add);
+    execution.abi = FunctionAbi(turboagent_typed_add);
+    execution.invoke = offer->invoke;
+    execution.context = &provider;
+
+    server_rpc.method_capacity = 2u;
+    server_rpc.max_inflight_calls = 2u;
+    server_rpc.native_max_items = 64u;
+    server_rpc.native_max_owned_bytes = 1024u;
+    mount.target = "/rpc";
+    mount.method_plan = plan;
+    mount.native_binding = &binding;
+    mount.execution = &execution;
+    mount.plugin_registry = &registry;
+    mount.plugin_ref = ref;
+    check_equal(chttp_server_init(&server, &server_config), SALTS_OK);
+    check_equal(chttp_server_rpc_configure(&server, &server_rpc), SALTS_OK);
+    check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_OK);
+    check_equal(cmeta_plugin_registry_release(
+        &registry, &discovery), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_get_lifecycle(
+        &registry, ref, &lifecycle), CMETA_PLUGIN_OK);
+    check_equal(lifecycle.active_leases, (size_t)1u);
+    check_equal(chttp_server_start(&server), SALTS_OK);
+    check_equal(chttp_server_port(&server, &port), SALTS_OK);
+    check_true(snprintf(uri, sizeof(uri), "tcp://127.0.0.1:%u",
+                        (unsigned int)port) > 0);
+
+    native.workspace = workspace;
+    native.workspace_bytes = sizeof(workspace);
+    native.max_depth = 16u;
+    native.max_items = 64u;
+    native.max_owned_bytes = 1024u;
+    call.connection_uri = uri;
+    call.authority = "localhost";
+    call.target = "/rpc";
+    call.request_id = UINT64_C(701);
+    call.deadline_ms = TYPED_TIMEOUT_MS;
+    call.method_plan = plan;
+    call.native_binding = &binding;
+    call.native_options = &native;
+    call.request = &request;
+    call.request_bytes = sizeof(request);
+    call.response = &response;
+    call.response_bytes = sizeof(response);
+    check_equal(chttp_async_client_init(&client, &client_config), SALTS_OK);
+    check_equal(chttp_async_client_rpc_call(
+        &client, &call, turboagent_typed_async_complete,
+        &completed, &handle), SALTS_OK);
+    check_true(handle.slot != 0u && handle.generation != 0u);
+
+    /* The Provider's actual *dynamic library* code has entered and is
+     * blocked before cancellation or Server stop is admitted. */
+    deadline = cmeta_monotonic_ms() + 2000u;
+    while (atomic_load_explicit(&provider.entered, memory_order_acquire) == 0 &&
+           cmeta_monotonic_ms() < deadline) {
+      size_t seen = 0u;
+      poll_status = chttp_async_client_poll(&client, 5u, &seen);
+      if (poll_status != SALTS_OK) break;
+    }
+    entered = atomic_load_explicit(&provider.entered, memory_order_acquire);
+    if (entered != 0 && poll_status == SALTS_OK) {
+      /* Cancellation is admitted on this active typed RPC; Server stop and
+       * unload interleave with the same still-running Provider invocation. */
+      cancel_status = chttp_async_request_cancel(&client, handle);
+      duplicate_status = chttp_async_request_cancel(&client, handle);
+      stop_status = cmeta_plugin_registry_request_stop(&registry, ref);
+      unload_status = cmeta_plugin_registry_unload(&registry, ref);
+      short_stop = chttp_server_stop(&server, 10u);
+      early_destroy = chttp_server_destroy(&server);
+      lifecycle_status = cmeta_plugin_registry_get_lifecycle(
+          &registry, ref, &lifecycle);
+      if (lifecycle_status == CMETA_PLUGIN_OK)
+        leases_during_stop = lifecycle.active_leases;
+    }
+    /* Always unblock the DSO before evaluating test assertions, including
+     * the negative-path preconditions: never strand a running callback. */
+    atomic_store_explicit(&provider.release, 1, memory_order_release);
+    check_equal(poll_status, SALTS_OK);
+    check_equal(entered, 1);
+    check_equal(cancel_status, SALTS_OK);
+    check_equal(duplicate_status, SALTS_EALREADY);
+    check_equal(stop_status, CMETA_PLUGIN_OK);
+    check_equal(unload_status, CMETA_PLUGIN_BUSY);
+    check_equal(short_stop, SALTS_ETIMEDOUT);
+    check_equal(early_destroy, SALTS_EBUSY);
+    check_equal(lifecycle_status, CMETA_PLUGIN_OK);
+    check_equal(leases_during_stop, (size_t)1u);
+
+    deadline = cmeta_monotonic_ms() + TYPED_TIMEOUT_MS;
+    while (completed.terminals == 0 && cmeta_monotonic_ms() < deadline) {
+      size_t seen = 0u;
+      poll_status = chttp_async_client_poll(&client, 5u, &seen);
+      if (poll_status != SALTS_OK) break;
+    }
+    check_equal(poll_status, SALTS_OK);
+    check_equal(completed.terminals, 1);
+    check_equal(completed.status, SALTS_ECANCELED);
+    check_equal(response.sum, UINT32_C(0xdecafbad));
+    check_equal(chttp_async_request_cancel(&client, handle), SALTS_ENOENT);
+    {
+      size_t seen = 0u;
+      check_equal(chttp_async_client_poll(&client, 0u, &seen), SALTS_OK);
+    }
+    check_equal(completed.terminals, 1);
+    check_equal(chttp_async_client_stop(&client, TYPED_TIMEOUT_MS), SALTS_OK);
+    check_equal(chttp_async_client_destroy(&client), SALTS_OK);
+
+    /* The old Provider still belongs to Server until final drain/destroy.
+     * Only the final quiescent unload may call native dlclose/FreeLibrary. */
+    check_equal(chttp_server_stop(&server, TYPED_TIMEOUT_MS), SALTS_OK);
+    check_equal(cmeta_plugin_registry_unload(&registry, ref), CMETA_PLUGIN_BUSY);
+    check_equal(chttp_server_destroy(&server), SALTS_OK);
+    check_equal(cmeta_plugin_registry_poll_quiescent(
+        &registry, ref, &quiescent), CMETA_PLUGIN_OK);
+    check_true(quiescent);
+    check_equal(cmeta_plugin_registry_unload(&registry, ref), CMETA_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
+    check_equal(completed.terminals, 1);
+    data_bind_rpc_method_plan_free(plan);
+    data_bind_free(contract);
+  }
+
 }

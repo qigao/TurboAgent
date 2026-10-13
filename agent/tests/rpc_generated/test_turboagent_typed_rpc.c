@@ -571,6 +571,40 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
         altered_plan = NULL;
       }
     }
+    /* A valid reflected FunctionDesc can advertise a non-VALUE result
+     * ownership class even when its scalar status carrier and request/response
+     * parameters are ABI-valid. The canonical DataBind MethodPlan compiler
+     * must not be mistaken for the CHttp Owner's stricter execution gate:
+     * mount rejects this candidate without publishing a wire method. */
+    {
+      cmeta_function_desc borrowed_return =
+          *FunctionMeta(turboagent_typed_add);
+      cmeta_function_abi_desc borrowed_abi =
+          *FunctionAbi(turboagent_typed_add);
+      DataBindServiceNativeBinding borrowed_binding = binding;
+      DataBindNativeExecution borrowed_execution = execution;
+      DataBindRpcMethodPlan *borrowed_plan = NULL;
+      chttp_server_rpc_mount_options denied = mount;
+
+      borrowed_return.result_flags = CMETA_RESULT_BORROWED;
+      borrowed_abi.function = &borrowed_return;
+      borrowed_binding.function = &borrowed_return;
+      borrowed_execution.function = &borrowed_return;
+      borrowed_execution.abi = &borrowed_abi;
+      borrowed_execution.invoke = turboagent_typed_invoke;
+      denied.native_binding = &borrowed_binding;
+      denied.execution = &borrowed_execution;
+      check_true(cmeta_function_desc_valid(&borrowed_return));
+      check_true(cmeta_function_abi_desc_valid(&borrowed_abi));
+      check_true(data_bind_native_execution_valid(&borrowed_execution));
+      check_equal(data_bind_rpc_method_plan_compile_service(
+          contract, "Calc", "Add", projection, &borrowed_binding,
+          &borrowed_plan, &diagnostic), DATA_BIND_OK);
+      check_not_null(borrowed_plan);
+      denied.method_plan = borrowed_plan;
+      check_equal(chttp_server_rpc_mount(&server, &denied), SALTS_ENOTSUP);
+      data_bind_rpc_method_plan_free(borrowed_plan);
+    }
     check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_OK);
     check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_EALREADY);
     check_equal(chttp_server_start(&server), SALTS_OK);

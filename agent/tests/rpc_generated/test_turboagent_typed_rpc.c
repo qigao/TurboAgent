@@ -418,6 +418,26 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
         DATA_BIND_ERR_INVALID_ARG);
     check_null(plan);
 
+#if defined(TURBOAGENT_RPC_INTEGRATED_ERROR_CANDIDATE)
+    /* This source-only candidate uses upstream DataBind PR #645, stacked on
+     * #643. Published rc.10 intentionally keeps its original behavior:
+     * never assert the new SCHEMA contract against immutable release SDKs. */
+    {
+      const DataBindRpcErrorMapping unowned = {
+          sizeof(DataBindRpcErrorMapping), "NotThrown", -32014};
+      invalid = *generated;
+      invalid.errors = &unowned;
+      invalid.error_count = 1u;
+      check_equal(data_bind_rpc_method_plan_compile_service(
+          contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+          DATA_BIND_ERR_SCHEMA);
+      check_null(plan);
+      check_equal(diagnostic.status, DATA_BIND_ERR_SCHEMA);
+      check_true(strstr(
+          diagnostic.message, "RPC typed-error projection") != NULL);
+    }
+#endif
+
     /* The same original signed/generated projection remains usable; every
      * negative candidate must leave out_plan empty without mutating it. */
     check_equal(turboagent_generated_rpc_compile_exact(

@@ -26,7 +26,7 @@ jobs:
         github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent') ||
        (github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/test/chttp-real-static-owner-source-123'))
-    name: Actual Salts #1187 CFlow/CSTL static owner + SaltsUtils #641/#645 / ${{ matrix.sanitizer }}
+    name: Actual Salts #1193 CNet private crypto + CFlow/CSTL static owner + SaltsUtils #641/#645 / ${{ matrix.sanitizer }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     strategy:
@@ -40,7 +40,7 @@ jobs:
       GRAPH_ROOT: /tmp/turboagent-fullsource-private-owner-${{ matrix.sanitizer }}
       PKG_ROOT: /tmp/turboagent-fullsource-private-owner-${{ matrix.sanitizer }}/prefix
       TSAN_OPTIONS: halt_on_error=1:exitcode=66
-      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+      ASAN_OPTIONS: detect_odr_violation=2:detect_leaks=1:halt_on_error=1:abort_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       CCACHE_DIR: ${{ github.workspace }}/.cache/rpc-fullsource-private-owner-${{ matrix.sanitizer }}
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -51,11 +51,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Checkout EXACT reviewed Salts static-private owner producer candidate PR #1187
+      - name: Checkout exact Salts CNet/CFlow/CSTL private-owner PR #1193
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: 3f55cea0f113ffde6702c08b5187144fd289b42a
+          ref: 6088dbe6ecc07f3e449ed8a69a2c8c66e7fe2021
           path: build/full-native-source/salts
           persist-credentials: false
       - name: Checkout exact public SaltsUtils 4.3.0-rc.10 tag
@@ -105,7 +105,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ninja-build nasm pkg-config ccache binutils
           mkdir -p "$GRAPH_ROOT"
           test "$(git rev-parse HEAD)" = "$EXPECTED_AGENT"
-          test "$(git -C build/full-native-source/salts rev-parse HEAD)" = '3f55cea0f113ffde6702c08b5187144fd289b42a'
+          test "$(git -C build/full-native-source/salts rev-parse HEAD)" = '6088dbe6ecc07f3e449ed8a69a2c8c66e7fe2021'
           test "$(git -C build/full-native-source/salts-utils rev-parse HEAD)" = '1410c9fd479f9faab31503523d8e31cc506b5b25'
           test "$(git -C build/full-native-source/salts-utils-monocypher-640 rev-parse HEAD)" = 'ceef02ae2eb1b1ecd167eb9305c70895a329baa0'
           test "$(git -C build/full-native-source/salts-utils-error-644 rev-parse HEAD)" = '90900a245a6eadffe53b9f82fdb4e94150d54180'
@@ -113,8 +113,8 @@ jobs:
           test "$(git -C build/full-native-source/chttp rev-parse HEAD)" = '251d9ca60b1526ceab9d02f7f68e18fe060ce6f5'
           {
             echo "turboagent_source=$EXPECTED_AGENT"
-            echo 'salts_source_kind=REVIEWED_PRODUCER_CANDIDATE_PR1187_NOT_A_RELEASE'
-            echo 'salts_source=3f55cea0f113ffde6702c08b5187144fd289b42a'
+            echo 'salts_source_kind=REVIEWED_PRODUCER_CANDIDATE_PR1193_NOT_A_RELEASE'
+            echo 'salts_source=6088dbe6ecc07f3e449ed8a69a2c8c66e7fe2021'
             echo 'saltsutils_tag=v4.3.0-rc.10'
             echo 'saltsutils_source=1410c9fd479f9faab31503523d8e31cc506b5b25'
             echo 'chttp_tag=v2.1.0-rc.5'
@@ -131,6 +131,7 @@ jobs:
             echo 'candidate_typed_error_invariant=SCHEMA_for_unowned_rpc_error'
             echo 'candidate_salts_CSTL=ACTUAL_PRODUCER_CMake_STATIC_ONLY_HIDE'
             echo 'candidate_salts_CFlow=ACTUAL_PRODUCER_CMake_STATIC_ONLY_HIDE'
+            echo 'candidate_cnet_monocypher=PR1193_53_symbol_private_namespace'
             echo 'actual_published_RC_SDK_qualification=NOT_COVERED'
             echo 'official_published_NuGet_binaries_used_for_link=false'
             echo 'normal_published_NuGet_consumer_gate=separate'
@@ -325,19 +326,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Exact-tag source builds link separate private Monocypher archives.
-          # Their crypto_argon2_no_extras storage must never be globally
-          # interposable across CNet and DataBind; keep ASan ODR checking ON.
+          # Salts #1193 and SaltsUtils #641 have disjoint private symbols.
+          # Require every crypto_* global/function to stay out of the actual
+          # CNet and DataBind DSO exports. Never suppress ASan ODR.
           test -f "$SALTS_ROOT/lib/libcnet.so"
           test -f "$SALTS_UTILS_ROOT/lib/libdata_bind.so"
+          test -f "$GRAPH_ROOT/build-salts/lib/libmonocypher.a"
+          nm --defined-only "$GRAPH_ROOT/build-salts/lib/libmonocypher.a" \
+            | tee "$GRAPH_ROOT/cnet-private-monocypher-symbols.txt"
+          grep -q 'salts_cnet_private_crypto_argon2_no_extras' \
+            "$GRAPH_ROOT/cnet-private-monocypher-symbols.txt"
           for lib in "$SALTS_ROOT/lib/libcnet.so" "$SALTS_UTILS_ROOT/lib/libdata_bind.so"; do
-            if nm -D --defined-only "$lib" | grep -Fq 'crypto_argon2_no_extras'; then
-              echo "Unisolated duplicate vendor crypto global in $lib" >&2
+            nm -D --defined-only "$lib" > "$GRAPH_ROOT/$(basename "$lib").symbols"
+            if awk '{print $3}' "$GRAPH_ROOT/$(basename "$lib").symbols" \
+                | grep -Eq '^(crypto_|salts_cnet_private_crypto_|databind_private_crypto_)'; then
+              echo "Private Monocypher crypto symbol exported from $lib" >&2
               exit 1
             fi
           done
+          echo 'private_monocypher_link_names=CNET_AND_DATABIND_DISTINCT' >> "$GRAPH_ROOT/provenance.txt"
           echo 'private_monocypher_elf_visibility=hidden' >> "$GRAPH_ROOT/provenance.txt"
-          echo 'asan_odr_detection=supported_and_not_disabled' >> "$GRAPH_ROOT/provenance.txt"
+          echo 'asan_odr_detection=2_unsuppressed' >> "$GRAPH_ROOT/provenance.txt"
 
       - name: Build instrumented external TurboAgent IDL / real Provider DSO
         shell: bash

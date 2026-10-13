@@ -564,6 +564,113 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
         &probe.invoked, memory_order_acquire), 1);
     check_equal(chttp_client_destroy(&client, TYPED_TIMEOUT_MS), SALTS_OK);
 
+    /* A *typed asynchronous* RPC enters the actual dynamically loaded
+     * Provider before its generation-safe CNet request is cancelled. The
+     * Provider is held at a deterministic barrier, not simulated in-host. */
+    {
+      chttp_async_client async_client = {0};
+      chttp_client_config async_config = typed_client_config();
+      chttp_client_rpc_call_options async_options =
+          CHTTP_CLIENT_RPC_CALL_OPTIONS_INIT;
+      DataBindNativeOptions async_native = DATA_BIND_NATIVE_OPTIONS_INIT;
+      unsigned char async_workspace[4096];
+      AddRequest async_request = {3u, 4u, 2u, 1u};
+      AddResponse async_result = {.sum = UINT32_C(0xdecafbad)};
+      turboagent_typed_async_probe async_probe = {0};
+      chttp_request async_handle = {0};
+      uint64_t entered_deadline;
+      uint64_t terminal_deadline;
+      int async_entered = 0;
+      int poll_status = SALTS_OK;
+      int cancel_admission = SALTS_EINVAL;
+      int duplicate_cancel = SALTS_EINVAL;
+      int unload_while_executing = 0;
+
+      async_native.workspace = async_workspace;
+      async_native.workspace_bytes = sizeof(async_workspace);
+      async_native.max_depth = 16u;
+      async_native.max_items = 64u;
+      async_native.max_owned_bytes = 1024u;
+      async_options.connection_uri = uri;
+      async_options.authority = "localhost";
+      async_options.target = "/rpc";
+      async_options.request_id = UINT64_C(609);
+      async_options.deadline_ms = TYPED_TIMEOUT_MS;
+      async_options.method_plan = plan;
+      async_options.native_binding = &binding;
+      async_options.native_options = &async_native;
+      async_options.request = &async_request;
+      async_options.request_bytes = sizeof(async_request);
+      async_options.response = &async_result;
+      async_options.response_bytes = sizeof(async_result);
+
+      atomic_store_explicit(&probe.entered, 0, memory_order_release);
+      atomic_store_explicit(&probe.release, 0, memory_order_release);
+      atomic_store_explicit(&probe.enabled, 1, memory_order_release);
+      check_equal(chttp_async_client_init(&async_client, &async_config), SALTS_OK);
+      check_equal(chttp_async_client_rpc_call(
+          &async_client, &async_options, turboagent_typed_async_complete,
+          &async_probe, &async_handle), SALTS_OK);
+      check_true(async_handle.slot != 0u && async_handle.generation != 0u);
+
+      entered_deadline = cmeta_monotonic_ms() + 2000u;
+      while (atomic_load_explicit(&probe.entered, memory_order_acquire) == 0 &&
+             cmeta_monotonic_ms() < entered_deadline) {
+        size_t completions = 0u;
+        poll_status = chttp_async_client_poll(&async_client, 5u, &completions);
+        if (poll_status != SALTS_OK) break;
+      }
+      async_entered = atomic_load_explicit(
+          &probe.entered, memory_order_acquire);
+
+      /* Don't leave an executing DSO blocked if a precondition fails; record
+       * each return value and publish release before checking assertions. */
+      if (async_entered != 0 && poll_status == SALTS_OK) {
+        unload_while_executing =
+            cmeta_plugin_registry_unload(&registry, ref);
+        cancel_admission =
+            chttp_async_request_cancel(&async_client, async_handle);
+        duplicate_cancel =
+            chttp_async_request_cancel(&async_client, async_handle);
+      }
+      atomic_store_explicit(&probe.release, 1, memory_order_release);
+      atomic_store_explicit(&probe.enabled, 0, memory_order_release);
+      check_equal(poll_status, SALTS_OK);
+      check_equal(async_entered, 1);
+      check_equal(unload_while_executing, CMETA_PLUGIN_BUSY);
+      check_equal(cancel_admission, SALTS_OK);
+      check_equal(duplicate_cancel, SALTS_EALREADY);
+
+      terminal_deadline = cmeta_monotonic_ms() + TYPED_TIMEOUT_MS;
+      while (async_probe.terminals == 0 &&
+             cmeta_monotonic_ms() < terminal_deadline) {
+        size_t completions = 0u;
+        poll_status = chttp_async_client_poll(&async_client, 5u, &completions);
+        if (poll_status != SALTS_OK) break;
+      }
+      check_equal(poll_status, SALTS_OK);
+      check_equal(async_probe.terminals, 1);
+      check_equal(async_probe.status, SALTS_ECANCELED);
+      check_equal(async_result.sum, UINT32_C(0xdecafbad));
+      check_equal(chttp_async_request_cancel(
+          &async_client, async_handle), SALTS_ENOENT);
+      {
+        size_t completions = 0u;
+        check_equal(chttp_async_client_poll(
+            &async_client, 0u, &completions), SALTS_OK);
+      }
+      check_equal(async_probe.terminals, 1);
+      check_equal(chttp_async_client_stop(
+          &async_client, TYPED_TIMEOUT_MS), SALTS_OK);
+      check_equal(chttp_async_client_destroy(&async_client), SALTS_OK);
+      check_equal(async_probe.terminals, 1);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, ref, &lifecycle), CMETA_PLUGIN_OK);
+      check_equal(lifecycle.active_leases, (size_t)1u);
+      check_equal(cmeta_plugin_registry_unload(
+          &registry, ref), CMETA_PLUGIN_BUSY);
+    }
+
     /* Deterministic concurrent Provider entry vs Server stop/unload:
      * the native invoke function physically resides inside this DSO, and the
      * test cannot release the old generation before all borrowed calls end. */

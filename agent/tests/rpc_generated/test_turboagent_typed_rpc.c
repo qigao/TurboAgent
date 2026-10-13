@@ -276,7 +276,110 @@ static void turboagent_typed_call_worker(void *user) {
   atomic_store_explicit(&args->finished, 1, memory_order_release);
 }
 
+/* An external generated caller must demand the exact artifact entry. The
+ * DataBind compiler also supports a convention-only NULL projection; that
+ * feature must not silently substitute for an absent generated RPC contract. */
+static DataBindStatus turboagent_generated_rpc_compile_exact(
+    DataBind *contract, const DataBindRpcProjectionArtifact *artifact,
+    const char *service, const char *operation,
+    const DataBindServiceNativeBinding *binding,
+    DataBindRpcMethodPlan **out, DataBindBindingPlanDiagnostic *diagnostic) {
+  const DataBindRpcProjectionConfig *projection =
+      data_bind_rpc_projection_artifact_find(artifact, service, operation);
+  if (out != NULL) *out = NULL;
+  if (projection == NULL) return DATA_BIND_ERR_SCHEMA;
+  return data_bind_rpc_method_plan_compile_service(
+      contract, service, operation, projection, binding, out, diagnostic);
+}
+
 spec("TurboAgent installed DataBind IDL typed RPC Owner") {
+  it("rejects missing and malformed generated projections before RPC admission") {
+    static const char source[] =
+        "message AddRequest { @Min(1) uint32 left; uint32 right;"
+        " optional uint32 scale default 1; }"
+        "message AddResponse { @Max(100) uint32 sum; }"
+        "service Calc { Add: AddRequest -> AddResponse; }";
+    DataBind *contract = NULL;
+    DataBindError parse_error = DATA_BIND_ERROR_INIT;
+    DataBindBindingPlanDiagnostic diagnostic =
+        DATA_BIND_BINDING_PLAN_DIAGNOSTIC_INIT;
+    DataBindServiceNativeBinding native =
+        DATA_BIND_SERVICE_NATIVE_BINDING_INIT(
+            FunctionMeta(turboagent_typed_add),
+            &ADD_REQUEST_NATIVE, &ADD_RESPONSE_NATIVE);
+    const DataBindRpcProjectionConfig *generated =
+        data_bind_rpc_projection_artifact_find(
+            &databind_turboagent_typed_rpc_rpc_projection, "Calc", "Add");
+    DataBindRpcProjectionConfig invalid;
+    DataBindRpcFieldProjection unknown =
+        (DataBindRpcFieldProjection)DATA_BIND_RPC_FIELD_PROJECTION_INIT;
+    DataBindRpcFieldProjection duplicates[2];
+    DataBindRpcMethodPlan *plan = NULL;
+
+    check_not_null(generated);
+    check_equal(data_bind_create_from_text(
+        source, sizeof(source) - 1u, &contract, &parse_error), DATA_BIND_OK);
+    /* No implicit convention fallback for a missing generated operation. */
+    check_equal(turboagent_generated_rpc_compile_exact(
+        contract, &databind_turboagent_typed_rpc_rpc_projection,
+        "Calc", "Missing", &native, &plan, &diagnostic),
+        DATA_BIND_ERR_SCHEMA);
+    check_null(plan);
+
+    invalid = *generated;
+    invalid.abi_version = DATA_BIND_METHOD_PLAN_ABI_VERSION + 1u;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    invalid = *generated;
+    invalid.fields = NULL;
+    invalid.field_count = 1u;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    unknown.direction = DATA_BIND_BINDING_INGRESS;
+    unknown.schema_field = "not_in_the_generated_service";
+    unknown.wire_name = "orphan";
+    unknown.ordinal = 0u;
+    invalid = *generated;
+    invalid.fields = &unknown;
+    invalid.field_count = 1u;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_SCHEMA);
+    check_null(plan);
+
+    duplicates[0] = generated->fields[0];
+    duplicates[1] = duplicates[0];
+    invalid = *generated;
+    invalid.fields = duplicates;
+    invalid.field_count = 2u;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    invalid = *generated;
+    invalid.ingress_format = DATA_BIND_FORMAT_NONE;
+    check_equal(data_bind_rpc_method_plan_compile_service(
+        contract, "Calc", "Add", &invalid, &native, &plan, &diagnostic),
+        DATA_BIND_ERR_INVALID_ARG);
+    check_null(plan);
+
+    /* The same original signed/generated projection remains usable; every
+     * negative candidate must leave out_plan empty without mutating it. */
+    check_equal(turboagent_generated_rpc_compile_exact(
+        contract, &databind_turboagent_typed_rpc_rpc_projection,
+        "Calc", "Add", &native, &plan, &diagnostic), DATA_BIND_OK);
+    check_not_null(plan);
+    check_equal(data_bind_rpc_method_plan_wire_method(plan), "calc.add");
+    data_bind_rpc_method_plan_free(plan);
+    data_bind_free(contract);
+  }
   it("compiles generated MethodPlan, mounts into HTTP Server, executes typed Client") {
     static const char contract_source[] =
         "message AddRequest { @Min(1) uint32 left; uint32 right;"

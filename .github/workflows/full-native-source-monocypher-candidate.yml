@@ -115,6 +115,7 @@ jobs:
             echo 'candidate_saltsutils_640_commit=ceef02ae2eb1b1ecd167eb9305c70895a329baa0'
             echo 'candidate_monocypher_namespace=PR641_four_files_only'
             echo 'candidate_salts_CSTL=static-hidden_test-only_Salts_1167_PR1169'
+            echo 'candidate_salts_CFlow=static-hidden_test-only_Salts_1180'
             echo 'actual_published_RC_SDK_qualification=NOT_COVERED'
             echo 'official_published_NuGet_binaries_used_for_link=false'
             echo 'normal_published_NuGet_consumer_gate=separate'
@@ -171,7 +172,7 @@ jobs:
           set -euo pipefail
           cmake --preset linux-dev-ci -S "$GITHUB_WORKSPACE/build/full-native-source/salts" \
             -B "$GRAPH_ROOT/build-salts" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PROJECT_Salts_INCLUDE="$GITHUB_WORKSPACE/build/full-native-source/salts-utils-monocypher-640/cmake/ci/cstl-hidden-source-odr.cmake" \
+            -DCMAKE_PROJECT_Salts_INCLUDE="$GITHUB_WORKSPACE/cmake/ci/chttp-rpc-sanitizer/cstl-cflow-hidden-candidate.cmake" \
             -DCMAKE_INSTALL_PREFIX="$SALTS_ROOT" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF \

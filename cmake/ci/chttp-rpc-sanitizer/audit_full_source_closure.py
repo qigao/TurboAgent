@@ -187,6 +187,26 @@ def main():
         for name, directory in builds.items()
     }
     if candidate:
+        # Salts::CFlow is a static archive linked into BOTH CHttp shared DSOs.
+        # Check its actual original-source object and test-only hidden owner
+        # compilation. Merely selecting a CMake option is not qualification.
+        source_rows = json.loads((builds["salts"] / "compile_commands.json").read_text())
+        cflow = [row for row in source_rows if row.get("file", "").replace("\\", "/")
+                 .endswith("/cflow/src/executor.c")]
+        require(len(cflow) == 1 and object_path(builds["salts"], cflow[0]).is_file(),
+                "CFlow executor reflection source missing from tested object graph")
+        require("-fvisibility=hidden" in command(cflow[0]),
+                "CFlow executor must be statically private in candidate source graph")
+        for label in ("chttp_client", "chttp_server"):
+            dso = root / "prefix/chttp/lib" / ("lib" + label + ".so")
+            require(dso.is_file(), f"candidate CHttp native DSO missing: {label}")
+            dynamic = subprocess.run(
+                ["nm", "-D", "--defined-only", str(dso)],
+                check=True, capture_output=True, text=True,
+            ).stdout
+            require("cflow_type_executor_protocol_stats_ptr" not in dynamic,
+                    f"{label}: duplicate preemptible CFlow type descriptor")
+    if candidate:
         # This checks actual built libraries and static archive, not only the
         # source header's #define names or CMake option declarations.
         lib = root / "prefix/salts-utils/lib/libdata_bind.so"

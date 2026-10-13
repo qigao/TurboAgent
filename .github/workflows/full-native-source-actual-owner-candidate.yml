@@ -245,12 +245,20 @@ jobs:
                   raise SystemExit(f"{name} object was configured but never built")
               selected[name] = {"object":str(obj), "sanitized":True,
                                 "visibility":"HIDDEN_IN_STATIC_LIBRARY"}
-          for owner,target in (("CFlow","cmeta_cflow"),("CSTL","cmeta_cstl")):
-              # Confirm no proxy CMake project overwrote actual producer targets.
-              builddir = build / ("cflow" if owner == "CFlow" else "cstl")
-              candidates = list(builddir.glob("*.a"))
-              if not candidates:
-                  raise SystemExit(f"Missing actual static {target} archive")
+          # Original Salts CMake emits archives under the top-level lib/
+          # output directory and installs the exact archives to prefix/lib.
+          # Check BOTH locations, matching the producer's actual link log.
+          for target in ("cmeta_cflow","cmeta_cstl"):
+              source_archive = build / "lib" / ("lib" + target + ".a")
+              installed_archive = root / "prefix/salts/lib" / ("lib" + target + ".a")
+              if not source_archive.is_file() or not installed_archive.is_file():
+                  raise SystemExit(f"Missing actual built/installed static {target} archive")
+              original = subprocess.run(["nm","--defined-only",str(source_archive)],
+                                       check=True,capture_output=True,text=True).stdout
+              required = ("cflow_type_executor_protocol_stats_ptr"
+                          if target == "cmeta_cflow" else "stl_bplus_tree_container_desc")
+              if required not in original:
+                  raise SystemExit(f"{target} archive lacks original reflected global")
           print(json.dumps({"mode":"ACTUAL_PRODUCER_CMAKE_NO_OVERLAY",
                             "salts_source_sha":
                                "3f55cea0f113ffde6702c08b5187144fd289b42a",

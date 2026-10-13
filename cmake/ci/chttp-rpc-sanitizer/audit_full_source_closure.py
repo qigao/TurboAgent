@@ -77,12 +77,16 @@ def audited_compiles(build, component, flags, candidate=False):
         require(object_path(build, hits[0]).is_file(),
                 f"{component}: required source not actually compiled {source}")
     if component in ("salts", "salts-utils"):
-        # Released Salts/Utils source builds use unmodified monocypher.c.
-        # PR #641 candidate instead builds one renamed DataBind-only wrapper,
-        # with the original vendor source included exactly once within it.
-        # Never count a configured/absent source as compiled instrumentation.
-        wrapped = component == "salts-utils" and candidate
-        expected = ("databind_monocypher.c" if wrapped else "monocypher.c")
+        # Published source builds used unmodified monocypher.c directly.
+        # In the candidate graph, PR #1193 compiles the original source
+        # through one CNet-private wrapper; PR #641 does the same for DataBind.
+        # Both real source objects must exist and be instrumented.
+        wrapped = candidate
+        expected = (
+            ("cnet_monocypher.c" if component == "salts"
+             else "databind_monocypher.c")
+            if wrapped else "monocypher.c"
+        )
         vendor = [row for row in rows if row.get("file", "").replace("\\", "/")
                   .endswith("/vendor/monocypher/" + expected)]
         require(len(vendor) == 1 and object_path(build, vendor[0]).is_file(),
@@ -93,7 +97,7 @@ def audited_compiles(build, component, flags, candidate=False):
             stale = [row for row in rows if row.get("file", "").replace("\\", "/")
                      .endswith("/vendor/monocypher/monocypher.c")
                      and object_path(build, row).is_file()]
-            require(not stale, "candidate must not compile a second raw Monocypher TU")
+            require(not stale, f"{component}: candidate must not compile raw Monocypher in a second TU")
     return {
         "configured_compile_commands": len(rows),
         "actually_built_object_units": len(built),

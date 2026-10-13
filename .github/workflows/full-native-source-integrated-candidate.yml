@@ -252,62 +252,73 @@ jobs:
           cmake --install "$GRAPH_ROOT/build-chttp"
           test -f "$CHTTP_ROOT/lib/cmake/Chttp/ChttpConfig.cmake"
 
-      # The published host compiler is a BUILD-TIME GENERATOR only, never a
-      # linked RPC/CNet/DataBind/CHttp runtime. ASan correctly detects ODR
-      # duplicate globals when the source-instrumented salts-idlc embeds
-      # static CSTL alongside instrumented libsalts.so. Keep detection ON:
-      # run a separately attested release host-tool binary with its own exact
-      # release host libraries; instrument every actual native test library.
-      - name: Qualify immutable separate build-time IDLC host tool
-        if: matrix.sanitizer == 'address'
+      # Unlike the released-tag baseline gate, this integrated candidate
+      # uses the actual ASan+UBSan-instrumented host IDLC built and installed
+      # from the same four-source graph. #639 / Draft #646 separately proved
+      # its test-only static-hidden CSTL ownership without ODR suppression.
+      - name: Prove and execute source-built, sanitizer-instrumented IDLC
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          host="$GRAPH_ROOT/host-only"
-          for item in salts salts-utils; do
-            case "$item" in
-              salts)
-                project=qigao/salts
-                tag=v2.3.0-rc.15
-                archive=Salts.Native.2.3.0-rc.15.nupkg
-                ;;
-              salts-utils)
-                project=qigao/salts-utils
-                tag=v4.3.0-rc.10
-                archive=SaltsUtils.Native.4.3.0-rc.10.nupkg
-                ;;
-            esac
-            mkdir -p "$host/$item/archive" "$host/$item/extracted"
-            gh release download "$tag" --repo "$project" --pattern "$archive" \
-              --dir "$host/$item/archive"
-            unzip -q "$host/$item/archive/$archive" -d "$host/$item/extracted"
-            python3 cmake/ci/verify-published-native-sdk.py \
-              --repo "$project" --archive "$host/$item/archive/$archive" \
-              --extracted "$host/$item/extracted" --rid linux-x64
-          done
-          host_salts="$host/salts/extracted/sdk/linux-x64"
-          host_utils="$host/salts-utils/extracted/sdk/linux-x64"
-          test -f "$host_utils/bin/salts-idlc"
-          chmod +x "$host_utils/bin/salts-idlc"
-          test -f "$host_salts/lib/cmake/Salts/SaltsConfig.cmake"
-          # A hermetic wrapper overwrites the generator process's library
-          # closure only. Normal runtime build imports remain source-prefixed.
-          mkdir -p "$host/wrapper/bin"
-          cat > "$host/wrapper/bin/salts-idlc-host" <<'HOST_IDLC'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          export LD_LIBRARY_PATH="$TURBOAGENT_HOST_IDLC_UTILS/lib:$TURBOAGENT_HOST_IDLC_UTILS/bin:$TURBOAGENT_HOST_IDLC_SALTS/lib:${LD_LIBRARY_PATH:-}"
-          exec "$TURBOAGENT_HOST_IDLC_UTILS/bin/salts-idlc" "$@"
-          HOST_IDLC
-          chmod +x "$host/wrapper/bin/salts-idlc-host"
-          {
-            echo "TURBOAGENT_HOST_IDLC_UTILS=$host_utils"
-            echo "TURBOAGENT_HOST_IDLC_SALTS=$host_salts"
-            echo "TURBOAGENT_HOST_IDLC_WRAPPER=$host/wrapper/bin/salts-idlc-host"
-          } >> "$GITHUB_ENV"
-          echo "asan_codegen_host_only=attested_published_tool_not_linked" >> "$GRAPH_ROOT/provenance.txt"
+          exe="$SALTS_UTILS_ROOT/bin/salts-idlc"
+          test -x "$exe"
+          python3 - <<'PY' | tee "$GRAPH_ROOT/source-idlc-link-audit.json"
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import shlex
+          import subprocess
+          root = Path(os.environ["GRAPH_ROOT"])
+          build = root / "build-salts-utils"
+          rows = json.loads((build / "compile_commands.json").read_text())
+          matches = [r for r in rows if
+                     r.get("file", "").replace("\\", "/").endswith("/databind/compiler/main.c")]
+          if len(matches) != 1:
+              raise SystemExit("required source IDLC main.c missing")
+          row = matches[0]
+          command = row.get("command") or " ".join(row.get("arguments", []))
+          flags = ("-fsanitize=address", "-fsanitize=undefined")
+          if not all(f in command for f in flags):
+              raise SystemExit("source IDLC main.c not ASan/UBSan instrumented")
+          args = row.get("arguments") or shlex.split(command)
+          if "-o" not in args:
+              raise SystemExit("source IDLC compiler object output unspecified")
+          obj = Path(args[args.index("-o") + 1])
+          if not obj.is_absolute():
+              obj = Path(row.get("directory", str(build))) / obj
+          if not obj.is_file():
+              raise SystemExit("source IDLC compiled object missing")
+          lines = subprocess.run(
+              ["ninja", "-C", str(build), "-t", "commands", "salts_idlc"],
+              check=True, capture_output=True, text=True).stdout.splitlines()
+          links = [line for line in lines
+                   if re.search(r"-o (?:[^ ]*/)?bin/salts-idlc(?:\s|$)", line)
+                   and " -c " not in line]
+          if len(links) != 1 or not all(f in links[0] for f in flags):
+              raise SystemExit("source IDLC final link lacks ASan+UBSan flags")
+          print(json.dumps({
+              "kind": "SOURCE_BUILT_IDLC_EXECUTABLE",
+              "source_object": str(obj),
+              "compiler_flags": list(flags),
+              "final_executable_sanitized": True,
+              "published_host_generator_used": False,
+          }, indent=2))
+          PY
+          ldd "$exe" | tee "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
+          grep -F "$SALTS_ROOT/lib/libsalts.so" "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
+          grep -F 'libasan.so' "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
+          grep -F 'libubsan.so' "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
+          output="$GRAPH_ROOT/source-idlc-preflight"
+          mkdir -p "$output"
+          "$exe" "$GITHUB_WORKSPACE/agent/tests/rpc_generated/turboagent_typed_rpc.schema" \
+            --lang c --output "$output/typed_records.h" \
+            --source-output "$output/typed_records.c"
+          test -s "$output/typed_records.h"
+          test -s "$output/typed_records.c"
+          sha256sum "$output/typed_records.h" "$output/typed_records.c" \
+            | tee "$GRAPH_ROOT/source-idlc-preflight.sha256"
+          echo 'asan_codegen_host=SOURCE_BUILT_ASAN_UBSAN_NO_PUBLISHED_IDLC' >> "$GRAPH_ROOT/provenance.txt"
 
       - name: Verify private vendored crypto globals are not exported from native DSOs
         shell: bash
@@ -334,7 +345,7 @@ jobs:
           cmake --preset ci-linux-release -S "$GITHUB_WORKSPACE" \
             -B "$GRAPH_ROOT/build-turboagent" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH="$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT" \
-            ${TURBOAGENT_HOST_IDLC_WRAPPER:+-DSaltsUtils_IDLC_EXECUTABLE=$TURBOAGENT_HOST_IDLC_WRAPPER} \
+            -DSaltsUtils_IDLC_EXECUTABLE="$SALTS_UTILS_ROOT/bin/salts-idlc" \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBUILD_TESTS=ON -DENABLE_WASM_TOOLS=OFF -DENABLE_PRAKTOR_TOOLS=OFF \
@@ -381,6 +392,9 @@ jobs:
             ${{ env.GRAPH_ROOT }}/provenance.txt
             ${{ env.GRAPH_ROOT }}/full-source-audit.json
             ${{ env.GRAPH_ROOT }}/actual-linked-native-libraries.txt
+            ${{ env.GRAPH_ROOT }}/source-idlc-link-audit.json
+            ${{ env.GRAPH_ROOT }}/source-built-idlc-linked-libraries.txt
+            ${{ env.GRAPH_ROOT }}/source-idlc-preflight.sha256
             ${{ env.GRAPH_ROOT }}/build-salts/compile_commands.json
             ${{ env.GRAPH_ROOT }}/build-salts-utils/compile_commands.json
             ${{ env.GRAPH_ROOT }}/build-chttp/compile_commands.json

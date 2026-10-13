@@ -59,6 +59,13 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s cmake/ci -p test_verify_published_native_sdk.py -v
           bash cmake/ci/restore-native-sdk.sh linux-x64 1 1
+      - name: Verify installed SDK roots after GITHUB_ENV propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CHTTP_ROOT"
+          test -n "$SALTS_ROOT"
+          test -n "$SALTS_UTILS_ROOT"
           test -f "$CHTTP_ROOT/lib/cmake/Chttp/ChttpConfig.cmake"
           test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
           test -f "$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"

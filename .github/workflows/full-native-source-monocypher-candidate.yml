@@ -1,0 +1,377 @@
+name: TurboAgent RPC candidate source ASan — private Monocypher/CSTL
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/full-native-source-monocypher-candidate.yml'
+      - 'cmake/ci/chttp-rpc-sanitizer/**'
+      - 'agent/tests/rpc_generated/**'
+      - 'CMakeLists.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: turboagent-rpc-full-native-monocypher-candidate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-first-party-source:
+    if: >-
+      github.repository == 'qigao/TurboAgent' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.number == 121 &&
+        github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent') ||
+       (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/test/chttp-rc5-installed-consumer-246'))
+    name: Candidate SaltsUtils #641 + static-hidden Salts CSTL + real DSO / ${{ matrix.sanitizer }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address]
+    env:
+      CC: gcc
+      CXX: g++
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      GRAPH_ROOT: /tmp/turboagent-fullsource-candidate-${{ matrix.sanitizer }}
+      PKG_ROOT: /tmp/turboagent-fullsource-candidate-${{ matrix.sanitizer }}/prefix
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      CCACHE_DIR: ${{ github.workspace }}/.cache/rpc-fullsource-candidate-${{ matrix.sanitizer }}
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - name: Checkout exact reviewed TurboAgent PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Checkout exact public Salts 2.3.0-rc.15 tag
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: v2.3.0-rc.15
+          path: build/full-native-source/salts
+          persist-credentials: false
+      - name: Checkout exact public SaltsUtils 4.3.0-rc.10 tag
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: v4.3.0-rc.10
+          path: build/full-native-source/salts-utils
+          persist-credentials: false
+      - name: Checkout immutable SaltsUtils Monocypher candidate PR #641
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ceef02ae2eb1b1ecd167eb9305c70895a329baa0
+          path: build/full-native-source/salts-utils-monocypher-640
+          persist-credentials: false
+      - name: Checkout exact public CHttp 2.1.0-rc.5 tag
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/chttp
+          ref: v2.1.0-rc.5
+          path: build/full-native-source/chttp
+          persist-credentials: false
+      - name: Restore pinned vcpkg binary cache and re2c host tools
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - name: Restore pinned re2c host generator
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+      - name: Install native build prerequisites
+        uses: ./build/full-native-source/salts/.github/actions/setup-build-host
+      - name: Attest exact immutable tagged original sources
+        shell: bash
+        env:
+          EXPECTED_AGENT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build nasm pkg-config ccache binutils
+          mkdir -p "$GRAPH_ROOT"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_AGENT"
+          test "$(git -C build/full-native-source/salts rev-parse HEAD)" = '21bdb1145fbb2b39ee3fa644173ec037adba7b87'
+          test "$(git -C build/full-native-source/salts-utils rev-parse HEAD)" = '1410c9fd479f9faab31503523d8e31cc506b5b25'
+          test "$(git -C build/full-native-source/salts-utils-monocypher-640 rev-parse HEAD)" = 'ceef02ae2eb1b1ecd167eb9305c70895a329baa0'
+          test "$(git -C build/full-native-source/chttp rev-parse HEAD)" = '251d9ca60b1526ceab9d02f7f68e18fe060ce6f5'
+          {
+            echo "turboagent_source=$EXPECTED_AGENT"
+            echo 'salts_tag=v2.3.0-rc.15'
+            echo 'salts_source=21bdb1145fbb2b39ee3fa644173ec037adba7b87'
+            echo 'saltsutils_tag=v4.3.0-rc.10'
+            echo 'saltsutils_source=1410c9fd479f9faab31503523d8e31cc506b5b25'
+            echo 'chttp_tag=v2.1.0-rc.5'
+            echo 'chttp_source=251d9ca60b1526ceab9d02f7f68e18fe060ce6f5'
+            echo "sanitizer=${{ matrix.sanitizer }}"
+            echo 'qualification=CANDIDATE_source-built-first-party-entire-RPC-graph'
+            echo 'original_release_source_tags_unmodified=true'
+            echo 'candidate_saltsutils_640_commit=ceef02ae2eb1b1ecd167eb9305c70895a329baa0'
+            echo 'candidate_monocypher_namespace=PR641_four_files_only'
+            echo 'candidate_salts_CSTL=static-hidden_test-only_Salts_1167_PR1169'
+            echo 'actual_published_RC_SDK_qualification=NOT_COVERED'
+            echo 'official_published_NuGet_binaries_used_for_link=false'
+            echo 'normal_published_NuGet_consumer_gate=separate'
+          } | tee "$GRAPH_ROOT/provenance.txt"
+
+      - name: Apply explicitly pinned candidate source overlay; keep originals identified
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="$GITHUB_WORKSPACE/build/full-native-source/salts-utils"
+          candidate="$GITHUB_WORKSPACE/build/full-native-source/salts-utils-monocypher-640"
+          for path in vendor/monocypher/CMakeLists.txt \
+                      vendor/monocypher/databind_monocypher.c \
+                      vendor/monocypher/databind_monocypher_namespace.h \
+                      databind/runtime/data_bind_contract_fingerprint.c; do
+            cp "$candidate/$path" "$release/$path"
+          done
+          test "$(git -C "$release" diff --name-only | wc -l)" -eq 2
+          test "$(git -C "$release" ls-files --others --exclude-standard | wc -l)" -eq 2
+          {
+            echo "candidate_overlay=exactly_two_changed_and_two_new_files"
+            sha256sum "$release/vendor/monocypher/databind_monocypher_namespace.h"
+            sha256sum "$release/vendor/monocypher/databind_monocypher.c"
+          } | tee -a "$GRAPH_ROOT/provenance.txt"
+          # This source overlay is intentionally NOT the immutable published
+          # SaltsUtils rc.10 binary; exact-tag acceptance remains a separate CI.
+      - name: Set independent sanitizer and source prefixes
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+        run: |
+          set -euo pipefail
+          if [ "$KIND" = thread ]; then
+            printf '%s\n' 'SAN_THREAD=ON' 'SAN_ADDRESS=OFF' 'SAN_UNDEFINED=OFF' \
+              'SAN_FLAGS=-fsanitize=thread -g -fno-omit-frame-pointer' \
+              'SAN_LINK=-fsanitize=thread' >> "$GITHUB_ENV"
+          else
+            printf '%s\n' 'SAN_THREAD=OFF' 'SAN_ADDRESS=ON' 'SAN_UNDEFINED=ON' \
+              'SAN_FLAGS=-fsanitize=address -fsanitize=undefined -g -fno-omit-frame-pointer' \
+              'SAN_LINK=-fsanitize=address -fsanitize=undefined' >> "$GITHUB_ENV"
+          fi
+          {
+            echo "SALTS_ROOT=$GRAPH_ROOT/prefix/salts"
+            echo "SALTS_UTILS_ROOT=$GRAPH_ROOT/prefix/salts-utils"
+            echo "DATABIND_ROOT=$GRAPH_ROOT/prefix/salts-utils"
+            echo "CHTTP_ROOT=$GRAPH_ROOT/prefix/chttp"
+            echo "LD_LIBRARY_PATH=$GRAPH_ROOT/prefix/chttp/lib:$GRAPH_ROOT/prefix/salts-utils/lib:$GRAPH_ROOT/prefix/salts/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib:$GITHUB_WORKSPACE/vcpkg_installed/ci-linux-release/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          } >> "$GITHUB_ENV"
+          echo "$GRAPH_ROOT/prefix/salts-utils/bin" >> "$GITHUB_PATH"
+
+      - name: Build + install instrumented exact Salts CNet / CMeta sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset linux-dev-ci -S "$GITHUB_WORKSPACE/build/full-native-source/salts" \
+            -B "$GRAPH_ROOT/build-salts" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PROJECT_Salts_INCLUDE="$GITHUB_WORKSPACE/build/full-native-source/salts-utils-monocypher-640/cmake/ci/cstl-hidden-source-odr.cmake" \
+            -DCMAKE_INSTALL_PREFIX="$SALTS_ROOT" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF \
+            -DENABLE_SANITIZER_THREAD="$SAN_THREAD" \
+            -DENABLE_SANITIZER_ADDRESS="$SAN_ADDRESS" \
+            -DENABLE_SANITIZER_UNDEFINED="$SAN_UNDEFINED" \
+            -DCMAKE_PROJECT_INCLUDE="$GITHUB_WORKSPACE/cmake/ci/chttp-rpc-sanitizer/qualify_private_vendor_symbols.cmake" \
+            -DCMAKE_C_FLAGS="$SAN_FLAGS" -DCMAKE_CXX_FLAGS="$SAN_FLAGS" \
+            -DCMAKE_SHARED_LINKER_FLAGS="$SAN_LINK" \
+            -DCMAKE_EXE_LINKER_FLAGS="$SAN_LINK"
+          cmake --build "$GRAPH_ROOT/build-salts" --parallel 2
+          cmake --install "$GRAPH_ROOT/build-salts"
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+
+      - name: Build + install instrumented exact SaltsUtils DataBind / IDL sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ci-linux-release-user \
+            -S "$GITHUB_WORKSPACE/build/full-native-source/salts-utils" \
+            -B "$GRAPH_ROOT/build-salts-utils" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX="$SALTS_UTILS_ROOT" \
+            -DCMAKE_PREFIX_PATH="$SALTS_ROOT" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF \
+            -DENABLE_SANITIZER_THREAD="$SAN_THREAD" \
+            -DENABLE_SANITIZER_ADDRESS="$SAN_ADDRESS" \
+            -DENABLE_SANITIZER_UNDEFINED="$SAN_UNDEFINED" \
+            -DCMAKE_PROJECT_INCLUDE="$GITHUB_WORKSPACE/cmake/ci/chttp-rpc-sanitizer/qualify_private_vendor_symbols.cmake" \
+            -DCMAKE_C_FLAGS="$SAN_FLAGS" -DCMAKE_CXX_FLAGS="$SAN_FLAGS" \
+            -DCMAKE_SHARED_LINKER_FLAGS="$SAN_LINK" \
+            -DCMAKE_EXE_LINKER_FLAGS="$SAN_LINK"
+          cmake --build "$GRAPH_ROOT/build-salts-utils" --parallel 2
+          cmake --install "$GRAPH_ROOT/build-salts-utils"
+          test -f "$SALTS_UTILS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -x "$SALTS_UTILS_ROOT/bin/salts-idlc"
+
+      - name: Build + install instrumented exact CHttp RPC Server / Client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ci-linux-release-user \
+            -S "$GITHUB_WORKSPACE/build/full-native-source/chttp" \
+            -B "$GRAPH_ROOT/build-chttp" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX="$CHTTP_ROOT" \
+            -DCMAKE_PREFIX_PATH="$SALTS_ROOT;$SALTS_UTILS_ROOT" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBUILD_TESTS=OFF -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EXAMPLES=OFF \
+            -DENABLE_SANITIZER_THREAD="$SAN_THREAD" \
+            -DENABLE_SANITIZER_ADDRESS="$SAN_ADDRESS" \
+            -DENABLE_SANITIZER_UNDEFINED="$SAN_UNDEFINED" \
+            -DCMAKE_C_FLAGS="$SAN_FLAGS" -DCMAKE_CXX_FLAGS="$SAN_FLAGS" \
+            -DCMAKE_SHARED_LINKER_FLAGS="$SAN_LINK" \
+            -DCMAKE_EXE_LINKER_FLAGS="$SAN_LINK"
+          cmake --build "$GRAPH_ROOT/build-chttp" --parallel 2
+          cmake --install "$GRAPH_ROOT/build-chttp"
+          test -f "$CHTTP_ROOT/lib/cmake/Chttp/ChttpConfig.cmake"
+
+      # The published host compiler is a BUILD-TIME GENERATOR only, never a
+      # linked RPC/CNet/DataBind/CHttp runtime. ASan correctly detects ODR
+      # duplicate globals when the source-instrumented salts-idlc embeds
+      # static CSTL alongside instrumented libsalts.so. Keep detection ON:
+      # run a separately attested release host-tool binary with its own exact
+      # release host libraries; instrument every actual native test library.
+      - name: Qualify immutable separate build-time IDLC host tool
+        if: matrix.sanitizer == 'address'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          host="$GRAPH_ROOT/host-only"
+          for item in salts salts-utils; do
+            case "$item" in
+              salts)
+                project=qigao/salts
+                tag=v2.3.0-rc.15
+                archive=Salts.Native.2.3.0-rc.15.nupkg
+                ;;
+              salts-utils)
+                project=qigao/salts-utils
+                tag=v4.3.0-rc.10
+                archive=SaltsUtils.Native.4.3.0-rc.10.nupkg
+                ;;
+            esac
+            mkdir -p "$host/$item/archive" "$host/$item/extracted"
+            gh release download "$tag" --repo "$project" --pattern "$archive" \
+              --dir "$host/$item/archive"
+            unzip -q "$host/$item/archive/$archive" -d "$host/$item/extracted"
+            python3 cmake/ci/verify-published-native-sdk.py \
+              --repo "$project" --archive "$host/$item/archive/$archive" \
+              --extracted "$host/$item/extracted" --rid linux-x64
+          done
+          host_salts="$host/salts/extracted/sdk/linux-x64"
+          host_utils="$host/salts-utils/extracted/sdk/linux-x64"
+          test -f "$host_utils/bin/salts-idlc"
+          chmod +x "$host_utils/bin/salts-idlc"
+          test -f "$host_salts/lib/cmake/Salts/SaltsConfig.cmake"
+          # A hermetic wrapper overwrites the generator process's library
+          # closure only. Normal runtime build imports remain source-prefixed.
+          mkdir -p "$host/wrapper/bin"
+          cat > "$host/wrapper/bin/salts-idlc-host" <<'HOST_IDLC'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBOAGENT_HOST_IDLC_UTILS/lib:$TURBOAGENT_HOST_IDLC_UTILS/bin:$TURBOAGENT_HOST_IDLC_SALTS/lib:${LD_LIBRARY_PATH:-}"
+          exec "$TURBOAGENT_HOST_IDLC_UTILS/bin/salts-idlc" "$@"
+          HOST_IDLC
+          chmod +x "$host/wrapper/bin/salts-idlc-host"
+          {
+            echo "TURBOAGENT_HOST_IDLC_UTILS=$host_utils"
+            echo "TURBOAGENT_HOST_IDLC_SALTS=$host_salts"
+            echo "TURBOAGENT_HOST_IDLC_WRAPPER=$host/wrapper/bin/salts-idlc-host"
+          } >> "$GITHUB_ENV"
+          echo "asan_codegen_host_only=attested_published_tool_not_linked" >> "$GRAPH_ROOT/provenance.txt"
+
+      - name: Verify private vendored crypto globals are not exported from native DSOs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Exact-tag source builds link separate private Monocypher archives.
+          # Their crypto_argon2_no_extras storage must never be globally
+          # interposable across CNet and DataBind; keep ASan ODR checking ON.
+          test -f "$SALTS_ROOT/lib/libcnet.so"
+          test -f "$SALTS_UTILS_ROOT/lib/libdata_bind.so"
+          for lib in "$SALTS_ROOT/lib/libcnet.so" "$SALTS_UTILS_ROOT/lib/libdata_bind.so"; do
+            if nm -D --defined-only "$lib" | grep -Fq 'crypto_argon2_no_extras'; then
+              echo "Unisolated duplicate vendor crypto global in $lib" >&2
+              exit 1
+            fi
+          done
+          echo 'private_monocypher_elf_visibility=hidden' >> "$GRAPH_ROOT/provenance.txt"
+          echo 'asan_odr_detection=supported_and_not_disabled' >> "$GRAPH_ROOT/provenance.txt"
+
+      - name: Build instrumented external TurboAgent IDL / real Provider DSO
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ci-linux-release -S "$GITHUB_WORKSPACE" \
+            -B "$GRAPH_ROOT/build-turboagent" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH="$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT" \
+            ${TURBOAGENT_HOST_IDLC_WRAPPER:+-DSaltsUtils_IDLC_EXECUTABLE=$TURBOAGENT_HOST_IDLC_WRAPPER} \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBUILD_TESTS=ON -DENABLE_WASM_TOOLS=OFF -DENABLE_PRAKTOR_TOOLS=OFF \
+            -DENABLE_CODEX_BRIDGE=OFF -DENABLE_CODING_TOOLS=OFF \
+            -DENABLE_SANITIZER_THREAD="$SAN_THREAD" \
+            -DENABLE_SANITIZER_ADDRESS="$SAN_ADDRESS" \
+            -DENABLE_SANITIZER_UNDEFINED="$SAN_UNDEFINED" -DENABLE_SANITIZER_LEAK=OFF \
+            -DCMAKE_C_FLAGS="$SAN_FLAGS" -DCMAKE_CXX_FLAGS="$SAN_FLAGS" \
+            -DCMAKE_SHARED_LINKER_FLAGS="$SAN_LINK" \
+            -DCMAKE_EXE_LINKER_FLAGS="$SAN_LINK"
+          cmake --build "$GRAPH_ROOT/build-turboagent" \
+            --target test_turboagent_typed_rpc --parallel 2
+
+      - name: Audit all actual source units, final links and imported prefixes
+        shell: bash
+        env:
+          KIND: ${{ matrix.sanitizer }}
+        run: |
+          set -euo pipefail
+          python3 cmake/ci/chttp-rpc-sanitizer/audit_full_source_closure.py \
+            "$GRAPH_ROOT" "$KIND" | tee "$GRAPH_ROOT/full-source-audit.json"
+          # The explicit audit must succeed before any runtime pass counts.
+          ldd "$GRAPH_ROOT/build-turboagent/bin/test_turboagent_typed_rpc" \
+            | tee "$GRAPH_ROOT/actual-linked-native-libraries.txt"
+
+      - name: Run exact generated typed RPC + active native Provider DSO 10x
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=10s 850s \
+            ctest --test-dir "$GRAPH_ROOT/build-turboagent" \
+            -R '^test_turboagent_typed_rpc$' --repeat until-fail:10 \
+            --no-tests=error --timeout 120 --output-on-failure
+
+      - name: Preserve first-party source sanitizer evidence and first failing trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-123-monocypher-640-CANDIDATE-${{ matrix.sanitizer }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ env.GRAPH_ROOT }}/provenance.txt
+            ${{ env.GRAPH_ROOT }}/full-source-audit.json
+            ${{ env.GRAPH_ROOT }}/actual-linked-native-libraries.txt
+            ${{ env.GRAPH_ROOT }}/build-salts/compile_commands.json
+            ${{ env.GRAPH_ROOT }}/build-salts-utils/compile_commands.json
+            ${{ env.GRAPH_ROOT }}/build-chttp/compile_commands.json
+            ${{ env.GRAPH_ROOT }}/build-turboagent/compile_commands.json
+            ${{ env.GRAPH_ROOT }}/build-turboagent/Testing/Temporary/LastTest.log
+
+      - name: Verify source checkout remains unchanged
+        if: always()
+        shell: bash
+        env:
+          EXPECTED_AGENT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_AGENT"
+          test -z "$(git status --porcelain --untracked-files=no)"

@@ -461,6 +461,48 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     mount.execution = &wrong_function;
     check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_EINVAL);
     mount.execution = &execution;
+    /* DataBind permits a reflected native signature whose pointer lifetime
+     * flags differ from the CHttp RPC Owner's strict borrowed-value contract.
+     * Compile two actual MethodPlans, then prove CHttp rejects both BEFORE
+     * publishing the wire method or claiming a Provider lease. */
+    {
+      cmeta_function_desc altered_function = *FunctionMeta(turboagent_typed_add);
+      cmeta_function_abi_desc altered_abi = *FunctionAbi(turboagent_typed_add);
+      cmeta_param_desc altered_params[2] = {
+          FunctionMeta(turboagent_typed_add)->params[0],
+          FunctionMeta(turboagent_typed_add)->params[1]};
+      DataBindServiceNativeBinding altered_binding = binding;
+      DataBindNativeExecution altered_execution = execution;
+      DataBindRpcMethodPlan *altered_plan = NULL;
+      chttp_server_rpc_mount_options denied = mount;
+      size_t n;
+
+      altered_function.params = altered_params;
+      altered_abi.function = &altered_function;
+      altered_binding.function = &altered_function;
+      altered_execution.function = &altered_function;
+      altered_execution.abi = &altered_abi;
+      denied.native_binding = &altered_binding;
+      denied.execution = &altered_execution;
+      for (n = 0u; n < 2u; ++n) {
+        altered_params[0].flags = (cmeta_param_flags)(
+            n == 0u ? CMETA_PARAM_IN
+                    : (CMETA_PARAM_IN | CMETA_PARAM_BORROWED));
+        altered_params[1].flags = (cmeta_param_flags)(
+            n == 1u ? CMETA_PARAM_OUT
+                    : (CMETA_PARAM_OUT | CMETA_PARAM_BORROWED));
+        check_true(cmeta_function_desc_valid(&altered_function));
+        check_true(cmeta_function_abi_desc_valid(&altered_abi));
+        check_equal(data_bind_rpc_method_plan_compile_service(
+            contract, "Calc", "Add", projection, &altered_binding,
+            &altered_plan, &diagnostic), DATA_BIND_OK);
+        check_not_null(altered_plan);
+        denied.method_plan = altered_plan;
+        check_equal(chttp_server_rpc_mount(&server, &denied), SALTS_ENOTSUP);
+        data_bind_rpc_method_plan_free(altered_plan);
+        altered_plan = NULL;
+      }
+    }
     check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_OK);
     check_equal(chttp_server_rpc_mount(&server, &mount), SALTS_EALREADY);
     check_equal(chttp_server_start(&server), SALTS_OK);

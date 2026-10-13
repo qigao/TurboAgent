@@ -59,7 +59,7 @@ def object_path(build, row):
         Path(row.get("directory") or str(build)) / output)
 
 
-def audited_compiles(build, component, flags):
+def audited_compiles(build, component, flags, candidate=False):
     path = build / "compile_commands.json"
     require(path.is_file(), f"{component}: missing compile_commands.json")
     rows = json.loads(path.read_text(encoding="utf-8"))
@@ -77,15 +77,23 @@ def audited_compiles(build, component, flags):
         require(object_path(build, hits[0]).is_file(),
                 f"{component}: required source not actually compiled {source}")
     if component in ("salts", "salts-utils"):
-        # Independent PRIVATE Monocypher archives must have separate
-        # visibility domains: no exported crypto_argon2_no_extras collision.
-        # ASan ODR detection stays on; confirm the ACTUAL compiled TU flag.
+        # Released Salts/Utils source builds use unmodified monocypher.c.
+        # PR #641 candidate instead builds one renamed DataBind-only wrapper,
+        # with the original vendor source included exactly once within it.
+        # Never count a configured/absent source as compiled instrumentation.
+        wrapped = component == "salts-utils" and candidate
+        expected = ("databind_monocypher.c" if wrapped else "monocypher.c")
         vendor = [row for row in rows if row.get("file", "").replace("\\", "/")
-                  .endswith("/vendor/monocypher/monocypher.c")]
+                  .endswith("/vendor/monocypher/" + expected)]
         require(len(vendor) == 1 and object_path(build, vendor[0]).is_file(),
-                f"{component}: expected one built Monocypher vendor object")
+                f"{component}: expected one built {expected} vendor object")
         require("-fvisibility=hidden" in command(vendor[0]),
-                f"{component}: Monocypher vendor symbol isolation missing")
+                f"{component}: {expected} private vendor visibility missing")
+        if wrapped:
+            stale = [row for row in rows if row.get("file", "").replace("\\", "/")
+                     .endswith("/vendor/monocypher/monocypher.c")
+                     and object_path(build, row).is_file()]
+            require(not stale, "candidate must not compile a second raw Monocypher TU")
     return {
         "configured_compile_commands": len(rows),
         "actually_built_object_units": len(built),
@@ -163,25 +171,50 @@ def audit_links(build, flags, prefixes):
 
 
 def main():
-    require(len(sys.argv) == 3,
-            "usage: audit_full_source_closure.py <graph-root> thread|address")
+    require(len(sys.argv) in (3, 4) and
+            (len(sys.argv) == 3 or sys.argv[3] == "monocypher-candidate"),
+            "usage: audit_full_source_closure.py <graph-root> thread|address [monocypher-candidate]")
     root = Path(sys.argv[1]).resolve()
     kind = sys.argv[2]
     require(kind in ("thread", "address"), f"unknown sanitizer {kind}")
+    candidate = len(sys.argv) == 4
     flags = ("-fsanitize=thread",) if kind == "thread" else (
         "-fsanitize=address", "-fsanitize=undefined")
     builds = {name: root / ("build-" + name)
               for name in REQUIRED_SOURCES}
     source_report = {
-        name: audited_compiles(directory, name, flags)
+        name: audited_compiles(directory, name, flags, candidate)
         for name, directory in builds.items()
     }
+    if candidate:
+        # This checks actual built libraries and static archive, not only the
+        # source header's #define names or CMake option declarations.
+        lib = root / "prefix/salts-utils/lib/libdata_bind.so"
+        archive = root / "build-salts-utils/lib/libdatabind_monocypher.a"
+        require(lib.is_file() and archive.is_file(),
+                "candidate DataBind DSO or namespaced vendor archive missing")
+        public = subprocess.run(["nm", "-D", "--defined-only", str(lib)],
+                                check=True, capture_output=True, text=True).stdout
+        exported = [line.split()[-1] for line in public.splitlines() if line.split()]
+        require(not any(name.startswith("crypto_") for name in exported),
+                "candidate libdata_bind exports unprefixed Monocypher globals/functions")
+        original = subprocess.run(["nm", "--defined-only", str(archive)],
+                                  check=True, capture_output=True, text=True).stdout
+        require("databind_private_crypto_argon2_no_extras" in original,
+                "candidate static Monocypher archive lacks namespaced Argon2 global")
+        for dso in (lib, root / "prefix/salts/lib/libsalts.so"):
+            defined = subprocess.run(["nm", "-D", "--defined-only", str(dso)],
+                                     check=True, capture_output=True, text=True).stdout
+            require("stl_bplus_tree_container_desc" not in defined,
+                    f"static-hidden CSTL candidate still exports duplicate descriptor: {dso}")
     prefixes = audit_prefixes(root, builds)
     links = audit_links(builds["turboagent"], flags, prefixes)
     report = {
         "status": "PASS",
-        "coverage": "FULL_FIRST_PARTY_NATIVE_SOURCE_GRAPH",
+        "coverage": ("FULL_FIRST_PARTY_NATIVE_SOURCE_GRAPH_CANDIDATE_ONLY"
+                     if candidate else "FULL_FIRST_PARTY_NATIVE_SOURCE_GRAPH"),
         "sanitizer": kind,
+        "candidate_monocypher_static_hidden_cstl": candidate,
         "configured_compiler_commands": sum(v["configured_compile_commands"]
                                              for v in source_report.values()),
         "actually_built_object_units": sum(v["actually_built_object_units"]

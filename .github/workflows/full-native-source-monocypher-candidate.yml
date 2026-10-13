@@ -335,7 +335,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 cmake/ci/chttp-rpc-sanitizer/audit_full_source_closure.py \
-            "$GRAPH_ROOT" "$KIND" | tee "$GRAPH_ROOT/full-source-audit.json"
+            "$GRAPH_ROOT" "$KIND" monocypher-candidate | tee "$GRAPH_ROOT/full-source-audit.json"
           # The explicit audit must succeed before any runtime pass counts.
           ldd "$GRAPH_ROOT/build-turboagent/bin/test_turboagent_typed_rpc" \
             | tee "$GRAPH_ROOT/actual-linked-native-libraries.txt"

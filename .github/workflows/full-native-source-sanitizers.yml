@@ -232,7 +232,8 @@ jobs:
           done
           host_salts="$host/salts/extracted/sdk/linux-x64"
           host_utils="$host/salts-utils/extracted/sdk/linux-x64"
-          test -x "$host_utils/bin/salts-idlc"
+          test -f "$host_utils/bin/salts-idlc"
+          chmod +x "$host_utils/bin/salts-idlc"
           test -f "$host_salts/lib/cmake/Salts/SaltsConfig.cmake"
           # A hermetic wrapper overwrites the generator process's library
           # closure only. Normal runtime build imports remain source-prefixed.

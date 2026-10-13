@@ -78,6 +78,7 @@ jobs:
           repository: qigao/salts-utils
           ref: 90900a245a6eadffe53b9f82fdb4e94150d54180
           path: build/full-native-source/salts-utils-error-644
+          fetch-depth: 2
           persist-credentials: false
       - name: Checkout exact public CHttp 2.1.0-rc.5 tag
         uses: actions/checkout@v4

@@ -76,6 +76,16 @@ def audited_compiles(build, component, flags):
                 f"{component}: expected exactly one configured unit {source}; got {len(hits)}")
         require(object_path(build, hits[0]).is_file(),
                 f"{component}: required source not actually compiled {source}")
+    if component in ("salts", "salts-utils"):
+        # Independent PRIVATE Monocypher archives must have separate
+        # visibility domains: no exported crypto_argon2_no_extras collision.
+        # ASan ODR detection stays on; confirm the ACTUAL compiled TU flag.
+        vendor = [row for row in rows if row.get("file", "").replace("\\", "/")
+                  .endswith("/vendor/monocypher/monocypher.c")]
+        require(len(vendor) == 1 and object_path(build, vendor[0]).is_file(),
+                f"{component}: expected one built Monocypher vendor object")
+        require("-fvisibility=hidden" in command(vendor[0]),
+                f"{component}: Monocypher vendor symbol isolation missing")
     return {
         "configured_compile_commands": len(rows),
         "actually_built_object_units": len(built),

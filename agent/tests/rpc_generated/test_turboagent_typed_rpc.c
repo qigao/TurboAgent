@@ -764,6 +764,112 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
         &probe.invoked, memory_order_acquire), 2);
     check_equal(chttp_client_destroy(&client, TYPED_TIMEOUT_MS), SALTS_OK);
 
+    /* A typed deadline expires on the SAME bounded CHttp async/HTTP request
+     * slot after the real dynamically loaded Provider enters and remains at
+     * its own native callback barrier. Timeout must win exactly once without
+     * initializing the borrowed caller-visible native response. An incoming
+     * late Provider result has no permission to publish a second terminal. */
+    {
+      chttp_async_client deadline_client = {0};
+      chttp_client_config deadline_client_config = typed_client_config();
+      chttp_client_rpc_call_options deadline_options =
+          CHTTP_CLIENT_RPC_CALL_OPTIONS_INIT;
+      DataBindNativeOptions deadline_native = DATA_BIND_NATIVE_OPTIONS_INIT;
+      unsigned char deadline_workspace[4096];
+      AddRequest deadline_request = {3u, 4u, 2u, 1u};
+      AddResponse deadline_response = {.sum = UINT32_C(0xdecafbad)};
+      turboagent_typed_async_probe deadline_probe = {0};
+      chttp_request deadline_handle = {0};
+      uint64_t entered_until;
+      uint64_t terminal_until;
+      int saw_entered;
+      int poll_status = SALTS_OK;
+      int invoked_before = atomic_load_explicit(
+          &probe.invoked, memory_order_acquire);
+      int premature_unload = CMETA_PLUGIN_OK;
+
+      deadline_native.workspace = deadline_workspace;
+      deadline_native.workspace_bytes = sizeof(deadline_workspace);
+      deadline_native.max_depth = 16u;
+      deadline_native.max_items = 64u;
+      deadline_native.max_owned_bytes = 1024u;
+      deadline_options.connection_uri = uri;
+      deadline_options.authority = "localhost";
+      deadline_options.target = "/rpc";
+      deadline_options.request_id = UINT64_C(608);
+      /* Below the test DSO's hard 3000 ms barrier ceiling; the timer is
+       * observed using the real client poll loop, never a sleep/retry. */
+      deadline_options.deadline_ms = 1500u;
+      deadline_options.method_plan = plan;
+      deadline_options.native_binding = &binding;
+      deadline_options.native_options = &deadline_native;
+      deadline_options.request = &deadline_request;
+      deadline_options.request_bytes = sizeof(deadline_request);
+      deadline_options.response = &deadline_response;
+      deadline_options.response_bytes = sizeof(deadline_response);
+
+      atomic_store_explicit(&probe.entered, 0, memory_order_release);
+      atomic_store_explicit(&probe.release, 0, memory_order_release);
+      atomic_store_explicit(&probe.enabled, 1, memory_order_release);
+      check_equal(chttp_async_client_init(
+          &deadline_client, &deadline_client_config), SALTS_OK);
+      check_equal(chttp_async_client_rpc_call(
+          &deadline_client, &deadline_options,
+          turboagent_typed_async_complete, &deadline_probe,
+          &deadline_handle), SALTS_OK);
+      check_true(deadline_handle.slot != 0u &&
+                 deadline_handle.generation != 0u);
+
+      entered_until = cmeta_monotonic_ms() + TYPED_TIMEOUT_MS;
+      while (atomic_load_explicit(&probe.entered, memory_order_acquire) == 0 &&
+             cmeta_monotonic_ms() < entered_until && poll_status == SALTS_OK) {
+        size_t completions = 0u;
+        poll_status = chttp_async_client_poll(
+            &deadline_client, 5u, &completions);
+      }
+      saw_entered = atomic_load_explicit(
+          &probe.entered, memory_order_acquire);
+      terminal_until = cmeta_monotonic_ms() + TYPED_TIMEOUT_MS;
+      while (deadline_probe.terminals == 0 &&
+             cmeta_monotonic_ms() < terminal_until &&
+             poll_status == SALTS_OK) {
+        size_t completions = 0u;
+        poll_status = chttp_async_client_poll(
+            &deadline_client, 5u, &completions);
+      }
+      if (saw_entered != 0 && deadline_probe.terminals != 0)
+        premature_unload = cmeta_plugin_registry_unload(&registry, ref);
+      /* Always release native DSO execution BEFORE any assertion, including
+       * the failure paths. No callback may retain unbounded test ownership. */
+      atomic_store_explicit(&probe.release, 1, memory_order_release);
+      atomic_store_explicit(&probe.enabled, 0, memory_order_release);
+
+      check_equal(poll_status, SALTS_OK);
+      check_equal(saw_entered, 1);
+      check_equal(atomic_load_explicit(
+          &probe.invoked, memory_order_acquire), invoked_before + 1);
+      check_equal(premature_unload, CMETA_PLUGIN_BUSY);
+      check_equal(deadline_probe.terminals, 1);
+      check_equal(deadline_probe.status, SALTS_ETIMEDOUT);
+      check_equal(deadline_probe.kind, CHTTP_CLIENT_RPC_NONE);
+      check_equal(deadline_response.sum, UINT32_C(0xdecafbad));
+      check_equal(chttp_async_request_cancel(
+          &deadline_client, deadline_handle), SALTS_ENOENT);
+      {
+        size_t completions = 0u;
+        check_equal(chttp_async_client_poll(
+            &deadline_client, 0u, &completions), SALTS_OK);
+      }
+      check_equal(deadline_probe.terminals, 1);
+      check_equal(chttp_async_client_stop(
+          &deadline_client, TYPED_TIMEOUT_MS), SALTS_OK);
+      check_equal(chttp_async_client_destroy(&deadline_client), SALTS_OK);
+      check_equal(deadline_probe.terminals, 1);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, ref, &lifecycle), CMETA_PLUGIN_OK);
+      check_equal(lifecycle.active_leases, (size_t)1u);
+    }
+
     /* A *typed asynchronous* RPC enters the actual dynamically loaded
      * Provider before its generation-safe CNet request is cancelled. The
      * Provider is held at a deterministic barrier, not simulated in-host. */

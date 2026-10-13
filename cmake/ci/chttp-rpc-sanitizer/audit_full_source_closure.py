@@ -8,6 +8,7 @@ actual native test and unloadable Provider DSO must be linked with them too.
 import json
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 
@@ -16,15 +17,19 @@ REQUIRED_SOURCES = {
     "salts": (
         "cnet/src/cnet_module.c",
         "platform/src/thread_posix.c",
+        "cmeta/src/function.c",
+        "plugin/src/plugin.c",
     ),
     "salts-utils": (
         "databind/runtime/data_bind_binding_plan.c",
         "databind/runtime/data_bind_method_plan.c",
+        "databind/runtime/data_bind_native.c",
     ),
     "chttp": (
         "http_client/src/chttp_client.c",
         "http_server/src/chttp_server.c",
         "http_server/rpc/chttp_server_rpc_service.c",
+        "http_server/rpc/crpc_server.c",
     ),
     "turboagent": (
         "agent/tests/rpc_generated/test_turboagent_typed_rpc.c",
@@ -42,23 +47,40 @@ def command(record):
     return record.get("command") or " ".join(record.get("arguments", ()))
 
 
+def object_path(build, row):
+    # A compile database also contains targets that were CONFIGURED but never
+    # actually built. Only count existing compiler outputs as tested source.
+    argv = row.get("arguments") or shlex.split(command(row))
+    require("-o" in argv, f"missing -o output in {row.get('file')}")
+    index = argv.index("-o")
+    require(index + 1 < len(argv), "incomplete -o compiler argument")
+    output = Path(argv[index + 1])
+    return output if output.is_absolute() else (
+        Path(row.get("directory") or str(build)) / output)
+
+
 def audited_compiles(build, component, flags):
     path = build / "compile_commands.json"
     require(path.is_file(), f"{component}: missing compile_commands.json")
     rows = json.loads(path.read_text(encoding="utf-8"))
-    require(isinstance(rows, list) and rows, f"{component}: zero compiled units")
+    require(isinstance(rows, list) and rows, f"{component}: zero configured source units")
     missing = [row.get("file", "<unknown>") for row in rows
                if not all(flag in command(row) for flag in flags)]
     require(not missing, f"{component}: uninstrumented source units: {missing[:8]}")
+    built = [r for r in rows if object_path(build, r).is_file()]
+    require(built, f"{component}: zero actually built instrumented objects")
     for source in REQUIRED_SOURCES[component]:
         hits = [r for r in rows if
                 r.get("file", "").replace("\\", "/").endswith("/" + source)]
         require(len(hits) == 1,
-                f"{component}: expected exactly one compiled unit {source}; got {len(hits)}")
+                f"{component}: expected exactly one configured unit {source}; got {len(hits)}")
+        require(object_path(build, hits[0]).is_file(),
+                f"{component}: required source not actually compiled {source}")
     return {
-        "total_compiled_units": len(rows),
-        "instrumented_units": len(rows),
-        "required_sources": list(REQUIRED_SOURCES[component]),
+        "configured_compile_commands": len(rows),
+        "actually_built_object_units": len(built),
+        "instrumented_built_units": len(built),
+        "required_built_sources": list(REQUIRED_SOURCES[component]),
         "flags": list(flags),
     }
 
@@ -150,8 +172,10 @@ def main():
         "status": "PASS",
         "coverage": "FULL_FIRST_PARTY_NATIVE_SOURCE_GRAPH",
         "sanitizer": kind,
-        "total_compiled_units": sum(v["total_compiled_units"]
-                                    for v in source_report.values()),
+        "configured_compiler_commands": sum(v["configured_compile_commands"]
+                                             for v in source_report.values()),
+        "actually_built_object_units": sum(v["actually_built_object_units"]
+                                           for v in source_report.values()),
         "components": source_report,
         "links": links,
         "upstream_inputs": "exact_source_tags_not_released_nupkg",

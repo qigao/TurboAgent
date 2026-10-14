@@ -18,9 +18,9 @@ target_link_libraries(
   # hash_bytes from the executable or another module's hidden static archive.
   PRIVATE Salts::CSTL Praktor::Praktor Salts::Core)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  # The callback is reached through a dependency DSO, which does not always
-  # pull its PRIVATE static archive member into this shared image. Force only
-  # this CSTL implementation into PraktorTools, retaining hidden visibility.
+  # The dependency DSO callback does not itself force the static archive
+  # member into this image. Require the local CSTL implementation and
+  # reject unresolved shared-library imports at the owner boundary.
   target_link_options(praktor_tools PRIVATE
     "LINKER:-u,hash_bytes"
     "LINKER:-z,defs")
@@ -45,4 +45,13 @@ if(BUILD_TESTS)
     include
     FOLDER
     "Praktor Tools/tests")
+
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+      NAME turbo_praktor_tools_private_cstl_symbols
+      COMMAND "${CMAKE_COMMAND}"
+        "-DNATIVE_IMAGE=$<TARGET_FILE:praktor_tools>"
+        "-DNM_TOOL=${CMAKE_NM}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ci/verify-praktor-cstl-image.cmake")
+  endif()
 endif()

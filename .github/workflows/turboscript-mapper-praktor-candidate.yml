@@ -21,10 +21,10 @@ jobs:
     if: >-
       github.repository == 'qigao/TurboAgent' &&
       ((github.event_name == 'pull_request' &&
-        github.event.pull_request.head.ref == 'test/turboscript-130-praktor-consumer' &&
+        github.event.pull_request.head.ref == 'test/turboscript-praktor-dual-cstl-owner-130-129' &&
         github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent') ||
        (github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/test/turboscript-130-praktor-consumer'))
+        github.ref == 'refs/heads/test/turboscript-praktor-dual-cstl-owner-130-129'))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:

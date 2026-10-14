@@ -1,4 +1,4 @@
-name: TurboAgent RPC actual Salts private-owner producer ASan (#1187)
+name: TurboAgent RPC actual native private-owner source sanitizers (#123)
 
 'on':
   pull_request:
@@ -22,17 +22,17 @@ jobs:
     if: >-
       github.repository == 'qigao/TurboAgent' &&
       ((github.event_name == 'pull_request' &&
-        github.event.pull_request.head.ref == 'test/chttp-real-static-owner-source-123' &&
+        github.event.pull_request.head.ref == 'test/chttp-private-owner-tsan-123' &&
         github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent') ||
        (github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/test/chttp-real-static-owner-source-123'))
+        github.ref == 'refs/heads/test/chttp-private-owner-tsan-123'))
     name: Actual Salts #1193 CNet private crypto + CFlow/CSTL static owner + SaltsUtils #641/#645 / ${{ matrix.sanitizer }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
-        sanitizer: [address]
+        sanitizer: [thread, address]
     env:
       CC: gcc
       CXX: g++
@@ -255,7 +255,7 @@ jobs:
           test -f "$CHTTP_ROOT/lib/cmake/Chttp/ChttpConfig.cmake"
 
       # Unlike the released-tag baseline gate, this integrated candidate
-      # uses the actual ASan+UBSan-instrumented host IDLC built and installed
+      # uses the actual source-sanitizer-instrumented host IDLC built and installed
       # from the same four-source graph. #639 / Draft #646 separately proved
       # its test-only static-hidden CSTL ownership without ODR suppression.
       - name: Prove and execute source-built, sanitizer-instrumented IDLC
@@ -280,9 +280,10 @@ jobs:
               raise SystemExit("required source IDLC main.c missing")
           row = matches[0]
           command = row.get("command") or " ".join(row.get("arguments", []))
-          flags = ("-fsanitize=address", "-fsanitize=undefined")
+          flags = (("-fsanitize=thread",) if os.environ["SAN_THREAD"] == "ON"
+                   else ("-fsanitize=address", "-fsanitize=undefined"))
           if not all(f in command for f in flags):
-              raise SystemExit("source IDLC main.c not ASan/UBSan instrumented")
+              raise SystemExit("source IDLC main.c missing required source sanitizer flags")
           args = row.get("arguments") or shlex.split(command)
           if "-o" not in args:
               raise SystemExit("source IDLC compiler object output unspecified")
@@ -298,7 +299,7 @@ jobs:
                    if re.search(r"-o (?:[^ ]*/)?bin/salts-idlc(?:\s|$)", line)
                    and " -c " not in line]
           if len(links) != 1 or not all(f in links[0] for f in flags):
-              raise SystemExit("source IDLC final link lacks ASan+UBSan flags")
+              raise SystemExit("source IDLC final link lacks required source sanitizer flags")
           print(json.dumps({
               "kind": "SOURCE_BUILT_IDLC_EXECUTABLE",
               "source_object": str(obj),
@@ -309,8 +310,12 @@ jobs:
           PY
           ldd "$exe" | tee "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
           grep -F "$SALTS_ROOT/lib/libsalts.so" "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
-          grep -F 'libasan.so' "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
-          grep -F 'libubsan.so' "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
+          if [ "$SAN_THREAD" = ON ]; then
+            grep -F 'libtsan.so' "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
+          else
+            grep -F 'libasan.so' "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
+            grep -F 'libubsan.so' "$GRAPH_ROOT/source-built-idlc-linked-libraries.txt"
+          fi
           output="$GRAPH_ROOT/source-idlc-preflight"
           mkdir -p "$output"
           "$exe" "$GITHUB_WORKSPACE/agent/tests/rpc_generated/turboagent_typed_rpc.schema" \
@@ -320,7 +325,11 @@ jobs:
           test -s "$output/typed_records.c"
           sha256sum "$output/typed_records.h" "$output/typed_records.c" \
             | tee "$GRAPH_ROOT/source-idlc-preflight.sha256"
-          echo 'asan_codegen_host=SOURCE_BUILT_ASAN_UBSAN_NO_PUBLISHED_IDLC' >> "$GRAPH_ROOT/provenance.txt"
+          if [ "$SAN_THREAD" = ON ]; then
+            echo 'source_codegen_host=SOURCE_BUILT_TSAN_NO_PUBLISHED_IDLC' >> "$GRAPH_ROOT/provenance.txt"
+          else
+            echo 'source_codegen_host=SOURCE_BUILT_ASAN_UBSAN_NO_PUBLISHED_IDLC' >> "$GRAPH_ROOT/provenance.txt"
+          fi
 
       - name: Verify private vendored crypto globals are not exported from native DSOs
         shell: bash
@@ -346,7 +355,11 @@ jobs:
           done
           echo 'private_monocypher_link_names=CNET_AND_DATABIND_DISTINCT' >> "$GRAPH_ROOT/provenance.txt"
           echo 'private_monocypher_elf_visibility=hidden' >> "$GRAPH_ROOT/provenance.txt"
-          echo 'asan_odr_detection=2_unsuppressed' >> "$GRAPH_ROOT/provenance.txt"
+          if [ "$SAN_THREAD" = ON ]; then
+            echo 'tsan_race_detection=unsuppressed' >> "$GRAPH_ROOT/provenance.txt"
+          else
+            echo 'asan_odr_detection=2_unsuppressed' >> "$GRAPH_ROOT/provenance.txt"
+          fi
 
       - name: Build instrumented external TurboAgent IDL / real Provider DSO
         shell: bash

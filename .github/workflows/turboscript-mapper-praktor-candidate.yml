@@ -105,6 +105,30 @@ jobs:
           grep -F "$TURBOSCRIPT_CANDIDATE_PREFIX" \
             build/ci-linux-release/CMakeCache.txt
 
+      - name: Audit newly compiled TurboAgent DSO imports before executable link
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/ta-turboscript-130-consumer"
+          cmake --build --preset ci-linux-release --target praktor_tools agent_compiler
+          : > "$root/turboagent-built-dso-undefined-hash.txt"
+          count=0
+          for image in build/ci-linux-release/bin/*.so; do
+            test -f "$image" || continue
+            if nm -D --undefined-only "$image" \
+               | grep -E '[[:space:]]U[[:space:]]+hash_bytes(@|$)' \
+               > "$root/hash-symbol-current.txt"; then
+              count=$((count+1))
+              printf 'DSO=%s\n' "$image" | tee -a "$root/turboagent-built-dso-undefined-hash.txt"
+              cat "$root/hash-symbol-current.txt" \
+                | tee -a "$root/turboagent-built-dso-undefined-hash.txt"
+              readelf -d "$image" > "$root/$(basename "$image").needed.txt"
+              readelf -Ws "$image" > "$root/$(basename "$image").symbols.txt"
+            fi
+          done
+          printf 'newly_built_DSO_unresolved_hash_bytes=%s\n' "$count" \
+            | tee "$root/newly-built-image-summary.txt"
+
       - name: Link and execute real PraktorTools tests with candidate Mapper
         shell: bash
         run: |

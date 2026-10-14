@@ -1,4 +1,4 @@
-name: TurboAgent PraktorTools v3.0.11 source-candidate installed SDK (#73)
+name: TurboAgent PraktorTools 3.0.11 CI-source SDK and real DSO (#73)
 
 'on':
   pull_request:
@@ -58,7 +58,7 @@ jobs:
           root="$RUNNER_TEMP/ta-turboscript-130-consumer"
           mkdir -p "$root/download" "$root/sdk"
           # This artifact is produced by the exact, independently validated
-          # TurboScript v3.0.11 release-prep PR #131; it is NOT a published NuGet package.
+          # TurboScript v3.0.11 source PR #131; it is NOT a published NuGet package.
           gh run download "$TURBOSCRIPT_CANDIDATE_RUN" \
             --repo qigao/TurboScript --name turboscript-sdk-linux-x64 \
             --dir "$root/download"
@@ -153,53 +153,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake --build --preset ci-linux-release \
-            --target test_turbo_praktor_inline_plan test_turbo_praktor_tool_pack
-          # ELF RUNPATH is nontransitive. The installed Praktor SDK requires
-          # the actual released CHttp S3 shared image through its DT_NEEDED
-          # closure. Admit only exact already-verified SDK roots, not system
-          # provider libraries or older package fallbacks.
+          cmake --build --preset ci-linux-release --target test_turbo_praktor_inline_plan test_turbo_praktor_tool_pack
+          # The exact installed Praktor / CHttp package DSOs must be supplied
+          # from their verified SDK roots; ELF RUNPATH is not transitive.
           export LD_LIBRARY_PATH="$CHTTP_ROOT/lib:$PRAKTOR_ROOT/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           root="$RUNNER_TEMP/ta-turboscript-130-consumer"
           for executable in test_turbo_praktor_inline_plan test_turbo_praktor_tool_pack; do
-            ldd "build/ci-linux-release/bin/$executable" \
-              | tee "$root/$executable.ldd.txt"
+            ldd "build/ci-linux-release/bin/$executable" | tee "$root/$executable.ldd.txt"
             if grep -Fq 'not found' "$root/$executable.ldd.txt"; then
-              echo "Unresolved installed SDK DSO for $executable" >&2
+              echo "Unresolved exact installed SDK DSO for $executable" >&2
               exit 1
             fi
             grep -F "$CHTTP_ROOT/lib/libchttp_s3.so" "$root/$executable.ldd.txt"
           done
-          ctest --test-dir build/ci-linux-release \
-            -R '^test_turbo_praktor_(inline_plan|tool_pack)
-
-      - name: Preserve executable link and candidate binary proof
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="$RUNNER_TEMP/ta-turboscript-130-consumer"
-          mkdir -p "$root"
-          if test -f build/ci-linux-release/build.ninja; then
-            ninja -C build/ci-linux-release -t commands \
-              > "$root/all-native-link-commands.txt"
-            grep -E '(test_turbo_praktor_inline_plan|test_turbo_praktor_tool_pack)' \
-              "$root/all-native-link-commands.txt" > "$root/praktor-link-commands.txt" || true
-          fi
-          if test -d build/ci-linux-release/Testing; then
-            cp -r build/ci-linux-release/Testing "$root/" || true
-          fi
-
-      - name: Upload candidate vs official SDK provenance
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: turboagent-praktor-turboscript-candidate-linux
-          retention-days: 14
-          if-no-files-found: warn
-          path: ${{ runner.temp }}/ta-turboscript-130-consumer/
- \
-            --no-tests=error --output-on-failure --timeout 120
+          ctest --test-dir build/ci-linux-release -R '^test_turbo_praktor_(inline_plan|tool_pack)$' --no-tests=error --output-on-failure --timeout 120
 
       - name: Preserve executable link and candidate binary proof
         if: always()

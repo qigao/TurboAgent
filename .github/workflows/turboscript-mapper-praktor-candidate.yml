@@ -128,6 +128,9 @@ jobs:
           done
           printf 'newly_built_DSO_unresolved_hash_bytes=%s\n' "$count" \
             | tee "$root/newly-built-image-summary.txt"
+          # A source-built DSO borrowing hidden CSTL code is itself a
+          # release blocker, even when an upstream Mapper has been fixed.
+          test "$count" -eq 0
 
       - name: Link and execute real PraktorTools tests with candidate Mapper
         shell: bash

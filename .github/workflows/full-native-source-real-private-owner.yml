@@ -22,10 +22,10 @@ jobs:
     if: >-
       github.repository == 'qigao/TurboAgent' &&
       ((github.event_name == 'pull_request' &&
-        github.event.pull_request.head.ref == 'test/chttp-real-static-owner-source-123' &&
+        github.event.pull_request.head.ref == 'test/chttp-private-owner-tsan-123' &&
         github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent') ||
        (github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/test/chttp-real-static-owner-source-123'))
+        github.ref == 'refs/heads/test/chttp-private-owner-tsan-123'))
     name: Actual Salts #1193 CNet private crypto + CFlow/CSTL static owner + SaltsUtils #641/#645 / ${{ matrix.sanitizer }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150

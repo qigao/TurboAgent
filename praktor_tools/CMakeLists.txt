@@ -40,4 +40,13 @@ if(BUILD_TESTS)
     include
     FOLDER
     "Praktor Tools/tests")
+
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+      NAME turbo_praktor_tools_private_cstl_symbols
+      COMMAND "${CMAKE_COMMAND}"
+        "-DNATIVE_IMAGE=$<TARGET_FILE:praktor_tools>"
+        "-DNM_TOOL=${CMAKE_NM}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ci/verify-praktor-cstl-image.cmake")
+  endif()
 endif()

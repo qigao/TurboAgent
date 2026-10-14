@@ -111,6 +111,17 @@ jobs:
           set -euo pipefail
           root="$RUNNER_TEMP/ta-turboscript-130-consumer"
           cmake --build --preset ci-linux-release --target praktor_tools agent_compiler
+          echo '=== packaged native DSO definitions of hash_bytes ==='
+          : > "$root/packaged-defined-hash-by-image.txt"
+          while IFS= read -r -d '' lib; do
+            if nm -D --defined-only "$lib" 2>/dev/null \
+               | grep -E '[[:space:]][A-Za-z][[:space:]]+hash_bytes(@|$)' \
+               > "$root/hash-defined-current.txt"; then
+              printf 'DSO=%s\n' "$lib" | tee -a "$root/packaged-defined-hash-by-image.txt"
+              cat "$root/hash-defined-current.txt" \
+                | tee -a "$root/packaged-defined-hash-by-image.txt"
+            fi
+          done < <(find "$RUNNER_TEMP/turboagent-release-sdks" -type f -name '*.so*' -print0)
           echo '=== actual linker command: praktor_tools ==='
           ninja -C build/ci-linux-release -t commands praktor_tools \
             | grep -F -- '-o bin/libpraktor_tools.so' | tail -1 \

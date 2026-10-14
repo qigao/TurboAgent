@@ -164,6 +164,19 @@ jobs:
           set -euo pipefail
           cmake --build --preset ci-linux-release \
             --target test_turbo_praktor_inline_plan test_turbo_praktor_tool_pack
+          # ELF RUNPATH is nontransitive. Published Praktor -> CHttp S3 native
+          # DT_NEEDED requires exact, explicit SDK runtime prefixes for smoke.
+          # This is not a legacy package fallback or symbol-visibility change.
+          export LD_LIBRARY_PATH="$CHTTP_ROOT/lib:$PRAKTOR_ROOT/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          root="$RUNNER_TEMP/ta-turboscript-130-consumer"
+          for executable in test_turbo_praktor_inline_plan test_turbo_praktor_tool_pack; do
+            ldd "build/ci-linux-release/bin/$executable" \
+              | tee "$root/$executable.ldd.txt"
+            if grep -Fq 'not found' "$root/$executable.ldd.txt"; then
+              echo "Unresolved installed SDK DSO for $executable" >&2
+              exit 1
+            fi
+          done
           ctest --test-dir build/ci-linux-release \
             -R '^test_turbo_praktor_(inline_plan|tool_pack)$' \
             --no-tests=error --output-on-failure --timeout 120

@@ -16,7 +16,7 @@ target_link_libraries(
   PUBLIC TurboAgent::RuntimeTools Salts::JsonParser
   # PraktorTools must own CSTL callbacks linked into this DSO, not resolve
   # hash_bytes from the executable or another module's hidden static archive.
-  PRIVATE Praktor::Praktor Salts::Core Salts::CSTL)
+  PRIVATE Salts::CSTL Praktor::Praktor Salts::Core)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # The callback is reached through a dependency DSO, which does not always
   # pull its PRIVATE static archive member into this shared image. Force only

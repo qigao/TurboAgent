@@ -1,0 +1,85 @@
+name: Praktor Linux CSTL DSO owner diagnostic (#73)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/praktor-cstl-image-owner-audit.yml'
+      - 'cmake/ci/audit-praktor-cstl-owner.sh'
+      - 'praktor_tools/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: praktor-cstl-owner-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-native-elf:
+    if: github.repository == 'qigao/TurboAgent'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Restore canonical build tools (read-only pinned action)
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - name: Restore pinned re2c host generator
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+
+      - name: Install Linux native linker audit prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build nasm binutils unzip
+
+      - name: Restore actual published Linux Native SDK graph (no source fallback)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash cmake/ci/restore-native-sdk.sh linux-x64 1 1
+
+      - name: Identify exact ELF image importing hidden CSTL hash_bytes
+        shell: bash
+        run: bash cmake/ci/audit-praktor-cstl-owner.sh
+
+      - name: Configure exact installed Linux SDK consumer
+        shell: bash
+        run: cmake --preset ci-linux-release
+
+      - name: Reproduce two real PraktorTools installed-SDK link targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build --preset ci-linux-release \
+            --target test_turbo_praktor_inline_plan test_turbo_praktor_tool_pack
+
+      - name: Capture actual final linker commands
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="${RUNNER_TEMP}/praktor-cstl-owner-report"
+          mkdir -p "$dir"
+          if test -f build/ci-linux-release/build.ninja; then
+            ninja -C build/ci-linux-release -t commands \
+              > "$dir/all-ninja-commands.txt"
+            grep -E '(libpraktor_tools.so|bin/test_turbo_praktor_inline_plan|bin/test_turbo_praktor_tool_pack)' \
+              "$dir/all-ninja-commands.txt" > "$dir/praktor-link-commands.txt" || true
+          fi
+
+      - name: Upload exact package, ELF, symbol and link evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: praktor-cstl-native-image-owner-linux
+          retention-days: 14
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/praktor-cstl-owner-report/

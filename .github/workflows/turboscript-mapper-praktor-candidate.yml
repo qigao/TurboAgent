@@ -1,4 +1,4 @@
-name: TurboAgent PraktorTools candidate TurboScript Mapper owner (#129)
+name: TurboAgent PraktorTools v3.0.11 source-candidate installed SDK (#73)
 
 'on':
   pull_request:
@@ -21,17 +21,17 @@ jobs:
     if: >-
       github.repository == 'qigao/TurboAgent' &&
       ((github.event_name == 'pull_request' &&
-        github.event.pull_request.head.ref == 'test/turboscript-praktor-dual-cstl-owner-130-129' &&
+        github.event.pull_request.head.ref == 'test/turboscript-3.0.11-praktor-consumer-131' &&
         github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent') ||
        (github.event_name == 'workflow_dispatch' &&
-        github.ref == 'refs/heads/test/turboscript-praktor-dual-cstl-owner-130-129'))
+        github.ref == 'refs/heads/test/turboscript-3.0.11-praktor-consumer-131'))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       GITHUB_TOKEN: ${{ github.token }}
       CMAKE_BUILD_PARALLEL_LEVEL: 2
-      TURBOSCRIPT_CANDIDATE_RUN: "38527075336"
-      TURBOSCRIPT_CANDIDATE_SOURCE: "2a526f9cc4f0bb62516497bf2b05b8b80b7a48c0"
+      TURBOSCRIPT_CANDIDATE_RUN: "38529473245"
+      TURBOSCRIPT_CANDIDATE_SOURCE: "48dc114ee7eed19290703d1c449ea8ad0213f270"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,7 +58,7 @@ jobs:
           root="$RUNNER_TEMP/ta-turboscript-130-consumer"
           mkdir -p "$root/download" "$root/sdk"
           # This artifact is produced by the exact, independently validated
-          # TurboScript source PR #130; it is NOT a published NuGet package.
+          # TurboScript v3.0.11 release-prep PR #131; it is NOT a published NuGet package.
           gh run download "$TURBOSCRIPT_CANDIDATE_RUN" \
             --repo qigao/TurboScript --name turboscript-sdk-linux-x64 \
             --dir "$root/download"
@@ -70,6 +70,7 @@ jobs:
           test -f "$candidate/turboscript-sdk-manifest.txt"
           grep -Fx "commit=$TURBOSCRIPT_CANDIDATE_SOURCE" \
             "$candidate/turboscript-sdk-manifest.txt"
+          grep -Fx "version=3.0.11" "$candidate/turboscript-sdk-manifest.txt"
           for pair in "salts_release=2.3.0-rc.16" \
                       "salts_utils_release=4.3.0-rc.11" \
                       "chttp_release=2.1.0-rc.6"; do
@@ -93,6 +94,7 @@ jobs:
             echo "turboagent_source=${{ github.event.pull_request.head.sha || github.sha }}"
             echo "candidate_turboscript_source=$TURBOSCRIPT_CANDIDATE_SOURCE"
             echo "candidate_turboscript_run=$TURBOSCRIPT_CANDIDATE_RUN"
+            echo "candidate_turboscript_version=3.0.11"
             echo "qualification=SOURCE_CANDIDATE_NOT_RELEASED_NUGET"
             echo "official_turboscript_3.0.10_binaries_unchanged=true"
           } | tee "$root/provenance.txt"

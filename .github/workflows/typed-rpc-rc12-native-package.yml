@@ -26,8 +26,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SRC_RC12_CI: '38541449664'
       SRC_RC12_SHA: '804f6b99fab31bc7c4bb099de3769a867af34357'
-      BUILD_ROOT: ${{ runner.temp }}/ta-rc12-consumer
-      PKG_ROOT: ${{ runner.temp }}/ta-rc12-packages
+      BUILD_ROOT: /tmp/ta-rc12-consumer
+      PKG_ROOT: /tmp/ta-rc12-packages
       CMAKE_BUILD_PARALLEL_LEVEL: '2'
     steps:
       - name: Exact reviewed TurboAgent typed RPC/Provider source

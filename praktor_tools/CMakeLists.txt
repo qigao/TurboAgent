@@ -18,7 +18,12 @@ target_link_libraries(
   # hash_bytes from the executable or another module's hidden static archive.
   PRIVATE Praktor::Praktor Salts::Core Salts::CSTL)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  target_link_options(praktor_tools PRIVATE "LINKER:-z,defs")
+  # The callback is reached through a dependency DSO, which does not always
+  # pull its PRIVATE static archive member into this shared image. Force only
+  # this CSTL implementation into PraktorTools, retaining hidden visibility.
+  target_link_options(praktor_tools PRIVATE
+    "LINKER:-u,hash_bytes"
+    "LINKER:-z,defs")
 endif()
 
 cmake_config_target(praktor_tools FOLDER "Praktor Tools" EXPORT_NAME PraktorTools

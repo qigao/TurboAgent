@@ -45,4 +45,15 @@ if(BUILD_TESTS)
     include
     FOLDER
     "Praktor Tools/tests")
+
+  # Verify that linking the imported static CSTL really put hash_bytes
+  # inside this image, without leaving a dynamic import or public export.
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+      NAME turbo_praktor_tools_private_cstl_symbols
+      COMMAND "${CMAKE_COMMAND}"
+        "-DNATIVE_IMAGE=$<TARGET_FILE:praktor_tools>"
+        "-DNM_TOOL=${CMAKE_NM}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ci/verify-praktor-cstl-image.cmake")
+  endif()
 endif()

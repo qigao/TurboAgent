@@ -111,6 +111,21 @@ jobs:
           set -euo pipefail
           root="$RUNNER_TEMP/ta-turboscript-130-consumer"
           cmake --build --preset ci-linux-release --target praktor_tools agent_compiler
+          echo '=== actual linker command: praktor_tools ==='
+          ninja -C build/ci-linux-release -t commands praktor_tools \
+            | grep -F -- '-o bin/libpraktor_tools.so' | tail -1 \
+            | tee "$root/praktor-tools-actual-link.txt"
+          echo '=== actual static archive ownership in resulting image ==='
+          nm -a build/ci-linux-release/bin/libpraktor_tools.so \
+            | grep -E 'hash_bytes|hash_map_raw_init' \
+            | tee "$root/praktor-tools-complete-symbols.txt" || true
+          echo '=== symbol visibility ==='
+          readelf -Ws build/ci-linux-release/bin/libpraktor_tools.so \
+            | grep -E 'hash_bytes|hash_map_raw_init' \
+            | tee "$root/praktor-tools-hash-readelf.txt" || true
+          echo '=== linked native library imports ==='
+          readelf -d build/ci-linux-release/bin/libpraktor_tools.so \
+            | grep -F NEEDED | tee "$root/praktor-tools-needed.txt" || true
           : > "$root/turboagent-built-dso-undefined-hash.txt"
           count=0
           for image in build/ci-linux-release/bin/*.so; do

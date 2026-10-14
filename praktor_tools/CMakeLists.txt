@@ -14,7 +14,12 @@ target_include_directories(
 target_link_libraries(
   praktor_tools
   PUBLIC TurboAgent::RuntimeTools Salts::JsonParser
-  PRIVATE Praktor::Praktor Salts::Core)
+  # PraktorTools must own CSTL callbacks linked into this DSO, not resolve
+  # hash_bytes from the executable or another module's hidden static archive.
+  PRIVATE Praktor::Praktor Salts::Core Salts::CSTL)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(praktor_tools PRIVATE "LINKER:-z,defs")
+endif()
 
 cmake_config_target(praktor_tools FOLDER "Praktor Tools" EXPORT_NAME PraktorTools
                     ALIAS TurboAgent::PraktorTools)

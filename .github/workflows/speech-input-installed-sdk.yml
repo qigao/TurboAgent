@@ -104,7 +104,8 @@ jobs:
           cmake -S "$root" -B "$root/build" -G Ninja \
             "-DCMAKE_TOOLCHAIN_FILE=$QIGAO_VCPKG_TOOLCHAIN_FILE" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
-            "-DCMAKE_PREFIX_PATH=$TA_SPEECH_INSTALLED;$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT"
+            "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed/ci-linux-release" \
+            "-DCMAKE_PREFIX_PATH=$TA_SPEECH_INSTALLED;$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT;$GITHUB_WORKSPACE/vcpkg_installed/ci-linux-release/x64-linux"
           cmake --build "$root/build" --parallel 2
           "$root/build/speech_c11"
           "$root/build/speech_cpp17"

@@ -3,7 +3,8 @@
 
 #include <stdio.h>
 #include <stdatomic.h>
-#include <threads.h>
+#include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -54,7 +55,7 @@ static void cancel_cb(void *v) {
   atomic_store(&((test_t *)v)->producer_error, 1);
 }
 
-static int producer(void *v) {
+static void *producer(void *v) {
   test_t *t = (test_t *)v;
   int16_t pcm[320] = {0};
   for (int i = 1; i <= COUNT; i++) {
@@ -64,7 +65,7 @@ static int producer(void *v) {
       rc = turbo_agent_speech_offer_frame(
         t->handle, 1001u, pcm, 320u, (uint64_t)i * 20000u);
       if (rc == TURBO_AGENT_SPEECH_EBUSY ||
-          rc == TURBO_AGENT_SPEECH_ECAPACITY) thrd_yield();
+          rc == TURBO_AGENT_SPEECH_ECAPACITY) sched_yield();
     } while (rc == TURBO_AGENT_SPEECH_EBUSY ||
              rc == TURBO_AGENT_SPEECH_ECAPACITY);
     if (rc != TURBO_AGENT_SPEECH_OK) {
@@ -73,16 +74,15 @@ static int producer(void *v) {
     }
   }
   atomic_store(&t->producer_done, 1);
-  return 0;
+  return NULL;
 }
 
 int main(void) {
   test_t t = {0};
-  thrd_t worker;
+  pthread_t worker;
   turbo_agent_speech_config_t cfg;
   turbo_agent_speech_provider_v1_t provider;
   size_t pumped;
-  int joined;
   char text[16];
   size_t bytes;
   turbo_agent_speech_transcript_kind_t kind;
@@ -99,13 +99,13 @@ int main(void) {
   provider.cancel = cancel_cb;
   CHECK(turbo_agent_speech_create(&cfg, &provider, &t.handle) == 0);
   CHECK(turbo_agent_speech_begin(t.handle, 1001u) == 0);
-  CHECK(thrd_create(&worker, producer, &t) == thrd_success);
+  CHECK(pthread_create(&worker, NULL, producer, &t) == 0);
   for (int retry = 0; retry < 1000000; retry++) {
     CHECK(turbo_agent_speech_pump(t.handle, 3u, &pumped) == 0);
     if (atomic_load(&t.producer_done) && t.accepted == COUNT) break;
-    thrd_yield();
+    sched_yield();
   }
-  CHECK(thrd_join(worker, &joined) == thrd_success && joined == 0);
+  CHECK(pthread_join(worker, NULL) == 0);
   CHECK(atomic_load(&t.producer_error) == 0);
   CHECK(t.accepted == COUNT);
   CHECK(turbo_agent_speech_request_finish(t.handle) == 0);

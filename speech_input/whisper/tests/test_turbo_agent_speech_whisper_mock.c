@@ -457,7 +457,7 @@ static int equal_power_distinct_waveforms_characterization(void) {
                                             &length,&kind)==0);
       if (guard) {
         REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_NO_SPEECH);
-        REQUIRE(length==0u && result[0]=='\\0');
+        REQUIRE(length==0u && result[0]=='\0');
         REQUIRE(atomic_load(&st_decode_calls)==before);
       } else {
         REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL);

@@ -40,3 +40,13 @@ option(ENABLE_TTS_PLAYBACK_BRIDGE_TEST
 if(ENABLE_TTS_PLAYBACK_BRIDGE_TEST)
   add_subdirectory(playback)
 endif()
+# M4.2 never runs on the default standalone or full TurboAgent graph.
+option(ENABLE_TTS_VOICE_COORDINATOR_TEST
+  "Build experimental half-duplex Voice Coordinator against M4.1" OFF)
+if(ENABLE_TTS_VOICE_COORDINATOR_TEST)
+  if(NOT ENABLE_TTS_PLAYBACK_BRIDGE_TEST)
+    message(FATAL_ERROR "M4.2 requires explicit M4.1 playback opt-in")
+  endif()
+  add_subdirectory(voice_coordinator)
+endif()
+

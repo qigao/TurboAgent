@@ -36,7 +36,6 @@ static int write_all(int fd, const void *data, size_t count) {
 }
 int main(int argc, char **argv) {
   const uint16_t endian_probe = 1u;
-  const int16_t *probe = NULL;
   ta_speex_ns_owner_t *owner = NULL;
   struct stat st;
   int src = -1, dst = -1, rc = 2, db, align = 0;
@@ -94,14 +93,14 @@ int main(int argc, char **argv) {
   rc = 0;
   printf("{\"library\":\"SpeexDSP-1.2.1\","
          "\"frame_samples\":320,\"rate\":16000,"
-         "\"frames\":%zu,\"noise_suppress_db\":%d,"\n         "\"aligned_one_frame_with_drain\":%s,"
+         "\"frames\":%zu,\"noise_suppress_db\":%d,"
+         "\"aligned_one_frame_with_drain\":%s,"
          "\"input_power\":%" PRIu64 ",\"output_power\":%" PRIu64 ","
          "\"vad_enabled\":false,\"agc_enabled\":false,"
          "\"voice_quality_certified\":false,"
          "\"no_model_download\":true}\n",
          frames, db, align ? "true" : "false", energy_before, energy_after);
 done:
-  (void)probe;
   if (dst >= 0) (void)close(dst);
   if (src >= 0) (void)close(src);
   if (owner) (void)ta_speex_ns_destroy(&owner);

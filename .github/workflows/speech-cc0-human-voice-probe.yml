@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   japanese-cc0-voice-no-model:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146'
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146' || github.event.pull_request.head.ref == 'test/speech-human-energy-envelope-stress-146')
     name: Independently pinned Japanese CC0 voice, Guard OFF/ON (no weights)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -156,7 +156,7 @@ jobs:
           # remain in RUNNER_TEMP until trap cleanup; no model download.
 
   mandarin-cc0-voice-no-model:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146'
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146' || github.event.pull_request.head.ref == 'test/speech-human-energy-envelope-stress-146')
     name: Independently pinned Mandarin CC0 voice, Guard OFF/ON (no weights)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -300,7 +300,7 @@ jobs:
           # remain in RUNNER_TEMP until trap cleanup; no model download.
 
   english-ccby-voice-no-model:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146'
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146' || github.event.pull_request.head.ref == 'test/speech-human-energy-envelope-stress-146')
     name: SHA256-pinned English CC-BY voice, Guard OFF/ON (no weights)
     runs-on: ubuntu-24.04
     timeout-minutes: 20

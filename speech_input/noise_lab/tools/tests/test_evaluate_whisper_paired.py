@@ -110,7 +110,7 @@ class PairedASRValidation(unittest.TestCase):
                 calls.append(1)
                 if len(calls)==1:
                     args[2].write_bytes(b"MODEL TAMPERED AFTER VERIFIED SHA")
-                return SimpleNamespace(returncode=0,stdout=b"Hello world\\n",
+                return SimpleNamespace(returncode=0,stdout=b"Hello world\n",
                                        stderr=b"")
             with self.assertRaisesRegex(ValueError,"SHA-256 mismatch"):
                 paired.evaluate(*args[:7],*args[7:9],"en",runner=mutate_model)
@@ -121,7 +121,7 @@ class PairedASRValidation(unittest.TestCase):
             args=list(fixture(root))
             def mutate_wav(*a,**kw):
                 args[5][0].write_bytes(wave_bytes(900))
-                return SimpleNamespace(returncode=0,stdout=b"Hello world\\n",
+                return SimpleNamespace(returncode=0,stdout=b"Hello world\n",
                                        stderr=b"")
             with self.assertRaisesRegex(ValueError,"SHA-256 mismatch"):
                 paired.evaluate(*args[:7],*args[7:9],"en",runner=mutate_wav)
@@ -129,8 +129,8 @@ class PairedASRValidation(unittest.TestCase):
     def test_unicode_bidi_and_oversized_private_output_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             args=fixture(Path(td))
-            for malicious in ("spoof\\u202Econtent".encode("utf-8"),
-                              b"a"*4098, b"bad\\x00control", b"\\xff"):
+            for malicious in ("spoof\u202Econtent".encode("utf-8"),
+                              b"a"*4098, b"bad\x00control", b"\xff"):
                 def fake(*a,**kw):
                     return SimpleNamespace(returncode=0,stdout=malicious,stderr=b"")
                 with self.assertRaises((ValueError,UnicodeError)):

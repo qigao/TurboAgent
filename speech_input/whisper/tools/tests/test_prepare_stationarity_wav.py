@@ -111,6 +111,13 @@ class PrivateWavPreflightTests(unittest.TestCase):
                 prep.prepare(*args)
             self.assertEqual(spy.call_count, 0)
             self.assertFalse((root/"out.wav").exists())
+            # Exact model-free decoder binary must be approved/pinned BEFORE
+            # the first external process invocation.
+            with self.assertRaisesRegex(ValueError, "decoder executable SHA-256 mismatch"):
+                prep.prepare(
+                    src, hashlib.sha256(src.read_bytes()).hexdigest(), ffmpeg,
+                    root/"out.wav", root/"provenance.json", True, "0"*64, spy)
+            self.assertEqual(spy.call_count, 0)
             linked = root / "linked.wav"
             linked.symlink_to(src)
             with self.assertRaisesRegex(ValueError, "source must be"):

@@ -4,6 +4,8 @@ name: Speech M3 licensed human voice predecode characterization (#146)
   pull_request:
     paths:
       - '.github/workflows/speech-cc0-human-voice-probe.yml'
+      - 'speech_input/whisper/tools/stress_stationarity_human.py'
+      - 'speech_input/whisper/tools/tests/test_stress_stationarity_human.py'
 
 permissions:
   contents: read
@@ -119,6 +121,37 @@ jobs:
           }, ensure_ascii=False, sort_keys=True))
           PY
 
+          # Deliberate *source-derived* audio transformation: gain-only
+          # attenuation and per-frame RMS equalization. The latter splices
+          # nonzero 20-ms frames and is NOT natural, intelligibility-proven
+          # low-volume/monotone human speech. Only numeric report is logged.
+          STRESS_WAV="$private_dir/japanese.wav" \
+          STRESS_META="$private_dir/japanese.private.json" \
+          STRESS_LANG="ja" \
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, "speech_input/whisper/tools")
+          from stress_stationarity_human import evaluate_bytes
+          wave = Path(os.environ["STRESS_WAV"]).read_bytes()
+          sha = json.loads(Path(os.environ["STRESS_META"]).read_text())[
+              "normalized_wav_sha256"]
+          result = evaluate_bytes(wave, sha)
+          control = result["controlled_energy_equalization"]
+          assert control["selected_nonzero_source_frames"] >= 50
+          assert control["guard_on_predecode_no_speech"] is True
+          assert control["guard_off_predecode_no_speech"] is False
+          assert result["actual_whisper_model_used"] is False
+          assert result["actual_c11_provider_used_on_source_audio"] is False
+          print(json.dumps({
+              "evidence_kind": "derived_from_verified_real_spoken_source",
+              "language": os.environ["STRESS_LANG"],
+              **result,
+          }, sort_keys=True))
+          PY
+
           # No upload-artifact action. All clip/manifest/provenance bytes
           # remain in RUNNER_TEMP until trap cleanup; no model download.
 
@@ -230,6 +263,37 @@ jobs:
               "speaker_population_coverage_certified": False,
               "no_audio_or_transcript_artifact": True,
           }, ensure_ascii=False, sort_keys=True))
+          PY
+
+          # Deliberate *source-derived* audio transformation: gain-only
+          # attenuation and per-frame RMS equalization. The latter splices
+          # nonzero 20-ms frames and is NOT natural, intelligibility-proven
+          # low-volume/monotone human speech. Only numeric report is logged.
+          STRESS_WAV="$private_dir/mandarin.wav" \
+          STRESS_META="$private_dir/mandarin.private.json" \
+          STRESS_LANG="zh" \
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, "speech_input/whisper/tools")
+          from stress_stationarity_human import evaluate_bytes
+          wave = Path(os.environ["STRESS_WAV"]).read_bytes()
+          sha = json.loads(Path(os.environ["STRESS_META"]).read_text())[
+              "normalized_wav_sha256"]
+          result = evaluate_bytes(wave, sha)
+          control = result["controlled_energy_equalization"]
+          assert control["selected_nonzero_source_frames"] >= 50
+          assert control["guard_on_predecode_no_speech"] is True
+          assert control["guard_off_predecode_no_speech"] is False
+          assert result["actual_whisper_model_used"] is False
+          assert result["actual_c11_provider_used_on_source_audio"] is False
+          print(json.dumps({
+              "evidence_kind": "derived_from_verified_real_spoken_source",
+              "language": os.environ["STRESS_LANG"],
+              **result,
+          }, sort_keys=True))
           PY
 
           # No upload-artifact action. All clip/manifest/provenance bytes
@@ -352,6 +416,37 @@ jobs:
 
           # The CC-BY-3.0-US credit is preserved in the numeric evidence;
           # no raw voice is uploaded, and the author is never reidentified.
+          # Deliberate *source-derived* audio transformation: gain-only
+          # attenuation and per-frame RMS equalization. The latter splices
+          # nonzero 20-ms frames and is NOT natural, intelligibility-proven
+          # low-volume/monotone human speech. Only numeric report is logged.
+          STRESS_WAV="$private_dir/english.wav" \
+          STRESS_META="$private_dir/english.private.json" \
+          STRESS_LANG="en" \
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, "speech_input/whisper/tools")
+          from stress_stationarity_human import evaluate_bytes
+          wave = Path(os.environ["STRESS_WAV"]).read_bytes()
+          sha = json.loads(Path(os.environ["STRESS_META"]).read_text())[
+              "normalized_wav_sha256"]
+          result = evaluate_bytes(wave, sha)
+          control = result["controlled_energy_equalization"]
+          assert control["selected_nonzero_source_frames"] >= 50
+          assert control["guard_on_predecode_no_speech"] is True
+          assert control["guard_off_predecode_no_speech"] is False
+          assert result["actual_whisper_model_used"] is False
+          assert result["actual_c11_provider_used_on_source_audio"] is False
+          print(json.dumps({
+              "evidence_kind": "derived_from_verified_real_spoken_source",
+              "language": os.environ["STRESS_LANG"],
+              **result,
+          }, sort_keys=True))
+          PY
+
           # No upload-artifact action. All clip/manifest/provenance bytes
           # remain in RUNNER_TEMP until trap cleanup; no model download.
 

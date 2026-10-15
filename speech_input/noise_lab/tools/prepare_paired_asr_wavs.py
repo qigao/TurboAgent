@@ -147,6 +147,10 @@ def prepare(source: Path, source_sha: str, executable: Path,
                        str(db), "--align-one-frame"]
             observed = runner(command, input=b"", capture_output=True,
                               timeout=45, check=False)
+            # A failed native process may still leave a partial output file.
+            # Register it for rollback BEFORE validating its return status.
+            if ns_raw_file.exists() or ns_raw_file.is_symlink():
+                created.append(ns_raw_file)
             if (type(observed.returncode) is not int
                     or observed.returncode != 0
                     or not isinstance(observed.stdout, bytes)
@@ -171,7 +175,6 @@ def prepare(source: Path, source_sha: str, executable: Path,
             if (not ns_raw_file.is_file() or ns_raw_file.is_symlink()
                     or ns_raw_file.stat().st_size > MAX_RAW_BYTES):
                 raise ValueError("missing or invalid private DSP output")
-            created.append(ns_raw_file)
             with ns_raw_file.open("rb") as source_file:
                 filtered = source_file.read(MAX_RAW_BYTES + 1)
             canonical = wrapped_raw(filtered, expected_frames)
@@ -191,9 +194,13 @@ def prepare(source: Path, source_sha: str, executable: Path,
                             ("ns12", OUTPUT_NAMES[1]),
                             ("ns18", OUTPUT_NAMES[2])):
             current = private_root / name
-            if bounded_file(current, digest_by_condition[label], MAX_WAV_BYTES) != (
-                    original if label == "original" else current.read_bytes()):
-                raise ValueError("inconsistent private paired WAV")
+            observed_bytes = bounded_file(
+                current, digest_by_condition[label], MAX_WAV_BYTES)
+            if label == "original" and observed_bytes != original:
+                raise ValueError("inconsistent original private WAV")
+            _, frame_count = wav_pcm(observed_bytes)
+            if frame_count != expected_frames:
+                raise ValueError("inconsistent private frame count")
         report = {
             "schema": 1,
             "test_kind": "private_source_identical_3_condition_ns_wav_bundle",

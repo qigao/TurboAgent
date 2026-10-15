@@ -106,10 +106,21 @@ static int test_would_block_and_source_done(void) {
   CHECK(turbo_agent_speech_output_pump(h, 1u) == TURBO_TTS_EAGAIN);
   CHECK(turbo_agent_speech_output_pump(h, 1u) == TURBO_TTS_EAGAIN);
   CHECK(turbo_agent_speech_output_get_state(h) == TURBO_TTS_SYNTHESIZING);
-  CHECK(turbo_agent_speech_output_pump(h, 1u) == TURBO_TTS_OK);
-  CHECK(turbo_agent_speech_output_get_state(h) == TURBO_TTS_SETTLED);
+  CHECK(turbo_agent_speech_output_pump(h, 1u) == TURBO_TTS_EPROVIDER);
+  CHECK(turbo_agent_speech_output_get_state(h) == TURBO_TTS_FAILED);
   CHECK(f.poll_calls == 3);
   CHECK(turbo_agent_speech_output_destroy(&h) == TURBO_TTS_OK);
+
+  /* Once any actual PCM was accepted, SOURCE_DONE is a valid terminal;
+   * no staging remains but Playback's own device drain is separate. */
+  CHECK(setup(&f, 30000u, 4096u, &h) == 0);
+  CHECK(turbo_agent_speech_output_begin(h, 2u, "hello", 5u, "v1", "en") == 0);
+  CHECK(turbo_agent_speech_output_pump(h, 2u) == 0);
+  CHECK(turbo_agent_speech_output_consume_pcm(h, 2u, 480u) == 0);
+  f.force_source_done = 1;
+  CHECK(turbo_agent_speech_output_pump(h, 2u) == 0);
+  CHECK(turbo_agent_speech_output_get_state(h) == TURBO_TTS_SETTLED);
+  CHECK(turbo_agent_speech_output_destroy(&h) == 0);
   return 0;
 }
 
@@ -245,11 +256,11 @@ static int test_bad_config_and_begin_failure(void) {
   turbo_agent_tts_config_init(&cfg);
   cfg.output.sample_rate_hz = 48000u;
   CHECK(turbo_agent_speech_output_create(&cfg, &provider, &h) ==
-        TURBO_TTS_EINVAL && h == NULL);
+        TURBO_TTS_EUNSUPPORTED && h == NULL);
   cfg.output.sample_rate_hz = 24000u;
   cfg.output.channels = 2u;
   CHECK(turbo_agent_speech_output_create(&cfg, &provider, &h) ==
-        TURBO_TTS_EINVAL);
+        TURBO_TTS_EUNSUPPORTED);
   cfg.output.channels = 1u;
   cfg.max_audio_ms = 21u;
   CHECK(turbo_agent_speech_output_create(&cfg, &provider, &h) ==

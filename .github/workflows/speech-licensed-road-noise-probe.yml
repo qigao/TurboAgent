@@ -1,0 +1,122 @@
+name: Speech M3 real-world road warning noise admission (#146)
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/speech-licensed-road-noise-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  licensed-real-road-noise-no-model:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-licensed-road-noise-probe-146'
+    name: Actual CC BY-SA roadway back-up beeper predecode guard (no model)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SOURCE_URL: https://upload.wikimedia.org/wikipedia/commons/e/e2/Back-up_white_noise.ogg
+      SOURCE_EXPECTED_SHA1: 71500b016280d285ac6854bd46eef6373847247e
+      SOURCE_EXPECTED_SHA256: 7d70594ef7ba1bd7a34136ab7140420d016fd730acc6c124a1a02fe6c75337d0
+      SOURCE_EXPECTED_BYTES: '120796'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install only CPU local decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Verify author-licensed original and calculate predecoder noise screening (no ASR)
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$(mktemp -d "${RUNNER_TEMP}/real-field-noise-XXXXXX")"
+          chmod 700 "$root"
+          trap 'rm -rf -- "$root"' EXIT
+          source="$root/back-up-white-noise.ogg"
+          curl --fail --location --silent --show-error --retry 2 \
+            --connect-timeout 15 --max-time 60 --max-filesize 300000 \
+            --proto '=https' --proto-redir '=https' \
+            --user-agent 'TurboAgent-licensed-noise-test/1.0 (qigao/TurboAgent)' \
+            "$SOURCE_URL" --output "$source"
+          test "$(wc -c < "$source" | tr -d '[:space:]')" = "$SOURCE_EXPECTED_BYTES"
+          test "$(sha1sum "$source" | awk '{print $1}')" = "$SOURCE_EXPECTED_SHA1"
+          source_sha256="$(sha256sum "$source" | awk '{print $1}')"
+          # Second run pins the full originally observed source digest.
+          test "$source_sha256" = "$SOURCE_EXPECTED_SHA256"
+
+          selected_ffmpeg="$(realpath "$(command -v ffmpeg)")"
+          selected_ffmpeg_sha256="$(sha256sum "$selected_ffmpeg" | awk '{print $1}')"
+          python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
+            --source "$source" --source-sha256 "$source_sha256" \
+            --ffmpeg "$selected_ffmpeg" --ffmpeg-sha256 "$selected_ffmpeg_sha256" \
+            --output-wav "$root/road-noise.wav" \
+            --private-provenance "$root/road-noise.private.json" \
+            --acknowledge-rights > "$root/preflight.private.json"
+
+          SOURCE_SHA256="$source_sha256" PRIVATE_DIR="$root" python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          folder = Path(os.environ['PRIVATE_DIR'])
+          info = json.loads((folder / 'road-noise.private.json').read_text())
+          manifest = {
+              "schema": 2,
+              "samples": [{
+                  "path": "road-noise.wav",
+                  "sha256": info["normalized_wav_sha256"],
+                  "source_kind": "real_noise",
+                  "language": "none",
+                  "condition": "traffic",
+                  "rights_basis": "public_license",
+              }],
+          }
+          mf = folder / "noise.private-manifest.json"
+          mf.write_text(json.dumps(manifest))
+          os.chmod(mf, 0o600)
+          sys.path.insert(0, 'speech_input/whisper/tools')
+          from evaluate_stationarity_corpus import evaluate
+          from measure_frame_stationarity import inspect_wav
+          energy = inspect_wav(folder / "road-noise.wav")
+          result = evaluate(folder, mf)
+          metric = result["real_noise"]
+          assert result["sample_count"] == 1
+          assert metric["guard_on_predecode_rejections"]["count"] in (0, 1)
+          assert metric["hallucination_rate_measured"] is False
+          assert result["model_inference_used"] is False
+          print(json.dumps({
+              "evidence_kind": "independent_recorded_road_vehicle_noise",
+              "description": "Real recycling-truck reversing warning beeper / white noise",
+              "license": "CC-BY-SA-4.0",
+              "attribution": "Ke4roh; converted to 16k mono S16LE solely for analysis",
+              "source_page": "https://commons.wikimedia.org/wiki/File:Back-up_white_noise.ogg",
+              "source_sha1_verification": "PASS",
+              "source_sha256_independently_pinned": True,
+              "original_sha256": os.environ["SOURCE_SHA256"],
+              "canonical_wav_sha256": info["normalized_wav_sha256"],
+              "frames": info["frames"],
+              "frame_power_cv": energy["frame_power_cv"],
+              "frame_power_max_min_ratio": energy["frame_power_max_min_ratio"],
+              "minimum_frame_power": energy["minimum_frame_power"],
+              "maximum_frame_power": energy["maximum_frame_power"],
+              "stationarity_hypothesis": energy["stationarity_hypothesis"],
+              "real_noise_count": 1,
+              "guard_off_predecode_rejections":
+                  metric["guard_off_predecode_rejections"],
+              "guard_on_predecode_rejections":
+                  metric["guard_on_predecode_rejections"]["count"],
+              "guard_on_predecode_screening_fraction":
+                  metric["guard_on_predecode_rejections"]["rate"],
+              "potential_false_acceptance_not_measured": True,
+              "asr_hallucination_measurement": False,
+              "model_weights_used": False,
+              "raw_audio_or_transcript_artifact_uploaded": False,
+              "general_noise_quality_certified": False,
+          }, sort_keys=True))
+          PY
+          # No artifact upload, no private audio or transcript in log.

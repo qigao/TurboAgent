@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   speexdsp-native-c11:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-noise-level-sweep-167')
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-noise-level-sweep-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-paired-asr-offline-167')
     name: SpeexDSP-1.2.1 C11 NS-only smoke, native source + licensed audio
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -59,6 +59,15 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s speech_input/noise_lab/tools/tests \
             -p 'test_*.py' -v
+      - name: Prove fail-closed private model/CLI/WAV gates and transcript-free paired CER/WER accounting
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The test model and C11 transcripts are mocked strictly inside
+          # unit tests. This job MUST NOT download or open any real weights.
+          python3 -m unittest discover \
+            -s speech_input/noise_lab/tools/tests \
+            -p 'test_evaluate_whisper_paired.py' -v
       - name: Compare synthetic stationary noise, real whisper and real road noise NS
         shell: bash
         run: |

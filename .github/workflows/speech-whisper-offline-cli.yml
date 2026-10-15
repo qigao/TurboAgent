@@ -95,8 +95,15 @@ jobs:
           python3 speech_input/whisper/tools/generate_noise_fixtures.py \
             --output-dir "$MODEL_FIXTURES/stationarity-noise" \
             --report /tmp/speech-cli-stationary-fixtures-metadata.json
+          # Stress the previously passed human-spoken sample under framewise
+          # AGC + synthetic comfort noise; no weights and no raw audio upload.
+          python3 speech_input/whisper/tools/generate_agc_speech_probe.py \
+            --source "$GITHUB_WORKSPACE/external/whisper-v195/samples/jfk.wav" \
+            --output "$MODEL_FIXTURES/agc-jfk-private.wav" \
+            --report /tmp/speech-cli-agc-provenance.json
           python3 speech_input/whisper/tools/measure_frame_stationarity.py \
             --jfk-wav external/whisper-v195/samples/jfk.wav \
+            --agc-jfk-wav "$MODEL_FIXTURES/agc-jfk-private.wav" \
             --noise-dir "$MODEL_FIXTURES/stationarity-noise" \
             --report /tmp/speech-cli-stationarity-metrics.json
           # The report describes energy variation only, not accepted VAD.
@@ -266,6 +273,7 @@ jobs:
             /tmp/speech-cli-real-dependencies.txt
             /tmp/speech-cli-stationarity-metrics.json
             /tmp/speech-cli-stationary-fixtures-metadata.json
+            /tmp/speech-cli-agc-provenance.json
             /tmp/speech-cli-negative.txt
             /tmp/speech-cli-mock-positive.txt
             build/speech-cli/compile_commands.json

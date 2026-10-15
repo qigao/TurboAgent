@@ -220,3 +220,30 @@ Suggested operator-side protocol:
 Even multiple real-speaker samples do not automatically validate a
 production VAD. Keep the experimental guard DEFAULT OFF, #137/#146 OPEN,
 and all stacked PRs Draft / DO NOT MERGE / DO NOT RELEASE.
+
+## Integrated private normalization and corpus parity gate (#153)
+
+The independent normalization tool from [Draft #151](https://github.com/qigao/TurboAgent/pull/151)
+is now wired into a separate Draft [#153](https://github.com/qigao/TurboAgent/pull/153),
+stacked on #152. For already authorized **local** source recordings:
+
+1. Keep the original recording and its true source SHA-256 private.
+2. Pass the verified byte snapshot to a caller-reviewed absolute FFmpeg binary
+   using its explicitly pinned executable SHA-256 and `--acknowledge-rights`.
+   Conversion creates a private 0600 canonical WAV and private 0600 provenance;
+   existing destinations and overlength/invalid results fail closed.
+3. Use the *converted* WAV's pinned SHA in the private schema 1/2 manifest.
+   The ABI2 evaluator reads and scores a single immutable WAV snapshot.
+   Sample aliases that decode to the same PCM are rejected as duplicates.
+4. Read explicit unknown-rate / uncovered-language/noise strata in the report.
+   Do **not** interpret silent/unseen cohorts as 0% error. The report measures
+   the **predecode lag-one-plus-frame-power** opt-in filter only, not actual
+   speech recognition or noise hallucination.
+
+Public CI uses exclusively deterministic synthetic WAV/Ogg fixtures to check
+the **actual CPU FFmpeg -> private WAV -> SHA -> lag-1 corpus** handoff.
+Neither human voices, speaker identities, raw audio, private provenance,
+model weights, nor transcripts are fetched or uploaded. Run the private
+data pipeline locally under the source dataset's consent/license terms.
+All rights and speaker-group declarations are unverified by the software.
+The experimental filter stays **OFF** by default; no merge or publication.

@@ -282,14 +282,107 @@ static int test_begin_failure_retains_provider(void) {
   CHECK(turbo_tts_destroy(&tts) == TURBO_TTS_OK);
   return 0;
 }
+/* M4.2 must tell the Host which borrowed obligations prevent release,
+ * rather than conflating a permanently failed clear with Provider settlement.
+ * No infinite loop or sleep; these are fixed deterministic owner ticks. */
+static int test_snapshot_stalled_provider_and_device_clear(void) {
+  fake_provider_t p = {0};
+  salts_playback_t dev;
+  device_init(&dev);
+  turbo_tts_output_t *tts = NULL;
+  turbo_voice_coordinator_t *v = NULL;
+  CHECK(setup(&p, &dev, &tts, &v) == 0);
+
+  turbo_voice_snapshot_t snapshot;
+  turbo_voice_snapshot_init(&snapshot);
+  snapshot.abi_version++;
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_EINVAL);
+  turbo_voice_snapshot_init(&snapshot);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.generation == 0u && snapshot.blockers == 0u);
+
+  CHECK(admitted(v, 100u) == 0);
+  size_t written = 0u;
+  CHECK(turbo_voice_pump(v, 1u, &written) == TURBO_VOICE_OK);
+  CHECK(written == 960u && dev.count == 960u);
+  const unsigned initial_writes = dev.writes;
+  const unsigned initial_polls = p.polls;
+
+  dev.clear_error = 1;
+  p.wait_canceled = 1000u;  /* deterministic, non-cooperative until released */
+  p.late_pcm = 1;
+  CHECK(turbo_voice_interrupt(v, 100u) == TURBO_VOICE_EDEVICE);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.state == TURBO_VOICE_CANCEL_PENDING);
+  CHECK((snapshot.blockers & TURBO_VOICE_BLOCK_DEVICE_CLEAR) != 0u);
+  CHECK((snapshot.blockers & TURBO_VOICE_BLOCK_PROVIDER_SETTLE) != 0u);
+  CHECK((snapshot.blockers & TURBO_VOICE_BLOCK_INPUT_QUIESCE) == 0u);
+
+  /* Still-failed clear permits no Provider callback and no new PCM write. */
+  for (unsigned i = 0u; i < 32u; ++i) {
+    written = 17u;
+    CHECK(turbo_voice_pump(v, 1u, &written) == TURBO_VOICE_EDEVICE);
+    CHECK(written == 0u);
+    CHECK(turbo_voice_begin_input(v, 101u) == TURBO_VOICE_EBUSY);
+    CHECK(turbo_voice_destroy(&v) == TURBO_VOICE_EBUSY);
+    CHECK(v != NULL);
+  }
+  CHECK(dev.writes == initial_writes && p.polls == initial_polls);
+  CHECK(p.cancels == 1u && dev.clears == 0u);
+
+  dev.clear_error = 0;
+  CHECK(turbo_voice_pump(v, 1u, &written) == TURBO_VOICE_EBUSY);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK((snapshot.blockers & TURBO_VOICE_BLOCK_DEVICE_CLEAR) == 0u);
+  CHECK((snapshot.blockers & TURBO_VOICE_BLOCK_PROVIDER_SETTLE) != 0u);
+  CHECK(dev.count == 0u && dev.clears == 1u);
+
+  /* Even after ring clear, uncooperative Provider is still a DSO barrier. */
+  for (unsigned i = 0u; i < 64u; ++i) {
+    CHECK(turbo_voice_pump(v, 1u, &written) == TURBO_VOICE_EBUSY);
+    CHECK(written == 0u);
+    CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+    CHECK(snapshot.blockers == TURBO_VOICE_BLOCK_PROVIDER_SETTLE);
+    CHECK(turbo_voice_destroy(&v) == TURBO_VOICE_EBUSY);
+  }
+  CHECK(dev.writes == initial_writes && p.cancels == 1u);
+  CHECK(turbo_voice_begin_input(v, 101u) == TURBO_VOICE_EBUSY);
+
+  /* Explicit external settlement (not a forced DSO unload) releases barrier. */
+  p.wait_canceled = 0u;
+  CHECK(turbo_voice_pump(v, 1u, &written) == TURBO_VOICE_OK);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.state == TURBO_VOICE_INTERRUPTED);
+  CHECK(snapshot.blockers == 0u && snapshot.generation == 100u);
+
+  CHECK(turbo_voice_begin_input(v, 101u) == TURBO_VOICE_OK);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.state == TURBO_VOICE_INPUT);
+  CHECK(snapshot.blockers == TURBO_VOICE_BLOCK_INPUT_QUIESCE);
+  CHECK(turbo_voice_asr_event(v, 100u, TURBO_VOICE_ASR_CHECKED_FINAL) ==
+        TURBO_VOICE_ESTALE);
+  CHECK(turbo_voice_interrupt(v, 101u) == TURBO_VOICE_OK);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.state == TURBO_VOICE_CANCEL_PENDING);
+  CHECK(snapshot.blockers == TURBO_VOICE_BLOCK_INPUT_QUIESCE);
+  CHECK(turbo_voice_input_quiesced(v, 101u) == TURBO_VOICE_OK);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.state == TURBO_VOICE_INTERRUPTED && snapshot.blockers == 0u);
+  CHECK(turbo_voice_destroy(&v) == TURBO_VOICE_OK);
+  CHECK(turbo_tts_destroy(&tts) == TURBO_TTS_OK);
+  return 0;
+}
+
 int main(void) {
   CHECK(test_admission_fifo_drain() == 0);
   CHECK(test_clear_failure_noncooperative() == 0);
   CHECK(test_errors_never_mark_completed() == 0);
   CHECK(test_begin_failure_retains_provider() == 0);
+  CHECK(test_snapshot_stalled_provider_and_device_clear() == 0);
   puts("PASS M4.2 checked FINAL + quiesced input; ASR PARTIAL rejected");
-  puts("PASS M4.2 FIFO/short-write/drain, generation and acoustic echo isolation");
+  puts("PASS M4.2 FIFO/short-write/drain, generation and ASR-event isolation");
   puts("PASS M4.2 failed clear/noncooperative Provider retain borrowed DSO");
   puts("PASS M4.2 device and Provider failures cannot mark output played");
+  puts("PASS M4.2 read-only blocker snapshot, failed clear and stalled DSO");
   return 0;
 }

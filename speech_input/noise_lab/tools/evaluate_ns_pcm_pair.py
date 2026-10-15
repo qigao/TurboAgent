@@ -44,6 +44,60 @@ def wrap_wav(raw: bytes) -> bytes:
     return buffer.getvalue()
 
 
+from operator import mul
+
+
+def bounded_offset_cosine(a, b):
+    """Report best waveform offset, *not* certified DSP algorithm latency.
+
+    Search only plus/minus one existing 320-sample 20ms frame and use a
+    limited window to avoid unbounded quadratic Python correlation. The
+    aligned full-clip score is diagnostic, not phoneme/intelligibility proof.
+    """
+    n = len(a)
+    if n != len(b) or n < 320:
+        raise ValueError("unalignable PCM")
+    if not any(a) or not any(b):
+        return None, None
+    start = min(8000, max(320, n // 4))
+    span = min(4096, n - start - 320)
+    if span < 320:
+        start = 320
+        span = n - 640
+    if span < 320:
+        return None, None
+
+    aa = a[start:start+span]
+    norm_a = sum(v*v for v in aa)
+    if norm_a == 0:
+        return None, None
+    best_lag, best_score = 0, -2.0
+    def score(lag):
+        bb = b[start+lag:start+lag+span]
+        norm_b = sum(v*v for v in bb)
+        if norm_b == 0:
+            return -2.0
+        return sum(map(mul, aa, bb)) / math.sqrt(norm_a * norm_b)
+    for lag in range(-320,321,8):
+        candidate = score(lag)
+        if candidate > best_score:
+            best_lag, best_score = lag, candidate
+    for lag in range(max(-320,best_lag-8),min(320,best_lag+8)+1):
+        candidate = score(lag)
+        if candidate > best_score:
+            best_lag, best_score = lag, candidate
+    if best_lag >= 0:
+        av,bv=a[:n-best_lag],b[best_lag:]
+    else:
+        av,bv=a[-best_lag:],b[:n+best_lag]
+    e1=sum(v*v for v in av)
+    e2=sum(v*v for v in bv)
+    if not e1 or not e2:
+        return best_lag, None
+    return best_lag, round(sum(map(mul,av,bv)) / math.sqrt(e1*e2),6)
+
+
+
 def evaluate(before: bytes, after: bytes, kind: str, db: int) -> dict:
     if kind not in ("steady", "whisper", "road") or db not in (-12, -18):
         raise ValueError("unsupported sample label or suppression level")
@@ -71,6 +125,7 @@ def evaluate(before: bytes, after: bytes, kind: str, db: int) -> dict:
     original_kind = inspect_wav_bytes(wrap_wav(before))["stationarity_hypothesis"]
     denoised_kind = inspect_wav_bytes(wrap_wav(after))["stationarity_hypothesis"]
     denom = math.sqrt(before_energy*after_energy) if after_energy else 0.0
+    aligned_lag, aligned_score = bounded_offset_cosine(a, b)
 
     return {
         "schema": 1,
@@ -81,7 +136,10 @@ def evaluate(before: bytes, after: bytes, kind: str, db: int) -> dict:
         "before_power": before_energy,
         "after_power": after_energy,
         "energy_ratio": round(after_energy/before_energy, 6),
-        "cosine_similarity": round(dot/denom, 6) if denom else None,
+        "zero_lag_cosine_similarity": round(dot/denom, 6) if denom else None,
+        "best_bounded_alignment_shift_samples": aligned_lag,
+        "estimated_alignment_not_latency_certified": True,
+        "aligned_cosine_similarity": aligned_score,
         "changed_samples": changed,
         "nonzero_original_frames": voiced_a,
         "newly_zero_original_frames": newly_zero,

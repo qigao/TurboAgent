@@ -247,3 +247,22 @@ model weights, nor transcripts are fetched or uploaded. Run the private
 data pipeline locally under the source dataset's consent/license terms.
 All rights and speaker-group declarations are unverified by the software.
 The experimental filter stays **OFF** by default; no merge or publication.
+
+## Strict lag-one ratio boundary and bounded integer arithmetic (#156)
+
+The ABI2 opt-in C11 Provider and offline byte-snapshot evaluator compare the
+**same unrounded adjacent PCM products**. To avoid a floating-point
+cross-language boundary disagreement, stationary-noise admission requires
+`100 * abs(sum(previous_sample * next_sample)) < 12 * sum(next_sample²)`,
+excluding cross-frame adjacency. **Equality at 12/100 fails open to the
+Whisper decoder**; merely constant frame power is not enough to reject.
+
+At most 3000 frames of 320 S16 samples are accepted per utterance; each
+absolute sample product is at most 2³⁰. Therefore the worst possible
+absolute correlation cross-product multiplied by 100 is below 1.1×10¹⁷,
+safely bounded by unsigned 64-bit arithmetic. The no-model regression
+constructs 100 constant-power 20-ms frames, with 35/36/37 frames having one
+extra sign flip to test just above, exactly at and just below the 0.12
+threshold in both Python and native C11 provider callbacks. These are
+pure synthetic signals, not a real voice, natural noise or VAD benchmark.
+The experimental stationary guard remains OFF by default.

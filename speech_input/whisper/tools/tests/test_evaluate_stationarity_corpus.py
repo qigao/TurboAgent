@@ -411,6 +411,42 @@ class CorpusGateTests(unittest.TestCase):
             self.assertIn("lag1",report["method"])
             self.assertFalse(report["acoustic_vad_or_recognition_quality_certified"])
 
+    def test_strict_exact_lag1_ratio_matches_c11_at_and_around_12_percent(self):
+        # This is one-to-one parity with C11 stationarity_exact_lag1_ratio_test.
+        # No transcript or real-human voice, only fixed-power synthetic signs.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sample = root / "exact-lag1.wav"
+            manifest = root / "private-manifest.json"
+            for extra141, expected, expected_cross in (
+                    (35, 0, 3830),
+                    (36, 0, 3828),
+                    (37, 1, 3826)):
+                with self.subTest(extra141=extra141):
+                    with wave.open(str(sample), "wb") as out:
+                        out.setnchannels(1)
+                        out.setsampwidth(2)
+                        out.setframerate(16000)
+                        for frame in range(100):
+                            flips = 140 + (frame < extra141)
+                            pcm = [1000]
+                            for index in range(1, 320):
+                                pcm.append(-pcm[-1] if index <= flips else pcm[-1])
+                            out.writeframes(struct.pack("<320h", *pcm))
+                    report = corpus.inspect_wav_bytes(sample.read_bytes())
+                    self.assertEqual(report["frame_count"], 100)
+                    self.assertEqual(report["frame_power_cv"], 0)
+                    self.assertEqual(report["frame_power_max_min_ratio"], 1)
+                    self.assertEqual(report["lag1_abs_correlation"],
+                                     round(expected_cross / 31900, 6))
+                    manifest.write_text(json.dumps({"schema": 1, "samples": [
+                        entry(sample, "synthetic", condition="equal_power")]}))
+                    aggregate = corpus.evaluate(root, manifest)
+                    self.assertEqual(
+                        aggregate["synthetic_controls"]["guard_on_predecode_rejections"],
+                        expected)
+                    self.assertFalse(aggregate["acoustic_vad_or_recognition_quality_certified"])
+
     def test_unknown_rate_is_not_misreported_as_zero(self):
         self.assertIsNone(corpus.rate(0, 0)["rate"])
         self.assertIsNone(corpus.rate(0, 0)["wilson95"])

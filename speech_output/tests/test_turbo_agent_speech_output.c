@@ -74,7 +74,7 @@ static int test_finite_synthesis_and_borrowed_text(void) {
   total += n;
   CHECK(turbo_agent_speech_output_consume_pcm(h, 41u, n) == TURBO_TTS_OK);
   CHECK(turbo_agent_speech_output_pump(h, 41u) == TURBO_TTS_OK);
-  CHECK(turbo_agent_speech_output_get_state(h) == TURBO_TTS_PLAYBACK_DRAINING);
+  CHECK(turbo_agent_speech_output_get_state(h) == TURBO_TTS_STAGING_DRAINING);
   CHECK(turbo_agent_speech_output_pump(h, 41u) == TURBO_TTS_EBUSY);
   CHECK(turbo_agent_speech_output_peek_pcm(h, 41u, &pcm, &n) == TURBO_TTS_OK);
   CHECK(n == 137u);

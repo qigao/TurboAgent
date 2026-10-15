@@ -222,13 +222,19 @@ def prepare(source: Path, expected_sha: str, ffmpeg: Path,
     if not destination.is_absolute() or not provenance.is_absolute():
         raise ValueError("all output paths must be absolute")
     source_bytes = read_pinned_source(source, expected_sha)
+    # Pin the selected decoder before use and re-check after it exits.
+    # A changed binary cannot be attributed to one immutable tool revision.
+    decoder_sha_before = digest_file(ffmpeg)
     normalized, metadata = convert_snapshot(source_bytes, ffmpeg, runner)
+    decoder_sha_after = digest_file(ffmpeg)
+    if decoder_sha_before != decoder_sha_after:
+        raise ValueError("decoder executable changed during conversion")
     evidence = {
         "schema": 1,
         "mode": "local_private_single_snapshot_only",
         "rights_and_consent_user_declared_not_verified": True,
         "source_sha256": expected_sha,
-        "ffmpeg_executable_sha256": digest_file(ffmpeg),
+        "ffmpeg_executable_sha256": decoder_sha_before,
         "model_weights_used": False,
         "model_inference_used": False,
         "audio_downloaded": False,

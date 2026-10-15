@@ -224,6 +224,33 @@ class PrivateWavPreflightTests(unittest.TestCase):
                     timeout=0.2, check=False)
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "optional local CPU ffmpeg absent")
+    def test_actual_local_vorbis_to_canonical_wav_through_pipe(self):
+        # This fixture is synthesized digital PCM, not a human-voice recording.
+        # It exercises the Ogg/Vorbis container path used by the licensed
+        # source candidates, with no network URL or model-weight access.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = make_source(root)
+            ogg = root / "synthetic.ogg"
+            ffmpeg = Path(shutil.which("ffmpeg")).resolve(strict=True)
+            encode = subprocess.run(
+                [str(ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error",
+                 "-i", str(source), "-c:a", "libvorbis", "-qscale:a", "4",
+                 "-y", str(ogg)],
+                capture_output=True, check=False, timeout=15)
+            self.assertEqual(encode.returncode, 0, encode.stderr[:500])
+            result = prep.prepare(
+                ogg, hashlib.sha256(ogg.read_bytes()).hexdigest(), ffmpeg,
+                root / "from-ogg.wav", root / "from-ogg.private.json", True)
+            self.assertTrue(result["no_model_or_network"])
+            self.assertGreaterEqual(result["frame_count"], 59)
+            self.assertLessEqual(result["frame_count"], 60)
+            with wave.open(str(root / "from-ogg.wav"), "rb") as wav:
+                self.assertEqual((wav.getframerate(), wav.getnchannels(),
+                                  wav.getsampwidth()), (16000, 1, 2))
+                self.assertEqual(wav.getnframes() % 320, 0)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "optional local CPU ffmpeg absent")
     def test_actual_ffmpeg_pipe_only_cpu_decode(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

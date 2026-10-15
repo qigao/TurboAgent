@@ -196,7 +196,7 @@ class AtomicThreeArmTests(unittest.TestCase):
                         stub.mutate_executable=True
                     else:
                         stub.alter_source=src
-                    with self.assertRaisesRegex(ValueError,"changed during"):
+                    with self.assertRaisesRegex(ValueError,"SHA|changed during"):
                         pair.prepare(src,sha(src),exe,sha(exe),out,stub)
                     self.assertEqual(list(out.iterdir()),[])
 

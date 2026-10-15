@@ -406,6 +406,89 @@ jobs:
           # By design this step creates no GitHub artifact. Its private
           # decoded/source/derivative PCM and vendor stub transcripts are
           # erased automatically by the exit trap.
+      - name: Re-run PLOS voiced, whispered and adjusted-envelope PCM through native C11 Provider
+        if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-paired-voiced-whispered-study-146'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          private="$(mktemp -d "$RUNNER_TEMP/study-native-c11-XXXXXX")"
+          chmod 700 "$private"
+          trap 'rm -rf -- "$private"' EXIT
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$GITHUB_WORKSPACE/build/speech-cli-mock"
+          cli="$GITHUB_WORKSPACE/build/speech-cli-mock/mock_whisper_cli"
+          model="$MODEL_FIXTURES/fake-model.bin"
+          model_sha="$(cat "$MODEL_FIXTURES/fake-model.sha256")"
+          decoder="$(realpath "$(command -v ffmpeg)")"
+          decoder_sha="$(sha256sum "$decoder" | awk '{print $1}')"
+          test -x "$cli"
+
+          case_count=0
+          while IFS='|' read -r stimulus url source_bytes source_sha1 source_sha256 wav_sha256; do
+            test -n "$stimulus" || continue
+            case_count=$((case_count + 1))
+            source="$private/$stimulus.oga"
+            wav="$private/$stimulus.wav"
+            curl --fail --location --silent --show-error --retry 2 \
+              --connect-timeout 15 --max-time 45 --max-filesize 80000 \
+              --proto '=https' --proto-redir '=https' \
+              --user-agent 'TurboAgent-PLOS-C11-paired-acoustics/1.0 (qigao/TurboAgent)' \
+              "$url" --output "$source"
+            test "$(wc -c < "$source" | tr -d '[:space:]')" = "$source_bytes"
+            test "$(sha1sum "$source" | awk '{print $1}')" = "$source_sha1"
+            test "$(sha256sum "$source" | awk '{print $1}')" = "$source_sha256"
+            python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
+              --source "$source" --source-sha256 "$source_sha256" \
+              --ffmpeg "$decoder" --ffmpeg-sha256 "$decoder_sha" \
+              --output-wav "$wav" \
+              --private-provenance "$private/$stimulus.evidence.json" \
+              --acknowledge-rights > "$private/$stimulus.status.json"
+            test "$(sha256sum "$wav" | awk '{print $1}')" = "$wav_sha256"
+
+            STUDY_WAV="$wav" STUDY_ID="$stimulus" python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "speech_input/whisper/tools")
+          from measure_frame_stationarity import inspect_wav_bytes
+          raw = Path(os.environ["STUDY_WAV"]).read_bytes()
+          metrics = inspect_wav_bytes(raw)
+          assert metrics["frame_count"] == 76
+          assert metrics["stationarity_hypothesis"] == "dynamic_or_unknown"
+          print(json.dumps({
+              "study": "Ruggles-Freyman-Oxenham-2014",
+              "stimulus": os.environ["STUDY_ID"],
+              "exact_canonical_wav_sha_verified": True,
+              "predecode_guard_on_rejection": False,
+              "frame_power_cv": metrics["frame_power_cv"],
+              "frame_power_ratio": metrics["frame_power_max_min_ratio"],
+              "paired_experimental_stimuli_not_independent_speakers": True,
+          }, sort_keys=True))
+          PY
+
+            # Exactly the production C11 CLI→M2 Capture→M1 SpeechInput→
+            # Whisper Provider C source, with the vendor inference engine
+            # replaced by the deterministic, model-free " utterance" stub.
+            # Both original and envelope-adjusted speech should reach it.
+            for guard in 0 1; do
+              stdout="$private/$stimulus-guard$guard.stdout"
+              stderr="$private/$stimulus-guard$guard.stderr"
+              "$cli" --model "$model" --sha256 "$model_sha" \
+                --wav "$wav" --language en --stationarity-guard "$guard" \
+                --threads 1 --timeout-ms 30000 \
+                > "$stdout" 2> "$stderr"
+              test "$(cat "$stdout")" = ' utterance'
+              ! grep -Fq 'NO_SPEECH (no transcript emitted)' "$stderr"
+            done
+            printf '{"study":"Ruggles-Freyman-Oxenham-2014","stimulus":"%s","native_c11_guard_off":"FINAL","native_c11_guard_on":"FINAL","inference":"fake_vendor_only","source_sha256_pinned":true,"real_ASR_quality_measured":false,"no_audio_upload":true}\n' "$stimulus"
+          done <<'STUDY_PINNED_ORIGINALS'
+          voiced|https://upload.wikimedia.org/wikipedia/commons/9/93/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s001.oga|11157|7ea315ea7703f3a6370088cddb15732ce41b4973|8457f227ce1490cfb372b52636812a1fd8ea39d2f63f66018688fac1f25ad6c7|a93d68dc3bf61f413d219c9ff6e68b0a5e059f728e72bec7d1e34d809d6b2819
+          whispered|https://upload.wikimedia.org/wikipedia/commons/2/25/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s002.oga|11722|a7a0bdcceaba58a3e5e8fafa68efa80c256dd09e|2f11c93a0100f6106dee8de19cb7098d4b178730966f12d82b236a9420549c34|808c58491a4aa89ce69356832602999daa64e9f2180be13843064aa5ad3f1ea2
+          whispered_envelope_matched|https://upload.wikimedia.org/wikipedia/commons/2/29/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s003.oga|10991|ecd2002718660eb5943b7a94b814272ca4068367|2f9efe41064d5122871860237e904b8febce993e8496bb22990e7ef6f322068a|2c35f44a0eb1101c6d51c56bad75ce274ae167e8ef8b5db5c209d0fe5363a428
+          STUDY_PINNED_ORIGINALS
+          test "$case_count" = 3
+          # No samples, model weights or fake transcripts in artifacts.
       - name: Archive pinned source and unmodified stdout/dependency evidence
         if: always()
         uses: actions/upload-artifact@v4

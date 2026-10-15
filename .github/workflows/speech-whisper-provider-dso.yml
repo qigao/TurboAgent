@@ -5,6 +5,9 @@ name: SpeechWhisper M3 real Provider ELF lease and unload (#137)
     paths:
       - 'speech_input/whisper/tests/whisper_fake_engine_image.c'
       - 'speech_input/whisper/tests/test_speech_whisper_provider_image.c'
+      - 'speech_input/whisper/src/turbo_agent_speech_whisper.c'
+      - 'speech_input/whisper/include/turbo_agent_speech_whisper.h'
+      - 'speech_input/whisper/tests/test_turbo_agent_speech_whisper_mock.c'
       - '.github/workflows/speech-whisper-provider-dso.yml'
   workflow_dispatch:
 

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   speexdsp-native-c11:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167')
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || (github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-multisnr-167'))
     name: SpeexDSP-1.2.1 C11 NS-only smoke, native source + licensed audio
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -213,5 +213,38 @@ jobs:
               --mixed-sha256 "$(sha256sum "$root/known/mixed-known-noise.raw" | awk '{print $1}')" \
               --filtered "$root/known/mixed-processed-$db.raw" \
               --filtered-sha256 "$(sha256sum "$root/known/mixed-processed-$db.raw" | awk '{print $1}')"
+          done
+          # Controlled matrix: same exact licensed whisper across 3 noise
+          # amplitudes, 2 generated spectra and 2 explicit NS strengths.
+          # A separate CLEAN-only pass measures how much NS itself alters
+          # the original voice even without injected noise.
+          for db in -12 -18; do
+            "$probe" "$root/known/clean-reference.raw" \
+              "$root/known/clean-only-$db.raw" "$db" --align-one-frame
+          done
+          for profile in white lowpass; do
+            for peak in 100 200 400; do
+              matrix_root="$root/known-$profile-$peak"
+              mkdir -m 700 "$matrix_root"
+              python3 speech_input/noise_lab/tools/known_noise_reference.py prepare \
+                --source-raw "$root/whisper.raw" \
+                --source-sha256 "$(sha256sum "$root/whisper.raw" | awk '{print $1}')" \
+                --private-root "$matrix_root" \
+                --noise-peak "$peak" --noise-profile "$profile"
+              for db in -12 -18; do
+                "$probe" "$matrix_root/mixed-known-noise.raw" \
+                  "$matrix_root/mixed-processed-$db.raw" "$db" --align-one-frame
+                python3 speech_input/noise_lab/tools/known_noise_reference.py score \
+                  --clean "$matrix_root/clean-reference.raw" \
+                  --clean-sha256 "$(sha256sum "$matrix_root/clean-reference.raw" | awk '{print $1}')" \
+                  --mixed "$matrix_root/mixed-known-noise.raw" \
+                  --mixed-sha256 "$(sha256sum "$matrix_root/mixed-known-noise.raw" | awk '{print $1}')" \
+                  --filtered "$matrix_root/mixed-processed-$db.raw" \
+                  --filtered-sha256 "$(sha256sum "$matrix_root/mixed-processed-$db.raw" | awk '{print $1}')" \
+                  --clean-filtered "$root/known/clean-only-$db.raw" \
+                  --clean-filtered-sha256 "$(sha256sum "$root/known/clean-only-$db.raw" | awk '{print $1}')" \
+                  --noise-peak "$peak" --noise-profile "$profile"
+              done
+            done
           done
           # No upload-artifact action. WAV/raw/provenance wiped on exit.

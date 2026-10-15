@@ -7,6 +7,8 @@ admission; thresholds are explicit test hypotheses for a future optional C11
 preflight. No raw audio, model or transcript is uploaded.
 """
 import argparse
+import hashlib
+import io
 import json
 from pathlib import Path
 import struct
@@ -22,10 +24,15 @@ MAX_STATIONARY_CV = 0.12
 MAX_STATIONARY_POWER_RATIO = 2.0
 
 
-def inspect_wav(path: Path) -> dict:
-    if path.stat().st_size > MAX_FILE_BYTES:
-        raise ValueError("oversized WAV")
-    with wave.open(str(path), "rb") as wav:
+def inspect_wav_bytes(raw_bytes: bytes, *, include_pcm_digest=False) -> dict:
+    """Calculate exact energy and optional PCM fingerprint from ONE byte snapshot.
+
+    The optional fingerprint is for private corpus deduplication only; it
+    must never appear in published aggregate reports or default diagnostics.
+    """
+    if not isinstance(raw_bytes, bytes) or len(raw_bytes) > MAX_FILE_BYTES:
+        raise ValueError("oversized or invalid WAV snapshot")
+    with wave.open(io.BytesIO(raw_bytes), "rb") as wav:
         if (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) != (RATE, 1, 2):
             raise ValueError("expected strict mono 16000Hz signed PCM16")
         frames = wav.getnframes()
@@ -33,10 +40,13 @@ def inspect_wav(path: Path) -> dict:
             raise ValueError("incomplete or oversized 20ms frame sequence")
         blocks = frames // FRAME
         power = []
+        pcm_digest = hashlib.sha256() if include_pcm_digest else None
         for _ in range(blocks):
             raw = wav.readframes(FRAME)
             if len(raw) != FRAME * 2:
                 raise ValueError("partial PCM read")
+            if pcm_digest is not None:
+                pcm_digest.update(raw)
             pcm = struct.unpack("<320h", raw)
             power.append(sum(int(x) * int(x) for x in pcm))
         if wav.readframes(1):
@@ -57,7 +67,7 @@ def inspect_wav(path: Path) -> dict:
         kind = ("stationary_candidate" if count >= MIN_FRAMES and
                 cv <= MAX_STATIONARY_CV and ratio is not None and
                 ratio <= MAX_STATIONARY_POWER_RATIO else "dynamic_or_unknown")
-    return {
+    report = {
         "frame_count": count,
         "sample_count": frames,
         "zero_pcm": total == 0,
@@ -68,7 +78,17 @@ def inspect_wav(path: Path) -> dict:
         "maximum_frame_power": max(power),
         "voice_activity_certified": False,
     }
+    if pcm_digest is not None:
+        report["_pcm_sha256"] = pcm_digest.hexdigest()
+    return report
 
+
+def inspect_wav(path: Path) -> dict:
+    # Single bounded read, including the case where the file grows after
+    # being opened. No re-open between source bytes and measured PCM.
+    with path.open("rb") as stream:
+        raw = stream.read(MAX_FILE_BYTES + 1)
+    return inspect_wav_bytes(raw)
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)

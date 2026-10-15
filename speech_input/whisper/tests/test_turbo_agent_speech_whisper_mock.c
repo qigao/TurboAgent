@@ -360,6 +360,60 @@ static int stationary_power_test(int guard, int dynamic) {
   return 0;
 }
 
+/* The same Owner and the same SpeechInput are reused across three distinct
+ * utterances. This catches retained statistics, stale PCM/generation IDs,
+ * false acceptance of a 49-frame utterance, and boundary off-by-one errors.
+ * This test uses synthetic energy envelopes, NOT actual human speech. */
+static int stationarity_threshold_and_generation_reset(void) {
+  turbo_agent_speech_whisper_t *owner=NULL;
+  turbo_agent_speech_provider_v1_t api;
+  turbo_agent_speech_input_t *m1=NULL;
+  turbo_agent_speech_config_t options;
+  size_t pumped=0u, length=0u;
+  char result[100];
+  turbo_agent_speech_transcript_kind_t kind;
+  int baseline=atomic_load(&st_decode_calls);
+  REQUIRE(create_owner_ex(&owner,30000u,80u,1u)==0);
+  REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
+  turbo_agent_speech_config_init(&options);
+  options.max_utterance_frames=80u;
+  options.max_text_bytes=100u;
+  REQUIRE(turbo_agent_speech_create(&options,&api,&m1)==0);
+  for (unsigned pass=0u; pass<3u; pass++) {
+    const uint32_t frames=pass==0u ? 49u : 50u;
+    const uint64_t utterance_id=90u+pass;
+    int16_t pcm[320];
+    REQUIRE(turbo_agent_speech_begin(m1,utterance_id)==0);
+    for (uint32_t frame=0u; frame<frames; frame++) {
+      const int16_t amplitude=(int16_t)
+          (pass==2u && frame%10u>=4u ? 5000u : 1000u);
+      for (size_t s=0u; s<320u; s++) {
+        pcm[s]=(int16_t)((s&1u) ? amplitude : -amplitude);
+      }
+      REQUIRE(turbo_agent_speech_offer_frame(
+          m1,utterance_id,pcm,320u,(frame+1u)*20000u)==0);
+      REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0 && pumped==1u);
+    }
+    REQUIRE(turbo_agent_speech_request_finish(m1)==0);
+    REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0);
+    REQUIRE(turbo_agent_speech_take_final(m1,result,sizeof(result),
+                                           &length,&kind)==0);
+    if (pass==1u) {
+      REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_NO_SPEECH);
+      REQUIRE(length==0u && result[0]=='\0');
+      REQUIRE(atomic_load(&st_decode_calls)==baseline+1);
+    } else {
+      REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL);
+      REQUIRE(length==11u && strcmp(result," recognized")==0);
+      REQUIRE(atomic_load(&st_decode_calls)==baseline+(pass==0u ? 1 : 2));
+    }
+    REQUIRE(turbo_agent_speech_begin(m1,utterance_id)==TURBO_AGENT_SPEECH_ESTALE);
+  }
+  REQUIRE(turbo_agent_speech_destroy(&m1)==0);
+  REQUIRE(turbo_agent_speech_whisper_destroy(&owner)==0);
+  return 0;
+}
+
 int main(void) {
   atomic_init(&st_decode_entered,0);
   atomic_init(&st_hold_until_abort,0);
@@ -374,6 +428,7 @@ int main(void) {
   REQUIRE(stationary_power_test(0,0)==0); /* default OFF preserves FINAL */
   REQUIRE(stationary_power_test(1,0)==0); /* stationary input skips engine */
   REQUIRE(stationary_power_test(1,1)==0); /* dynamic envelope reaches engine */
+  REQUIRE(stationarity_threshold_and_generation_reset()==0);
   puts("Whisper mock C-ABI PCM/cancel/deadline/stationary opt-in admission PASS");
   return 0;
 }

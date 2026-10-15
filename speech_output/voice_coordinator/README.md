@@ -59,3 +59,32 @@ NOT independently TSan-verified concurrent inference/DSO unload,
 NOT real Harness/ASR integration, and NOT acoustic echo/AEC validation.
 M4.3 real TTS model licensing, downloads, worker/DSO and hardware all
 remain separately authorized acceptance work. DO NOT MERGE / RELEASE.
+
+## Read-only blocker snapshot
+
+The host may call turbo_voice_snapshot_init() then
+turbo_voice_get_snapshot() from its serialized control Owner. ABI/version
+and exact struct_size are checked; no handles, TTS text, PCM or device
+pointers escape. The flags are observations of existing obligations,
+not a second ownership authority:
+
+- INPUT_QUIESCE: Capture stopped/callback join not yet attested.
+- DEVICE_CLEAR: M4.1 still owes native ring clear after cancel.
+- PROVIDER_SETTLE: the TTS Provider has not returned a terminal settle.
+- PLAYBACK_DRAIN: SOURCE_DONE but device ring consumption not confirmed.
+- HOST_APPROVAL: ready for committed approved user-visible text.
+- FAULT: the generation has observed a device/Provider error.
+
+A failed clear and outstanding Provider settlement can be reported
+simultaneously. After ring clear succeeds, the Provider barrier remains
+until explicit terminal cancellation; no timeout grants DSO unload.
+A permanent device error and a permanently noncooperative Provider
+remain fail-closed indefinitely: the Host must retain their borrowed
+lifetime or use a separately reviewed isolated-process kill boundary.
+The deterministic test runs 32 unsuccessful clear retries and 64
+noncooperative Provider ticks, rejects premature destroy/new input and
+verifies recovery only after explicit clear and settle.
+
+Snapshot state does NOT independently verify an external mic callback
+join, a trusted ASR FINAL or committed Harness approval. Acoustic
+echo/AEC is not tested by rejecting in-process ASR events.

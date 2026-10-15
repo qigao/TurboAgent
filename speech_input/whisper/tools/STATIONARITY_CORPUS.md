@@ -6,7 +6,7 @@ stacked on [#147](https://github.com/qigao/TurboAgent/pull/147).
 The optional `stationary_noise_guard` remains **OFF by default**.
 
 The standalone `evaluate_stationarity_corpus.py` program characterizes what
-the existing 20 ms frame-power rule *would* reject before ASR. It **does not**
+the current ABI2 20-ms frame-power **and lag-1 correlation** rule would reject before ASR. It **does not**
 invoke a Whisper model, run inference, measure WER/CER, detect hallucinations,
 record speech, download model/audio assets, or verify corpus consent. An exact
 SHA-256 and a caller-declared rights basis are required for every input file.
@@ -173,3 +173,50 @@ The stacked ancestor drafts (#145–#149) were qualified against an older
 power-only Provider; their historical CI success must not be projected
 onto this reconciled correlation-aware integration head. Real human voice
 and natural noise quality evidence remains absent. No merge or release.
+
+## Potential independent real-voice input: Mozilla Common Voice v27.0
+
+For the still **OPEN** real-speaker acceptance matrix, one possible locally
+managed source is the official Mozilla Data Collective's **Common Voice
+Scripted Speech 27.0**, released in September 2026. Its public dataset
+catalog lists English (`en`), Japanese (`ja`) and Chinese (`zh-CN`)
+collections as **CC0-1.0**. Actual eligibility must be verified on the
+*exact downloaded release*, not assumed from a different version or mirror:
+
+- Official catalog: https://mozilladatacollective.com/organization/cmfh0j9o10006ns07jq45h7xk
+- Official Japanese data sheet: https://mozilladatacollective.com/datasets/cmu5xbhnf00fmnq07z9p3aa70
+- Version and license announcement: https://discourse.mozilla.org/t/common-voice-scripted-speech-v27-0-and-spontaneous-speech-v5-0-released/149490
+
+**Restrictions matter despite the CC0 label:** the Japanese v27.0 data
+sheet explicitly forbids speaker identity determination and dataset
+re-hosting/re-sharing. Follow each acquired locale's terms. The *private*
+evaluator neither acquires these files nor attempts to identify speakers,
+and it must not publish audio, full manifests, paths, raw labels,
+speaker tokens or model transcripts. Corpus downloads require a separate
+deliberate user action outside ordinary GitHub PR CI.
+
+Suggested operator-side protocol:
+
+1. Acquire exact release through the publisher under applicable terms, locally.
+   Record version, access date, documented rights and original source checksums
+   in a private provenance log. Never infer a participant's real identity.
+2. Keep original MP3 and metadata off public GitHub. Convert **locally** into
+   strictly 16-kHz mono S16LE, whole 320-sample/20-ms-frame WAVs with a
+   pinned conversion tool and documented padding/crop choices. Rehash the
+   **final WAV bytes**, check every sample is <=60 s, and never conflate the
+   source checksum with the converted WAV checksum.
+3. Populate private schema-2 manifests with `language`, `source_kind`,
+   `condition`, `rights_basis` and opaque speaker grouping *only when
+   legitimately provided by corpus metadata*. Unknown grouping must remain
+   unknown; do not invent speaker independence or reconstruct identity.
+4. Separately source properly permitted real fan/HVAC/traffic/intermittent
+   room audio; do not label synthetic noise as a real recording. Ensure
+   conditions reflect the actual samples and no double-use of identical PCM.
+5. Run the offline evaluator **locally**, inspect its explicit `coverage_gaps`
+   and null empty-cohort denominators. Consider live-model WER/CER,
+   hallucination, false-refusal, latency and DSO lifetime only in a separately
+   authorized private environment. No raw assets enter public artifacts.
+
+Even multiple real-speaker samples do not automatically validate a
+production VAD. Keep the experimental guard DEFAULT OFF, #137/#146 OPEN,
+and all stacked PRs Draft / DO NOT MERGE / DO NOT RELEASE.

@@ -8,6 +8,8 @@ name: SpeechWhisper offline WAV CLI real CPU and mock positive (#137)
       - '.github/workflows/speech-whisper-offline-cli.yml'
       - 'speech_input/noise_lab/tools/run_three_arm_native_c11_ci.sh'
       - 'speech_input/noise_lab/tools/prepare_paired_asr_wavs.py'
+      - 'speech_input/noise_lab/tools/run_multilingual_three_arm_c11_ci.sh'
+      - 'speech_input/noise_lab/tools/run_three_arm_native_c11_ci.sh'
   workflow_dispatch:
 
 permissions:
@@ -492,7 +494,7 @@ jobs:
           test "$case_count" = 3
           # No samples, model weights or fake transcripts in artifacts.
       - name: Execute SHA-pinned three-arm SpeexDSP source on real C11 Provider, fake inference only
-        if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-speexdsp-3arm-c11-native-167'
+        if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-3arm-c11-native-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-multilingual-c11-167')
         shell: bash
         run: |
           set -euo pipefail

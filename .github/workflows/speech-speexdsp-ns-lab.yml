@@ -28,6 +28,10 @@ jobs:
             libspeexdsp-dev pkg-config ninja-build ffmpeg
           test "$(pkg-config --modversion speexdsp)" = 1.2.1
           dpkg-query -W -f='speexdsp-pkg=${Version}\n' libspeexdsp-dev
+          test "$(dpkg-query -W -f='${Version}' libspeexdsp-dev)" = '1.2.1-1ubuntu3'
+          speex_lib="$(readlink -f "$(pkg-config --variable=libdir speexdsp)/libspeexdsp.so")"
+          test -f "$speex_lib"
+          sha256sum "$speex_lib"
           pkg-config --cflags --libs speexdsp
           # Distro package build itself is not compiled with our sanitizers;
           # only the test-only strict C11 owner and harness are instrumented.
@@ -47,6 +51,12 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
             UBSAN_OPTIONS=halt_on_error=1 \
             ctest --test-dir build/speex-ns-sanitized --output-on-failure
+      - name: Test metadata-only PCM A/B metrics and private SHA handling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s speech_input/noise_lab/tools/tests \
+            -p 'test_*.py' -v
       - name: Compare synthetic stationary noise, real whisper and real road noise NS
         shell: bash
         run: |
@@ -106,6 +116,12 @@ jobs:
           for sample in steady whisper road; do
             for db in -12 -18; do
               "$probe" "$root/$sample.raw" "$root/$sample.$db.raw" "$db"
+              python3 speech_input/noise_lab/tools/evaluate_ns_pcm_pair.py \
+                --before "$root/$sample.raw" \
+                --before-sha256 "$(sha256sum "$root/$sample.raw" | awk '{print $1}')" \
+                --after "$root/$sample.$db.raw" \
+                --after-sha256 "$(sha256sum "$root/$sample.$db.raw" | awk '{print $1}')" \
+                --kind "$sample" --db "$db"
               RAW_ROOT="$root" PCM_KIND="$sample" PCM_DB="$db" python3 - <<'PY'
           from pathlib import Path
           import json, os, struct

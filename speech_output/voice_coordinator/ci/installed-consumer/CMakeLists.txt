@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.27)
-project(TurboAgentM42VoiceInstalledConsumer LANGUAGES C)
+project(TurboAgentM42VoiceInstalledConsumer LANGUAGES C CXX)
 if(NOT DEFINED ENV{SALTS_ROOT} OR NOT DEFINED ENV{SALTS_UTILS_ROOT})
   message(FATAL_ERROR "M4.2 requires pinned published Salts SDK environment")
 endif()
@@ -31,4 +31,16 @@ target_include_directories(tts_voice_release_link PRIVATE
 # Force current HEAD coordinator->bridge->SpeechOutput and the ACTUAL released
 # playback target. No fake symbols or device open in this linked smoke.
 target_link_libraries(tts_voice_release_link PRIVATE
+  "${_voice}" "${_bridge}" "${_source}" Salts::Playback)
+
+# Separate installed C++17 header/link witness; no device is instantiated.
+add_executable(tts_voice_cpp17_release_link verify_installed_voice.cpp)
+target_compile_features(tts_voice_cpp17_release_link PRIVATE cxx_std_17)
+target_compile_options(tts_voice_cpp17_release_link PRIVATE
+  -Wall -Wextra -Wpedantic -Werror)
+target_include_directories(tts_voice_cpp17_release_link PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/../../include"
+  "${CMAKE_CURRENT_LIST_DIR}/../../../playback/include"
+  "${CMAKE_CURRENT_LIST_DIR}/../../../include")
+target_link_libraries(tts_voice_cpp17_release_link PRIVATE
   "${_voice}" "${_bridge}" "${_source}" Salts::Playback)

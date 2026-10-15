@@ -173,7 +173,7 @@ jobs:
           set -euo pipefail
           export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           cmake -S speech_input -B build/speech-real-model -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
             -DENABLE_SPEECH_WHISPER=ON \
             -DENABLE_SPEECH_CAPTURE_BRIDGE=ON \
             -DENABLE_SPEECH_WHISPER_CLI=ON \
@@ -232,6 +232,37 @@ jobs:
           grep -Fq 'no transcript admitted' /tmp/ta-real-asr-deadline.stderr
           printf 'real_model_decode_deadline_1ms=fail_closed\nexit_status=%s\nstdout_bytes=0\n' "$rc" \
             > /tmp/ta-real-asr-deadline-evidence.txt
+      - name: Qualify genuine model-backed Provider abort, deadline and ELF drain/unload
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cmake --build build/speech-real-model \
+            --target test_turbo_agent_speech_whisper_real_model_dso --parallel 2
+          provider="$GITHUB_WORKSPACE/build/speech-real-model/whisper/libturbo_agent_speech_whisper.so"
+          host="$GITHUB_WORKSPACE/build/speech-real-model/whisper/test_turbo_agent_speech_whisper_real_model_dso"
+          test -f "$provider" && test -x "$host"
+          # The tested image must actually depend on the independently built
+          # Whisper CPU vendor shared library, not the CI's fake ABI engine.
+          ldd "$provider" | tee /tmp/ta-real-asr-provider-linked-images.txt
+          grep -F "$TURBO_WHISPER_SDK_ROOT/lib/libwhisper.so" \
+            /tmp/ta-real-asr-provider-linked-images.txt
+          if grep -Fq 'not found' /tmp/ta-real-asr-provider-linked-images.txt; then exit 1; fi
+          # The strict C11 host must use dlsym without linking vendor engine.
+          ldd "$host" | tee /tmp/ta-real-asr-host-linked-images.txt
+          if grep -E 'lib(whisper|ggml)' /tmp/ta-real-asr-host-linked-images.txt; then
+            echo "Host directly linked Whisper/GGML; unload proof invalid" >&2
+            exit 1
+          fi
+          timeout --signal=TERM --kill-after=10s 240s \
+            "$host" "$provider" "$MODEL_ROOT/ggml-tiny.bin" "$MODEL_SHA256" \
+            "$MODEL_ROOT/jfk-canonical.wav" \
+            | tee /tmp/ta-real-asr-provider-lifecycle.txt
+          test "$(grep -c '^real_whisper_generation=' /tmp/ta-real-asr-provider-lifecycle.txt)" -eq 6
+          grep -Fq 'PASS: 6 real-weight Whisper CPU Provider ELF settle/unload generations' \
+            /tmp/ta-real-asr-provider-lifecycle.txt
+          # This separate measured gate is not proof of hard preemption or
+          # cross-platform unload behavior.
       - name: Upload only hashes, acoustic metrics, and source/provenance
         if: always()
         uses: actions/upload-artifact@v4
@@ -249,4 +280,7 @@ jobs:
             /tmp/ta-real-asr-transcript.txt
             /tmp/ta-real-asr-acoustic-metrics.json
             /tmp/ta-real-asr-deadline-evidence.txt
+            /tmp/ta-real-asr-provider-linked-images.txt
+            /tmp/ta-real-asr-host-linked-images.txt
+            /tmp/ta-real-asr-provider-lifecycle.txt
             build/speech-real-model/compile_commands.json

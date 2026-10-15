@@ -42,6 +42,28 @@ class KnownNoiseReferenceTests(unittest.TestCase):
             self.assertGreater(improved["reference_ser_delta_db"],5.5)
             self.assertFalse(improved["model_wer_cer_or_phoneme_intelligibility_measured"])
 
+    def test_fixed_seed_sweep_and_disallowed_noise_peaks(self):
+        original = struct.pack("<%dh" % (320*60), *([900,-900]*160*60))
+        noisy_hashes = set()
+        for peak in (100,200,400,800):
+            with tempfile.TemporaryDirectory() as temp:
+                root=Path(temp)
+                os.chmod(root,0o700)
+                report=ref.prepare(original,root,noise_peak=peak)
+                self.assertEqual(report["noise_max_amplitude"],peak)
+                noisy=(root/"mixed-known-noise.raw").read_bytes()
+                noisy_hashes.add(hashlib.sha256(noisy).hexdigest())
+                summary=ref.score((root/"clean-reference.raw").read_bytes(),
+                                  noisy,noisy)
+                self.assertEqual(summary["reference_ser_delta_db"],0.0)
+        self.assertEqual(len(noisy_hashes),4)
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            os.chmod(root,0o700)
+            for peak in (0,50,801,32000,True):
+                with self.assertRaises(ValueError):
+                    ref.prepare(original,root,noise_peak=peak)
+
     def test_sha_mismatch_and_ambiguous_raw_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

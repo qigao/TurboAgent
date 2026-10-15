@@ -85,12 +85,20 @@ Poll returns one bounded frame, WOULD_BLOCK or terminal. WOULD_BLOCK must not sp
 ### Exact states / ownership
 
 ~~~text
-IDLE -- begin --> SYNTHESIZING -- source DONE --> PLAYBACK_DRAINING -- ring empty --> SETTLED
+IDLE -- begin --> SYNTHESIZING -- source final --> STAGING_DRAINING -- PCM accepted --> SETTLED
                       |
                       +-- request_cancel --> CANCEL_PENDING -- producer quiesced
                                                         + provider settled --> CANCELED
                       +-- error --------------------------------------------> FAILED
 ~~~
+
+M4.0 host-facing STAGING_DRAINING is deliberately distinct from the
+Playback device ring. The implemented C11 facade owns exactly one 480-sample
+staging block: SETTLED confirms the synthesizer and staging have finished,
+**not** that Salts Playback has consumed its ring. A future M4.1/M4.2 Voice
+Coordinator waits for Salts Playback drain separately. Zero PCM emitted for
+nonempty approved text is a fail-closed Provider error, not success.
+Format mismatch returns EUNSUPPORTED without resampling/fallback.
 
 SOURCE_DONE is not PLAYBACK_DRAINED. For cancellation: refuse further new PCM, settle/join any Provider worker, quiesce the *sole* playback writer, discard its staging suffix, then clear retained Salts Playback PCM on the control owner. Provider DSO may be unloaded only after no borrowed text, PCM or in-flight callback remains. Do not introduce a second arbitrary Owner or raw-audio persistence path.
 

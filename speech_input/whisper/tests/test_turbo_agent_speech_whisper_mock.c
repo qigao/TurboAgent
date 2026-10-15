@@ -88,7 +88,8 @@ static void temp_model_path(char *dst, size_t cap) {
   if (!getcwd(cwd, sizeof(cwd))) abort();
   if (snprintf(dst, cap, "%s/speech-mock-engine.bin", cwd) <= 0) abort();
 }
-static int create_owner(turbo_agent_speech_whisper_t **owner) {
+static int create_owner(turbo_agent_speech_whisper_t **owner,
+                        uint32_t decode_ms) {
   static const char blob[] = "MOCK_C11_VALIDATED_MODEL";
   turbo_agent_speech_whisper_config_t config;
   unsigned char digest[32];
@@ -110,6 +111,7 @@ static int create_owner(turbo_agent_speech_whisper_t **owner) {
   config.max_text_bytes=100;
   config.language=TURBO_AGENT_WHISPER_LANGUAGE_JA;
   config.cpu_threads=1;
+  config.max_decode_ms=decode_ms;
   memcpy(config.expected_sha256,digest,sizeof(digest));
   int status=turbo_agent_speech_whisper_create(&config,owner);
   remove(path);
@@ -126,7 +128,7 @@ static int transcript_cycle(void) {
   turbo_agent_speech_transcript_kind_t kind;
   int16_t pcm[320]={0};
   pcm[0]=16384;
-  REQUIRE(create_owner(&owner)==0 && owner!=NULL);
+  REQUIRE(create_owner(&owner, 30000u)==0 && owner!=NULL);
   REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
   REQUIRE(api.struct_size==sizeof(api) && api.abi_version==1);
   turbo_agent_speech_config_init(&options);
@@ -164,7 +166,7 @@ static int digital_silence(void) {
   int16_t silence[320]={0};
   char text[32];
   turbo_agent_speech_transcript_kind_t kind;
-  REQUIRE(create_owner(&owner)==0);
+  REQUIRE(create_owner(&owner, 30000u)==0);
   REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
   turbo_agent_speech_config_init(&options);
   REQUIRE(turbo_agent_speech_create(&options,&api,&m1)==0);
@@ -203,7 +205,7 @@ static int abort_and_recover(void) {
   abort_worker_t worker;
   int16_t pcm[320]={1};
   size_t pumped=0;
-  REQUIRE(create_owner(&owner)==0);
+  REQUIRE(create_owner(&owner, 30000u)==0);
   REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
   turbo_agent_speech_config_init(&options);
   REQUIRE(turbo_agent_speech_create(&options,&api,&m1)==0);
@@ -227,6 +229,35 @@ static int abort_and_recover(void) {
   return 0;
 }
 
+static int monotonic_decode_deadline(void) {
+  turbo_agent_speech_whisper_t *owner=NULL;
+  turbo_agent_speech_provider_v1_t api;
+  turbo_agent_speech_input_t *m1=NULL;
+  turbo_agent_speech_config_t options;
+  int16_t pcm[320]={1};
+  size_t pumped=0;
+  REQUIRE(create_owner(&owner, 1u)==0);
+  REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
+  turbo_agent_speech_config_init(&options);
+  REQUIRE(turbo_agent_speech_create(&options,&api,&m1)==0);
+  REQUIRE(turbo_agent_speech_begin(m1,55u)==0);
+  REQUIRE(turbo_agent_speech_offer_frame(m1,55u,pcm,320,2000u)==0);
+  REQUIRE(turbo_agent_speech_request_finish(m1)==0);
+  atomic_store(&st_hold_until_abort,1);
+  atomic_store(&st_decode_entered,0);
+  REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0 && pumped==1);
+  /* No worker cancellation: the Provider must independently abort after
+   * its own 1ms monotonic deadline, without publishing a transcript. */
+  REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==TURBO_AGENT_SPEECH_EPROVIDER);
+  REQUIRE(atomic_load(&st_decode_entered)==1);
+  REQUIRE(turbo_agent_speech_whisper_last_error(owner)==TURBO_AGENT_WHISPER_EABORT);
+  REQUIRE(turbo_agent_speech_get_state(m1)==TURBO_AGENT_SPEECH_FAILED);
+  REQUIRE(turbo_agent_speech_destroy(&m1)==0);
+  REQUIRE(turbo_agent_speech_whisper_destroy(&owner)==0);
+  atomic_store(&st_hold_until_abort,0);
+  return 0;
+}
+
 int main(void) {
   atomic_init(&st_decode_entered,0);
   atomic_init(&st_hold_until_abort,0);
@@ -235,6 +266,7 @@ int main(void) {
   REQUIRE(transcript_cycle()==0);
   REQUIRE(digital_silence()==0);
   REQUIRE(abort_and_recover()==0);
-  puts("Whisper mock C-ABI Provider end-to-end PCM, no-speech, abort PASS");
+  REQUIRE(monotonic_decode_deadline()==0);
+  puts("Whisper mock C-ABI Provider PCM, no-speech, cancel and deadline PASS");
   return 0;
 }

@@ -38,6 +38,10 @@ struct turbo_agent_speech_whisper_s {
   uint64_t power_min, power_max;
   uint32_t power_frames;
   double power_mean, power_m2;
+  /* Optional correlation evidence: total <=3000*320 samples, all signed
+   * products and sums strictly fit int64_t. No second PCM owner. */
+  int64_t lag_cross;
+  uint64_t lag_energy;
   turbo_agent_speech_whisper_language_t language;
   uint64_t last_utterance, last_timestamp_us;
   int has_timestamp, active, has_nonzero_pcm, last_error;
@@ -109,6 +113,8 @@ static void wipe_utterance(turbo_agent_speech_whisper_t *owner) {
   owner->power_frames = 0u;
   owner->power_mean = 0.0;
   owner->power_m2 = 0.0;
+  owner->lag_cross = 0;
+  owner->lag_energy = 0u;
 }
 
 static void destroy_storage(turbo_agent_speech_whisper_t *owner) {
@@ -324,10 +330,16 @@ static int provider_accept(void *context, const int16_t *pcm,
    * 320 * 32768^2 < 2^39. Statistics are updated only by the serialized
    * Provider accept callback; abort() never accesses them. */
   uint64_t frame_power = 0u;
+  int64_t previous = 0;
   for (size_t i = 0u; i < samples; i++) {
     if (owner->stationary_noise_guard) {
       const int64_t value = (int64_t)pcm[i];
       frame_power += (uint64_t)(value * value);
+      if (i > 0u) {
+        owner->lag_cross += value * previous;
+        owner->lag_energy += (uint64_t)(value * value);
+      }
+      previous = value;
     }
     owner->pcm_f32[owner->used_samples + i] =
         (float)pcm[i] * (1.0f / 32768.0f);
@@ -365,21 +377,29 @@ static bool whisper_abort_callback(void *context) {
   return false;
 }
 
-/* Tight *stationary-power* rejection hypothesis, NOT general VAD.
- * Require >=1s of accepted 20ms PCM, every frame nonzero, low variation
- * across frames. Human speech with silent/variable-power frames is allowed
- * to the original vendor decoder. A rhythmic/nonstationary noise may still
- * hallucinate, so never infer production acoustic quality from this gate. */
+/* Tight *uncorrelated stationary-power* rejection hypothesis, NOT VAD.
+ * Require >=1s accepted 20ms PCM, every frame nonzero, low frame-power
+ * variation AND weak absolute lag-1 sample correlation. This last term
+ * protects power-flattened coherent speech/tones from a false NO_SPEECH:
+ * RMS/AGC alone is not evidence of non-speech. Correlated or changing
+ * background noise can still hallucinate; no generic quality claim. */
 static int stationary_noise_candidate(
     const turbo_agent_speech_whisper_t *owner) {
   double variance;
+  double absolute_lag;
   if (!owner->stationary_noise_guard || owner->power_frames < 50u ||
-      owner->power_min == 0u || owner->power_mean <= 0.0)
+      owner->power_min == 0u || owner->power_mean <= 0.0 ||
+      owner->lag_energy == 0u)
     return 0;
-  /* Per 20ms power maximum is less than 2^39; doubling cannot overflow. */
+  /* Per 20ms power maximum is <2^39; doubling cannot overflow. */
   if (owner->power_max > owner->power_min * 2u) return 0;
   variance = owner->power_m2 / (double)owner->power_frames;
-  return variance <= 0.0144 * owner->power_mean * owner->power_mean;
+  if (variance > 0.0144 * owner->power_mean * owner->power_mean) return 0;
+  /* Fail open to genuine decode when coherent structure exists. The
+   * accumulated <=960k PCM products safely fit int64_t. */
+  absolute_lag = owner->lag_cross < 0 ?
+      -(double)owner->lag_cross : (double)owner->lag_cross;
+  return absolute_lag < 0.12 * (double)owner->lag_energy;
 }
 
 static int provider_finish(void *context,

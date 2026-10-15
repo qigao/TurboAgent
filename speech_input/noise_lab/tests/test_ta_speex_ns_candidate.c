@@ -27,6 +27,12 @@ int main(void) {
     CHECK(memcmp(output,again,sizeof(output))==0);
   }
   CHECK(ta_speex_ns_processed_frames(one) == 100u);
+  CHECK(ta_speex_ns_finish(one, output, 319u) == TA_SPEEX_NS_EINVAL);
+  CHECK(ta_speex_ns_finish(one, output, 320u) == TA_SPEEX_NS_OK);
+  CHECK(ta_speex_ns_processed_frames(one) == 100u);
+  CHECK(ta_speex_ns_finish(one, output, 320u) == TA_SPEEX_NS_ESETTLED);
+  CHECK(ta_speex_ns_process(one, input, 320u, output) ==
+        TA_SPEEX_NS_ESETTLED);
   CHECK(ta_speex_ns_destroy(&two) == TA_SPEEX_NS_OK);
   CHECK(ta_speex_ns_destroy(&one) == TA_SPEEX_NS_OK);
   CHECK(one == NULL && two == NULL);
@@ -36,6 +42,9 @@ int main(void) {
     CHECK(ta_speex_ns_process(one,input,320u,output)==TA_SPEEX_NS_OK);
   CHECK(ta_speex_ns_processed_frames(one)==TA_SPEEX_NS_MAX_FRAMES);
   CHECK(ta_speex_ns_process(one,input,320u,output)==TA_SPEEX_NS_ECAPACITY);
+  CHECK(ta_speex_ns_finish(one, output, 320u) == TA_SPEEX_NS_OK);
+  CHECK(ta_speex_ns_processed_frames(one)==TA_SPEEX_NS_MAX_FRAMES);
+  CHECK(ta_speex_ns_finish(one, output, 320u) == TA_SPEEX_NS_ESETTLED);
   CHECK(ta_speex_ns_destroy(&one)==TA_SPEEX_NS_OK);
   puts("SpeexDSP C11 strict owner, deterministic replay and bounded frames PASS");
   return 0;

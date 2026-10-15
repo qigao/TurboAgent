@@ -1,0 +1,98 @@
+name: TurboAgent SpeechInput M1 C11 conformance (#134)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/**'
+      - '.github/workflows/speech-input-m1.yml'
+      - 'CMakeLists.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-standalone:
+    name: Standalone C11 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure standalone C11 SpeechInput (no SDK or ASR model)
+        run: cmake -S speech_input -B build/speech-m1 -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Compile exactly the standalone SpeechInput C11 targets
+        run: cmake --build build/speech-m1 --config Release --parallel 2
+      - name: Execute real M1 conformance (no skipped tests)
+        run: ctest --test-dir build/speech-m1 -C Release --no-tests=error --output-on-failure --timeout 30
+
+  strict-source-sanitizers:
+    name: Native C11 / ${{ matrix.kind }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [address, thread]
+    env:
+      CC: gcc
+      SAN_KIND: ${{ matrix.kind }}
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build actual SpeechInput source and concurrent producer test with sanitizer flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$SAN_KIND" = thread ]; then
+            san='-fsanitize=thread'
+          else
+            san='-fsanitize=address -fsanitize=undefined'
+          fi
+          cmake -S speech_input -B "build/speech-m1-$SAN_KIND" -G Ninja \
+            -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror $san -g -fno-omit-frame-pointer" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$san" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build "build/speech-m1-$SAN_KIND" --parallel 2
+          SAN_FLAGS="$san" SAN_KIND="$SAN_KIND" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path('build/speech-m1-' + os.environ['SAN_KIND'])
+          source = (Path('speech_input/src/turbo_agent_speech_input.c').resolve())
+          fixture = (Path('speech_input/tests/test_turbo_agent_speech_concurrent.c').resolve())
+          actual = json.loads((root / 'compile_commands.json').read_text())
+          needed = set(os.environ['SAN_FLAGS'].split())
+          for name in (source, fixture):
+              entries = [e for e in actual if Path(e['file']).resolve() == name]
+              if len(entries) != 1:
+                  raise SystemExit(f'Expected one actual compiled source: {name}')
+              if not needed.issubset(set(entries[0]['command'].split())):
+                  raise SystemExit(f'Missing exact sanitizer source flags: {name}')
+          print('PASS: actual C11 core and concurrent test fully source-instrumented')
+          PY
+      - name: Run deterministic PCM and 500-frame real concurrent owner stress
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctest --test-dir "build/speech-m1-$SAN_KIND" --no-tests=error \
+            --output-on-failure --timeout 30 --repeat until-fail:5
+      - name: Record build/CTest source-sanitizer provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-input-m1-${{ matrix.kind }}-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build/speech-m1-${{ matrix.kind }}/compile_commands.json
+            build/speech-m1-${{ matrix.kind }}/Testing/Temporary/LastTest.log

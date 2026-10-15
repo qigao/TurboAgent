@@ -64,6 +64,12 @@ int turbo_tts_playback_bridge_cancel(turbo_tts_playback_bridge_t *bridge);
 turbo_tts_playback_bridge_state_t
 turbo_tts_playback_bridge_get_state(const turbo_tts_playback_bridge_t *bridge);
 
+/* Read-only staged-clear obligation, NOT a native device health query.
+ * When nonzero, borrowed device and Provider must stay alive; caller must
+ * finish/retry clear on its serialized sole producer control owner. */
+int turbo_tts_playback_bridge_has_pending_clear(
+    const turbo_tts_playback_bridge_t *bridge);
+
 /* Must be terminal AND source settled; otherwise EBUSY preserves *bridge.
  * Does not destroy the source or playback native device. */
 int turbo_tts_playback_bridge_destroy(turbo_tts_playback_bridge_t **bridge);

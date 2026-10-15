@@ -98,8 +98,9 @@ static void temp_model_path(char *dst, size_t cap) {
   if (!getcwd(cwd, sizeof(cwd))) abort();
   if (snprintf(dst, cap, "%s/speech-mock-engine.bin", cwd) <= 0) abort();
 }
-static int create_owner(turbo_agent_speech_whisper_t **owner,
-                        uint32_t decode_ms) {
+static int create_owner_ex(turbo_agent_speech_whisper_t **owner,
+                           uint32_t decode_ms, uint32_t max_frames,
+                           uint32_t stationary_guard) {
   static const char blob[] = "MOCK_C11_VALIDATED_MODEL";
   turbo_agent_speech_whisper_config_t config;
   unsigned char digest[32];
@@ -117,8 +118,9 @@ static int create_owner(turbo_agent_speech_whisper_t **owner,
   turbo_agent_speech_whisper_config_init(&config);
   config.model_path=path;
   config.max_model_bytes=1024;
-  config.max_utterance_frames=10;
+  config.max_utterance_frames=max_frames;
   config.max_text_bytes=100;
+  config.stationary_noise_guard=stationary_guard;
   config.language=TURBO_AGENT_WHISPER_LANGUAGE_JA;
   config.cpu_threads=1;
   config.max_decode_ms=decode_ms;
@@ -126,6 +128,11 @@ static int create_owner(turbo_agent_speech_whisper_t **owner,
   int status=turbo_agent_speech_whisper_create(&config,owner);
   remove(path);
   return status;
+}
+
+static int create_owner(turbo_agent_speech_whisper_t **owner,
+                        uint32_t decode_ms) {
+  return create_owner_ex(owner, decode_ms, 10u, 0u);
 }
 
 static int transcript_cycle(void) {
@@ -300,6 +307,59 @@ static int successful_decode_after_deadline_must_fail(void) {
   return 0;
 }
 
+/* An opt-in stationarity gate cannot create a second owner or call
+ * whisper_full for exact stationary nonzero PCM. Existing disabled behavior
+ * remains byte-for-byte the same deterministic fake-engine transcription. */
+static int stationary_power_test(int guard, int dynamic) {
+  turbo_agent_speech_whisper_t *owner=NULL;
+  turbo_agent_speech_provider_v1_t api;
+  turbo_agent_speech_input_t *m1=NULL;
+  turbo_agent_speech_config_t options;
+  size_t pumped=0u, length=9u;
+  char result[100] = {0};
+  turbo_agent_speech_transcript_kind_t kind;
+  uint64_t utterance_id=dynamic ? 79u : guard ? 78u : 77u;
+  int before=atomic_load(&st_decode_calls);
+  REQUIRE(create_owner_ex(&owner, 30000u, 80u, (uint32_t)guard)==0);
+  REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
+  turbo_agent_speech_config_init(&options);
+  options.max_utterance_frames=80u;
+  options.max_text_bytes=100u;
+  REQUIRE(turbo_agent_speech_create(&options,&api,&m1)==0);
+  REQUIRE(turbo_agent_speech_begin(m1,utterance_id)==0);
+  for (unsigned frame=0u; frame<60u; frame++) {
+    int16_t pcm[320];
+    /* Constant-power alternating sign, or a time-varying speech-like
+     * amplitude envelope. Neither fixture claims real speech or VAD. */
+    const int16_t amplitude =
+        (int16_t)(dynamic ? (frame%10u<3u ? 0u :
+                           frame%10u<6u ? 500u : 7000u) : 1000u);
+    for (size_t i=0; i<320u; i++)
+      pcm[i] = (int16_t)((i & 1u) ? amplitude : -amplitude);
+    REQUIRE(turbo_agent_speech_offer_frame(
+          m1,utterance_id,pcm,320u,(frame+1u)*20000u)==0);
+    REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0 && pumped==1u);
+  }
+  REQUIRE(turbo_agent_speech_request_finish(m1)==0);
+  REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0);
+  REQUIRE(turbo_agent_speech_take_final(m1,result,sizeof(result),
+                                        &length,&kind)==0);
+  if (guard && !dynamic) {
+    REQUIRE(turbo_agent_speech_get_state(m1)==TURBO_AGENT_SPEECH_NO_SPEECH);
+    REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_NO_SPEECH);
+    REQUIRE(length==0u && result[0]=='\0');
+    REQUIRE(atomic_load(&st_decode_calls)==before);
+  } else {
+    REQUIRE(turbo_agent_speech_get_state(m1)==TURBO_AGENT_SPEECH_FINAL);
+    REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL);
+    REQUIRE(length==11u && strcmp(result," recognized")==0);
+    REQUIRE(atomic_load(&st_decode_calls)==before+1);
+  }
+  REQUIRE(turbo_agent_speech_destroy(&m1)==0);
+  REQUIRE(turbo_agent_speech_whisper_destroy(&owner)==0);
+  return 0;
+}
+
 int main(void) {
   atomic_init(&st_decode_entered,0);
   atomic_init(&st_hold_until_abort,0);
@@ -311,6 +371,9 @@ int main(void) {
   REQUIRE(abort_and_recover()==0);
   REQUIRE(monotonic_decode_deadline()==0);
   REQUIRE(successful_decode_after_deadline_must_fail()==0);
-  puts("Whisper mock C-ABI Provider PCM, no-speech, cancel, polled and unpolled deadline PASS");
+  REQUIRE(stationary_power_test(0,0)==0); /* default OFF preserves FINAL */
+  REQUIRE(stationary_power_test(1,0)==0); /* stationary input skips engine */
+  REQUIRE(stationary_power_test(1,1)==0); /* dynamic envelope reaches engine */
+  puts("Whisper mock C-ABI PCM/cancel/deadline/stationary opt-in admission PASS");
   return 0;
 }

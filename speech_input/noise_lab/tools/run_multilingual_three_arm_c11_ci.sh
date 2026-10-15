@@ -14,7 +14,7 @@ cli="$GITHUB_WORKSPACE/build/speech-cli-mock/mock_whisper_cli"
 probe="$GITHUB_WORKSPACE/build/three-arm-native-c11/ta_speex_ns_raw_probe"
 test -x "$cli" && test -x "$probe" && test -f "$model"
 test "$(pkg-config --modversion speexdsp)" = 1.2.1
-test "$(dpkg-query -W -f='@@VERSION@@' libspeexdsp-dev)" = 1.2.1-1ubuntu3
+test "$(dpkg-query -W -f='${Version}' libspeexdsp-dev)" = 1.2.1-1ubuntu3
 speex_lib="$(readlink -f "$(pkg-config --variable=libdir speexdsp)/libspeexdsp.so")"
 test "$(sha256sum "$speex_lib" | awk '{print $1}')" = \
   ef4e0d1c80fb4fcf832bb98be7df08b44faaed84ee2c003070fa1b1023a1c5fd

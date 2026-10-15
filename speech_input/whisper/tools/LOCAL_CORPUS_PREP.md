@@ -44,10 +44,12 @@ umask 077
 source=/private/licensed-clip.ogg
 input_sha="$(sha256sum "$source" | cut -d' ' -f1)"
 ffmpeg_binary="$(realpath "$(command -v ffmpeg)")"
+ffmpeg_sha="$(sha256sum "$ffmpeg_binary" | cut -d' ' -f1)"
 python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
   --source "$source" \
   --source-sha256 "$input_sha" \
   --ffmpeg "$ffmpeg_binary" \
+  --ffmpeg-sha256 "$ffmpeg_sha" \
   --output-wav /private/speech-normalized/clip1.wav \
   --private-provenance /private/speech-normalized/clip1.provenance.json \
   --acknowledge-rights
@@ -59,9 +61,13 @@ overwrite, uses one bounded (at most 16 MiB) original byte snapshot and passes
 these **exact** verified bytes through `ffmpeg` stdin.
 
 The decoder is a selected local executable and is invoked without a shell,
-with `-nostdin -protocol_whitelist pipe`; it cannot fetch external
-protocols/URLs or read arbitrary secondary media referenced by a manifest.
-CPU-only mono S16LE 16kHz output is capped and **clips longer than 60 seconds
+with `-nostdin -protocol_whitelist pipe`, which restricts its
+media access to the verified input pipe. The executable must match the
+**explicit caller-supplied decoder SHA-256** before spawning and must retain
+the same hash after execution. These arguments cannot sandbox an arbitrary
+malicious executable; the caller must choose a trusted reviewed FFmpeg build
+and, where stronger guarantees are needed, run it in a network-disabled
+isolated process. CPU-only mono S16LE 16kHz output is capped and **clips longer than 60 seconds
 are refused, not silently truncated**. Only the final *incomplete* 20ms frame
 (if any) is discarded (at most 319 samples). This changes the source duration
 by strictly less than 20ms and is recorded; it never appends artificial

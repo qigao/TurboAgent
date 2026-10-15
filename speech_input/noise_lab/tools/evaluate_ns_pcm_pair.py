@@ -86,15 +86,26 @@ def bounded_offset_cosine(a, b):
         candidate = score(lag)
         if candidate > best_score:
             best_lag, best_score = lag, candidate
-    if best_lag >= 0:
-        av,bv=a[:n-best_lag],b[best_lag:]
-    else:
-        av,bv=a[-best_lag:],b[:n+best_lag]
-    e1=sum(v*v for v in av)
-    e2=sum(v*v for v in bv)
-    if not e1 or not e2:
-        return best_lag, None
-    return best_lag, round(sum(map(mul,av,bv)) / math.sqrt(e1*e2),6)
+    # A weak/silent section in the local probe window may make the best
+    # local offset meaningless. Compare it with entire-clip correlations at
+    # 0 and +/- one full 320-sample frame before interpreting voice damage.
+    def full_score(lag):
+        if lag >= 0:
+            av, bv = a[:n-lag], b[lag:]
+        else:
+            av, bv = a[-lag:], b[:n+lag]
+        p1 = sum(v*v for v in av)
+        p2 = sum(v*v for v in bv)
+        if not p1 or not p2:
+            return None
+        return sum(map(mul, av, bv)) / math.sqrt(p1*p2)
+    candidates = {best_lag, 0, -320, 320}
+    scored = [(v, full_score(v)) for v in candidates]
+    valid = [(lag, score) for lag, score in scored if score is not None]
+    if not valid:
+        return None, None
+    best = max(valid, key=lambda item: item[1])
+    return best[0], round(best[1], 6)
 
 
 
@@ -126,6 +137,19 @@ def evaluate(before: bytes, after: bytes, kind: str, db: int) -> dict:
     denoised_kind = inspect_wav_bytes(wrap_wav(after))["stationarity_hypothesis"]
     denom = math.sqrt(before_energy*after_energy) if after_energy else 0.0
     aligned_lag, aligned_score = bounded_offset_cosine(a, b)
+    # Only frame-aligned shifts permit a meaningful frame-to-frame discard
+    # comparison. Until an explicit drain/flush is implemented, the tail
+    # displaced by positive lag has NOT been delivered in this input batch.
+    aligned_zeroed = None
+    aligned_compared = None
+    if aligned_lag is not None and aligned_lag % SAMPLES_PER_FRAME == 0:
+        frame_shift = aligned_lag // SAMPLES_PER_FRAME
+        if frame_shift >= 0:
+            aa, bb = power_a[:len(power_a)-frame_shift or None], power_b[frame_shift:]
+        else:
+            aa, bb = power_a[-frame_shift:], power_b[:len(power_b)+frame_shift]
+        aligned_zeroed = sum(x > 0 and y == 0 for x,y in zip(aa,bb))
+        aligned_compared = len(aa)
 
     return {
         "schema": 1,
@@ -142,7 +166,12 @@ def evaluate(before: bytes, after: bytes, kind: str, db: int) -> dict:
         "aligned_cosine_similarity": aligned_score,
         "changed_samples": changed,
         "nonzero_original_frames": voiced_a,
-        "newly_zero_original_frames": newly_zero,
+        "unaligned_same_index_newly_zero_frames": newly_zero,
+        "aligned_newly_zero_source_frames": aligned_zeroed,
+        "aligned_source_frames_compared": aligned_compared,
+        "undelivered_tail_samples_if_no_flush": (
+            aligned_lag if aligned_lag is not None and aligned_lag > 0 else 0),
+        "per_frame_losses_or_latency_not_certified": True,
         "guard_original_20ms_stationarity": original_kind,
         "guard_after_ns_20ms_stationarity": denoised_kind,
         "speex_vad_or_agc_enabled": False,

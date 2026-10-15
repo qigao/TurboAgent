@@ -207,6 +207,31 @@ jobs:
             --transcript-file /tmp/ta-real-asr-transcript.txt \
             --language en --max-wer 0.65 --require-word country \
             --report /tmp/ta-real-asr-acoustic-metrics.json
+      - name: Reject real Whisper inference exceeding a 1ms monotonic decode deadline
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cli="$GITHUB_WORKSPACE/build/speech-real-model/whisper/turboagent-whisper-transcribe"
+          test -x "$cli"
+          # Uses the already authenticated model and immutable JFK fixture.
+          # A real decode exceeding 1ms must fail closed without stdout,
+          # even if the vendor engine returns after its final abort poll.
+          set +e
+          timeout --signal=TERM --kill-after=10s 60s \
+            "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+              --sha256 "$MODEL_SHA256" \
+              --wav "$MODEL_ROOT/jfk-canonical.wav" \
+              --language en --threads 2 --timeout-ms 1 --model-max-mib 128 \
+            > /tmp/ta-real-asr-deadline.stdout \
+            2> /tmp/ta-real-asr-deadline.stderr
+          rc=$?
+          set -e
+          test "$rc" -eq 4
+          test ! -s /tmp/ta-real-asr-deadline.stdout
+          grep -Fq 'no transcript admitted' /tmp/ta-real-asr-deadline.stderr
+          printf 'real_model_decode_deadline_1ms=fail_closed\nexit_status=%s\nstdout_bytes=0\n' "$rc" \
+            > /tmp/ta-real-asr-deadline-evidence.txt
       - name: Upload only hashes, acoustic metrics, and source/provenance
         if: always()
         uses: actions/upload-artifact@v4
@@ -223,4 +248,5 @@ jobs:
             /tmp/ta-real-asr-resources.txt
             /tmp/ta-real-asr-transcript.txt
             /tmp/ta-real-asr-acoustic-metrics.json
+            /tmp/ta-real-asr-deadline-evidence.txt
             build/speech-real-model/compile_commands.json

@@ -142,3 +142,51 @@ weights**, then links the *same production CLI/M1/M2/M3 C11 source* to a
 is intentionally **not real speech recognition**. Real transcription metrics,
 licensed multilingual weights, user-provided model SHA and acoustic/permission
 tests are still pending. Do not auto-run a model download in CI.
+
+
+## Gated real tiny-model acoustic smoke — explicit maintainer action
+
+The ordinary CI and default native TurboAgent build **never download models**.
+A separate exact-source test workflow is present only to perform one real
+acoustic baseline **after repository maintainer authorization**:
+
+1. Review [OpenAI Whisper's MIT code and weight license](https://github.com/openai/whisper)
+   and the [official converted GGML tiny multilingual weights](https://huggingface.co/ggerganov/whisper.cpp)
+   (HF repository metadata specifies MIT).
+2. On the same-repo stacked real-model validation PR, the maintainer applies
+   the exact GitHub label `speech-model-download-approved`. Label addition
+   is the explicit approval event; do **not** apply this label to an untrusted
+   or fork PR. The workflow hard-checks its branch and repository.
+3. This permits a **single ephemeral CI runner** to download precisely the
+   official `ggml-tiny.bin` from pinned Hugging Face revision
+   `5359861c739e955e79d9a303bcbc70fb988958b1`, **size 77,691,713 bytes**
+   and SHA256 `be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21`.
+   A byte/size mismatch fails before the model can be loaded. The file
+   is never checked into Git, attached to CI artifacts, or published by
+   TurboAgent. The label can be removed after the run.
+4. The exact Whisper.cpp upstream pinned source provides its original
+   `samples/jfk.wav` English sample. The test checks 16 kHz mono S16, rewraps
+   *identical raw PCM samples* into a strict canonical WAV (no resampling),
+   runs the **real**, offline CPU Whisper model through the normal
+   `turboagent-whisper-transcribe` C11/WAV/M2/M1/M3 path and records English
+   WER, peak RSS and wall time, using the printed JFK example transcription
+   as baseline. The executable remains preview-only and never invokes Agent.
+5. This is an English tiny-model smoke only. Chinese, Japanese and code-switch
+   quality, model-backed unload/cancel, acoustic hallucinations and actual
+   microphone permissions remain separate #137 gates. Even a successful
+   run does **not** authorize an SDK release or establish ASR production
+   quality without wider corpus evidence.
+
+The workflow is **fail-closed on ordinary pull_request runs** when the exact
+maintainer-applied approval label is absent: its model job is skipped, not
+considered a successful real acoustic inference. With the approval label,
+the model download happens solely during that explicitly authorized test.
+
+## Terminal preview content safety
+
+M1 owns UTF-8 and FINAL semantics. Because valid UTF-8 may still contain
+terminal control characters, the CLI independently rejects C0/DEL, UTF-8
+encoded C1 controls `U+0080..U+009F`, Arabic Letter Mark `U+061C`,
+Unicode direction overrides/isolation and U+2028/U+2029 line separators.
+Adversarial tests require a failed command and **zero transcript stdout**;
+the CLI does not silently normalize suspicious characters into a command.

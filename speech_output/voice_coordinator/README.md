@@ -88,3 +88,13 @@ verifies recovery only after explicit clear and settle.
 Snapshot state does NOT independently verify an external mic callback
 join, a trusted ASR FINAL or committed Harness approval. Acoustic
 echo/AEC is not tested by rejecting in-process ASR events.
+
+The additional fatal-drain conformance first reaches SOURCE_DONE, then
+injects a native drain device failure plus an unsuccessful clear. It
+requires FAULT + DEVICE_CLEAR, blocks destruction and new generations,
+and only allows FAILED (never COMPLETED) after the clear obligation is
+actually discharged. The public release consumer also executes the real
+pinned Playback library's invalid PCM-rate rejection (12345 Hz) before
+any device-context initialization, for C11 and C++17. This is a
+**real-library fail-closed runtime negative**, not a null-device or
+physical speaker playback positive.

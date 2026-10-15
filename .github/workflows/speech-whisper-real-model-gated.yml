@@ -57,6 +57,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Authorize exactly the source checked out for this one-time
+          # GitHub labeled event. A later PR source change requires the
+          # maintainer to remove and re-add the approval label.
+          test "${{ github.event.action }}" = labeled
+          test "${{ github.event.label.name }}" = speech-model-download-approved
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
           test "$(git -C external/whisper-v195 rev-parse HEAD)" = "$WHISPER_SOURCE_SHA"
           test -f external/whisper-v195/LICENSE
           test -f external/whisper-v195/samples/jfk.wav
@@ -65,6 +71,10 @@ jobs:
           cat > /tmp/ta-real-asr-license.txt <<'TXT'
           user_approved_model_download=true
           consent_method=maintainer_applied_speech-model-download-approved_label
+          github_approval_event=labeled
+          approved_source_sha=${{ github.event.pull_request.head.sha }}
+          approval_actor=${{ github.actor }}
+          approval_trigger_actor=${{ github.triggering_actor }}
           code_license=whisper.cpp_v1.9.5_MIT
           weights_license=OpenAI_Whisper_and_ggml_HF_model_card_MIT
           model_redistributed_by_TurboAgent=false
@@ -101,7 +111,7 @@ jobs:
           set -euo pipefail
           url="https://huggingface.co/ggerganov/whisper.cpp/resolve/$HF_MODEL_REV/ggml-tiny.bin"
           curl -fL --proto '=https' --proto-redir '=https' --tlsv1.2 \
-            --retry 3 --max-time 360 \
+            --retry 3 --max-time 360 --max-filesize 77691713 \
             --output "$MODEL_ROOT/ggml-tiny.bin" "$url"
           size="$(stat -c %s "$MODEL_ROOT/ggml-tiny.bin")"
           test "$size" = "$MODEL_BYTES"

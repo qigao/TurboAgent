@@ -192,7 +192,19 @@ jobs:
             --wav "$MODEL_FIXTURES/s16-mono-16000.wav" --language en \
             --timeout-ms 30000 > /tmp/speech-cli-mock-positive.txt
           test "$(cat /tmp/speech-cli-mock-positive.txt)" = ' utterance'
-          echo 'PASS: real C11 WAV/M2/M1/Provider pipeline with deterministic fake acoustic engine'
+          for adversarial in TA_SPEECH_TEST_ESCAPE TA_SPEECH_TEST_BIDI; do
+            set +e
+            env "$adversarial=1" build/speech-cli-mock/mock_whisper_cli \
+              --model "$model" --sha256 "$sha" \
+              --wav "$MODEL_FIXTURES/s16-mono-16000.wav" --language en \
+              > "$MODEL_FIXTURES/unsafe.stdout" \
+              2> "$MODEL_FIXTURES/unsafe.stderr"
+            status=$?
+            set -e
+            test "$status" -eq 4
+            test ! -s "$MODEL_FIXTURES/unsafe.stdout"
+          done
+          echo 'PASS: real C11 WAV/M2/M1/Provider pipeline and terminal/bidi injection refusal with deterministic fake acoustic engine'
       - name: Archive pinned source and unmodified stdout/dependency evidence
         if: always()
         uses: actions/upload-artifact@v4

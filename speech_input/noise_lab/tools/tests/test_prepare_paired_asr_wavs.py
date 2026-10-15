@@ -103,6 +103,16 @@ class NativeProbeStub:
 
 
 class AtomicThreeArmTests(unittest.TestCase):
+    def test_exact_wav_sample_count_vs_20ms_frame_count_capacity(self):
+        _, frames = pair.wav_pcm(make_source(65))
+        self.assertEqual(frames, 65)
+        _, max_frames = pair.wav_pcm(make_source(pair.MAX_FRAMES))
+        self.assertEqual(max_frames, pair.MAX_FRAMES)
+        with self.assertRaises(ValueError):
+            pair.wav_pcm(make_source(pair.MAX_FRAMES + 1))
+        with self.assertRaises(ValueError):
+            pair.wav_pcm(make_source(0))
+
     def test_success_exact_original_two_separate_ns_states_and_no_raw_left(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

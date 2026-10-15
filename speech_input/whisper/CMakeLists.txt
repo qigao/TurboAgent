@@ -25,9 +25,12 @@ if(TURBO_SPEECH_STANDALONE)
     PATHS "$ENV{SALTS_ROOT}"
     NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 endif()
-if(NOT TARGET Salts::CMeta)
-  message(FATAL_ERROR "Whisper Provider requires the existing Salts::CMeta SHA-256 owner")
+if(NOT TARGET Salts::Core)
+  message(FATAL_ERROR "Whisper Provider requires the exact installed Salts::Core SHA-256 producer")
 endif()
+# cmeta_crypto.c and the exported cmeta_sha256_stream_* symbols are owned by
+# Salts::Core (utils/src), NOT by Salts::CMeta's reflection archive.
+# Link the real defining DSO and keep Linux -z defs fail-closed.
 
 # Not part of TurboAgentTargets: whisper is an explicitly owned optional
 # Provider image. Exporting a C++ GGML dependency into the ordinary TurboAgent
@@ -46,7 +49,7 @@ target_include_directories(turbo_agent_speech_whisper PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(turbo_agent_speech_whisper
-  PRIVATE whisper Salts::CMeta)
+  PRIVATE whisper Salts::Core turbo_agent_speech_input)
 if(MSVC)
   target_compile_options(turbo_agent_speech_whisper PRIVATE
     /experimental:c11atomics)
@@ -95,7 +98,7 @@ if(BUILD_TESTING AND UNIX)
   set_target_properties(test_turbo_agent_speech_whisper_mock PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
   target_link_libraries(test_turbo_agent_speech_whisper_mock PRIVATE
-    turbo_agent_speech_input Salts::CMeta Threads::Threads)
+    turbo_agent_speech_input Salts::Core Threads::Threads)
   add_test(NAME turbo_agent_speech_whisper_mock_provider
     COMMAND test_turbo_agent_speech_whisper_mock)
   set_tests_properties(turbo_agent_speech_whisper_mock_provider PROPERTIES

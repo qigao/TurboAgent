@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import wave
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -200,6 +201,118 @@ class CorpusGateTests(unittest.TestCase):
                         result["synthetic_controls"]["guard_on_predecode_rejections"],
                         expected)
                     self.assertFalse(result["acoustic_vad_or_recognition_quality_certified"])
+
+    def test_pcm_duplicate_with_distinct_valid_riff_headers_is_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            original = root / "recording.wav"
+            repackaged = root / "with-metadata.wav"
+            make_wave(original, "constant")
+            src = original.read_bytes()
+            self.assertEqual(src[0:4], b"RIFF")
+            self.assertEqual(src[8:12], b"WAVE")
+            # A different legal JUNK chunk changes the WAV container
+            # digest, but not the raw PCM being measured. Reject aliasing.
+            modified = src[:12] + b"JUNK" + struct.pack("<I", 4) + b"ABCD" + src[12:]
+            modified = modified[:4] + struct.pack("<I", len(modified)-8) + modified[8:]
+            repackaged.write_bytes(modified)
+            self.assertNotEqual(hashlib.sha256(src).digest(),
+                                hashlib.sha256(modified).digest())
+            one = corpus.inspect_wav_bytes(src, include_pcm_digest=True)
+            two = corpus.inspect_wav_bytes(modified, include_pcm_digest=True)
+            self.assertEqual(one["_pcm_sha256"], two["_pcm_sha256"])
+            self.assertNotIn("_pcm_sha256", corpus.inspect_wav_bytes(src))
+            manifest = root / "manifest.json"
+            samples = [entry(original, "synthetic"),
+                       entry(repackaged, "synthetic")]
+            manifest.write_text(json.dumps({"schema": 1, "samples": samples}))
+            with self.assertRaisesRegex(ValueError, "duplicate PCM samples"):
+                corpus.evaluate(root, manifest)
+
+    def test_same_snapshot_is_used_for_sha_and_stationarity(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sample = root / "pinned.wav"
+            make_wave(sample, "constant")
+            pinned = sample.read_bytes()
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"schema": 1, "samples": [
+                entry(sample, "synthetic")]}))
+            original_inspector = corpus.inspect_wav_bytes
+            observed = []
+            def mutate_after_read(raw, **kw):
+                observed.append(raw)
+                make_wave(sample, "dynamic")
+                return original_inspector(raw, **kw)
+            with mock.patch.object(corpus, "inspect_wav_bytes",
+                                   side_effect=mutate_after_read):
+                result = corpus.evaluate(root, manifest)
+            self.assertEqual(observed, [pinned])
+            self.assertEqual(
+                result["synthetic_controls"]["guard_on_predecode_rejections"], 1)
+            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+                corpus.evaluate(root, manifest)
+
+    def test_schema2_speaker_groups_are_private_and_not_clip_weighted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            paths = [root / f"sample-{i}.wav" for i in range(4)]
+            make_wave_amplitudes(paths[0], [1000] * 60)
+            make_wave_amplitudes(paths[1], [1100] * 60)
+            make_wave_amplitudes(paths[2], [1000, 6000] * 30)
+            make_wave_amplitudes(paths[3], [1200, 5500] * 120)
+            sp_a, sp_b = "opaque_group_A1", "opaque_group_B2"
+            samples = [
+                {**entry(paths[0], "human_voice", "en", "monotone",
+                         "creator_consent"), "speaker_group": sp_a},
+                {**entry(paths[1], "human_voice", "zh", "low_volume",
+                         "creator_consent"), "speaker_group": sp_a},
+                {**entry(paths[2], "human_voice", "ja", "ordinary",
+                         "public_license"), "speaker_group": sp_a},
+                {**entry(paths[3], "human_voice", "mixed", "code_switch",
+                         "public_license"), "speaker_group": sp_b},
+            ]
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"schema": 2, "samples": samples}))
+            report = corpus.evaluate(root, manifest)
+            self.assertEqual(report["schema"], 2)
+            self.assertEqual(report["human_voice"]["guard_on_rejections"], 2)
+            self.assertEqual(report["human_voice"]["guard_on_false_rejection"]["rate"], 0.5)
+            grouped = report["human_voice"]["speaker_groups"]
+            self.assertTrue(grouped["schema2_declared_groups"])
+            self.assertEqual(grouped["unique_group_count"], 2)
+            self.assertEqual(grouped["speaker_any_guard_rejection"]["rate"], 0.5)
+            self.assertEqual(grouped["equal_weight_per_speaker_rejection_rate"], 0.333333)
+            self.assertFalse(grouped["group_labels_or_identity_verified"])
+            duration = report["human_voice"]["by_duration"]
+            self.assertEqual(duration["1_to_3s"]["denominator"], 3)
+            self.assertEqual(duration["3_to_10s"]["denominator"], 1)
+            self.assertIsNone(duration["lt_1s"]["rate"])
+            private = json.dumps(report)
+            self.assertNotIn(sp_a, private)
+            self.assertNotIn(sp_b, private)
+            for sample in samples:
+                self.assertNotIn(sample["sha256"], private)
+                self.assertNotIn(sample["path"], private)
+            invalid_variants = [
+                {k:v for k,v in samples[0].items() if k != "speaker_group"},
+                {**samples[0], "speaker_group": "real name with spaces"},
+                {**samples[0], "speaker_group": "é" * 16},
+            ]
+            for invalid in invalid_variants:
+                manifest.write_text(json.dumps({"schema": 2, "samples": [invalid]}))
+                with self.assertRaises(ValueError):
+                    corpus.evaluate(root, manifest)
+            # Schema 1 must not silently accept a speaker token.
+            manifest.write_text(json.dumps({"schema": 1, "samples": [samples[0]]}))
+            with self.assertRaises(ValueError):
+                corpus.evaluate(root, manifest)
+            # Nonhuman rows cannot provide a pseudo speaker group either.
+            bad_noise = {**entry(paths[0], "real_noise", "none", "fan",
+                                 "public_license"), "speaker_group": sp_a}
+            manifest.write_text(json.dumps({"schema": 2, "samples": [bad_noise]}))
+            with self.assertRaises(ValueError):
+                corpus.evaluate(root, manifest)
 
     def test_unknown_rate_is_not_misreported_as_zero(self):
         self.assertIsNone(corpus.rate(0, 0)["rate"])

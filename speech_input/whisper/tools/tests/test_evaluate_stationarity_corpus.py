@@ -19,7 +19,21 @@ corpus = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(corpus)
 
 
+def _noise_frame(amplitude: int, state: int) -> tuple[list[int], int]:
+    """Fixed-seed uncorrelated signs; voice-like alternating sample polarity
+    is strongly correlated and deliberately MUST NOT be rejected by ABI2."""
+    values=[]
+    for _ in range(320):
+        state ^= (state << 13) & 0xffffffff
+        state ^= state >> 17
+        state ^= (state << 5) & 0xffffffff
+        state &= 0xffffffff
+        values.append(amplitude if state & 1 else -amplitude)
+    return values,state
+
+
 def make_wave(path: Path, kind: str, frames: int = 60):
+    state=0x41535231
     with wave.open(str(path), "wb") as output:
         output.setnchannels(1)
         output.setsampwidth(2)
@@ -28,17 +42,19 @@ def make_wave(path: Path, kind: str, frames: int = 60):
             amplitude = 0 if kind == "zero" else (
                 1000 if kind == "constant" else
                 (1000 if index % 2 else 5000))
-            output.writeframes(struct.pack("<320h", *([amplitude, -amplitude] * 160)))
+            pcm,state=_noise_frame(amplitude,state)
+            output.writeframes(struct.pack("<320h", *pcm))
 
 
 def make_wave_amplitudes(path: Path, amplitudes: list[int]):
+    state=0x41535231
     with wave.open(str(path), "wb") as output:
         output.setnchannels(1)
         output.setsampwidth(2)
         output.setframerate(16000)
         for amplitude in amplitudes:
-            output.writeframes(
-                struct.pack("<320h", *([amplitude, -amplitude] * 160)))
+            pcm,state=_noise_frame(amplitude,state)
+            output.writeframes(struct.pack("<320h", *pcm))
 
 
 def entry(path, kind, language="none", condition="stationary",
@@ -313,6 +329,30 @@ class CorpusGateTests(unittest.TestCase):
             manifest.write_text(json.dumps({"schema": 2, "samples": [bad_noise]}))
             with self.assertRaises(ValueError):
                 corpus.evaluate(root, manifest)
+
+    def test_equal_power_coherent_wave_must_bypass_noise_guard(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)
+            coherent=root/"coherent.wav"
+            with wave.open(str(coherent),"wb") as f:
+                f.setnchannels(1)
+                f.setsampwidth(2)
+                f.setframerate(16000)
+                for _ in range(60):
+                    f.writeframes(struct.pack("<320h", *(1000 if (i//40)%2 else -1000
+                                                              for i in range(320))))
+            data=corpus.inspect_wav_bytes(coherent.read_bytes())
+            self.assertEqual(data["frame_power_cv"],0.0)
+            self.assertEqual(data["frame_power_max_min_ratio"],1.0)
+            self.assertGreater(data["lag1_abs_correlation"],0.8)
+            self.assertEqual(data["stationarity_hypothesis"],"dynamic_or_unknown")
+            m=root/"manifest.json"
+            m.write_text(json.dumps({"schema":1,"samples":[entry(
+                coherent,"human_voice","en","monotone","creator_consent")]}))
+            report=corpus.evaluate(root,m)
+            self.assertEqual(report["human_voice"]["guard_on_rejections"],0)
+            self.assertIn("lag1",report["method"])
+            self.assertFalse(report["acoustic_vad_or_recognition_quality_certified"])
 
     def test_unknown_rate_is_not_misreported_as_zero(self):
         self.assertIsNone(corpus.rate(0, 0)["rate"])

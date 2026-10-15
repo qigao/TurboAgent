@@ -156,3 +156,20 @@ cancel/unload behavior on the **same samples**.
 Keep #137/#146 OPEN and #144/#145/#147/#148 Draft until independent quality
 and hardware/permission gates are resolved. Passing synthetic tests or a
 single pinned English JFK utterance cannot authorize default-ON or release.
+
+## ABI2 correlation contract (integration qualification)
+
+The live opt-in C11 guard (default **OFF**) also requires absolute
+lag-1 adjacent PCM correlation strictly **below 0.12**, in addition to
+at least 50 full 20-ms frames, each nonzero frame power, CV at most
+0.12 and max/min frame-power ratio at most 2.0. The offline evaluator
+must use the same unrounded full-snapshot statistics. A perfectly flat-
+power but coherent square wave is **not** rejected as stationary noise;
+an uncorrelated constant-power synthetic waveform is. This is a narrow
+pre-decode test, **not acoustic VAD**, real noise hallucination evidence,
+or proof a declared human voice actually contains intelligible speech.
+
+The stacked ancestor drafts (#145–#149) were qualified against an older
+power-only Provider; their historical CI success must not be projected
+onto this reconciled correlation-aware integration head. Real human voice
+and natural noise quality evidence remains absent. No merge or release.

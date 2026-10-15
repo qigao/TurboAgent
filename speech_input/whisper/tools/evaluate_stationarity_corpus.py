@@ -199,7 +199,16 @@ def evaluate(audio_root: Path, manifest_path: Path) -> dict:
                       / sp_count, 6) if sp_count else None)
     return {
         "schema": schema,
-        "method": "preinference_20ms_frame_power_stationarity_guard_abi2",
+        "method": "preinference_20ms_frame_power_lag1_correlation_guard_abi2",
+        "guard_eligibility": {
+            "min_full_20ms_frames": 50,
+            "max_frame_power_cv": 0.12,
+            "max_frame_power_ratio": 2.0,
+            "max_absolute_lag1_correlation_exclusive": 0.12,
+            "applies_only_to_nonzero_pcm": True,
+            "matches_default_off_c11_provider_abi": 2,
+            "not_general_voice_activity_detection": True,
+        },
         "guard_default_changed": False,
         "model_inference_used": False,
         "model_weights_downloaded": False,

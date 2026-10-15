@@ -320,6 +320,7 @@ static int stationary_power_test(int guard, int dynamic) {
   turbo_agent_speech_transcript_kind_t kind;
   uint64_t utterance_id=dynamic ? 79u : guard ? 78u : 77u;
   int before=atomic_load(&st_decode_calls);
+  uint32_t random_state=0x41535231u;
   REQUIRE(create_owner_ex(&owner, 30000u, 80u, (uint32_t)guard)==0);
   REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
   turbo_agent_speech_config_init(&options);
@@ -329,13 +330,25 @@ static int stationary_power_test(int guard, int dynamic) {
   REQUIRE(turbo_agent_speech_begin(m1,utterance_id)==0);
   for (unsigned frame=0u; frame<60u; frame++) {
     int16_t pcm[320];
-    /* Constant-power alternating sign, or a time-varying speech-like
-     * amplitude envelope. Neither fixture claims real speech or VAD. */
+    /* kind 0: truly uncorrelated fixed-power pseudo-noise;
+     * kind 1: dynamic amplitude envelope; kind 2: coherent fixed-power
+     * voiced surrogate. These are nonhuman synthetic conformance fixtures. */
     const int16_t amplitude =
-        (int16_t)(dynamic ? (frame%10u<3u ? 0u :
-                           frame%10u<6u ? 500u : 7000u) : 1000u);
-    for (size_t i=0; i<320u; i++)
-      pcm[i] = (int16_t)((i & 1u) ? amplitude : -amplitude);
+        (int16_t)(dynamic==1 ? (frame%10u<3u ? 0u :
+                             frame%10u<6u ? 500u : 7000u) : 1000u);
+    for (size_t i=0; i<320u; i++) {
+      if (dynamic == 0) {
+        random_state ^= random_state << 13;
+        random_state ^= random_state >> 17;
+        random_state ^= random_state << 5;
+        pcm[i] = (int16_t)((random_state & 1u) ? 1000 : -1000);
+      } else if (dynamic == 2) {
+        /* 400Hz correlated square-wave, constant frame RMS. */
+        pcm[i] = (int16_t)(((i / 20u) & 1u) ? amplitude : -amplitude);
+      } else {
+        pcm[i] = (int16_t)((i & 1u) ? amplitude : -amplitude);
+      }
+    }
     REQUIRE(turbo_agent_speech_offer_frame(
           m1,utterance_id,pcm,320u,(frame+1u)*20000u)==0);
     REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0 && pumped==1u);
@@ -344,7 +357,7 @@ static int stationary_power_test(int guard, int dynamic) {
   REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0);
   REQUIRE(turbo_agent_speech_take_final(m1,result,sizeof(result),
                                         &length,&kind)==0);
-  if (guard && !dynamic) {
+  if (guard && dynamic==0) {
     REQUIRE(turbo_agent_speech_get_state(m1)==TURBO_AGENT_SPEECH_NO_SPEECH);
     REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_NO_SPEECH);
     REQUIRE(length==0u && result[0]=='\0');
@@ -360,6 +373,16 @@ static int stationary_power_test(int guard, int dynamic) {
   return 0;
 }
 
+/* Bounded deterministic pseudo-noise for parity and boundary tests.
+ * Strongly uncorrelated between adjacent samples, unlike a 1kHz square
+ * wave which is coherent and MUST bypass the opt-in noise refusal. */
+static int16_t test_noise_sample(int16_t amplitude, uint32_t *state) {
+  *state ^= *state << 13;
+  *state ^= *state >> 17;
+  *state ^= *state << 5;
+  return (int16_t)((*state & 1u) ? amplitude : -amplitude);
+}
+
 /* The same Owner and the same SpeechInput are reused across three distinct
  * utterances. This catches retained statistics, stale PCM/generation IDs,
  * false acceptance of a 49-frame utterance, and boundary off-by-one errors.
@@ -373,6 +396,7 @@ static int stationarity_threshold_and_generation_reset(void) {
   char result[100];
   turbo_agent_speech_transcript_kind_t kind;
   int baseline=atomic_load(&st_decode_calls);
+  uint32_t random_state=0x41535231u;
   REQUIRE(create_owner_ex(&owner,30000u,80u,1u)==0);
   REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
   turbo_agent_speech_config_init(&options);
@@ -388,7 +412,7 @@ static int stationarity_threshold_and_generation_reset(void) {
       const int16_t amplitude=(int16_t)
           (pass==2u && frame%10u>=4u ? 5000u : 1000u);
       for (size_t s=0u; s<320u; s++) {
-        pcm[s]=(int16_t)((s&1u) ? amplitude : -amplitude);
+        pcm[s]=test_noise_sample(amplitude,&random_state);
       }
       REQUIRE(turbo_agent_speech_offer_frame(
           m1,utterance_id,pcm,320u,(frame+1u)*20000u)==0);
@@ -415,10 +439,10 @@ static int stationarity_threshold_and_generation_reset(void) {
 }
 
 
-/* Characterization only: these two distinctly shaped periodic signals have
- * identical nonzero power in EVERY frame. The energy-only opt-in gate rejects
- * both before fake vendor decode. This is a documented false-rejection risk,
- * NOT a speech recording, human-voice metric or VAD acceptance test. */
+/* Equal-power disagreement is intentional: uncorrelated pseudo-noise must
+ * skip the decoder, while a coherent constant-power square wave must reach
+ * it. Identical power alone is not a reliable speech/noise discriminator.
+ * Synthetic waveform only, not actual human voice or VAD certification. */
 static int equal_power_distinct_waveforms_characterization(void) {
   for (unsigned guard=0u; guard<=1u; ++guard) {
     turbo_agent_speech_whisper_t *owner=NULL;
@@ -429,6 +453,7 @@ static int equal_power_distinct_waveforms_characterization(void) {
     char result[100]={0};
     turbo_agent_speech_transcript_kind_t kind;
     int before=atomic_load(&st_decode_calls);
+    uint32_t random_state=0x41535231u;
     REQUIRE(create_owner_ex(&owner,30000u,80u,guard)==0);
     REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
     turbo_agent_speech_config_init(&options);
@@ -443,9 +468,8 @@ static int equal_power_distinct_waveforms_characterization(void) {
         for (size_t s=0u;s<320u;++s) {
           /* Both signals have abs(sample)==1000 throughout, with a
            * different temporal structure inside each frame. */
-          unsigned negative=shape==0u ? (unsigned)(s&1u) :
-                             (unsigned)((s/40u)&1u);
-          pcm[s]=negative ? -1000 : 1000;
+          pcm[s]=shape==0u ? test_noise_sample(1000,&random_state) :
+                 (int16_t)(((s/40u)&1u) ? -1000 : 1000);
         }
         REQUIRE(turbo_agent_speech_offer_frame(
             m1,id,pcm,320u,(frame+1u)*20000u)==0);
@@ -455,14 +479,14 @@ static int equal_power_distinct_waveforms_characterization(void) {
       REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0);
       REQUIRE(turbo_agent_speech_take_final(m1,result,sizeof(result),
                                             &length,&kind)==0);
-      if (guard) {
+      if (guard && shape==0u) {
         REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_NO_SPEECH);
         REQUIRE(length==0u && result[0]=='\0');
         REQUIRE(atomic_load(&st_decode_calls)==before);
       } else {
         REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL);
         REQUIRE(length==11u && strcmp(result," recognized")==0);
-        REQUIRE(atomic_load(&st_decode_calls)==before+(int)shape+1);
+        REQUIRE(atomic_load(&st_decode_calls)==before+(guard ? 1 : (int)shape+1));
       }
       REQUIRE(turbo_agent_speech_begin(m1,id)==TURBO_AGENT_SPEECH_ESTALE);
     }
@@ -490,6 +514,7 @@ static int stationarity_cv_and_ratio_boundaries(void) {
     size_t pumped=0u,length=0u;
     const uint64_t id=200u+(uint64_t)scenario;
     const int before=atomic_load(&st_decode_calls);
+    uint32_t random_state=0x41535231u;
     REQUIRE(create_owner_ex(&owner,30000u,120u,1u)==0);
     REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
     turbo_agent_speech_config_init(&opts);
@@ -505,7 +530,7 @@ static int stationarity_cv_and_ratio_boundaries(void) {
       if (scenario==2u && frame==99u) amplitude=1414;
       if (scenario==3u && frame==99u) amplitude=1415;
       for (size_t i=0u;i<320u;++i)
-        pcm[i]=(int16_t)((i&1u) ? amplitude : -amplitude);
+        pcm[i]=test_noise_sample(amplitude,&random_state);
       REQUIRE(turbo_agent_speech_offer_frame(
           m1,id,pcm,320u,(frame+1u)*20000u)==0);
       REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0 && pumped==1u);
@@ -543,9 +568,10 @@ int main(void) {
   REQUIRE(stationary_power_test(0,0)==0); /* default OFF preserves FINAL */
   REQUIRE(stationary_power_test(1,0)==0); /* stationary input skips engine */
   REQUIRE(stationary_power_test(1,1)==0); /* dynamic envelope reaches engine */
+  REQUIRE(stationary_power_test(1,2)==0); /* coherent flat-power input decodes */
   REQUIRE(stationarity_threshold_and_generation_reset()==0);
   REQUIRE(equal_power_distinct_waveforms_characterization()==0);
   REQUIRE(stationarity_cv_and_ratio_boundaries()==0);
-  puts("Whisper mock C-ABI PCM/cancel/deadline/stationary opt-in admission PASS");
+  puts("Whisper mock C11 stationary-power+lag1 conformance and ABI2 owner PASS");
   return 0;
 }

@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <threads.h>
 #include <pthread.h>
 #include <time.h>
 
@@ -12,8 +11,8 @@
  * The sole worker owns ONE 480-sample generation-scoped PCM block.
  * The host invokes all Provider callbacks on its serial control owner. */
 struct turbo_tts_test_dso {
-  mtx_t mutex;
-  cnd_t changed;
+  pthread_mutex_t mutex;
+  pthread_cond_t changed;
   pthread_t worker;
   uint64_t generation;
   int begun;
@@ -46,31 +45,31 @@ static void set_unload_observer(atomic_uint *observer) {
 
 static void *worker_main(void *param) {
   turbo_tts_test_dso_t *ctx = (turbo_tts_test_dso_t *)param;
-  if (mtx_lock(&ctx->mutex) != thrd_success) return NULL;
+  if (pthread_mutex_lock(&ctx->mutex) != 0) return NULL;
   ctx->worker_started = 1;
   ctx->counts.worker_started = 1u;
-  cnd_broadcast(&ctx->changed);
+  pthread_cond_broadcast(&ctx->changed);
 
   while (!ctx->allow_pcm && !ctx->cancel_requested)
-    (void)cnd_wait(&ctx->changed, &ctx->mutex);
+    (void)pthread_cond_wait(&ctx->changed, &ctx->mutex);
   if (!ctx->cancel_requested) {
     for (size_t i = 0u; i < TURBO_TTS_SAMPLES_PER_FRAME; ++i)
       ctx->frame[i] = (int16_t)(1000u + (uint32_t)i);
     ctx->frame_ready = 1;
-    cnd_broadcast(&ctx->changed);
+    pthread_cond_broadcast(&ctx->changed);
   }
 
   while (!ctx->cancel_requested && !ctx->finish_requested)
-    (void)cnd_wait(&ctx->changed, &ctx->mutex);
+    (void)pthread_cond_wait(&ctx->changed, &ctx->mutex);
   while (!ctx->allow_settle)
-    (void)cnd_wait(&ctx->changed, &ctx->mutex);
+    (void)pthread_cond_wait(&ctx->changed, &ctx->mutex);
 
   /* Terminal is a notification that this worker has no more callbacks
    * or PCM. The host must still pthread_join before actual DSO unload. */
   ctx->worker_done = 1;
   ctx->counts.worker_done = 1u;
-  cnd_broadcast(&ctx->changed);
-  (void)mtx_unlock(&ctx->mutex);
+  pthread_cond_broadcast(&ctx->changed);
+  (void)pthread_mutex_unlock(&ctx->mutex);
   return NULL;
 }
 
@@ -84,20 +83,20 @@ static int provider_begin(void *param, uint64_t generation,
       format->channels != 1u || format->bits_per_sample != 16u ||
       format->frame_samples != TURBO_TTS_SAMPLES_PER_FRAME)
     return -1;
-  if (mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (pthread_mutex_lock(&ctx->mutex) != 0) return -1;
   if (ctx->begun) {
-    (void)mtx_unlock(&ctx->mutex);
+    (void)pthread_mutex_unlock(&ctx->mutex);
     return -1;
   }
   ctx->generation = generation;
   ctx->begun = 1;
-  (void)mtx_unlock(&ctx->mutex);
+  (void)pthread_mutex_unlock(&ctx->mutex);
 
   if (pthread_create(&ctx->worker, NULL, worker_main, ctx) != 0)
     return -1;
-  if (mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (pthread_mutex_lock(&ctx->mutex) != 0) return -1;
   ctx->thread_created = 1;
-  (void)mtx_unlock(&ctx->mutex);
+  (void)pthread_mutex_unlock(&ctx->mutex);
   return 0;
 }
 
@@ -109,9 +108,9 @@ static int provider_poll_pcm(void *param, uint64_t generation,
       capacity != TURBO_TTS_SAMPLES_PER_FRAME) return -1;
   *samples = 0u;
   *kind = TURBO_TTS_WOULD_BLOCK;
-  if (mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (pthread_mutex_lock(&ctx->mutex) != 0) return -1;
   if (!ctx->begun || generation != ctx->generation) {
-    (void)mtx_unlock(&ctx->mutex);
+    (void)pthread_mutex_unlock(&ctx->mutex);
     return -1;
   }
   ctx->counts.provider_polls++;
@@ -135,22 +134,22 @@ static int provider_poll_pcm(void *param, uint64_t generation,
   } else if (ctx->worker_done) {
     *kind = TURBO_TTS_TERMINAL;
   }
-  (void)mtx_unlock(&ctx->mutex);
+  (void)pthread_mutex_unlock(&ctx->mutex);
   return 0;
 }
 
 static void provider_request_cancel(void *param, uint64_t generation) {
   turbo_tts_test_dso_t *ctx = (turbo_tts_test_dso_t *)param;
   if (!ctx) return;
-  if (mtx_lock(&ctx->mutex) != thrd_success) return;
+  if (pthread_mutex_lock(&ctx->mutex) != 0) return;
   if (ctx->begun && ctx->generation == generation &&
       !ctx->cancel_requested) {
     ctx->cancel_requested = 1;
     ctx->late_pcm = 1; /* malicious late frame must be rejected by M4.0 */
     ctx->counts.provider_cancel_requests++;
-    cnd_broadcast(&ctx->changed);
+    pthread_cond_broadcast(&ctx->changed);
   }
-  (void)mtx_unlock(&ctx->mutex);
+  (void)pthread_mutex_unlock(&ctx->mutex);
 }
 
 static int test_create(turbo_tts_test_dso_t **out_ctx) {
@@ -159,12 +158,12 @@ static int test_create(turbo_tts_test_dso_t **out_ctx) {
   turbo_tts_test_dso_t *ctx =
       (turbo_tts_test_dso_t *)calloc(1u, sizeof(*ctx));
   if (!ctx) return -1;
-  if (mtx_init(&ctx->mutex, mtx_plain) != thrd_success) {
+  if (pthread_mutex_init(&ctx->mutex, NULL) != 0) {
     free(ctx);
     return -1;
   }
-  if (cnd_init(&ctx->changed) != thrd_success) {
-    mtx_destroy(&ctx->mutex);
+  if (pthread_cond_init(&ctx->changed, NULL) != 0) {
+    pthread_mutex_destroy(&ctx->mutex);
     free(ctx);
     return -1;
   }
@@ -186,28 +185,28 @@ static int test_configure_provider(turbo_tts_test_dso_t *ctx,
 }
 
 static int test_grant_pcm(turbo_tts_test_dso_t *ctx) {
-  if (!ctx || mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (!ctx || pthread_mutex_lock(&ctx->mutex) != 0) return -1;
   ctx->allow_pcm = 1;
-  cnd_broadcast(&ctx->changed);
-  (void)mtx_unlock(&ctx->mutex);
+  pthread_cond_broadcast(&ctx->changed);
+  (void)pthread_mutex_unlock(&ctx->mutex);
   return 0;
 }
 
 static int wait_flag(turbo_tts_test_dso_t *ctx, const int *flag) {
-  if (!ctx || mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (!ctx || pthread_mutex_lock(&ctx->mutex) != 0) return -1;
   struct timespec until;
   if (timespec_get(&until, TIME_UTC) != TIME_UTC) {
-    (void)mtx_unlock(&ctx->mutex);
+    (void)pthread_mutex_unlock(&ctx->mutex);
     return -1;
   }
   until.tv_sec += 10;
   while (!*flag) {
-    if (cnd_timedwait(&ctx->changed, &ctx->mutex, &until) != thrd_success) {
-      (void)mtx_unlock(&ctx->mutex);
+    if (pthread_cond_timedwait(&ctx->changed, &ctx->mutex, &until) != 0) {
+      (void)pthread_mutex_unlock(&ctx->mutex);
       return -1;
     }
   }
-  (void)mtx_unlock(&ctx->mutex);
+  (void)pthread_mutex_unlock(&ctx->mutex);
   return 0;
 }
 
@@ -216,11 +215,11 @@ static int test_wait_pcm_ready(turbo_tts_test_dso_t *ctx) {
 }
 
 static int test_grant_settle(turbo_tts_test_dso_t *ctx) {
-  if (!ctx || mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (!ctx || pthread_mutex_lock(&ctx->mutex) != 0) return -1;
   ctx->allow_settle = 1;
   ctx->finish_requested = 1; /* normal finish if cancel not requested */
-  cnd_broadcast(&ctx->changed);
-  (void)mtx_unlock(&ctx->mutex);
+  pthread_cond_broadcast(&ctx->changed);
+  (void)pthread_mutex_unlock(&ctx->mutex);
   return 0;
 }
 
@@ -230,26 +229,26 @@ static int test_wait_worker_done(turbo_tts_test_dso_t *ctx) {
 
 static int test_snapshot(turbo_tts_test_dso_t *ctx,
                          turbo_tts_test_dso_counts_t *out) {
-  if (!ctx || !out || mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (!ctx || !out || pthread_mutex_lock(&ctx->mutex) != 0) return -1;
   *out = ctx->counts;
-  (void)mtx_unlock(&ctx->mutex);
+  (void)pthread_mutex_unlock(&ctx->mutex);
   return 0;
 }
 
 static int test_destroy(turbo_tts_test_dso_t **handle) {
   if (!handle || !*handle) return -1;
   turbo_tts_test_dso_t *ctx = *handle;
-  if (mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (pthread_mutex_lock(&ctx->mutex) != 0) return -1;
   int pending = ctx->thread_created && !ctx->worker_done;
   int thread_created = ctx->thread_created;
-  (void)mtx_unlock(&ctx->mutex);
+  (void)pthread_mutex_unlock(&ctx->mutex);
   if (pending) return -2; /* no early Provider/DSO release */
   if (thread_created) {
     if (pthread_join(ctx->worker, NULL) != 0) return -3;
   }
   memset(ctx->frame, 0, sizeof(ctx->frame));
-  cnd_destroy(&ctx->changed);
-  mtx_destroy(&ctx->mutex);
+  pthread_cond_destroy(&ctx->changed);
+  pthread_mutex_destroy(&ctx->mutex);
   memset(ctx, 0, sizeof(*ctx));
   free(ctx);
   *handle = NULL;

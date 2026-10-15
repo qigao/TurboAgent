@@ -3,6 +3,7 @@ name: SpeechWhisper M3 C11 owner source sanitizers (#137)
 'on':
   pull_request:
     paths:
+      - 'speech_input/whisper/**'
       - '.github/workflows/speech-whisper-source-sanitizers.yml'
   workflow_dispatch:
 

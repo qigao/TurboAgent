@@ -32,3 +32,11 @@ if(BUILD_TESTING)
  target_compile_features(test_speech_output_cpp17 PRIVATE cxx_std_17)
  add_test(NAME speech_output_cpp17 COMMAND test_speech_output_cpp17)
 endif()
+
+# M4.1 is explicitly selected by a caller: never build or find Playback
+# in the normal standalone M4.0 fake provider contract.
+option(ENABLE_TTS_PLAYBACK_BRIDGE_TEST
+  "Build opt-in playback adapter against exact installed Salts Playback" OFF)
+if(ENABLE_TTS_PLAYBACK_BRIDGE_TEST)
+  add_subdirectory(playback)
+endif()

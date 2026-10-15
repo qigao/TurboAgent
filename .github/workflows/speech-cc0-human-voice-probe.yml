@@ -1,4 +1,4 @@
-name: Speech M3 CC0 human voice predecode characterization (#146)
+name: Speech M3 licensed human voice predecode characterization (#146)
 
 'on':
   pull_request:
@@ -232,6 +232,124 @@ jobs:
           }, ensure_ascii=False, sort_keys=True))
           PY
 
+          # No upload-artifact action. All clip/manifest/provenance bytes
+          # remain in RUNNER_TEMP until trap cleanup; no model download.
+
+  english-ccby-voice-no-model:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146'
+    name: SHA1-pinned English CC-BY voice, Guard OFF/ON (no weights)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install only CPU audio-decoding dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          command -v ffmpeg
+      - name: Verify exact original CC0 Ogg, normalize privately and report only numeric admission
+        shell: bash
+        env:
+          CC0_URL: https://upload.wikimedia.org/wikipedia/commons/5/58/En-uk-Do_you_speak_English.ogg
+          CC0_EXPECTED_SHA1: 79b6f88e3db116fab8bc068cd523420406bef1c4
+          CC0_EXPECTED_BYTES: '21562'
+        run: |
+          set -euo pipefail
+          umask 077
+          private_dir="$(mktemp -d "${RUNNER_TEMP}/cc0-human-voice-XXXXXX")"
+          chmod 700 "$private_dir"
+          trap 'rm -rf -- "$private_dir"' EXIT
+
+          source="$private_dir/en-commons-original.ogg"
+          curl --fail --location --silent --show-error --retry 2 \
+            --connect-timeout 15 --max-time 60 --max-filesize 500000 \
+            --proto '=https' --proto-redir '=https' \
+            --user-agent 'TurboAgent-CC0-voice-test/1.0 (qigao/TurboAgent)' \
+            "$CC0_URL" --output "$source"
+          test "$(wc -c < "$source" | tr -d '[:space:]')" = "$CC0_EXPECTED_BYTES"
+          actual_sha1="$(sha1sum "$source" | awk '{print $1}')"
+          test "$actual_sha1" = "$CC0_EXPECTED_SHA1"
+          original_sha256="$(sha256sum "$source" | awk '{print $1}')"
+          # A second independent run must consume the *same* immutable
+          # original bytes as the first confirmed human-voice observation.
+          # Initial English discovery is pinned by the Commons SHA-1 + size;
+          # record full SHA-256 now, then pin it on the next repeat run.
+
+          ffmpeg_bin="$(realpath "$(command -v ffmpeg)")"
+          ffmpeg_sha256="$(sha256sum "$ffmpeg_bin" | awk '{print $1}')"
+          python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
+            --source "$source" --source-sha256 "$original_sha256" \
+            --ffmpeg "$ffmpeg_bin" --ffmpeg-sha256 "$ffmpeg_sha256" \
+            --output-wav "$private_dir/english.wav" \
+            --private-provenance "$private_dir/english.private.json" \
+            --acknowledge-rights > "$private_dir/preflight.stdout.json"
+
+          CC0_PRIVATE_DIR="$private_dir" CC0_SOURCE_SHA256="$original_sha256" \
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          folder = Path(os.environ['CC0_PRIVATE_DIR'])
+          sidecar = json.loads((folder / 'english.private.json').read_text())
+          manifest = {
+              "schema": 2,
+              "samples": [{
+                  "path": "english.wav",
+                  "sha256": sidecar["normalized_wav_sha256"],
+                  "source_kind": "human_voice",
+                  "language": "en",
+                  "condition": "ordinary",
+                  "rights_basis": "public_license",
+                  "speaker_group": "source_en_ccby_0001",
+              }]
+          }
+          manifest_file = folder / "manifest.private.json"
+          manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+          os.chmod(manifest_file, 0o600)
+          # Keep the only output strictly numerical/source-provenance. No
+          # raw audio, transcript, clip path or private speaker-group key.
+          sys.path.insert(0, "speech_input/whisper/tools")
+          from evaluate_stationarity_corpus import evaluate
+          result = evaluate(folder, manifest_file)
+          counts = result["human_voice"]
+          assert result["sample_count"] == 1
+          assert counts["guard_off_rejections"] == 0
+          assert counts["guard_on_rejections"] in (0, 1)
+          assert result["model_inference_used"] is False
+          assert result["speaker_independence_verified"] is False
+          print(json.dumps({
+              "evidence_kind": "independent_real_human_cc0_source",
+              "source_url": "https://commons.wikimedia.org/wiki/File:En-uk-Do_you_speak_English.ogg",
+              "source_revision": "current-upload-2010-01-18",
+              "source_sha1_verification": "PASS",
+              "source_sha256_independently_pinned": False,
+              "license": "CC-BY-3.0-US",
+              "attribution": "Association Shtooka / Judith Franck; conversion only",
+              "original_sha256": os.environ["CC0_SOURCE_SHA256"],
+              "canonical_wav_sha256": sidecar["normalized_wav_sha256"],
+              "language": "en",
+              "human_clip_count": 1,
+              "declared_speaker_count": 1,
+              "predecode_guard_off_rejections": counts["guard_off_rejections"],
+              "predecode_guard_on_rejections": counts["guard_on_rejections"],
+              "predecode_guard_on_false_rejection_fraction": counts[
+                  "guard_on_false_rejection"]["rate"],
+              "frames": sidecar["frames"],
+              "model_weights_used": False,
+              "wer_cer_measured": False,
+              "noise_hallucinations_measured": False,
+              "speaker_population_coverage_certified": False,
+              "no_audio_or_transcript_artifact": True,
+          }, ensure_ascii=False, sort_keys=True))
+          PY
+
+          # The CC-BY-3.0-US credit is preserved in the numeric evidence;
+          # no raw voice is uploaded, and the author is never reidentified.
           # No upload-artifact action. All clip/manifest/provenance bytes
           # remain in RUNNER_TEMP until trap cleanup; no model download.
 

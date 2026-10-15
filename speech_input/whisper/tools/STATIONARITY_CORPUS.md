@@ -58,6 +58,61 @@ legal or identity verification. Obtain recording permission and confirm the
 actual redistribution/license rights independently. Keep private recordings
 out of public GitHub Actions/artifacts.
 
+## Schema 2: private anonymous speaker grouping (recommended for human evaluation)
+
+To avoid counting multiple clips from one speaker as independent people, change
+`"schema": 1` to `"schema": 2` and add a **private, opaque** `speaker_group`
+token to each `human_voice` sample. Example only (the WAV is not included):
+
+~~~json
+{
+  "schema": 2,
+  "samples": [
+    {
+      "path": "voice/quiet-en.wav",
+      "sha256": "REPLACE_WITH_REAL_LOWERCASE_64_CHARACTER_SHA256",
+      "source_kind": "human_voice",
+      "language": "en",
+      "condition": "low_volume",
+      "rights_basis": "creator_consent",
+      "speaker_group": "random_group_0001"
+    }
+  ]
+}
+~~~
+
+Do not use names, accounts, or any identifying information as tokens. Tokens
+are not printed or included in the aggregate report; they are **caller
+declared**, not proof of personhood. Do not attempt to re-identify speakers,
+including contributors to public speech corpora. For noise and synthetic
+samples, `speaker_group` is forbidden. Schema 1 remains supported for
+existing private manifests, but its speaker-level statistics are unknown.
+
+Schema 2 reports the number of *declared* speaker groups, the fraction of
+groups with any pre-decode false rejection and an equally weighted mean of
+per-group false-rejection rates. Clip-level Wilson 95% intervals remain
+explicitly contingent on independence assumptions; even the group counts
+cannot certify population accuracy without independently curated speakers.
+
+`by_duration` bins for declared human speech are `lt_1s`, `1_to_3s`,
+`3_to_10s`, `10_to_60s`. Empty bins display a null rate rather than
+masquerading as 0%. **No automatic default-ON decision exists.**
+
+## Source integrity and licensing
+
+The evaluator hashes and decodes the **same bounded WAV byte snapshot**. It
+rejects repeated identical PCM samples even if a file's RIFF header,
+metadata, filename or language label is changed to produce a different
+file-level SHA-256. Neither raw PCM fingerprints nor private speaker tokens
+are emitted in reports.
+
+Check individual dataset release terms, contributor consent and
+redistribution restrictions before use. A dataset with a permissive license
+may still prohibit rehosting raw speaker clips or attempting to identify
+speakers. Keep raw human audio, per-speaker tokens, source file names and
+model output **outside public CI and GitHub artifacts**. The scripts neither
+download nor validate rights to external datasets.
+
 ## Offline invocation
 
 ~~~bash
@@ -71,9 +126,10 @@ Only explicit caller-supplied files are read. Every WAV must be 16 kHz, mono,
 signed PCM16, complete 20 ms frames, at most 60 seconds, at most 4 MiB, with
 an exact hash match. The tool bounds its corpus at 256 files / 128 MiB.
 Missing files, digest mismatch, unsafe paths, symbolic links, unsupported
-format, duplicate manifest keys, and exact-byte duplicate WAV digests fail
-closed without publishing raw data. Repeating one identical recording under
-several paths/language labels cannot inflate the observed sample denominator.
+format, duplicate manifest keys, duplicate WAV digests **and duplicate decoded
+PCM samples** fail closed without publishing raw data. Repeating one recording
+with a modified RIFF header, path or language label cannot inflate the sample
+denominator.
 
 The report contains aggregate counts and, where the denominator is positive,
 a Wilson 95% interval under an **independent-recordings assumption**

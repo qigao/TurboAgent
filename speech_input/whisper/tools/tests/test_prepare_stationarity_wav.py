@@ -136,7 +136,7 @@ class PrivateWavPreflightTests(unittest.TestCase):
                     returncode=0, stdout=pcm_frames(60) + b"\x7f",
                     stderr=b"")),
                 (lambda *_a, **_kw: SimpleNamespace(
-                    returncode=0, stdout=pcm_frames(60 * 60 // 2 + 1),
+                    returncode=0, stdout=pcm_frames(3001),
                     stderr=b"")),
             ]
             for fake in cases:

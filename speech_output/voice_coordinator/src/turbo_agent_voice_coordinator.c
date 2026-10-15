@@ -247,6 +247,42 @@ int turbo_voice_drain(turbo_voice_coordinator_t *v, uint32_t timeout_ms) {
   return TURBO_VOICE_OK;
 }
 
+void turbo_voice_snapshot_init(turbo_voice_snapshot_t *snapshot) {
+  if (!snapshot) return;
+  memset(snapshot, 0, sizeof(*snapshot));
+  snapshot->struct_size = sizeof(*snapshot);
+  snapshot->abi_version = TURBO_VOICE_SNAPSHOT_ABI_VERSION;
+}
+
+int turbo_voice_get_snapshot(const turbo_voice_coordinator_t *v,
+                             turbo_voice_snapshot_t *snapshot) {
+  if (!v || !snapshot || snapshot->struct_size != sizeof(*snapshot) ||
+      snapshot->abi_version != TURBO_VOICE_SNAPSHOT_ABI_VERSION)
+    return TURBO_VOICE_EINVAL;
+
+  uint32_t blocked = 0u;
+  if ((v->state == TURBO_VOICE_INPUT ||
+       v->state == TURBO_VOICE_CANCEL_PENDING) &&
+      !v->input_quiesced)
+    blocked |= TURBO_VOICE_BLOCK_INPUT_QUIESCE;
+  if (v->bridge &&
+      turbo_tts_playback_bridge_has_pending_clear(v->bridge))
+    blocked |= TURBO_VOICE_BLOCK_DEVICE_CLEAR;
+  if (v->state == TURBO_VOICE_CANCEL_PENDING && source_pending(v))
+    blocked |= TURBO_VOICE_BLOCK_PROVIDER_SETTLE;
+  if (v->state == TURBO_VOICE_DRAIN_PENDING)
+    blocked |= TURBO_VOICE_BLOCK_PLAYBACK_DRAIN;
+  if (v->state == TURBO_VOICE_WAIT_APPROVAL)
+    blocked |= TURBO_VOICE_BLOCK_HOST_APPROVAL;
+  if (v->faulted)
+    blocked |= TURBO_VOICE_BLOCK_FAULT;
+
+  snapshot->generation = v->generation;
+  snapshot->state = v->state;
+  snapshot->blockers = blocked;
+  return TURBO_VOICE_OK;
+}
+
 turbo_voice_state_t turbo_voice_get_state(
     const turbo_voice_coordinator_t *v) {
   return v ? v->state : TURBO_VOICE_FAILED;

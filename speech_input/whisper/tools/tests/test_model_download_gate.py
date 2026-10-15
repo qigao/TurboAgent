@@ -29,7 +29,7 @@ class MaintainerModelAdmission(unittest.TestCase):
         for required in (
             "github.repository == 'qigao/TurboAgent'",
             "github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent'",
-            "github.event.pull_request.head.ref == 'test/speech-whisper-real-model-gated-137'",
+            "github.event.pull_request.head.ref == 'feature/speech-stationary-noise-admission-137'",
             "ref: ${{ github.event.pull_request.head.sha }}",
         ):
             with self.subTest(required=required):
@@ -80,6 +80,20 @@ class MaintainerModelAdmission(unittest.TestCase):
             "stationary-noise-quiet.wav",
             "stationary-noise-medium.wav",
         ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, upload)
+
+    def test_opt_in_stationary_guard_real_model_is_approved_once_and_no_private_text(self):
+        text = self.workflow
+        self.assertIn("Qualify explicit guard on real JFK speech and exact stationary-noise probes", text)
+        self.assertIn("--stationarity-guard 1", text)
+        self.assertIn("/tmp/ta-real-asr-guard-metrics.json", text)
+        self.assertIn("/tmp/ta-real-asr-guard-jfk-metrics.json", text)
+        upload = text.split("name: speech-whisper-real-model-gated-metrics-NO-WEIGHTS", 1)[1]
+        for forbidden in ("ta-real-asr-guard-jfk-private.txt",
+                          "/tmp/ta-guard-digital-zero.stdout",
+                          "/tmp/ta-guard-stationary-noise-quiet.stdout",
+                          "/tmp/ta-guard-stationary-noise-medium.stdout"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, upload)
 

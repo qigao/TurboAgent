@@ -156,4 +156,9 @@ print(json.dumps({
     "no_private_audio_or_transcript_artifact":True
 },sort_keys=True))
 PY
+# Broaden the exact same real C11-only smoke to independently licensed
+# Japanese, Mandarin, ordinary English and explicitly short quiet speech.
+# The short quiet clip is exploratory: any lost human speech is logged as
+# a negative diagnostic, never counted as a quality success.
+bash speech_input/noise_lab/tools/run_multilingual_three_arm_c11_ci.sh
 # Everything remains under private runner temp until trap deletes it.

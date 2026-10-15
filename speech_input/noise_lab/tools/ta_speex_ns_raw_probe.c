@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
     for (j = 0u; j < TA_SPEEX_NS_FRAME_SAMPLES; ++j) {
       const int64_t a = input[j], b = output[j];
       energy_before += (uint64_t)(a*a);
-      energy_after += (uint64_t)(b*b);
+      if (!align || i != 0u) energy_after += (uint64_t)(b*b);
     }
     if ((!align || i != 0u) &&
         write_all(dst, output, sizeof(output)) != 0) goto done;
@@ -79,6 +79,10 @@ int main(int argc, char **argv) {
   if (ta_speex_ns_processed_frames(owner) != frames) goto done;
   if (align) {
     if (ta_speex_ns_finish(owner, output, 320u) != TA_SPEEX_NS_OK) goto done;
+    for (j = 0u; j < TA_SPEEX_NS_FRAME_SAMPLES; ++j) {
+      const int64_t value = output[j];
+      energy_after += (uint64_t)(value*value);
+    }
     if (write_all(dst, output, sizeof(output)) != 0) goto done;
   }
   {
@@ -90,12 +94,12 @@ int main(int argc, char **argv) {
   rc = 0;
   printf("{\"library\":\"SpeexDSP-1.2.1\","
          "\"frame_samples\":320,\"rate\":16000,"
-         "\"frames\":%zu,\"noise_suppress_db\":%d,"
+         "\"frames\":%zu,\"noise_suppress_db\":%d,"\n         "\"aligned_one_frame_with_drain\":%s,"
          "\"input_power\":%" PRIu64 ",\"output_power\":%" PRIu64 ","
          "\"vad_enabled\":false,\"agc_enabled\":false,"
          "\"voice_quality_certified\":false,"
          "\"no_model_download\":true}\n",
-         frames, db, energy_before, energy_after);
+         frames, db, align ? "true" : "false", energy_before, energy_after);
 done:
   (void)probe;
   if (dst >= 0) (void)close(dst);

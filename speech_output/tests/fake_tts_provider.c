@@ -105,7 +105,10 @@ static int fake_poll(void *ctx, uint64_t generation_id,
   *out_samples = samples;
   *out_kind = f->generated_frames == 3u ?
       TURBO_TTS_PCM_FINAL : TURBO_TTS_PCM;
-  if (*out_kind == TURBO_TTS_PCM_FINAL) f->finish_emitted = 1;
+  if (*out_kind == TURBO_TTS_PCM_FINAL) {
+    f->finish_emitted = 1;
+    f->active = 0; /* this callback is source-final and already quiescent */
+  }
   return 0;
 }
 

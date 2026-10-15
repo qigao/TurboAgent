@@ -3,7 +3,7 @@
 **Test-only Draft / no model download / no upload / no microphone / no release.**
 
 This is a *local preprocessing step* before
-[\`evaluate_stationarity_corpus.py\`](evaluate_stationarity_corpus.py).
+[`evaluate_stationarity_corpus.py`](evaluate_stationarity_corpus.py).
 The optional production C11 stationary-noise guard remains **OFF by default**.
 It cannot establish acoustic VAD quality, speech recognition accuracy or speaker
 independence.
@@ -56,10 +56,10 @@ python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
 All source and destination paths must be **absolute**. Both destination files
 must **not** already exist. The tool writes with 0600 permissions, does not
 overwrite, uses one bounded (at most 16 MiB) original byte snapshot and passes
-these **exact** verified bytes through \`ffmpeg\` stdin.
+these **exact** verified bytes through `ffmpeg` stdin.
 
 The decoder is a selected local executable and is invoked without a shell,
-with \`-nostdin -protocol_whitelist pipe\`; it cannot fetch external
+with `-nostdin -protocol_whitelist pipe`; it cannot fetch external
 protocols/URLs or read arbitrary secondary media referenced by a manifest.
 CPU-only mono S16LE 16kHz output is capped and **clips longer than 60 seconds
 are refused, not silently truncated**. Only the final *incomplete* 20ms frame
@@ -80,11 +80,11 @@ versions as though their 20ms power envelopes were identical.
 
 ## Feed the offline evaluator
 
-Take the \`normalized_wav_sha256\` from the private provenance JSON and put
-the **converted** WAV path (relative to a chosen private \`--audio-root\`) and
+Take the `normalized_wav_sha256` from the private provenance JSON and put
+the **converted** WAV path (relative to a chosen private `--audio-root`) and
 its SHA into the schema 2 manifest described in
-[\`STATIONARITY_CORPUS.md\`](STATIONARITY_CORPUS.md). Use private anonymous
-\`speaker_group\` tokens for human voice recordings only; group tokens are
+[`STATIONARITY_CORPUS.md`](STATIONARITY_CORPUS.md). Use private anonymous
+`speaker_group` tokens for human voice recordings only; group tokens are
 never raw names or an invitation to infer identity from audio.
 
 ~~~sh

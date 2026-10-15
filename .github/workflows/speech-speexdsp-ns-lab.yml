@@ -1,0 +1,146 @@
+name: Speech NS isolated SpeexDSP C11 candidate (#146)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/noise_lab/**'
+      - '.github/workflows/speech-speexdsp-ns-lab.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  speexdsp-native-c11:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146'
+    name: SpeexDSP-1.2.1 C11 NS-only smoke, native source + licensed audio
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install reviewed distro SpeexDSP native headers and CPU decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libspeexdsp-dev pkg-config ninja-build ffmpeg
+          test "$(pkg-config --modversion speexdsp)" = 1.2.1
+          dpkg-query -W -f='speexdsp-pkg=\${Version}\n' libspeexdsp-dev
+          pkg-config --cflags --libs speexdsp
+          # Distro package build itself is not compiled with our sanitizers;
+          # only the test-only strict C11 owner and harness are instrumented.
+      - name: Build independent strict C11 owner and test exact capacity/replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S speech_input/noise_lab -B build/speex-ns-lab -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+          cmake --build build/speex-ns-lab --parallel 2
+          ctest --test-dir build/speex-ns-lab --output-on-failure
+          cmake -S speech_input/noise_lab -B build/speex-ns-sanitized -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            "-DCMAKE_C_FLAGS=-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+          cmake --build build/speex-ns-sanitized --parallel 2
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            ctest --test-dir build/speex-ns-sanitized --output-on-failure
+      - name: Compare synthetic stationary noise, real whisper and real road noise NS
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$(mktemp -d "$RUNNER_TEMP/speex-ns-private-XXXXXX")"
+          chmod 700 "$root"
+          trap 'rm -rf -- "$root"' EXIT
+          # Wikimedia public CC0 (whisper, Mx. Granger) and CC BY-SA 4.0
+          # (recycling-truck warning, Ke4roh) previously source-pinned in
+          # #158/#155; never infer voice absence from NS-only output.
+          for case in whisper road; do
+            if [ "$case" = whisper ]; then
+              url='https://upload.wikimedia.org/wikipedia/commons/e/e8/Whispering-example.ogg'
+              sha='bbdbe95dfe4742e27845c03fba3a8caf9f0f5ad65e34e512fd5609d155e6304e'
+              bytes=30283
+            else
+              url='https://upload.wikimedia.org/wikipedia/commons/e/e2/Back-up_white_noise.ogg'
+              sha='7d70594ef7ba1bd7a34136ab7140420d016fd730acc6c124a1a02fe6c75337d0'
+              bytes=120796
+            fi
+            curl --fail --location --silent --show-error --retry 2 \
+              --connect-timeout 15 --max-time 60 --max-filesize 300000 \
+              --proto '=https' --proto-redir '=https' \
+              --user-agent 'TurboAgent-SpeexDSP-NS-study/1.0 (qigao/TurboAgent)' \
+              "$url" --output "$root/$case-original.ogg"
+            test "$(wc -c < "$root/$case-original.ogg" | tr -d '[:space:]')" = "$bytes"
+            test "$(sha256sum "$root/$case-original.ogg" | awk '{print $1}')" = "$sha"
+            ffmpeg="$(realpath "$(command -v ffmpeg)")"
+            ffmpeg_sha="$(sha256sum "$ffmpeg" | awk '{print $1}')"
+            python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
+              --source "$root/$case-original.ogg" --source-sha256 "$sha" \
+              --ffmpeg "$ffmpeg" --ffmpeg-sha256 "$ffmpeg_sha" \
+              --output-wav "$root/$case.wav" \
+              --private-provenance "$root/$case.provenance.json" \
+              --acknowledge-rights > "$root/$case.private-status"
+          done
+          RAW_ROOT="$root" python3 - <<'PY'
+          from pathlib import Path
+          import os, random, struct, wave
+          root = Path(os.environ['RAW_ROOT'])
+          for name in ('whisper','road'):
+              with wave.open(str(root/(name+'.wav')),'rb') as wav:
+                  assert (wav.getframerate(), wav.getsampwidth(), wav.getnchannels()) == (16000,2,1)
+                  frames = wav.getnframes()
+                  assert 0 < frames <= 960000 and frames % 320 == 0
+                  pcm = wav.readframes(frames)
+              (root/(name+'.raw')).write_bytes(pcm)
+          # Controlled constant-level broadband S16 noise, exactly 4 sec.
+          rng = random.Random(20261015)
+          with (root/'steady.raw').open('wb') as out:
+              for _ in range(16000*4):
+                  out.write(struct.pack('<h', rng.randint(-1000,1000)))
+          PY
+
+          probe="$GITHUB_WORKSPACE/build/speex-ns-lab/ta_speex_ns_raw_probe"
+          for sample in steady whisper road; do
+            for db in -12 -18; do
+              "$probe" "$root/$sample.raw" "$root/$sample.$db.raw" "$db"
+              RAW_ROOT="$root" PCM_KIND="$sample" PCM_DB="$db" python3 - <<'PY'
+          from pathlib import Path
+          import json, os, struct
+          root = Path(os.environ['RAW_ROOT'])
+          kind = os.environ['PCM_KIND']; db = os.environ['PCM_DB']
+          before = (root/(kind+'.raw')).read_bytes()
+          after = (root/(kind+'.'+db+'.raw')).read_bytes()
+          assert len(before) == len(after) and len(before)>0
+          assert len(after) % 640 == 0 and len(after) <= 1920000
+          a = struct.unpack('<%dh' % (len(before)//2), before)
+          b = struct.unpack('<%dh' % (len(after)//2), after)
+          before_energy = sum(x*x for x in a)
+          after_energy = sum(x*x for x in b)
+          modified = sum(x != y for x,y in zip(a,b))
+          assert before_energy > 0
+          assert modified > 0
+          if kind == "whisper":
+              assert after_energy > 0  # no all-zero mute of real human input
+          print(json.dumps({
+              "signal":kind,
+              "noise_suppress_db":int(db),
+              "source_type":"synthetic_noise" if kind=="steady" else
+                  "real_licensed_voice" if kind=="whisper" else "real_licensed_road_noise",
+              "frame_count":len(a)//320,
+              "raw_pcm_energy":before_energy,
+              "processed_pcm_energy":after_energy,
+              "energy_ratio":round(after_energy/before_energy,6),
+              "changed_samples":modified,
+              "nonzero_processed":sum(x!=0 for x in b),
+              "asr_accuracy_or_hallucinations_measured":False,
+              "speech_intelligibility_certified":False,
+              "model_weights_downloaded":False,
+              "audio_artifacts_uploaded":False,
+          }, sort_keys=True))
+          PY
+            done
+          done
+          # No upload-artifact action. WAV/raw/provenance wiped on exit.

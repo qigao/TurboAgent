@@ -320,6 +320,7 @@ static int stationary_power_test(int guard, int dynamic) {
   turbo_agent_speech_transcript_kind_t kind;
   uint64_t utterance_id=dynamic ? 79u : guard ? 78u : 77u;
   int before=atomic_load(&st_decode_calls);
+  uint32_t random_state=0x41535231u;
   REQUIRE(create_owner_ex(&owner, 30000u, 80u, (uint32_t)guard)==0);
   REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
   turbo_agent_speech_config_init(&options);
@@ -329,13 +330,25 @@ static int stationary_power_test(int guard, int dynamic) {
   REQUIRE(turbo_agent_speech_begin(m1,utterance_id)==0);
   for (unsigned frame=0u; frame<60u; frame++) {
     int16_t pcm[320];
-    /* Constant-power alternating sign, or a time-varying speech-like
-     * amplitude envelope. Neither fixture claims real speech or VAD. */
+    /* kind 0: truly uncorrelated fixed-power pseudo-noise;
+     * kind 1: dynamic amplitude envelope; kind 2: coherent fixed-power
+     * voiced surrogate. These are nonhuman synthetic conformance fixtures. */
     const int16_t amplitude =
-        (int16_t)(dynamic ? (frame%10u<3u ? 0u :
-                           frame%10u<6u ? 500u : 7000u) : 1000u);
-    for (size_t i=0; i<320u; i++)
-      pcm[i] = (int16_t)((i & 1u) ? amplitude : -amplitude);
+        (int16_t)(dynamic==1 ? (frame%10u<3u ? 0u :
+                             frame%10u<6u ? 500u : 7000u) : 1000u);
+    for (size_t i=0; i<320u; i++) {
+      if (dynamic == 0) {
+        random_state ^= random_state << 13;
+        random_state ^= random_state >> 17;
+        random_state ^= random_state << 5;
+        pcm[i] = (int16_t)((random_state & 1u) ? 1000 : -1000);
+      } else if (dynamic == 2) {
+        /* 400Hz correlated square-wave, constant frame RMS. */
+        pcm[i] = (int16_t)(((i / 20u) & 1u) ? amplitude : -amplitude);
+      } else {
+        pcm[i] = (int16_t)((i & 1u) ? amplitude : -amplitude);
+      }
+    }
     REQUIRE(turbo_agent_speech_offer_frame(
           m1,utterance_id,pcm,320u,(frame+1u)*20000u)==0);
     REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0 && pumped==1u);
@@ -344,7 +357,7 @@ static int stationary_power_test(int guard, int dynamic) {
   REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0);
   REQUIRE(turbo_agent_speech_take_final(m1,result,sizeof(result),
                                         &length,&kind)==0);
-  if (guard && !dynamic) {
+  if (guard && dynamic==0) {
     REQUIRE(turbo_agent_speech_get_state(m1)==TURBO_AGENT_SPEECH_NO_SPEECH);
     REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_NO_SPEECH);
     REQUIRE(length==0u && result[0]=='\0');
@@ -374,6 +387,7 @@ int main(void) {
   REQUIRE(stationary_power_test(0,0)==0); /* default OFF preserves FINAL */
   REQUIRE(stationary_power_test(1,0)==0); /* stationary input skips engine */
   REQUIRE(stationary_power_test(1,1)==0); /* dynamic envelope reaches engine */
-  puts("Whisper mock C-ABI PCM/cancel/deadline/stationary opt-in admission PASS");
+  REQUIRE(stationary_power_test(1,2)==0); /* steady coherent tone reaches engine */
+  puts("Whisper mock C-ABI PCM/cancel/deadline/uncorrelated stationary admission PASS");
   return 0;
 }

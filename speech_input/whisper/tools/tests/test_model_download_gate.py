@@ -97,6 +97,24 @@ class MaintainerModelAdmission(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, upload)
 
+    def test_agc_jfk_false_rejection_gate_uses_same_approved_model_only(self):
+        text = self.workflow
+        for piece in (
+            "Generate trusted fixed-RMS spoken JFK stress probe without model access",
+            "generate_agc_speech_probe.py",
+            "jfk-agc-private.wav",
+            "cmp -s /tmp/ta-real-asr-agc-guard-0.private.stdout",
+            "/tmp/ta-real-asr-agc-guard-comparison.json",
+            "guard_preserved_exact_baseline_text",
+        ):
+            with self.subTest(piece=piece):
+                self.assertIn(piece, text)
+        artifact=text.split(
+            "name: speech-whisper-real-model-gated-metrics-NO-WEIGHTS",1)[1]
+        self.assertNotIn("/tmp/ta-real-asr-agc-guard-0.private.stdout",artifact)
+        self.assertNotIn("/tmp/ta-real-asr-agc-guard-1.private.stdout",artifact)
+        self.assertNotIn("jfk-agc-private.wav",artifact)
+
     def test_real_inference_is_not_replaced_by_fixture(self):
         text = self.workflow
         self.assertIn("Build upstream Whisper v1.9.5 CPU-only from exact SHA", text)

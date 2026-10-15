@@ -1,0 +1,39 @@
+name: SpeechOutput M4 standalone C11 fake Provider (design Draft)
+'on':
+  pull_request:
+    paths:
+      - 'speech_output/**'
+      - '.github/workflows/speech-output-m4-fake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fake-provider:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [address, undefined]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile strict standalone C11 and run bounded fake PCM tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.sanitize }}" = address ]; then flags="-fsanitize=address,undefined"; else flags="-fsanitize=undefined"; fi
+          cmake -S speech_output -B build/speech-output -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags -fno-omit-frame-pointer" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$flags"
+          cmake --build build/speech-output --parallel 2
+          ctest --test-dir build/speech-output --output-on-failure
+      - name: Verify no output playback, model or network dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f speech_output/include/turbo_agent_speech_output.h
+          test ! -e speech_output/src/salts_playback.c
+          ! grep -E 'curl|wget|http_client|whisper_init' speech_output/src/turbo_agent_speech_output.c

@@ -184,34 +184,13 @@ jobs:
               > /tmp/ta-real-asr-transcript.txt 2> /tmp/ta-real-asr-engine.stderr
           test -s /tmp/ta-real-asr-transcript.txt
           test "$(wc -c < /tmp/ta-real-asr-transcript.txt)" -le 4097
-          python3 - <<'PY' | tee /tmp/ta-real-asr-acoustic-metrics.json
-          import json,re
-          from pathlib import Path
-          reference="And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country."
-          hyp=Path('/tmp/ta-real-asr-transcript.txt').read_text(encoding='utf-8')
-          def terms(t):return re.findall(r"[a-z0-9']+",t.lower())
-          a,b=terms(reference),terms(hyp)
-          assert b, "actual inference produced empty transcript"
-          assert any(term in b for term in ('country','americans','ask')), b
-          row=list(range(len(b)+1))
-          for i,x in enumerate(a,1):
-              nxt=[i]+[0]*len(b)
-              for j,y in enumerate(b,1):
-                  nxt[j]=min(nxt[j-1]+1,row[j]+1,row[j-1]+(x!=y))
-              row=nxt
-          wer=row[-1]/len(a)
-          # Baseline smoke is intentionally permissive, not a multilingual
-          # WER quality certification. A grossly incorrect decoder still fails.
-          assert wer<=0.65, f'WER={wer:.3f}; transcript={hyp!r}'
-          print(json.dumps({'engine':'actual_ggml_whisper_v1.9.5',
-                            'model':'tiny_multilingual_sha256_pinned',
-                            'fixture':'original_JFK_pcm_losslessly_rewrapped',
-                            'language':'en','reference_words':len(a),
-                            'hypothesis_words':len(b),
-                            'WER':round(wer,5),
-                            'quality_zh_ja_approved':False,
-                            'weights_uploaded':False},indent=2))
-          PY
+          # Reuse the exact same dependency-free WER/CER evaluator for
+          # English smoke and later pinned Chinese/Japanese corpora.
+          python3 speech_input/whisper/tools/evaluate_asr.py \
+            --reference "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country." \
+            --transcript-file /tmp/ta-real-asr-transcript.txt \
+            --language en --max-wer 0.65 --require-word country \
+            --report /tmp/ta-real-asr-acoustic-metrics.json
       - name: Upload only hashes, acoustic metrics, and source/provenance
         if: always()
         uses: actions/upload-artifact@v4

@@ -12,6 +12,7 @@ from unittest import mock
 import wave
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 SCRIPT = ROOT / "verify_native_guard_pcm.py"
 spec = importlib.util.spec_from_file_location("native_guard_pcm", SCRIPT)
 checker = importlib.util.module_from_spec(spec)

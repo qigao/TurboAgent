@@ -77,3 +77,11 @@ endif()
 if(ENABLE_SPEECH_CAPTURE_BRIDGE)
   add_subdirectory(capture)
 endif()
+
+# M3 CPU Whisper is an explicit external C-API Provider. Neither this option
+# nor any Whisper/GGML target is selected by normal TurboAgent.
+option(ENABLE_SPEECH_WHISPER
+  "Build optional exact-v1.9.5 CPU Whisper C-API speech Provider" OFF)
+if(ENABLE_SPEECH_WHISPER)
+  add_subdirectory(whisper)
+endif()

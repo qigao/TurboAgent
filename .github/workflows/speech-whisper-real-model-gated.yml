@@ -1,0 +1,337 @@
+name: SpeechWhisper real multilingual tiny model acoustic positive (explicit approval only)
+
+'on':
+  # Explicit authorization event is single-use for its exact PR source SHA.
+  # A later source commit never reuses a stale approval label to redownload.
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+jobs:
+  verified-real-weights:
+    # No model is downloaded by ordinary pull-request CI.
+    # The repository maintainer must deliberately add this exact approval
+    # label to the matching same-repo Draft PR. This requires label permission.
+    # Labeling is a one-time authorization for that PR head commit, not a
+    # persistent permission for reopened/synchronize or future source commits.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.run_attempt == 1 &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'speech-model-download-approved' &&
+      github.repository == 'qigao/TurboAgent' &&
+      github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' &&
+      github.event.pull_request.head.ref == 'test/speech-whisper-real-model-gated-137' &&
+      contains(github.event.pull_request.labels.*.name, 'speech-model-download-approved')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WHISPER_SOURCE_SHA: d1be6fde11ac6e0407606b4e42fe72d34add8037
+      SALTS_RELEASE_SHA: 6cf093dc053db98bb21b1788eb2fc1ada4df195e
+      HF_MODEL_REV: 5359861c739e955e79d9a303bcbc70fb988958b1
+      MODEL_SHA256: be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21
+      MODEL_BYTES: '77691713'
+      SALTS_ROOT: /tmp/ta-real-asr-salts/sdk/linux-x64
+      TURBO_WHISPER_SDK_ROOT: /tmp/ta-real-asr-whisper-sdk
+      MODEL_ROOT: /tmp/ta-real-asr-approved-model
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+    steps:
+      - name: Check out exact approved PR source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Check out immutable upstream Whisper CPU inference and JFK sample
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: d1be6fde11ac6e0407606b4e42fe72d34add8037
+          path: external/whisper-v195
+          submodules: recursive
+          persist-credentials: false
+      - name: Require source/weight license approvals before touching the model URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Authorize exactly the source checked out for this one-time
+          # GitHub labeled event. A later PR source change requires the
+          # maintainer to remove and re-add the approval label.
+          test "${{ github.run_attempt }}" = 1
+          test "${{ github.event.action }}" = labeled
+          test "${{ github.event.label.name }}" = speech-model-download-approved
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git -C external/whisper-v195 rev-parse HEAD)" = "$WHISPER_SOURCE_SHA"
+          test -f external/whisper-v195/LICENSE
+          test -f external/whisper-v195/samples/jfk.wav
+          test "$MODEL_SHA256" = be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21
+          test "$HF_MODEL_REV" = 5359861c739e955e79d9a303bcbc70fb988958b1
+          cat > /tmp/ta-real-asr-license.txt <<'TXT'
+          user_approved_model_download=true
+          consent_method=maintainer_applied_speech-model-download-approved_label
+          github_approval_event=labeled
+          approved_source_sha=${{ github.event.pull_request.head.sha }}
+          approval_actor=${{ github.actor }}
+          approval_trigger_actor=${{ github.triggering_actor }}
+          code_license=whisper.cpp_v1.9.5_MIT
+          weights_license=OpenAI_Whisper_and_ggml_HF_model_card_MIT
+          model_redistributed_by_TurboAgent=false
+          model_variant=ggml-tiny.bin_multilingual
+          upstream_weights_repo=ggerganov/whisper.cpp
+          upstream_weights_commit=5359861c739e955e79d9a303bcbc70fb988958b1
+          upstream_source_commit=d1be6fde11ac6e0407606b4e42fe72d34add8037
+          acoustic_fixture_source=whisper.cpp/samples/jfk.wav_pinned_source
+          other_language_quality_asserted=false
+          TXT
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - name: Install exact build prerequisites and official Salts.Native SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build nasm pkg-config time curl unzip
+          mkdir -p /tmp/ta-real-asr-salts "$MODEL_ROOT" "$TURBO_WHISPER_SDK_ROOT"
+          actual_sha="$(gh api repos/qigao/salts/git/ref/tags/v2.3.0-rc.16 --jq .object.sha)"
+          test "$actual_sha" = "$SALTS_RELEASE_SHA"
+          gh release download v2.3.0-rc.16 --repo qigao/salts \
+            --pattern Salts.Native.2.3.0-rc.16.nupkg \
+            --dir /tmp/ta-real-asr-salts
+          unzip -q /tmp/ta-real-asr-salts/Salts.Native.2.3.0-rc.16.nupkg \
+            -d /tmp/ta-real-asr-salts
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          sha256sum /tmp/ta-real-asr-salts/Salts.Native.2.3.0-rc.16.nupkg \
+            > /tmp/ta-real-asr-salts.sha256
+      - name: Download ONLY explicitly approved immutable MIT tiny model bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://huggingface.co/ggerganov/whisper.cpp/resolve/$HF_MODEL_REV/ggml-tiny.bin"
+          curl -fL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --retry 3 --max-time 360 --max-filesize 77691713 \
+            --output "$MODEL_ROOT/ggml-tiny.bin" "$url"
+          size="$(stat -c %s "$MODEL_ROOT/ggml-tiny.bin")"
+          test "$size" = "$MODEL_BYTES"
+          printf '%s  %s\n' "$MODEL_SHA256" "$MODEL_ROOT/ggml-tiny.bin" | sha256sum --check --status
+          sha256sum "$MODEL_ROOT/ggml-tiny.bin" > /tmp/ta-real-asr-model.sha256
+          echo "model_size_bytes=$size" >> /tmp/ta-real-asr-license.txt
+          # Never upload copied model weights, even on failure.
+      - name: Validate pinned original spoken fixture and preserve PCM without resampling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, wave
+          from pathlib import Path
+          source=Path('external/whisper-v195/samples/jfk.wav')
+          output=Path('/tmp/ta-real-asr-approved-model/jfk-canonical.wav')
+          with wave.open(str(source),'rb') as r:
+              rate=r.getframerate()
+              channels=r.getnchannels()
+              width=r.getsampwidth()
+              n=r.getnframes()
+              assert (rate,channels,width)==(16000,1,2), (rate,channels,width)
+              assert 320<=n<=3000*320 and n%320==0, n
+              pcm=r.readframes(n)
+              assert len(pcm)==n*2, (n,len(pcm))
+          # Only a lossless RIFF container rewrap; do not alter PCM samples,
+          # channel count, bit depth, duration or sample rate.
+          with wave.open(str(output),'wb') as w:
+              w.setnchannels(channels)
+              w.setsampwidth(width)
+              w.setframerate(rate)
+              w.writeframes(pcm)
+          print('source_audio_sha256='+hashlib.sha256(source.read_bytes()).hexdigest())
+          print('canonical_audio_sha256='+hashlib.sha256(output.read_bytes()).hexdigest())
+          print('pcm_sha256='+hashlib.sha256(pcm).hexdigest())
+          print('samples='+str(n))
+          print('seconds='+str(n/16000))
+          PY
+          sha256sum "$MODEL_ROOT/jfk-canonical.wav" > /tmp/ta-real-asr-audio.sha256
+      - name: Generate original, license-independent zero and nonzero noise probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Synthetic deterministic PCM, not a human speech sample. No
+          # model/network access in this generation step.
+          python3 speech_input/whisper/tools/generate_noise_fixtures.py \
+            --output-dir "$MODEL_ROOT/no-speech-probes" \
+            --report /tmp/ta-real-asr-nonspeech-fixture-metadata.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('/tmp/ta-real-asr-nonspeech-fixture-metadata.json').read_text())
+          assert manifest['human_audio_corpus_used'] is False
+          assert len(manifest['profiles']) == 3
+          assert manifest['profiles']['digital-zero']['nonzero_samples'] == 0
+          assert manifest['profiles']['stationary-noise-quiet']['nonzero_samples'] > 0
+          assert manifest['profiles']['stationary-noise-medium']['nonzero_samples'] > 0
+          PY
+      - name: Build upstream Whisper v1.9.5 CPU-only from exact SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S external/whisper-v195 -B build/speech-model-upstream -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_INSTALL_PREFIX=$TURBO_WHISPER_SDK_ROOT" \
+            -DWHISPER_BUILD_IS_DEV=OFF -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_SERVER=OFF \
+            -DWHISPER_CURL=OFF -DWHISPER_COREML=OFF -DWHISPER_OPENVINO=OFF \
+            -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF \
+            -DGGML_METAL=OFF -DGGML_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=ON
+          cmake --build build/speech-model-upstream --parallel 2
+          cmake --install build/speech-model-upstream
+          test -f "$TURBO_WHISPER_SDK_ROOT/lib/cmake/whisper/whisper-config.cmake"
+      - name: Build exact opt-in TurboAgent CLI and run actual model acoustic inference
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cmake -S speech_input -B build/speech-real-model -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            -DENABLE_SPEECH_WHISPER=ON \
+            -DENABLE_SPEECH_CAPTURE_BRIDGE=ON \
+            -DENABLE_SPEECH_WHISPER_CLI=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed/speech-model" \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build/speech-real-model \
+            --target turboagent-whisper-transcribe --parallel 2
+          cli="$GITHUB_WORKSPACE/build/speech-real-model/whisper/turboagent-whisper-transcribe"
+          test -x "$cli"
+          ldd "$cli" | tee /tmp/ta-real-asr-linked-images.txt
+          grep -F "$TURBO_WHISPER_SDK_ROOT/lib/libwhisper.so" /tmp/ta-real-asr-linked-images.txt
+          grep -F "$SALTS_ROOT/lib/libsalts.so" /tmp/ta-real-asr-linked-images.txt
+          if grep -Fq 'not found' /tmp/ta-real-asr-linked-images.txt; then exit 1; fi
+          /usr/bin/time -f 'real_elapsed_sec=%e\nmax_rss_kb=%M' \
+            -o /tmp/ta-real-asr-resources.txt \
+            timeout --signal=TERM --kill-after=10s 200s \
+              "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+                --sha256 "$MODEL_SHA256" \
+                --wav "$MODEL_ROOT/jfk-canonical.wav" \
+                --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+              > /tmp/ta-real-asr-transcript.txt 2> /tmp/ta-real-asr-engine.stderr
+          test -s /tmp/ta-real-asr-transcript.txt
+          test "$(wc -c < /tmp/ta-real-asr-transcript.txt)" -le 4097
+          # Reuse the exact same dependency-free WER/CER evaluator for
+          # English smoke and later pinned Chinese/Japanese corpora.
+          python3 speech_input/whisper/tools/evaluate_asr.py \
+            --reference "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country." \
+            --transcript-file /tmp/ta-real-asr-transcript.txt \
+            --language en --max-wer 0.65 --require-word country \
+            --report /tmp/ta-real-asr-acoustic-metrics.json
+      - name: Observe real tiny-model response to generated non-speech (diagnostic; no noise PASS claim)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cli="$GITHUB_WORKSPACE/build/speech-real-model/whisper/turboagent-whisper-transcribe"
+          test -x "$cli"
+          mkdir -p /tmp/ta-real-asr-nonspeech-private
+          for profile in digital-zero stationary-noise-quiet stationary-noise-medium; do
+            # ONLY already-approved verified weights: no second download.
+            # Keep stdout/stderr private; never upload a hallucinated phrase.
+            set +e
+            timeout --signal=TERM --kill-after=10s 200s \
+              "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+                --sha256 "$MODEL_SHA256" \
+                --wav "$MODEL_ROOT/no-speech-probes/$profile.wav" \
+                --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+              > "/tmp/ta-real-asr-nonspeech-private/$profile.stdout" \
+              2> "/tmp/ta-real-asr-nonspeech-private/$profile.stderr"
+            status=$?
+            set -e
+            # Timeouts/crashes must never be disguised as negative acceptance.
+            test "$status" -eq 0 || test "$status" -eq 4
+            printf '%s\n' "$status" > "/tmp/ta-real-asr-nonspeech-private/$profile.exit"
+          done
+          python3 speech_input/whisper/tools/evaluate_non_speech_probe.py \
+            --input-dir /tmp/ta-real-asr-nonspeech-private \
+            --report /tmp/ta-real-asr-nonspeech-outcomes.json
+      - name: Reject real Whisper inference exceeding a 1ms monotonic decode deadline
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cli="$GITHUB_WORKSPACE/build/speech-real-model/whisper/turboagent-whisper-transcribe"
+          test -x "$cli"
+          # Uses the already authenticated model and immutable JFK fixture.
+          # A real decode exceeding 1ms must fail closed without stdout,
+          # even if the vendor engine returns after its final abort poll.
+          set +e
+          timeout --signal=TERM --kill-after=10s 60s \
+            "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+              --sha256 "$MODEL_SHA256" \
+              --wav "$MODEL_ROOT/jfk-canonical.wav" \
+              --language en --threads 2 --timeout-ms 1 --model-max-mib 128 \
+            > /tmp/ta-real-asr-deadline.stdout \
+            2> /tmp/ta-real-asr-deadline.stderr
+          rc=$?
+          set -e
+          test "$rc" -eq 4
+          test ! -s /tmp/ta-real-asr-deadline.stdout
+          grep -Fq 'no transcript admitted' /tmp/ta-real-asr-deadline.stderr
+          printf 'real_model_decode_deadline_1ms=fail_closed\nexit_status=%s\nstdout_bytes=0\n' "$rc" \
+            > /tmp/ta-real-asr-deadline-evidence.txt
+      - name: Qualify genuine model-backed Provider abort, deadline and ELF drain/unload
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cmake --build build/speech-real-model \
+            --target test_turbo_agent_speech_whisper_real_model_dso --parallel 2
+          provider="$GITHUB_WORKSPACE/build/speech-real-model/whisper/libturbo_agent_speech_whisper.so"
+          host="$GITHUB_WORKSPACE/build/speech-real-model/whisper/test_turbo_agent_speech_whisper_real_model_dso"
+          test -f "$provider" && test -x "$host"
+          # The tested image must actually depend on the independently built
+          # Whisper CPU vendor shared library, not the CI's fake ABI engine.
+          ldd "$provider" | tee /tmp/ta-real-asr-provider-linked-images.txt
+          grep -F "$TURBO_WHISPER_SDK_ROOT/lib/libwhisper.so" \
+            /tmp/ta-real-asr-provider-linked-images.txt
+          if grep -Fq 'not found' /tmp/ta-real-asr-provider-linked-images.txt; then exit 1; fi
+          # The strict C11 host must use dlsym without linking vendor engine.
+          ldd "$host" | tee /tmp/ta-real-asr-host-linked-images.txt
+          if grep -E 'lib(whisper|ggml)' /tmp/ta-real-asr-host-linked-images.txt; then
+            echo "Host directly linked Whisper/GGML; unload proof invalid" >&2
+            exit 1
+          fi
+          timeout --signal=TERM --kill-after=10s 240s \
+            "$host" "$provider" "$MODEL_ROOT/ggml-tiny.bin" "$MODEL_SHA256" \
+            "$MODEL_ROOT/jfk-canonical.wav" \
+            | tee /tmp/ta-real-asr-provider-lifecycle.txt
+          test "$(grep -c '^real_whisper_generation=' /tmp/ta-real-asr-provider-lifecycle.txt)" -eq 6
+          grep -Fq 'PASS: 6 real-weight Whisper CPU Provider ELF settle/unload generations' \
+            /tmp/ta-real-asr-provider-lifecycle.txt
+          # This separate measured gate is not proof of hard preemption or
+          # cross-platform unload behavior.
+      - name: Upload only hashes, acoustic metrics, and source/provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-whisper-real-model-gated-metrics-NO-WEIGHTS
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            /tmp/ta-real-asr-license.txt
+            /tmp/ta-real-asr-model.sha256
+            /tmp/ta-real-asr-audio.sha256
+            /tmp/ta-real-asr-salts.sha256
+            /tmp/ta-real-asr-linked-images.txt
+            /tmp/ta-real-asr-resources.txt
+            /tmp/ta-real-asr-transcript.txt
+            /tmp/ta-real-asr-acoustic-metrics.json
+            /tmp/ta-real-asr-deadline-evidence.txt
+            /tmp/ta-real-asr-nonspeech-fixture-metadata.json
+            /tmp/ta-real-asr-nonspeech-outcomes.json
+            /tmp/ta-real-asr-provider-linked-images.txt
+            /tmp/ta-real-asr-host-linked-images.txt
+            /tmp/ta-real-asr-provider-lifecycle.txt
+            build/speech-real-model/compile_commands.json

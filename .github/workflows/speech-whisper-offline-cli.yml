@@ -13,6 +13,22 @@ permissions:
   packages: read
 
 jobs:
+  asr-metrics-no-weights:
+    name: Offline zh/ja CER and en WER evaluator (no model download)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test deterministic multilingual scoring and fail-closed transcript admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover \
+            -s speech_input/whisper/tools/tests \
+            -p 'test_*.py' -v
+
   real-whisper-binary-and-mock-cli:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -70,6 +86,21 @@ jobs:
               f.writeframes(struct.pack('<639h',*samples[:-1]))
           (root/'bad.wav').write_bytes(b'NOT_A_WAVE')
           PY
+      - name: Compare exact JFK spoken WAV and stationary noise power envelope without model bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C external/whisper-v195 rev-parse HEAD)" = d1be6fde11ac6e0407606b4e42fe72d34add8037
+          test -f external/whisper-v195/samples/jfk.wav
+          python3 speech_input/whisper/tools/generate_noise_fixtures.py \
+            --output-dir "$MODEL_FIXTURES/stationarity-noise" \
+            --report /tmp/speech-cli-stationary-fixtures-metadata.json
+          python3 speech_input/whisper/tools/measure_frame_stationarity.py \
+            --jfk-wav external/whisper-v195/samples/jfk.wav \
+            --noise-dir "$MODEL_FIXTURES/stationarity-noise" \
+            --report /tmp/speech-cli-stationarity-metrics.json
+          # The report describes energy variation only, not accepted VAD.
+          grep -Fq '"acoustic_vad_certified": false' /tmp/speech-cli-stationarity-metrics.json
       - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
         with:
           mode: read
@@ -111,6 +142,24 @@ jobs:
           cmake --build build/speech-cli --target turboagent-whisper-transcribe \
             --parallel 2
           test -f build/speech-cli/whisper/turboagent-whisper-transcribe
+          # Model-free compile audit for the independent real-model DSO host.
+          # It must not require a model, link Whisper or trigger any download.
+          cmake --build build/speech-cli \
+            --target test_turbo_agent_speech_whisper_real_model_dso --parallel 2
+          host=build/speech-cli/whisper/test_turbo_agent_speech_whisper_real_model_dso
+          test -x "$host"
+          if ldd "$host" | grep -E 'lib(whisper|ggml)' ; then
+            echo 'Independent C11 host must not link vendor inference libraries' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          commands=json.loads(Path('build/speech-cli/compile_commands.json').read_text())
+          found=[r for r in commands if Path(r['file']).name=='test_speech_whisper_real_model_dso.c']
+          assert len(found)==1 and '-Werror' in found[0]['command'], found
+          print('PASS: real-model DSO host compiles as independent strict C11; zero model bytes')
+          PY
           ldd build/speech-cli/whisper/turboagent-whisper-transcribe \
             | tee /tmp/speech-cli-real-dependencies.txt
           grep -F "$TURBO_WHISPER_SDK_ROOT/lib/libwhisper.so" \
@@ -192,7 +241,7 @@ jobs:
             --wav "$MODEL_FIXTURES/s16-mono-16000.wav" --language en \
             --timeout-ms 30000 > /tmp/speech-cli-mock-positive.txt
           test "$(cat /tmp/speech-cli-mock-positive.txt)" = ' utterance'
-          for adversarial in TA_SPEECH_TEST_ESCAPE TA_SPEECH_TEST_BIDI; do
+          for adversarial in TA_SPEECH_TEST_ESCAPE TA_SPEECH_TEST_BIDI TA_SPEECH_TEST_C1 TA_SPEECH_TEST_ARABIC_MARK TA_SPEECH_TEST_LINE_SEPARATOR; do
             set +e
             env "$adversarial=1" build/speech-cli-mock/mock_whisper_cli \
               --model "$model" --sha256 "$sha" \
@@ -215,6 +264,8 @@ jobs:
           path: |
             /tmp/speech-cli-salts.sha256
             /tmp/speech-cli-real-dependencies.txt
+            /tmp/speech-cli-stationarity-metrics.json
+            /tmp/speech-cli-stationary-fixtures-metadata.json
             /tmp/speech-cli-negative.txt
             /tmp/speech-cli-mock-positive.txt
             build/speech-cli/compile_commands.json

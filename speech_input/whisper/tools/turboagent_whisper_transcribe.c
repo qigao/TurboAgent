@@ -117,10 +117,15 @@ static int safe_preview_text(const char *utf8, size_t length) {
   for (size_t i=0; i<length; ++i) {
     const unsigned char b = p[i];
     if ((b < 0x20u && b != '\n' && b != '\t') || b == 0x7fu)
-      return 0; /* reject ANSI ESC, CR rewrites and other C0/C1 terminals */
+      return 0; /* reject ANSI ESC, CR rewrites and C0/DEL controls */
+    if (b == 0xc2u && i+1u < length &&
+        p[i+1u] >= 0x80u && p[i+1u] <= 0x9fu)
+      return 0; /* encoded U+0080..U+009F (C1 terminal controls) */
+    if (b == 0xd8u && i+1u < length && p[i+1u] == 0x9cu)
+      return 0; /* U+061C Arabic Letter Mark, bidi formatter */
     if (i+2u < length && b == 0xe2u) {
       if (p[i+1u] == 0x80u &&
-          ((p[i+2u] >= 0xaau && p[i+2u] <= 0xaeu) ||
+          ((p[i+2u] >= 0xa8u && p[i+2u] <= 0xaeu) ||
            p[i+2u] == 0x8eu || p[i+2u] == 0x8fu))
         return 0; /* U+202A..202E / U+200E,U+200F bidi controls */
       if (p[i+1u] == 0x81u &&

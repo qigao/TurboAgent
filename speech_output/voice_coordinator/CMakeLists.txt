@@ -33,3 +33,14 @@ install(TARGETS turbo_tts_voice_coordinator
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES include/turbo_agent_voice_coordinator.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# Test-only real dlopen/worker acceptance, no weights or audio hardware.
+# Linux-only and deliberately OFF in regular M4.2, native SDK and release.
+option(ENABLE_TTS_NATIVE_DSO_TEST
+  "Qualify native C11 TTS Provider DSO and worker cancellation" OFF)
+if(ENABLE_TTS_NATIVE_DSO_TEST)
+  if(NOT BUILD_TESTING)
+    message(FATAL_ERROR "native DSO fixture requires BUILD_TESTING")
+  endif()
+  add_subdirectory(tests/dso)
+endif()

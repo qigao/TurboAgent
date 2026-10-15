@@ -29,7 +29,7 @@ class MaintainerModelAdmission(unittest.TestCase):
         for required in (
             "github.repository == 'qigao/TurboAgent'",
             "github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent'",
-            "github.event.pull_request.head.ref == 'feature/speech-stationary-noise-admission-137'",
+            "github.event.pull_request.head.ref == 'test/speech-correlated-corpus-integration-146'",
             "ref: ${{ github.event.pull_request.head.sha }}",
         ):
             with self.subTest(required=required):
@@ -96,6 +96,47 @@ class MaintainerModelAdmission(unittest.TestCase):
                           "/tmp/ta-guard-stationary-noise-medium.stdout"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, upload)
+
+    def test_agc_jfk_false_rejection_gate_uses_same_approved_model_only(self):
+        text = self.workflow
+        for piece in (
+            "Generate trusted fixed-RMS spoken JFK stress probe without model access",
+            "generate_agc_speech_probe.py",
+            "jfk-agc-private.wav",
+            "cmp -s /tmp/ta-real-asr-agc-guard-0.private.stdout",
+            "/tmp/ta-real-asr-agc-guard-comparison.json",
+            "guard_preserved_exact_baseline_text",
+        ):
+            with self.subTest(piece=piece):
+                self.assertIn(piece, text)
+        artifact=text.split(
+            "name: speech-whisper-real-model-gated-metrics-NO-WEIGHTS",1)[1]
+        self.assertNotIn("/tmp/ta-real-asr-agc-guard-0.private.stdout",artifact)
+        self.assertNotIn("/tmp/ta-real-asr-agc-guard-1.private.stdout",artifact)
+        self.assertNotIn("jfk-agc-private.wav",artifact)
+
+    def test_soft_and_short_jfk_voice_comparison_keeps_private_transcripts_local(self):
+        workflow = self.workflow
+        for required in (
+            "generate_speech_stress_probes.py",
+            "Compare baseline against opt-in guard on genuine soft and short JFK voice derivatives",
+            "compare_speech_stress_outcomes.py",
+            "/tmp/ta-real-asr-soft-jfk-comparison.json",
+            "/tmp/ta-real-asr-speech-stress-manifest.json",
+            "jfk-mid-short-0p8s",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, workflow)
+        upload = workflow.split(
+            "name: speech-whisper-real-model-gated-metrics-NO-WEIGHTS", 1)[1]
+        for private in (
+            "/tmp/ta-real-asr-soft-jfk-private",
+            "jfk-speech-stress-private/",
+            "-guard0.stdout", "-guard1.stdout",
+            "jfk-soft-8.wav", "jfk-agc-soft-32.wav",
+        ):
+            with self.subTest(private=private):
+                self.assertNotIn(private, upload)
 
     def test_real_inference_is_not_replaced_by_fixture(self):
         text = self.workflow

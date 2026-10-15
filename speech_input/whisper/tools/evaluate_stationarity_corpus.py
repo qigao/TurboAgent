@@ -155,6 +155,7 @@ def evaluate(audio_root: Path, manifest_path: Path) -> dict:
     groups = defaultdict(lambda: [0, 0, 0])  # count / OFF reject / ON reject
     langs = defaultdict(lambda: [0, 0])
     conditions = defaultdict(lambda: [0, 0])
+    real_noise_conditions = defaultdict(lambda: [0, 0])
     durations = {k: [0, 0] for k in
                  ("lt_1s", "1_to_3s", "3_to_10s", "10_to_60s")}
     speaker_groups = defaultdict(lambda: [0, 0])
@@ -191,15 +192,45 @@ def evaluate(audio_root: Path, manifest_path: Path) -> dict:
                 s = speaker_groups[speaker]
                 s[0] += 1
                 s[1] += int(on)
+        elif source == "real_noise":
+            n = real_noise_conditions[condition]
+            n[0] += 1
+            n[1] += int(on)
     human, noise, synthetic = (groups[k] for k in
                                ("human_voice", "real_noise", "synthetic"))
     sp_count = len(speaker_groups)
     sp_any = sum(1 for clips, rejected in speaker_groups.values() if rejected > 0)
     sp_macro = (round(sum(rej / clips for clips, rej in speaker_groups.values())
                       / sp_count, 6) if sp_count else None)
+    # Do not omit missing stratification categories: a null 0/0 cohort
+    # is a visible evidence gap, NOT an observed zero false-refusal rate.
+    empty_languages = sorted(k for k in LANGUAGES if langs[k][0] == 0)
+    empty_voice_conditions = sorted(
+        k for k in SOURCE_CONDITIONS["human_voice"] if conditions[k][0] == 0)
+    empty_noise_conditions = sorted(
+        k for k in SOURCE_CONDITIONS["real_noise"]
+        if real_noise_conditions[k][0] == 0)
     return {
         "schema": schema,
-        "method": "preinference_20ms_frame_power_stationarity_guard_abi2",
+        "coverage_gaps": {
+            "missing_declared_voice_languages": empty_languages,
+            "missing_declared_voice_conditions": empty_voice_conditions,
+            "missing_declared_real_noise_conditions": empty_noise_conditions,
+            "any_independently_verified_human_voice": False,
+            "any_independently_verified_real_noise": False,
+            "all_required_strata_independently_qualified": False,
+            "no_data_is_not_zero_error_rate": True,
+        },
+        "method": "preinference_20ms_frame_power_lag1_correlation_guard_abi2",
+        "guard_eligibility": {
+            "min_full_20ms_frames": 50,
+            "max_frame_power_cv": 0.12,
+            "max_frame_power_ratio": 2.0,
+            "max_absolute_lag1_correlation_exclusive": 0.12,
+            "applies_only_to_nonzero_pcm": True,
+            "matches_default_off_c11_provider_abi": 2,
+            "not_general_voice_activity_detection": True,
+        },
         "guard_default_changed": False,
         "model_inference_used": False,
         "model_weights_downloaded": False,
@@ -214,8 +245,11 @@ def evaluate(audio_root: Path, manifest_path: Path) -> dict:
             "guard_on_rejections": human[2],
             "incremental_guard_rejections": human[2]-human[1],
             "guard_on_false_rejection": rate(human[2], human[0]),
-            "by_language": {k: rate(v[1], v[0]) for k, v in sorted(langs.items())},
-            "by_condition": {k: rate(v[1], v[0]) for k, v in sorted(conditions.items())},
+            "by_language": {
+                k: rate(langs[k][1], langs[k][0]) for k in sorted(LANGUAGES)},
+            "by_condition": {
+                k: rate(conditions[k][1], conditions[k][0])
+                for k in sorted(SOURCE_CONDITIONS["human_voice"])},
             "by_duration": {k: rate(v[1], v[0]) for k, v in sorted(durations.items())},
             "speaker_groups": {
                 "schema2_declared_groups": schema == 2,
@@ -231,6 +265,9 @@ def evaluate(audio_root: Path, manifest_path: Path) -> dict:
             "guard_off_predecode_rejections": noise[1],
             "guard_on_predecode_rejections": rate(noise[2], noise[0]),
             "not_screened_by_guard": noise[0]-noise[2],
+            "by_condition": {
+                k: rate(real_noise_conditions[k][1], real_noise_conditions[k][0])
+                for k in sorted(SOURCE_CONDITIONS["real_noise"])},
             "hallucination_rate_measured": False,
         },
         "synthetic_controls": {

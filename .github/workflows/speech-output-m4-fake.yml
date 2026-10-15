@@ -1,0 +1,75 @@
+name: SpeechOutput M4 standalone C11 fake Provider (design Draft)
+'on':
+  pull_request:
+    paths:
+      - 'speech_output/**'
+      - '.github/workflows/speech-output-m4-fake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fake-provider:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [address, undefined, thread]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile strict standalone C11 and run bounded fake PCM tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.sanitize }}" = address ]; then flags="-fsanitize=address,undefined";
+          elif [ "${{ matrix.sanitize }}" = thread ]; then flags="-fsanitize=thread";
+          else flags="-fsanitize=undefined"; fi
+          cmake -S speech_output -B build/speech-output -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags -fno-omit-frame-pointer" \
+            "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags -fno-omit-frame-pointer" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$flags"
+          cmake --build build/speech-output --parallel 2
+          ctest --test-dir build/speech-output --output-on-failure
+      - name: Verify installed standalone C11 and C++17 consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/tts-sdk"
+          cmake --install build/speech-output --prefix "$prefix"
+          test -f "$prefix/include/turbo_agent_speech_output.h"
+          test -f "$prefix/lib/libturbo_agent_speech_output.a"
+          cat > /tmp/tts-installed-c11.c <<'C'
+          #include <turbo_agent_speech_output.h>
+          int main(void) {
+            turbo_tts_config_t c;
+            turbo_tts_provider_t p;
+            turbo_tts_config_init(&c);
+            turbo_tts_provider_init(&p);
+            return c.abi_version != 1u || p.abi_version != 1u ||
+                   c.format.sample_rate_hz != 24000u;
+          }
+          C
+          if [ "${{ matrix.sanitize }}" = address ]; then flags='-fsanitize=address,undefined';
+          elif [ "${{ matrix.sanitize }}" = thread ]; then flags='-fsanitize=thread';
+          else flags='-fsanitize=undefined'; fi
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror "$flags" \
+            -I"$prefix/include" /tmp/tts-installed-c11.c \
+            "$prefix/lib/libturbo_agent_speech_output.a" \
+            -o /tmp/tts-installed-c11
+          /tmp/tts-installed-c11
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror "$flags" \
+            -I"$prefix/include" \
+            speech_output/tests/test_speech_output_cpp17.cpp \
+            "$prefix/lib/libturbo_agent_speech_output.a" \
+            -o /tmp/tts-installed-cpp17
+          /tmp/tts-installed-cpp17
+      - name: Verify no output playback, model or network dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f speech_output/include/turbo_agent_speech_output.h
+          test ! -e speech_output/src/salts_playback.c
+          ! grep -E 'curl|wget|http_client|whisper_init' speech_output/src/turbo_agent_speech_output.c

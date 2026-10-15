@@ -164,8 +164,6 @@ jobs:
             | tee /tmp/speech-cli-real-dependencies.txt
           grep -F "$TURBO_WHISPER_SDK_ROOT/lib/libwhisper.so" \
             /tmp/speech-cli-real-dependencies.txt
-            /tmp/speech-cli-stationarity-metrics.json
-            /tmp/speech-cli-stationary-fixtures-metadata.json
           if grep -Fq 'not found' /tmp/speech-cli-real-dependencies.txt; then exit 1; fi
       - name: Reject malformed WAV, missing/wrong model SHA, unsupported format and implicit inputs
         shell: bash
@@ -266,6 +264,8 @@ jobs:
           path: |
             /tmp/speech-cli-salts.sha256
             /tmp/speech-cli-real-dependencies.txt
+            /tmp/speech-cli-stationarity-metrics.json
+            /tmp/speech-cli-stationary-fixtures-metadata.json
             /tmp/speech-cli-negative.txt
             /tmp/speech-cli-mock-positive.txt
             build/speech-cli/compile_commands.json

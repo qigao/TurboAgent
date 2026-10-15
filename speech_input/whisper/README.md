@@ -125,6 +125,10 @@ The command pumps one 20ms frame through M2 and M1 at a time, bounding queue
 admission; only FINAL is written to stdout. PARTIAL and engine errors cannot
 become a transcript. NO_SPEECH produces no stdout. On failure, no transcript
 is admitted; this is a preview for operator review, **not** an Agent input.
+Although M1 validates strict UTF-8, the CLI also refuses terminal ESC/C0,
+DEL and Unicode bidi direction override/isolate controls **before** writing
+any transcript to stdout. It never silently strips/reorders unsafe bytes;
+adversarial model-output fixtures must leave stdout empty.
 
 `--language` is required and must explicitly select `en`, `zh`, `ja`
 or `auto`; optional CPU threads 1..16, cooperative decode deadline

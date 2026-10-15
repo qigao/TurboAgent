@@ -106,6 +106,63 @@ class CorpusGateTests(unittest.TestCase):
             self.assertNotIn("a.wav", result.stdout)
             self.assertEqual(json.loads(result.stdout), report)
 
+    def test_absent_language_and_noise_strata_are_explicitly_unknown(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            spoken = root / "private-voice.wav"
+            make_wave(spoken, "dynamic")
+            manifest = root / "private-manifest.json"
+            manifest.write_text(json.dumps({"schema": 1, "samples": [
+                entry(spoken, "human_voice", "en", "ordinary", "creator_consent")
+            ]}), encoding="utf-8")
+            report = corpus.evaluate(root, manifest)
+            gaps = report["coverage_gaps"]
+            self.assertEqual(gaps["missing_declared_voice_languages"],
+                             ["ja", "mixed", "zh"])
+            self.assertEqual(gaps["missing_declared_real_noise_conditions"],
+                             sorted(corpus.SOURCE_CONDITIONS["real_noise"]))
+            self.assertIn("low_volume", gaps["missing_declared_voice_conditions"])
+            self.assertNotIn("ordinary", gaps["missing_declared_voice_conditions"])
+            self.assertTrue(gaps["no_data_is_not_zero_error_rate"])
+            self.assertFalse(gaps["all_required_strata_independently_qualified"])
+            self.assertEqual(report["human_voice"]["by_language"]["en"]["denominator"], 1)
+            for language in ("zh", "ja", "mixed"):
+                self.assertIsNone(report["human_voice"]["by_language"][language]["rate"])
+                self.assertIsNone(report["human_voice"]["by_language"][language]["wilson95"])
+                self.assertEqual(report["human_voice"]["by_language"][language]["denominator"], 0)
+            self.assertIsNone(report["real_noise"]["by_condition"]["fan"]["rate"])
+            self.assertFalse(report["real_noise"]["hallucination_rate_measured"])
+            public = json.dumps(report)
+            self.assertNotIn(spoken.name, public)
+            self.assertNotIn(str(root), public)
+            self.assertNotIn(entry(spoken, "human_voice", "en", "ordinary",
+                                   "creator_consent")["sha256"], public)
+
+    def test_real_noise_condition_rates_are_predecode_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            constant = root / "quiet.wav"
+            varying = root / "intermittent.wav"
+            make_wave(constant, "constant")
+            make_wave(varying, "dynamic")
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"schema": 1, "samples": [
+                entry(constant, "real_noise", "none", "fan", "public_license"),
+                entry(varying, "real_noise", "none", "intermittent", "public_license")
+            ]}), encoding="utf-8")
+            report = corpus.evaluate(root, manifest)
+            noise = report["real_noise"]
+            self.assertEqual(noise["guard_on_predecode_rejections"]["denominator"], 2)
+            self.assertEqual(noise["guard_on_predecode_rejections"]["count"], 1)
+            self.assertEqual(noise["by_condition"]["fan"]["denominator"], 1)
+            self.assertEqual(noise["by_condition"]["fan"]["rate"], 1)
+            self.assertEqual(noise["by_condition"]["intermittent"]["rate"], 0)
+            self.assertIsNone(noise["by_condition"]["traffic"]["rate"])
+            self.assertEqual(report["coverage_gaps"]["missing_declared_voice_languages"],
+                             ["en", "ja", "mixed", "zh"])
+            self.assertFalse(noise["hallucination_rate_measured"])
+            self.assertFalse(report["acoustic_vad_or_recognition_quality_certified"])
+
     def test_threshold_49_versus_50_frames_and_provenance_rejection(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -1,3 +1,6 @@
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "turbo_agent_speech_whisper.h"
 
 #include <cmeta_crypto.h>
@@ -9,6 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
 #define WHISPER_PCM_MAX_SAMPLES \
   ((size_t)TURBO_AGENT_SPEECH_MAX_UTTERANCE_FRAMES * \
@@ -22,12 +30,27 @@ struct turbo_agent_speech_whisper_s {
   char *text; /* one result, borrowed only during synchronous finish() */
   size_t max_samples, used_samples, max_text;
   uint32_t cpu_threads;
+  uint32_t max_decode_ms;
+  uint64_t decode_deadline_ms;
   turbo_agent_speech_whisper_language_t language;
   uint64_t last_utterance, last_timestamp_us;
   int has_timestamp, active, has_nonzero_pcm, last_error;
   atomic_int abort_requested;
   atomic_int in_decode;
 };
+
+/* Monotonic deadline source, never a wall-clock or model-provided timestamp.
+ * The device callback never invokes this (it remains pure bounded PCM). */
+static uint64_t monotonic_milliseconds(void) {
+#if defined(_WIN32)
+  return (uint64_t)GetTickCount64();
+#else
+  struct timespec t;
+  if (clock_gettime(CLOCK_MONOTONIC, &t) != 0 || t.tv_sec < 0)
+    return 0u;
+  return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u;
+#endif
+}
 
 static int absolute_model_path(const char *path) {
   size_t n = 0u;
@@ -74,6 +97,7 @@ static void wipe_utterance(turbo_agent_speech_whisper_t *owner) {
   owner->has_nonzero_pcm = 0;
   owner->has_timestamp = 0;
   owner->last_timestamp_us = 0u;
+  owner->decode_deadline_ms = 0u;
 }
 
 static void destroy_storage(turbo_agent_speech_whisper_t *owner) {
@@ -175,6 +199,7 @@ void turbo_agent_speech_whisper_config_init(
   config->max_utterance_frames = 1500u;
   config->max_text_bytes = 1024u;
   config->cpu_threads = 2u;
+  config->max_decode_ms = 30000u;
   config->language = TURBO_AGENT_WHISPER_LANGUAGE_AUTO;
 }
 
@@ -199,6 +224,8 @@ int turbo_agent_speech_whisper_create(
       config->max_text_bytes > TURBO_AGENT_SPEECH_MAX_TEXT_BYTES ||
       config->cpu_threads == 0u ||
       config->cpu_threads > TURBO_AGENT_SPEECH_WHISPER_MAX_THREADS ||
+      config->max_decode_ms == 0u ||
+      config->max_decode_ms > TURBO_AGENT_SPEECH_WHISPER_MAX_DECODE_MS ||
       !valid_language(config->language))
     return TURBO_AGENT_SPEECH_EINVAL;
   for (size_t i = 0u; i < sizeof(config->expected_sha256); i++) {
@@ -215,6 +242,7 @@ int turbo_agent_speech_whisper_create(
   owner->max_samples = n;
   owner->max_text = (size_t)config->max_text_bytes;
   owner->cpu_threads = config->cpu_threads;
+  owner->max_decode_ms = config->max_decode_ms;
   owner->language = config->language;
   atomic_init(&owner->abort_requested, 0);
   atomic_init(&owner->in_decode, 0);
@@ -291,9 +319,17 @@ static int provider_accept(void *context, const int16_t *pcm,
 }
 
 static bool whisper_abort_callback(void *context) {
-  const turbo_agent_speech_whisper_t *owner =
-      (const turbo_agent_speech_whisper_t *)context;
-  return atomic_load_explicit(&owner->abort_requested, memory_order_acquire) != 0;
+  turbo_agent_speech_whisper_t *owner =
+      (turbo_agent_speech_whisper_t *)context;
+  uint64_t now;
+  if (atomic_load_explicit(&owner->abort_requested, memory_order_acquire))
+    return true;
+  now = monotonic_milliseconds();
+  if (now == 0u || now >= owner->decode_deadline_ms) {
+    atomic_store_explicit(&owner->abort_requested, 1, memory_order_release);
+    return true; /* decoder must settle before any Provider image unload */
+  }
+  return false;
 }
 
 static int provider_finish(void *context,
@@ -332,6 +368,14 @@ static int provider_finish(void *context,
   params.vad = false; /* no externally supplied VAD model */
   params.abort_callback = whisper_abort_callback;
   params.abort_callback_user_data = owner;
+  {
+    const uint64_t now = monotonic_milliseconds();
+    if (now == 0u || now > UINT64_MAX - (uint64_t)owner->max_decode_ms) {
+      owner->last_error = TURBO_AGENT_WHISPER_EENGINE;
+      return -1;
+    }
+    owner->decode_deadline_ms = now + (uint64_t)owner->max_decode_ms;
+  }
   atomic_store_explicit(&owner->in_decode, 1, memory_order_release);
   rc = whisper_full(owner->engine, params, owner->pcm_f32,
                     (int)owner->used_samples);

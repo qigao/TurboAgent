@@ -49,6 +49,7 @@ int salts_playback_drain(salts_playback_t *p, uint32_t timeout_ms) {
 static int run_real_dso_case(int cancel_first) {
   atomic_uint unloads;
   atomic_init(&unloads, 0u);
+  fprintf(stderr, "DSO CASE %d: begin\n", cancel_first);
   void *module = dlopen(TEST_TTS_DSO_PATH, RTLD_NOW | RTLD_LOCAL);
   if (module == NULL) {
     fprintf(stderr, "FAIL dlopen: %s\n", dlerror());
@@ -66,6 +67,7 @@ static int run_real_dso_case(int cancel_first) {
   REQUIRE(api && api->abi_version == TURBO_TTS_TEST_DSO_ABI &&
           api->struct_size == sizeof(*api));
   api->set_unload_observer(&unloads);
+  fprintf(stderr, "DSO CASE %d: loaded\n", cancel_first);
 
   turbo_tts_test_dso_t *ctx = NULL;
   REQUIRE(api->create(&ctx) == 0 && ctx != NULL);
@@ -85,11 +87,13 @@ static int run_real_dso_case(int cancel_first) {
   REQUIRE(turbo_voice_input_quiesced(voice, 42u) == TURBO_VOICE_OK);
   REQUIRE(turbo_voice_approved_final(voice, 42u, "Approved output", 15u,
                                      "fake", "en") == TURBO_VOICE_OK);
+  fprintf(stderr, "DSO CASE %d: worker created\n", cancel_first);
 
   /* Actual DSO thread publishes a deterministic PCM frame through a C11
    * condition variable. No spin, timer-based schedule or second host queue. */
   REQUIRE(api->grant_pcm(ctx) == 0);
   REQUIRE(api->wait_pcm_ready(ctx) == 0);
+  fprintf(stderr, "DSO CASE %d: worker frame ready\n", cancel_first);
   size_t written = 0u;
   REQUIRE(turbo_voice_pump(voice, 1u, &written) == TURBO_VOICE_OK);
   REQUIRE(written == 960u && device.size == 960u);
@@ -99,6 +103,7 @@ static int run_real_dso_case(int cancel_first) {
     REQUIRE(actual == (int16_t)(1000u + i));
   }
   const unsigned original_writes = device.writes;
+  fprintf(stderr, "DSO CASE %d: PCM handed off\n", cancel_first);
   turbo_voice_snapshot_t snapshot;
   turbo_voice_snapshot_init(&snapshot);
 
@@ -128,8 +133,10 @@ static int run_real_dso_case(int cancel_first) {
 
   /* External test host explicitly releases the worker/Provider terminal
    * barrier. This is the only authorization for joining and dlclose. */
+  fprintf(stderr, "DSO CASE %d: release worker\n", cancel_first);
   REQUIRE(api->grant_settle(ctx) == 0);
   REQUIRE(api->wait_worker_done(ctx) == 0);
+  fprintf(stderr, "DSO CASE %d: worker settled\n", cancel_first);
   REQUIRE(turbo_voice_pump(voice, 1u, &written) == TURBO_VOICE_OK);
   if (cancel_first) {
     REQUIRE(turbo_voice_get_state(voice) == TURBO_VOICE_INTERRUPTED);
@@ -149,8 +156,10 @@ static int run_real_dso_case(int cancel_first) {
   REQUIRE(api->snapshot(ctx, &counts) == 0);
   REQUIRE(counts.worker_started == 1u && counts.worker_done == 1u);
   REQUIRE(api->destroy(&ctx) == 0 && ctx == NULL);
+  fprintf(stderr, "DSO CASE %d: worker joined\n", cancel_first);
   /* No callback, borrowed PCM or worker remains after the explicit join. */
   REQUIRE(dlclose(module) == 0);
+  fprintf(stderr, "DSO CASE %d: dlclose returned\n", cancel_first);
   REQUIRE(atomic_load_explicit(&unloads, memory_order_acquire) == 1u);
   printf("PASS real C11 DSO: %s, worker settled/joined, one dlclose\n",
          cancel_first ? "cancel-first + late PCM discarded" :

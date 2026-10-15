@@ -49,11 +49,18 @@ and durable raw PCM remain absent.
 
 ## Cancellation, text, and authority
 
-Whisper v1.9.5 exposes a real abort callback. Only
-`turbo_agent_speech_whisper_request_abort()` may be called concurrently,
-setting an atomic flag. The host must await the caller-driven Provider
-`finish()` return, settle M1 SpeechInput and its DSO callback lease, then
-destroy/unload. `destroy` returns EBUSY while active or decoding.
+Whisper v1.9.5 exposes a real abort callback. Each inference has a
+caller-configured **monotonic time budget** (`max_decode_ms`: 1–120,000 ms,
+default 30,000 ms). The Provider itself stops at the deadline when Whisper
+next polls its callback; **this is cooperative, not forced thread termination**.
+Only `turbo_agent_speech_whisper_request_abort()` may additionally be called
+concurrently, setting an atomic flag. The host must still impose an outer
+execution/watchdog deadline for engine operations that fail to poll abort.
+
+The host must await the caller-driven Provider `finish()` return, settle M1
+SpeechInput and its DSO callback lease, then destroy/unload.
+`destroy` returns EBUSY while active or decoding. An expired deadline
+produces an error terminal, never a partially published FINAL.
 
 Whisper segments must fit the configured text bound **without truncation**.
 M1 validates strict UTF-8 and allows one FINAL only. All-zero digital PCM

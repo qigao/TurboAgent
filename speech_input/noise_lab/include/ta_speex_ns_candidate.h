@@ -22,7 +22,8 @@ enum {
   TA_SPEEX_NS_EINVAL = -1,
   TA_SPEEX_NS_EENGINE = -2,
   TA_SPEEX_NS_ECAPACITY = -3,
-  TA_SPEEX_NS_EFAILED = -4
+  TA_SPEEX_NS_EFAILED = -4,
+  TA_SPEEX_NS_ESETTLED = -5
 };
 
 /* Exactly -12 or -18 dB noise floor; no implied fallback. SpeexDSP 1.2.1
@@ -37,6 +38,14 @@ int ta_speex_ns_create(int noise_suppress_db, ta_speex_ns_owner_t **out_owner);
 int ta_speex_ns_process(ta_speex_ns_owner_t *owner,
                         const int16_t *input, size_t count,
                         int16_t *output);
+
+/* EXPERIMENTAL single-frame end flush. Drives precisely one ZERO input
+ * frame through the same DSP state and returns the delayed output. It does
+ * not count against the 3,000 caller-input frames, and then seals the owner.
+ * The caller must independently validate priming/latency compensation
+ * before republishing a timestamped sequence. No automatic fallback. */
+int ta_speex_ns_finish(ta_speex_ns_owner_t *owner,
+                       int16_t *out_tail, size_t count);
 
 size_t ta_speex_ns_processed_frames(const ta_speex_ns_owner_t *owner);
 

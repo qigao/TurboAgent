@@ -56,7 +56,7 @@ class CorpusGateTests(unittest.TestCase):
                            ("a.wav", "b.wav", "c.wav", "z.wav")]
             make_wave(a, "constant")
             make_wave(b, "dynamic")
-            make_wave(c, "constant")
+            make_wave_amplitudes(c, [1200] * 60)  # distinct stationary noise
             make_wave(z, "zero")
             # These stand-ins exercise DECLARED human/noise metadata. They
             # cannot substantiate actual human-voice false-rejection rates.

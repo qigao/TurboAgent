@@ -20,7 +20,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       CMAKE_BUILD_PARALLEL_LEVEL: '2'
-      TA_SPEECH_INSTALLED: ${{ runner.temp }}/ta-speech-m1-sdk
+      TA_SPEECH_INSTALLED: /tmp/ta-speech-m1-sdk
     steps:
       - uses: actions/checkout@v4
         with:

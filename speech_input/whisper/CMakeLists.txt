@@ -104,3 +104,34 @@ if(BUILD_TESTING AND UNIX)
   set_tests_properties(turbo_agent_speech_whisper_mock_provider PROPERTIES
     TIMEOUT 30)
 endif()
+
+# The first user-facing offline transcription adapter is explicitly selected.
+# It needs the M2 strict S16LE capture bridge for WAV frames but never opens
+# a microphone, downloads weights, submits an Agent Session or calls tools.
+option(ENABLE_SPEECH_WHISPER_CLI
+  "Build optional verified-model offline WAV-to-transcript preview" OFF)
+if(ENABLE_SPEECH_WHISPER_CLI)
+  if(NOT TARGET turbo_agent_speech_capture_bridge)
+    message(FATAL_ERROR
+      "Whisper WAV CLI requires ENABLE_SPEECH_CAPTURE_BRIDGE=ON; no duplicate S16LE adapter")
+  endif()
+  add_executable(turboagent-whisper-transcribe
+    tools/turboagent_whisper_transcribe.c)
+  target_compile_features(turboagent-whisper-transcribe PRIVATE c_std_11)
+  set_target_properties(turboagent-whisper-transcribe PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  target_link_libraries(turboagent-whisper-transcribe PRIVATE
+    turbo_agent_speech_whisper turbo_agent_speech_capture_bridge)
+  if(NOT TURBO_SPEECH_STANDALONE)
+    include(GNUInstallDirs)
+    install(TARGETS turboagent-whisper-transcribe
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  endif()
+  if(BUILD_TESTING)
+    add_test(NAME turbo_agent_speech_whisper_cli_reject_missing_arguments
+      COMMAND turboagent-whisper-transcribe)
+    set_tests_properties(
+      turbo_agent_speech_whisper_cli_reject_missing_arguments PROPERTIES
+      WILL_FAIL TRUE TIMEOUT 5)
+  endif()
+endif()

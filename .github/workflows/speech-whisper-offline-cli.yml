@@ -1,0 +1,221 @@
+name: SpeechWhisper offline WAV CLI real CPU and mock positive (#137)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/whisper/tools/**'
+      - 'speech_input/whisper/CMakeLists.txt'
+      - '.github/workflows/speech-whisper-offline-cli.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  real-whisper-binary-and-mock-cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SALTS_ROOT: /tmp/speech-cli-salts/sdk/linux-x64
+      TURBO_WHISPER_SDK_ROOT: /tmp/speech-cli-whisper-sdk
+      MODEL_FIXTURES: /tmp/speech-cli-fixtures
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: d1be6fde11ac6e0407606b4e42fe72d34add8037
+          path: external/whisper-v195
+          submodules: recursive
+          persist-credentials: false
+      - name: Pin native Whisper API, published Salts crypto and CLI fixture provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C external/whisper-v195 rev-parse HEAD)" = d1be6fde11ac6e0407606b4e42fe72d34add8037
+          mkdir -p /tmp/speech-cli-salts "$TURBO_WHISPER_SDK_ROOT" "$MODEL_FIXTURES"
+          test "$(gh api repos/qigao/salts/git/ref/tags/v2.3.0-rc.16 --jq .object.sha)" = 6cf093dc053db98bb21b1788eb2fc1ada4df195e
+          gh release download v2.3.0-rc.16 --repo qigao/salts \
+            --pattern Salts.Native.2.3.0-rc.16.nupkg \
+            --dir /tmp/speech-cli-salts
+          unzip -q /tmp/speech-cli-salts/Salts.Native.2.3.0-rc.16.nupkg \
+            -d /tmp/speech-cli-salts
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          sha256sum /tmp/speech-cli-salts/Salts.Native.2.3.0-rc.16.nupkg \
+            > /tmp/speech-cli-salts.sha256
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, wave, struct
+          root = Path('/tmp/speech-cli-fixtures')
+          model = root / 'fake-model.bin'
+          model.write_bytes(b'MOCK_SIGNED_SPEECH_MODEL_ONLY')
+          (root/'fake-model.sha256').write_text(hashlib.sha256(model.read_bytes()).hexdigest())
+          samples = [16384] + [0]*639
+          with wave.open(str(root/'s16-mono-16000.wav'), 'wb') as f:
+              f.setnchannels(1); f.setsampwidth(2); f.setframerate(16000)
+              f.writeframes(struct.pack('<640h',*samples))
+          with wave.open(str(root/'wrong-rate.wav'), 'wb') as f:
+              f.setnchannels(1); f.setsampwidth(2); f.setframerate(44100)
+              f.writeframes(struct.pack('<640h',*samples))
+          with wave.open(str(root/'wrong-channel.wav'), 'wb') as f:
+              f.setnchannels(2); f.setsampwidth(2); f.setframerate(16000)
+              f.writeframes(struct.pack('<640h',*samples))
+          with wave.open(str(root/'partial-frame.wav'), 'wb') as f:
+              f.setnchannels(1); f.setsampwidth(2); f.setframerate(16000)
+              f.writeframes(struct.pack('<639h',*samples[:-1]))
+          (root/'bad.wav').write_bytes(b'NOT_A_WAVE')
+          PY
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - name: Install CPU build utilities
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build nasm pkg-config
+      - name: Build real reviewed Whisper.cpp v1.9.5 CPU shared SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S external/whisper-v195 -B build/whisper-cli-upstream -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_INSTALL_PREFIX=$TURBO_WHISPER_SDK_ROOT" \
+            -DWHISPER_BUILD_IS_DEV=OFF -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_SERVER=OFF \
+            -DWHISPER_CURL=OFF -DWHISPER_COREML=OFF \
+            -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF \
+            -DGGML_METAL=OFF -DGGML_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=ON
+          cmake --build build/whisper-cli-upstream --parallel 2
+          cmake --install build/whisper-cli-upstream
+          test -f "$TURBO_WHISPER_SDK_ROOT/lib/cmake/whisper/whisper-config.cmake"
+      - name: Build actual optional offline CLI linked to pinned Whisper CPU provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-cli/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cmake -S speech_input -B build/speech-cli -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            -DENABLE_SPEECH_WHISPER=ON \
+            -DENABLE_SPEECH_CAPTURE_BRIDGE=ON \
+            -DENABLE_SPEECH_WHISPER_CLI=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed/speech-cli" \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build/speech-cli --target turboagent-whisper-transcribe \
+            --parallel 2
+          test -f build/speech-cli/whisper/turboagent-whisper-transcribe
+          ldd build/speech-cli/whisper/turboagent-whisper-transcribe \
+            | tee /tmp/speech-cli-real-dependencies.txt
+          grep -F "$TURBO_WHISPER_SDK_ROOT/lib/libwhisper.so" \
+            /tmp/speech-cli-real-dependencies.txt
+          if grep -Fq 'not found' /tmp/speech-cli-real-dependencies.txt; then exit 1; fi
+      - name: Reject malformed WAV, missing/wrong model SHA, unsupported format and implicit inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-cli/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cli="$GITHUB_WORKSPACE/build/speech-cli/whisper/turboagent-whisper-transcribe"
+          wav="$MODEL_FIXTURES/s16-mono-16000.wav"
+          model="$MODEL_FIXTURES/fake-model.bin"
+          sha="$(cat "$MODEL_FIXTURES/fake-model.sha256")"
+          require_failure() {
+            local expected="$1"; shift
+            set +e
+            "$cli" "$@" > "$MODEL_FIXTURES/negative.stdout" 2> "$MODEL_FIXTURES/negative.stderr"
+            local status=$?
+            set -e
+            test "$status" -eq "$expected"
+            test ! -s "$MODEL_FIXTURES/negative.stdout"
+          }
+          require_failure 2
+          require_failure 2 --model relative.bin --sha256 "$sha" --wav "$wav" --language en
+          require_failure 2 --model "$model" --sha256 malformed --wav "$wav" --language en
+          require_failure 3 --model "$model" --sha256 "$sha" --wav "$MODEL_FIXTURES/bad.wav" --language en
+          require_failure 3 --model "$model" --sha256 "$sha" --wav "$MODEL_FIXTURES/wrong-rate.wav" --language en
+          require_failure 3 --model "$model" --sha256 "$sha" --wav "$MODEL_FIXTURES/wrong-channel.wav" --language en
+          require_failure 3 --model "$model" --sha256 "$sha" --wav "$MODEL_FIXTURES/partial-frame.wav" --language en
+          require_failure 4 --model "$model" --sha256 "$sha" --wav "$wav" --language en
+          printf '%s\n' 'PASS: real Whisper rejects invalid GGML model and all format/security negatives' \
+            | tee /tmp/speech-cli-negative.txt
+      - name: Build actual C11 CLI/PCM/Provider source against test-only pinned Whisper fake DSO
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/speech-cli-mock-build
+          cat > /tmp/speech-cli-mock-build/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.25)
+          project(WhisperOfflineCliMockC11 LANGUAGES C)
+          set(CMAKE_C_STANDARD 11)
+          set(CMAKE_C_STANDARD_REQUIRED ON)
+          set(CMAKE_C_EXTENSIONS OFF)
+          find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+          add_library(fake_whisper_provider SHARED
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/src/turbo_agent_speech_whisper.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/tests/whisper_fake_engine_image.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/src/turbo_agent_speech_input.c")
+          set_target_properties(fake_whisper_provider PROPERTIES C_VISIBILITY_PRESET hidden)
+          target_compile_definitions(fake_whisper_provider PRIVATE TURBO_AGENT_SPEECH_WHISPER_BUILD)
+          target_include_directories(fake_whisper_provider PRIVATE
+            "$ENV{GITHUB_WORKSPACE}/speech_input/include"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/include"
+            "$ENV{GITHUB_WORKSPACE}/external/whisper-v195/include"
+            "$ENV{GITHUB_WORKSPACE}/external/whisper-v195/ggml/include")
+          target_link_libraries(fake_whisper_provider PRIVATE Salts::Core)
+          target_link_options(fake_whisper_provider PRIVATE "LINKER:-z,defs")
+          add_executable(mock_whisper_cli
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/tools/turboagent_whisper_transcribe.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/capture/src/turbo_agent_speech_capture_bridge.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/src/turbo_agent_speech_input.c")
+          target_include_directories(mock_whisper_cli PRIVATE
+            "$ENV{GITHUB_WORKSPACE}/speech_input/include"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/capture/include"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/include")
+          target_link_libraries(mock_whisper_cli PRIVATE fake_whisper_provider Salts::Core)
+          CMAKE
+          cmake -S /tmp/speech-cli-mock-build -B build/speech-cli-mock -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror" \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build/speech-cli-mock --parallel 2
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$GITHUB_WORKSPACE/build/speech-cli-mock:${LD_LIBRARY_PATH:-}"
+          model="$MODEL_FIXTURES/fake-model.bin"
+          sha="$(cat "$MODEL_FIXTURES/fake-model.sha256")"
+          build/speech-cli-mock/mock_whisper_cli \
+            --model "$model" --sha256 "$sha" \
+            --wav "$MODEL_FIXTURES/s16-mono-16000.wav" --language en \
+            --timeout-ms 30000 > /tmp/speech-cli-mock-positive.txt
+          test "$(cat /tmp/speech-cli-mock-positive.txt)" = ' utterance'
+          for adversarial in TA_SPEECH_TEST_ESCAPE TA_SPEECH_TEST_BIDI; do
+            set +e
+            env "$adversarial=1" build/speech-cli-mock/mock_whisper_cli \
+              --model "$model" --sha256 "$sha" \
+              --wav "$MODEL_FIXTURES/s16-mono-16000.wav" --language en \
+              > "$MODEL_FIXTURES/unsafe.stdout" \
+              2> "$MODEL_FIXTURES/unsafe.stderr"
+            status=$?
+            set -e
+            test "$status" -eq 4
+            test ! -s "$MODEL_FIXTURES/unsafe.stdout"
+          done
+          echo 'PASS: real C11 WAV/M2/M1/Provider pipeline and terminal/bidi injection refusal with deterministic fake acoustic engine'
+      - name: Archive pinned source and unmodified stdout/dependency evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-whisper-offline-wav-cli-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            /tmp/speech-cli-salts.sha256
+            /tmp/speech-cli-real-dependencies.txt
+            /tmp/speech-cli-negative.txt
+            /tmp/speech-cli-mock-positive.txt
+            build/speech-cli/compile_commands.json
+            build/speech-cli-mock/compile_commands.json

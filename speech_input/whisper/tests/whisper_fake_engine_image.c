@@ -80,5 +80,12 @@ int whisper_full_n_segments(struct whisper_context *ctx) {
 }
 const char *whisper_full_get_segment_text(struct whisper_context *ctx,
                                            int index) {
-  return ctx && ctx->decoded && index == 0 ? " utterance" : NULL;
+  if (!ctx || !ctx->decoded || index != 0) return NULL;
+  /* Test-only adversarial transcripts. Neither input is real inference:
+   * assert CLI display admission never emits terminal ESC or bidi controls. */
+  if (getenv("TA_SPEECH_TEST_ESCAPE"))
+    return "\033[31munsafe terminal output";
+  if (getenv("TA_SPEECH_TEST_BIDI"))
+    return "\xe2\x80\xae" "reversed display";
+  return " utterance";
 }

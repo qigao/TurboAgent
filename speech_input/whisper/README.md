@@ -84,3 +84,61 @@ weights SHA, and real microphone permission/DSO unload remain explicitly
 OPEN until a legally approved model fixture and platform tests exist.
 Source license is upstream MIT; weights are a **separate** artifact/licensing
 decision. No model files are bundled by this PR.
+
+
+## Preview-only local WAV CLI — opt in
+
+An explicit file-to-text entrypoint is available for real offline ASR **only**
+when the operator already has a locally authorized Whisper GGML model and its
+exact SHA-256. This command **does not open a microphone, create an Agent
+Session, call tools, authorize commands, perform network access, select another
+model or download weights**.
+
+Enable the CLI with the existing optional isolated Whisper provider and
+the M2 bounded S16LE bridge:
+
+```sh
+cmake -S speech_input -B build/whisper-cli \
+  -DENABLE_SPEECH_WHISPER=ON \
+  -DENABLE_SPEECH_CAPTURE_BRIDGE=ON \
+  -DENABLE_SPEECH_WHISPER_CLI=ON \
+  -DBUILD_TESTING=ON
+cmake --build build/whisper-cli --target turboagent-whisper-transcribe
+build/whisper-cli/whisper/turboagent-whisper-transcribe \
+  --model /absolute/approved/model.ggml.bin \
+  --sha256 EXACT_64_HEX_SHA256 \
+  --wav /absolute/approved/utterance.wav \
+  --language zh \
+  --threads 2 --timeout-ms 30000 --model-max-mib 128
+```
+
+Accepted WAV: RIFF/WAVE, PCM format 1 (no float/compression), signed
+**16-bit little-endian**, exactly **16,000 Hz mono**, byte rate 32,000,
+block align 2, an exact RIFF length, and a final `data` chunk with **whole
+640-byte / 20ms audio frames**. Max 60s, no sample truncation, implicit
+resampling, automatic channel selection, trailing data, or model fallback.
+Other metadata chunks before `data` may be skipped if they are bounded.
+Malformed/missing WAV returns a separate explicit failure before loading
+the model. Paths must be absolute and authorization is the caller's duty.
+
+The command pumps one 20ms frame through M2 and M1 at a time, bounding queue
+admission; only FINAL is written to stdout. PARTIAL and engine errors cannot
+become a transcript. NO_SPEECH produces no stdout. On failure, no transcript
+is admitted; this is a preview for operator review, **not** an Agent input.
+Although M1 validates strict UTF-8, the CLI also refuses terminal ESC/C0,
+DEL and Unicode bidi direction override/isolate controls **before** writing
+any transcript to stdout. It never silently strips/reorders unsafe bytes;
+adversarial model-output fixtures must leave stdout empty.
+
+`--language` is required and must explicitly select `en`, `zh`, `ja`
+or `auto`; optional CPU threads 1..16, cooperative decode deadline
+1..120000ms, and explicit maximum model MiB 1..1024. Decode deadline
+is cooperative, not forced interruption of non-polling vendor code.
+
+The dedicated CI builds **real** reviewed Whisper.cpp v1.9.5 CPU shared
+libraries and this CLI, tests negative model and WAV admission **without
+weights**, then links the *same production CLI/M1/M2/M3 C11 source* to a
+**test-only fake Whisper engine** for positive WAV-to-FINAL. That positive fixture
+is intentionally **not real speech recognition**. Real transcription metrics,
+licensed multilingual weights, user-provided model SHA and acoustic/permission
+tests are still pending. Do not auto-run a model download in CI.

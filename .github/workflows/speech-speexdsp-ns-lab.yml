@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   speexdsp-native-c11:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146'
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167')
     name: SpeexDSP-1.2.1 C11 NS-only smoke, native source + licensed audio
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -193,5 +193,25 @@ jobs:
           }, sort_keys=True))
           PY
             done
+          done
+          # Separately controlled speech-plus-known-noise reference:
+          # original genuine licensed whisper + precisely generated noise
+          # and one extra second of noise-only adaptation. Never infer
+          # acoustic recognition quality from this signal-to-error proxy.
+          mkdir -m 700 "$root/known"
+          python3 speech_input/noise_lab/tools/known_noise_reference.py prepare \
+            --source-raw "$root/whisper.raw" \
+            --source-sha256 "$(sha256sum "$root/whisper.raw" | awk '{print $1}')" \
+            --private-root "$root/known"
+          for db in -12 -18; do
+            "$probe" "$root/known/mixed-known-noise.raw" \
+              "$root/known/mixed-processed-$db.raw" "$db" --align-one-frame
+            python3 speech_input/noise_lab/tools/known_noise_reference.py score \
+              --clean "$root/known/clean-reference.raw" \
+              --clean-sha256 "$(sha256sum "$root/known/clean-reference.raw" | awk '{print $1}')" \
+              --mixed "$root/known/mixed-known-noise.raw" \
+              --mixed-sha256 "$(sha256sum "$root/known/mixed-known-noise.raw" | awk '{print $1}')" \
+              --filtered "$root/known/mixed-processed-$db.raw" \
+              --filtered-sha256 "$(sha256sum "$root/known/mixed-processed-$db.raw" | awk '{print $1}')"
           done
           # No upload-artifact action. WAV/raw/provenance wiped on exit.

@@ -1,8 +1,10 @@
 name: SpeechWhisper real multilingual tiny model acoustic positive (explicit approval only)
 
 'on':
+  # Explicit authorization event is single-use for its exact PR source SHA.
+  # A later source commit never reuses a stale approval label to redownload.
   pull_request:
-    types: [opened, reopened, synchronize, labeled]
+    types: [labeled]
 
 permissions:
   contents: read
@@ -14,8 +16,12 @@ jobs:
     # No model is downloaded by ordinary pull-request CI.
     # The repository maintainer must deliberately add this exact approval
     # label to the matching same-repo Draft PR. This requires label permission.
+    # Labeling is a one-time authorization for that PR head commit, not a
+    # persistent permission for reopened/synchronize or future source commits.
     if: >-
       github.event_name == 'pull_request' &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'speech-model-download-approved' &&
       github.repository == 'qigao/TurboAgent' &&
       github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' &&
       github.event.pull_request.head.ref == 'test/speech-whisper-real-model-gated-137' &&

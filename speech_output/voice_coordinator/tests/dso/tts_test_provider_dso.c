@@ -210,6 +210,10 @@ static int wait_flag(turbo_tts_test_dso_t *ctx, const int *flag) {
   return 0;
 }
 
+static int test_wait_worker_started(turbo_tts_test_dso_t *ctx) {
+  return ctx ? wait_flag(ctx, &ctx->worker_started) : -1;
+}
+
 static int test_wait_pcm_ready(turbo_tts_test_dso_t *ctx) {
   return ctx ? wait_flag(ctx, &ctx->frame_ready) : -1;
 }
@@ -262,6 +266,7 @@ static const turbo_tts_test_dso_api_t test_api = {
   .create = test_create,
   .configure_provider = test_configure_provider,
   .grant_pcm = test_grant_pcm,
+  .wait_worker_started = test_wait_worker_started,
   .wait_pcm_ready = test_wait_pcm_ready,
   .grant_settle = test_grant_settle,
   .wait_worker_done = test_wait_worker_done,

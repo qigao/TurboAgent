@@ -3,7 +3,6 @@ name: SpeechWhisper real multilingual tiny model acoustic positive (explicit app
 'on':
   pull_request:
     types: [opened, reopened, synchronize, labeled]
-  workflow_dispatch:
 
 permissions:
   contents: read

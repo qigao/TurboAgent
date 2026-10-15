@@ -27,7 +27,7 @@ class SpeexNSPairedMetrics(unittest.TestCase):
         self.assertEqual(report["energy_ratio"], 1)
         self.assertEqual(report["aligned_cosine_similarity"], 1)
         self.assertEqual(report["changed_samples"], 0)
-        self.assertEqual(report["newly_zero_original_frames"], 0)
+        self.assertEqual(report["unaligned_same_index_newly_zero_frames"], 0)
         self.assertFalse(report["no_speech_decision_authorized"])
         self.assertFalse(report["actual_snr_or_wer_cer_measured"])
         attenuated = generated_pcm(150)
@@ -50,12 +50,27 @@ class SpeexNSPairedMetrics(unittest.TestCase):
         self.assertLess(abs(result["zero_lag_cosine_similarity"]), 0.04)
         self.assertTrue(result["estimated_alignment_not_latency_certified"])
 
+    def test_exact_one_frame_delay_does_not_count_voice_loss(self):
+        import random
+        generator = random.Random(12345)
+        samples = [generator.randint(-3000, 3000) for _ in range(320*60)]
+        raw = struct.pack("<%dh" % len(samples), *samples)
+        one_frame_delay = struct.pack(
+            "<%dh" % len(samples), *([0]*320 + samples[:-320]))
+        report = mod.evaluate(raw, one_frame_delay, "whisper", -12)
+        self.assertEqual(report["best_bounded_alignment_shift_samples"], 320)
+        self.assertGreater(report["aligned_cosine_similarity"], 0.999)
+        self.assertEqual(report["unaligned_same_index_newly_zero_frames"], 1)
+        self.assertEqual(report["aligned_newly_zero_source_frames"], 0)
+        self.assertEqual(report["aligned_source_frames_compared"], 59)
+        self.assertEqual(report["undelivered_tail_samples_if_no_flush"], 320)
+
     def test_complete_silencing_is_reported_without_fabricating_vad(self):
         original = generated_pcm(500)
         silence = b"\x00" * len(original)
         result = mod.evaluate(original, silence, "road", -18)
         self.assertIsNone(result["aligned_cosine_similarity"])
-        self.assertEqual(result["newly_zero_original_frames"], 60)
+        self.assertEqual(result["unaligned_same_index_newly_zero_frames"], 60)
         self.assertEqual(result["guard_after_ns_20ms_stationarity"], "digital_zero")
         self.assertFalse(result["no_speech_decision_authorized"])
         self.assertFalse(result["intelligibility_or_weak_consonants_preserved_certified"])

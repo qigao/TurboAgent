@@ -20,6 +20,7 @@ MAX_FILE_BYTES = 4 * 1024 * 1024
 MIN_FRAMES = 50
 MAX_STATIONARY_CV = 0.12
 MAX_STATIONARY_POWER_RATIO = 2.0
+MAX_STATIONARY_LAG1_CORRELATION = 0.12
 
 
 def inspect_wav(path: Path) -> dict:
@@ -33,15 +34,21 @@ def inspect_wav(path: Path) -> dict:
             raise ValueError("incomplete or oversized 20ms frame sequence")
         blocks = frames // FRAME
         power = []
+        lag_cross, lag_energy = 0, 0
         for _ in range(blocks):
             raw = wav.readframes(FRAME)
             if len(raw) != FRAME * 2:
                 raise ValueError("partial PCM read")
             pcm = struct.unpack("<320h", raw)
             power.append(sum(int(x) * int(x) for x in pcm))
+            lag_cross += sum(int(pcm[i]) * int(pcm[i-1])
+                             for i in range(1, FRAME))
+            lag_energy += sum(int(pcm[i]) * int(pcm[i])
+                              for i in range(1, FRAME))
         if wav.readframes(1):
             raise ValueError("undeclared additional PCM")
     count = len(power)
+    lag1_abs_correlation = abs(lag_cross) / lag_energy if lag_energy else 0.0
     total = sum(power)
     if total == 0:
         kind = "digital_zero"
@@ -56,13 +63,16 @@ def inspect_wav(path: Path) -> dict:
         # No quality assertion: this is only a stationarity *candidate*.
         kind = ("stationary_candidate" if count >= MIN_FRAMES and
                 cv <= MAX_STATIONARY_CV and ratio is not None and
-                ratio <= MAX_STATIONARY_POWER_RATIO else "dynamic_or_unknown")
+                ratio <= MAX_STATIONARY_POWER_RATIO and
+                lag1_abs_correlation < MAX_STATIONARY_LAG1_CORRELATION
+                else "dynamic_or_unknown")
     return {
         "frame_count": count,
         "sample_count": frames,
         "zero_pcm": total == 0,
         "stationarity_hypothesis": kind,
         "frame_power_cv": round(cv, 6),
+        "lag1_abs_correlation": round(lag1_abs_correlation, 6),
         "frame_power_max_min_ratio": None if ratio is None else round(ratio, 6),
         "minimum_frame_power": min(power),
         "maximum_frame_power": max(power),
@@ -74,6 +84,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jfk-wav", type=Path, required=True)
     parser.add_argument("--noise-dir", type=Path, required=True)
+    parser.add_argument("--agc-jfk-wav", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -81,6 +92,15 @@ def main() -> int:
         for name in ("digital-zero", "stationary-noise-quiet",
                      "stationary-noise-medium"):
             items[name] = inspect_wav(args.noise_dir / (name + ".wav"))
+        if args.agc_jfk_wav:
+            items["agc_jfk_spoken"] = inspect_wav(args.agc_jfk_wav)
+            agc = items["agc_jfk_spoken"]
+            if (agc["frame_power_cv"] >= MAX_STATIONARY_CV or
+                    agc["frame_power_max_min_ratio"] is None or
+                    agc["frame_power_max_min_ratio"] >= MAX_STATIONARY_POWER_RATIO or
+                    agc["lag1_abs_correlation"] <= MAX_STATIONARY_LAG1_CORRELATION or
+                    agc["stationarity_hypothesis"] != "dynamic_or_unknown"):
+                raise ValueError("gain-normalized JFK speech risks a false NO_SPEECH classification")
         if items["official_jfk_spoken"]["stationarity_hypothesis"] != "dynamic_or_unknown":
             raise ValueError("stationarity rule would reject the pinned spoken JFK sample")
         if items["digital-zero"]["stationarity_hypothesis"] != "digital_zero":
@@ -95,6 +115,7 @@ def main() -> int:
             "min_evidence_frames": MIN_FRAMES,
             "max_candidate_cv": MAX_STATIONARY_CV,
             "max_candidate_power_ratio": MAX_STATIONARY_POWER_RATIO,
+            "max_uncorrelated_lag1_ratio": MAX_STATIONARY_LAG1_CORRELATION,
             "records": items,
         }
         text = json.dumps(payload, sort_keys=True, indent=2) + "\n"

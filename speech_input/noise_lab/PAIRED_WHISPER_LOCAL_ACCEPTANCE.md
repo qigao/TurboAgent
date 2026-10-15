@@ -86,7 +86,7 @@ writes a non-0600 raw output, the operation fails closed and **rolls back
 all outputs**, leaving the initially empty directory empty. There is no
 raw-audio fallback, in-memory model inference or downloader.
 
-CI [#175](https://github.com/qigao/TurboAgent/pull/175) separately proves
+Draft [PR #176](https://github.com/qigao/TurboAgent/pull/176) separately proves
 that the exact real CC0 whispered source yields the same native C11 PCM
 bytes as the independently run NS-only diagnostic. This verifies file
 construction, **not** voice intelligibility or actual ASR WER/CER.

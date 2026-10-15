@@ -183,6 +183,16 @@ jobs:
           # Local transformed audio must not be uploaded or misrepresented
           # as an independently licensed natural speech corpus.
           test -s "$MODEL_ROOT/jfk-agc-private.wav"
+      - name: Generate pinned soft, AGC-soft and short JFK speech-derived probes without weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 speech_input/whisper/tools/generate_speech_stress_probes.py \
+            --source "$GITHUB_WORKSPACE/external/whisper-v195/samples/jfk.wav" \
+            --output-dir "$MODEL_ROOT/jfk-speech-stress-private" \
+            --report /tmp/ta-real-asr-speech-stress-manifest.json
+          test -f "$MODEL_ROOT/jfk-speech-stress-private/jfk-soft-8.wav"
+          test -f "$MODEL_ROOT/jfk-speech-stress-private/jfk-mid-short-0p8s.wav"
       - name: Build upstream Whisper v1.9.5 CPU-only from exact SHA
         shell: bash
         run: |
@@ -361,6 +371,34 @@ jobs:
             json.dumps(result,indent=2,sort_keys=True)+'\n')
           print(json.dumps(result,indent=2,sort_keys=True))
           PY
+      - name: Compare baseline against opt-in guard on genuine soft and short JFK voice derivatives
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cli="$GITHUB_WORKSPACE/build/speech-real-model/whisper/turboagent-whisper-transcribe"
+          mkdir -p /tmp/ta-real-asr-soft-jfk-private
+          for profile in jfk-soft-8 jfk-soft-64 jfk-agc-soft-8 jfk-agc-soft-32 jfk-mid-short-0p8s; do
+            for guard in 0 1; do
+              set +e
+              timeout --signal=TERM --kill-after=10s 200s \
+                "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+                  --sha256 "$MODEL_SHA256" \
+                  --wav "$MODEL_ROOT/jfk-speech-stress-private/$profile.wav" \
+                  --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+                  --stationarity-guard "$guard" \
+                > "/tmp/ta-real-asr-soft-jfk-private/$profile-guard$guard.stdout" \
+                2> "/tmp/ta-real-asr-soft-jfk-private/$profile-guard$guard.stderr"
+              status=$?
+              set -e
+              test "$status" -eq 0 || test "$status" -eq 4
+              printf '%s\n' "$status" > "/tmp/ta-real-asr-soft-jfk-private/$profile-guard$guard.exit"
+            done
+          done
+          python3 speech_input/whisper/tools/compare_speech_stress_outcomes.py \
+            --input-dir /tmp/ta-real-asr-soft-jfk-private \
+            --report /tmp/ta-real-asr-soft-jfk-comparison.json
+          # Exact equality alone is NOT certification of any transcript.
       - name: Reject real Whisper inference exceeding a 1ms monotonic decode deadline
         shell: bash
         run: |
@@ -442,6 +480,8 @@ jobs:
             /tmp/ta-real-asr-agc-guard-0.metrics.json
             /tmp/ta-real-asr-agc-guard-1.metrics.json
             /tmp/ta-real-asr-agc-guard-comparison.json
+            /tmp/ta-real-asr-speech-stress-manifest.json
+            /tmp/ta-real-asr-soft-jfk-comparison.json
             /tmp/ta-real-asr-provider-linked-images.txt
             /tmp/ta-real-asr-host-linked-images.txt
             /tmp/ta-real-asr-provider-lifecycle.txt

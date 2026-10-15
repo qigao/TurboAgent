@@ -106,6 +106,32 @@ jobs:
             --agc-jfk-wav "$MODEL_FIXTURES/agc-jfk-private.wav" \
             --noise-dir "$MODEL_FIXTURES/stationarity-noise" \
             --report /tmp/speech-cli-stationarity-metrics.json
+          # No-model false refusal regression: official JFK is the only
+          # licensed human-voice origin. Compare short, quiet and AGC-quiet
+          # derivatives without inferring model acoustic correctness.
+          python3 speech_input/whisper/tools/generate_speech_stress_probes.py \
+            --source "$GITHUB_WORKSPACE/external/whisper-v195/samples/jfk.wav" \
+            --output-dir "$MODEL_FIXTURES/jfk-stress-private" \
+            --report /tmp/speech-cli-jfk-stress-provenance.json
+          python3 - <<'PY'
+          import json,os,sys
+          from pathlib import Path
+          sys.path.insert(0,str(Path('speech_input/whisper/tools').resolve()))
+          from generate_speech_stress_probes import PROFILES
+          from measure_frame_stationarity import inspect_wav
+          root=Path(os.environ['MODEL_FIXTURES'])/'jfk-stress-private'
+          outcomes={}
+          for name,*_ in PROFILES:
+              m=inspect_wav(root/(name+'.wav'))
+              if m['stationarity_hypothesis'] == 'stationary_candidate':
+                  raise SystemExit(f'{name}: speech-derived signal at risk of false NO_SPEECH')
+              outcomes[name]=m
+          Path('/tmp/speech-cli-jfk-stress-stationarity.json').write_text(
+              json.dumps({'speech_derived_profiles':outcomes,
+                          'real_voice_false_refusal_certified':False,
+                          'model_weights_used':False},indent=2,sort_keys=True)+'\n')
+          print('PASS: five voice-derived low-volume/AGC/short samples admitted by bounded C11 hypothesis')
+          PY
           # The report describes energy variation only, not accepted VAD.
           grep -Fq '"acoustic_vad_certified": false' /tmp/speech-cli-stationarity-metrics.json
       - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
@@ -274,6 +300,8 @@ jobs:
             /tmp/speech-cli-stationarity-metrics.json
             /tmp/speech-cli-stationary-fixtures-metadata.json
             /tmp/speech-cli-agc-provenance.json
+            /tmp/speech-cli-jfk-stress-provenance.json
+            /tmp/speech-cli-jfk-stress-stationarity.json
             /tmp/speech-cli-negative.txt
             /tmp/speech-cli-mock-positive.txt
             build/speech-cli/compile_commands.json

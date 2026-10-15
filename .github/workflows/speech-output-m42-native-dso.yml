@@ -1,0 +1,125 @@
+name: SpeechOutput M4.2 native C11 TTS Provider DSO and worker unload
+'on':
+  pull_request:
+    paths:
+      - 'speech_output/**'
+      - '.github/workflows/speech-output-m42-native-dso.yml'
+permissions:
+  contents: read
+jobs:
+  native-playback:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'feature/speech-output-m42-native-dso'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [address, undefined, thread]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download exact published Salts and SaltsUtils NuGet SDK archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pinned-nupkg"
+          curl --fail --location --silent --show-error --retry 3 \
+            --connect-timeout 25 --max-time 240 \
+            --proto '=https' --proto-redir '=https' \
+            https://github.com/qigao/salts-utils/releases/download/v4.3.0-rc.11/SaltsUtils.Native.4.3.0-rc.11.nupkg \
+            --output "$RUNNER_TEMP/pinned-nupkg/SaltsUtils.Native.4.3.0-rc.11.nupkg"
+          curl --fail --location --silent --show-error --retry 3 \
+            --connect-timeout 25 --max-time 240 \
+            --proto '=https' --proto-redir '=https' \
+            https://github.com/qigao/salts/releases/download/v2.3.0-rc.16/Salts.Native.2.3.0-rc.16.nupkg \
+            --output "$RUNNER_TEMP/pinned-nupkg/Salts.Native.2.3.0-rc.16.nupkg"
+          python3 speech_output/playback/ci/verify_published_playback.py \
+            --package-dir "$RUNNER_TEMP/pinned-nupkg"
+          mkdir -p "$RUNNER_TEMP/salts-sdk" "$RUNNER_TEMP/saltsutils-sdk"
+          unzip -q "$RUNNER_TEMP/pinned-nupkg/Salts.Native.2.3.0-rc.16.nupkg" -d "$RUNNER_TEMP/salts-sdk"
+          unzip -q "$RUNNER_TEMP/pinned-nupkg/SaltsUtils.Native.4.3.0-rc.11.nupkg" -d "$RUNNER_TEMP/saltsutils-sdk"
+          test -f "$RUNNER_TEMP/saltsutils-sdk/sdk/linux-x64/include/salts_playback.h"
+          test -f "$RUNNER_TEMP/saltsutils-sdk/sdk/linux-x64/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          printf 'SALTS_ROOT=%s\n' "$RUNNER_TEMP/salts-sdk/sdk/linux-x64" >> "$GITHUB_ENV"
+          printf 'SALTS_UTILS_ROOT=%s\n' "$RUNNER_TEMP/saltsutils-sdk/sdk/linux-x64" >> "$GITHUB_ENV"
+      - name: Compile real-header cooperative bridge against pinned public SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.sanitize }}" = address ]; then
+            flags="-fsanitize=address,undefined"
+          elif [ "${{ matrix.sanitize }}" = thread ]; then
+            flags="-fsanitize=thread"
+          else
+            flags="-fsanitize=undefined"
+          fi
+          cmake -S speech_output -B build/speech-output-m41 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_TTS_PLAYBACK_BRIDGE_TEST=ON \
+            -DENABLE_TTS_VOICE_COORDINATOR_TEST=ON \
+            -DENABLE_TTS_NATIVE_DSO_TEST=ON \
+            "-DSALTS_PLAYBACK_INCLUDE_DIR=$SALTS_UTILS_ROOT/include" \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror -fno-omit-frame-pointer $flags" \
+            "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Wpedantic -Werror -fno-omit-frame-pointer $flags" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$flags"
+          cmake --build build/speech-output-m41 --parallel 2
+          ctest --test-dir build/speech-output-m41 --output-on-failure
+      - name: Link actual published Salts Playback imported CMake target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.sanitize }}" = address ]; then flags="-fsanitize=address,undefined"
+          elif [ "${{ matrix.sanitize }}" = thread ]; then flags="-fsanitize=thread"
+          else flags="-fsanitize=undefined"; fi
+          cmake -S speech_output/playback/ci/installed-consumer \
+            -B build/speech-playback-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DTTS_M41_BUILD_ROOT=$GITHUB_WORKSPACE/build/speech-output-m41" \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$flags"
+          cmake --build build/speech-playback-release --parallel 2
+          # Link forces the actual current-head bridge object and published device\n          # symbols without creating or opening any audio device.
+          LD_LIBRARY_PATH="$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib" \
+            build/speech-playback-release/tts_playback_release_link
+      - name: Audit playback no-fallback and no-human-model-network
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f speech_output/playback/src/turbo_agent_tts_playback_bridge.c
+          test -f speech_output/playback/include/turbo_agent_tts_playback_bridge.h
+          ! grep -E 'curl|wget|whisper_init|http_client|ma_device_init' \
+            speech_output/playback/src/turbo_agent_tts_playback_bridge.c
+
+      - name: Link exact-head M4.2 coordinator + M4.1 bridge + released Salts Playback
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.sanitize }}" = address ]; then flags="-fsanitize=address,undefined"
+          elif [ "${{ matrix.sanitize }}" = thread ]; then flags="-fsanitize=thread"
+          else flags="-fsanitize=undefined"; fi
+          cmake -S speech_output/voice_coordinator/ci/installed-consumer \
+            -B build/speech-voice-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DTTS_M42_BUILD_ROOT=$GITHUB_WORKSPACE/build/speech-output-m41" \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags" \
+            "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$flags"
+          cmake --build build/speech-voice-release --parallel 2
+          LD_LIBRARY_PATH="$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib" \
+            build/speech-voice-release/tts_voice_release_link
+          LD_LIBRARY_PATH="$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib" \
+            build/speech-voice-release/tts_voice_cpp17_release_link
+      - name: Reject M4.2 when M4.1 opt-in is absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cmake -S speech_output -B build/m42-no-playback -G Ninja \
+               -DENABLE_TTS_PLAYBACK_BRIDGE_TEST=OFF \
+               -DENABLE_TTS_VOICE_COORDINATOR_TEST=ON \
+               > "$RUNNER_TEMP/m42-no-playback.log" 2>&1; then
+            echo 'M4.2 unexpectedly configured without M4.1 Playback' >&2
+            exit 1
+          fi
+          grep -F 'M4.2 requires explicit M4.1 playback opt-in' \
+            "$RUNNER_TEMP/m42-no-playback.log"

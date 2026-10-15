@@ -173,8 +173,9 @@ def prepare(source: Path, source_sha: str, executable: Path,
                     or report.get("no_model_download") is not True):
                 raise ValueError("unapproved native SpeexDSP mode or frame count")
             if (not ns_raw_file.is_file() or ns_raw_file.is_symlink()
-                    or ns_raw_file.stat().st_size > MAX_RAW_BYTES):
-                raise ValueError("missing or invalid private DSP output")
+                    or ns_raw_file.stat().st_size > MAX_RAW_BYTES
+                    or stat.S_IMODE(ns_raw_file.stat().st_mode) != 0o600):
+                raise ValueError("missing, unbounded or nonprivate DSP output")
             with ns_raw_file.open("rb") as source_file:
                 filtered = source_file.read(MAX_RAW_BYTES + 1)
             canonical = wrapped_raw(filtered, expected_frames)

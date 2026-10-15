@@ -184,7 +184,7 @@ int turbo_agent_speech_output_begin(turbo_agent_speech_output_t *output,
       !valid_voice(voice_id) || !valid_language(language))
     return TURBO_TTS_EINVAL;
   if (output->state == TURBO_TTS_SYNTHESIZING ||
-      output->state == TURBO_TTS_PLAYBACK_DRAINING ||
+      output->state == TURBO_TTS_STAGING_DRAINING ||
       output->state == TURBO_TTS_CANCEL_PENDING)
     return TURBO_TTS_EBUSY;
   if (generation_id <= output->generation_id) return TURBO_TTS_ESTALE;
@@ -236,7 +236,7 @@ int turbo_agent_speech_output_pump(turbo_agent_speech_output_t *output,
   if (rc) return rc;
   if (output->state != TURBO_TTS_SYNTHESIZING &&
       output->state != TURBO_TTS_CANCEL_PENDING)
-    return output->state == TURBO_TTS_PLAYBACK_DRAINING ?
+    return output->state == TURBO_TTS_STAGING_DRAINING ?
         TURBO_TTS_EBUSY : TURBO_TTS_ESTATE;
   canceling = output->state == TURBO_TTS_CANCEL_PENDING;
   if (output->pending_samples != 0u) return TURBO_TTS_EBUSY;
@@ -279,7 +279,7 @@ int turbo_agent_speech_output_pump(turbo_agent_speech_output_t *output,
     output->pending_samples = samples;
     output->pending_offset = 0u;
     if (kind == TURBO_TTS_PCM_FINAL)
-      output->state = TURBO_TTS_PLAYBACK_DRAINING;
+      output->state = TURBO_TTS_STAGING_DRAINING;
     return TURBO_TTS_OK;
   }
   if (samples != 0u)
@@ -306,7 +306,7 @@ int turbo_agent_speech_output_peek_pcm(
   rc = check_generation(output, generation_id);
   if (rc) return rc;
   if (output->state != TURBO_TTS_SYNTHESIZING &&
-      output->state != TURBO_TTS_PLAYBACK_DRAINING)
+      output->state != TURBO_TTS_STAGING_DRAINING)
     return TURBO_TTS_ESTATE;
   if (!output->pending_samples) return TURBO_TTS_EAGAIN;
   *out_samples = output->frame + output->pending_offset;
@@ -320,7 +320,7 @@ int turbo_agent_speech_output_consume_pcm(
   int rc = check_generation(output, generation_id);
   if (rc) return rc;
   if (output->state != TURBO_TTS_SYNTHESIZING &&
-      output->state != TURBO_TTS_PLAYBACK_DRAINING)
+      output->state != TURBO_TTS_STAGING_DRAINING)
     return TURBO_TTS_ESTATE;
   if (output->pending_samples == 0u) return TURBO_TTS_EAGAIN;
   if (accepted_samples == 0u ||
@@ -328,7 +328,7 @@ int turbo_agent_speech_output_consume_pcm(
     return TURBO_TTS_EBUFFER;
   output->pending_offset += accepted_samples;
   if (output->pending_offset == output->pending_samples) {
-    int last = output->state == TURBO_TTS_PLAYBACK_DRAINING;
+    int last = output->state == TURBO_TTS_STAGING_DRAINING;
     clear_pending(output);
     if (last) {
       /* Source PCM is accepted, not necessarily yet drained by a device. */
@@ -345,7 +345,7 @@ int turbo_agent_speech_output_cancel(turbo_agent_speech_output_t *output,
   if (output->state == TURBO_TTS_CANCEL_PENDING ||
       output->state == TURBO_TTS_CANCELED) return TURBO_TTS_OK;
   if (output->state != TURBO_TTS_SYNTHESIZING &&
-      output->state != TURBO_TTS_PLAYBACK_DRAINING)
+      output->state != TURBO_TTS_STAGING_DRAINING)
     return TURBO_TTS_ESTATE;
   clear_pending(output);
   output->state = TURBO_TTS_CANCEL_PENDING;
@@ -361,7 +361,7 @@ turbo_agent_tts_state_t turbo_agent_speech_output_get_state(
 int turbo_agent_speech_output_destroy(turbo_agent_speech_output_t **output) {
   if (!output || !*output) return TURBO_TTS_EINVAL;
   if ((*output)->state == TURBO_TTS_SYNTHESIZING ||
-      (*output)->state == TURBO_TTS_PLAYBACK_DRAINING ||
+      (*output)->state == TURBO_TTS_STAGING_DRAINING ||
       (*output)->state == TURBO_TTS_CANCEL_PENDING)
     return TURBO_TTS_EBUSY;
   wipe(*output, sizeof(**output));

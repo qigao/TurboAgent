@@ -32,6 +32,8 @@ jobs:
           speex_lib="$(readlink -f "$(pkg-config --variable=libdir speexdsp)/libspeexdsp.so")"
           test -f "$speex_lib"
           sha256sum "$speex_lib"
+          test "$(sha256sum "$speex_lib" | awk '{print $1}')" = \
+            ef4e0d1c80fb4fcf832bb98be7df08b44faaed84ee2c003070fa1b1023a1c5fd
           pkg-config --cflags --libs speexdsp
           # Distro package build itself is not compiled with our sanitizers;
           # only the test-only strict C11 owner and harness are instrumented.

@@ -37,6 +37,7 @@ static int test_invalid_model_and_digest(void) {
   turbo_agent_speech_whisper_config_init(&c);
   CHECK(c.struct_size == sizeof(c) &&
         c.abi_version == TURBO_AGENT_SPEECH_WHISPER_ABI_VERSION);
+  CHECK(c.stationary_noise_guard == 0u); /* explicit default OFF */
   CHECK(turbo_agent_speech_whisper_create(&c, &owner) ==
         TURBO_AGENT_SPEECH_EINVAL && owner == NULL);
   c.model_path = "relative-model.bin";
@@ -59,6 +60,10 @@ static int test_invalid_model_and_digest(void) {
   CHECK(turbo_agent_speech_whisper_create(&c, &owner) ==
         TURBO_AGENT_SPEECH_EINVAL);
   c.max_decode_ms = 30000u;
+  c.stationary_noise_guard = 2u;
+  CHECK(turbo_agent_speech_whisper_create(&c, &owner) ==
+        TURBO_AGENT_SPEECH_EINVAL && owner == NULL);
+  c.stationary_noise_guard = 0u;
   c.max_utterance_frames = TURBO_AGENT_SPEECH_MAX_UTTERANCE_FRAMES + 1u;
   CHECK(turbo_agent_speech_whisper_create(&c, &owner) ==
         TURBO_AGENT_SPEECH_EINVAL);

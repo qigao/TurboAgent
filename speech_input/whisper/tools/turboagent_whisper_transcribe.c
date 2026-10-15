@@ -16,7 +16,7 @@
 typedef struct cli_options_s {
   const char *model_path, *wav_path;
   uint8_t sha256[32];
-  uint32_t threads, decode_ms, model_max_mib;
+  uint32_t threads, decode_ms, model_max_mib, stationary_noise_guard;
   turbo_agent_speech_whisper_language_t language;
 } cli_options_t;
 
@@ -24,7 +24,7 @@ static void usage(void) {
   fputs("usage: turboagent-whisper-transcribe --model ABS_PATH "
         "--sha256 SHA256_64_HEX --wav ABS_PATH --language en|zh|ja|auto "
         "[--threads 1..16] [--timeout-ms 1..120000] "
-        "[--model-max-mib 1..1024]\n"
+        "[--model-max-mib 1..1024] [--stationarity-guard 0|1]\n"
         "Offline WAV only: mono 16kHz signed 16-bit little-endian PCM; "
         "exact 20ms (640-byte) frames, max 60 seconds. "
         "Transcript is preview-only, never a tool request.\n", stderr);
@@ -78,7 +78,7 @@ static int parse_args(int argc, char **argv, cli_options_t *opts) {
   opts->threads=2u;
   opts->decode_ms=30000u;
   opts->model_max_mib=128u;
-  if ((argc & 1)==0 || argc < 9 || argc > 15) return -1;
+  if ((argc & 1)==0 || argc < 9 || argc > 17) return -1;
   for (int i=1; i<argc; i+=2) {
     const char *key=argv[i], *value=argv[i+1];
     unsigned bit=0;
@@ -101,6 +101,8 @@ static int parse_args(int argc, char **argv, cli_options_t *opts) {
       bit=32u; if (uint_option(value,1,120000,&opts->decode_ms)!=0) return -1;
     } else if (strcmp(key,"--model-max-mib")==0) {
       bit=64u; if (uint_option(value,1,1024,&opts->model_max_mib)!=0) return -1;
+    } else if (strcmp(key,"--stationarity-guard")==0) {
+      bit=128u; if (uint_option(value,0,1,&opts->stationary_noise_guard)!=0) return -1;
     } else return -1;
     if (seen & bit) return -1;
     seen |= bit;
@@ -221,6 +223,7 @@ static int transcribe(FILE *wav, const audio_span_t *audio,
   whisper_config.cpu_threads=options->threads;
   whisper_config.max_decode_ms=options->decode_ms;
   whisper_config.language=options->language;
+  whisper_config.stationary_noise_guard=options->stationary_noise_guard;
   if (turbo_agent_speech_whisper_create(&whisper_config,&owner)!=0)
     goto cleanup;
   if (turbo_agent_speech_whisper_provider(owner,&provider)!=0)

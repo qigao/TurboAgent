@@ -253,42 +253,9 @@ jobs:
             test "$status" -eq 0 || test "$status" -eq 4
             printf '%s\n' "$status" > "/tmp/ta-real-asr-nonspeech-private/$profile.exit"
           done
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          root=Path('/tmp/ta-real-asr-nonspeech-private')
-          outcomes={}
-          for profile in ('digital-zero','stationary-noise-quiet','stationary-noise-medium'):
-              rc=int((root/(profile+'.exit')).read_text().strip())
-              stdout=(root/(profile+'.stdout')).read_bytes()
-              stderr=(root/(profile+'.stderr')).read_bytes()
-              if len(stdout)>4097:
-                  raise SystemExit(f'{profile}: unexpected oversized output')
-              if rc==0 and not stdout and b'NO_SPEECH' in stderr:
-                  status='no_speech'
-              elif rc==0 and stdout:
-                  status='unprompted_text_observed'
-              elif rc==4 and not stdout and b'no transcript admitted' in stderr:
-                  status='provider_or_output_rejected'
-              else:
-                  raise SystemExit(f'{profile}: invalid terminal outcome rc={rc} bytes={len(stdout)}')
-              if profile=='digital-zero' and status!='no_speech':
-                  raise SystemExit('digital zero must fail closed to NO_SPEECH')
-              outcomes[profile]={
-                  'classification':status,
-                  'cli_exit_status':rc,
-                  'stdout_bytes':len(stdout),
-              }
-          report={
-              'test_kind':'genuine_tiny_weights_generated_noise_diagnostic',
-              'real_noise_rejection_certified':False,
-              'language_quality_certified':False,
-              'non_speech_cases':outcomes,
-          }
-          dst=Path('/tmp/ta-real-asr-nonspeech-outcomes.json')
-          dst.write_text(json.dumps(report,indent=2,sort_keys=True)+'\n',encoding='utf-8')
-          print(json.dumps(report,indent=2,sort_keys=True))
-          PY
+          python3 speech_input/whisper/tools/evaluate_non_speech_probe.py \
+            --input-dir /tmp/ta-real-asr-nonspeech-private \
+            --report /tmp/ta-real-asr-nonspeech-outcomes.json
       - name: Reject real Whisper inference exceeding a 1ms monotonic decode deadline
         shell: bash
         run: |

@@ -135,3 +135,22 @@ if(ENABLE_SPEECH_WHISPER_CLI)
       WILL_FAIL TRUE TIMEOUT 5)
   endif()
 endif()
+
+
+# Real weights and provider callbacks are never introduced in normal CTest.
+# This standalone strict-C11 ELF host builds without a model and never links
+# directly to whisper or the production Provider. Its six actual-inference
+# scenarios are invoked ONLY from the separately authorized label-only job.
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(Threads REQUIRED)
+  add_executable(test_turbo_agent_speech_whisper_real_model_dso
+    tests/test_speech_whisper_real_model_dso.c)
+  target_compile_features(test_turbo_agent_speech_whisper_real_model_dso
+    PRIVATE c_std_11)
+  set_target_properties(test_turbo_agent_speech_whisper_real_model_dso
+    PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+  target_link_libraries(test_turbo_agent_speech_whisper_real_model_dso
+    PRIVATE turbo_agent_speech_input Threads::Threads ${CMAKE_DL_LIBS})
+  target_link_options(test_turbo_agent_speech_whisper_real_model_dso
+    PRIVATE "LINKER:-z,defs")
+endif()

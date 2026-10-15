@@ -33,7 +33,7 @@ jobs:
           decoder="$(realpath "$(command -v ffmpeg)")"
           decoder_sha="$(sha256sum "$decoder" | awk '{print $1}')"
           case_count=0
-          while IFS='|' read -r stimulus suffix url published_sha1; do
+          while IFS='|' read -r stimulus suffix url published_sha1 published_sha256 exact_bytes expected_wav_sha256; do
             test -n "$stimulus" || continue
             case_count=$((case_count + 1))
             original="$private/$stimulus.oga"
@@ -44,20 +44,21 @@ jobs:
               --user-agent 'TurboAgent-PLOS-paired-acoustic-study/1.0 (qigao/TurboAgent)' \
               "$url" --output "$original"
             byte_count="$(wc -c < "$original" | tr -d '[:space:]')"
+            test "$byte_count" = "$exact_bytes"
             test "$byte_count" -gt 5000
             test "$byte_count" -lt 25000
             test "$(head -c 4 "$original")" = 'OggS'
             observed_sha1="$(sha1sum "$original" | awk '{print $1}')"
-            if [ -n "$published_sha1" ]; then
-              test "$observed_sha1" = "$published_sha1"
-            fi
+            test "$observed_sha1" = "$published_sha1"
             observed_sha256="$(sha256sum "$original" | awk '{print $1}')"
+            test "$observed_sha256" = "$published_sha256"
             python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
               --source "$original" --source-sha256 "$observed_sha256" \
               --ffmpeg "$decoder" --ffmpeg-sha256 "$decoder_sha" \
               --output-wav "$converted" \
               --private-provenance "$private/$stimulus.private.json" \
               --acknowledge-rights > "$private/$stimulus.status.json"
+            test "$(sha256sum "$converted" | awk '{print $1}')" = "$expected_wav_sha256"
             STIMULUS="$stimulus" FILE_BYTES="$byte_count" \
             ORIG_SHA1="$observed_sha1" ORIG_SHA256="$observed_sha256" \
             PUBLISHED_SHA1="$published_sha1" WAV="$converted" \
@@ -96,8 +97,10 @@ jobs:
               "naturally_recorded_unaltered": stimulus != "whispered_envelope_matched",
               "original_bytes": int(os.environ["FILE_BYTES"]),
               "original_sha1": os.environ["ORIG_SHA1"],
-              "original_sha1_previously_pinned": bool(os.environ["PUBLISHED_SHA1"]),
-              "original_sha256_first_observation": os.environ["ORIG_SHA256"],
+              "original_sha1_previously_pinned": True,
+              "original_sha256_independently_pinned": True,
+              "exact_canonical_wav_sha256_verified": True,
+              "original_sha256": os.environ["ORIG_SHA256"],
               "canonical_sha256": hashlib.sha256(raw).hexdigest(),
               "complete_20ms_frames": len(power),
               "zero_power_frames": sum(p == 0 for p in power),
@@ -113,9 +116,9 @@ jobs:
           }, sort_keys=True))
           PY
           done <<'STUDY_STIMULI'
-          voiced|s001|https://upload.wikimedia.org/wikipedia/commons/9/93/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s001.oga|
-          whispered|s002|https://upload.wikimedia.org/wikipedia/commons/2/25/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s002.oga|
-          whispered_envelope_matched|s003|https://upload.wikimedia.org/wikipedia/commons/2/29/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s003.oga|ecd2002718660eb5943b7a94b814272ca4068367
+          voiced|s001|https://upload.wikimedia.org/wikipedia/commons/9/93/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s001.oga|7ea315ea7703f3a6370088cddb15732ce41b4973|8457f227ce1490cfb372b52636812a1fd8ea39d2f63f66018688fac1f25ad6c7|11157|a93d68dc3bf61f413d219c9ff6e68b0a5e059f728e72bec7d1e34d809d6b2819
+          whispered|s002|https://upload.wikimedia.org/wikipedia/commons/2/25/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s002.oga|a7a0bdcceaba58a3e5e8fafa68efa80c256dd09e|2f11c93a0100f6106dee8de19cb7098d4b178730966f12d82b236a9420549c34|11722|808c58491a4aa89ce69356832602999daa64e9f2180be13843064aa5ad3f1ea2
+          whispered_envelope_matched|s003|https://upload.wikimedia.org/wikipedia/commons/2/29/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s003.oga|ecd2002718660eb5943b7a94b814272ca4068367|2f9efe41064d5122871860237e904b8febce993e8496bb22990e7ef6f322068a|10991|2c35f44a0eb1101c6d51c56bad75ce274ae167e8ef8b5db5c209d0fe5363a428
           STUDY_STIMULI
           test "$case_count" = 3
           # No upload-artifact action or transcript; runner temp wiped.

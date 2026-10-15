@@ -12,6 +12,7 @@ struct salts_playback {
   size_t max_write;
   int clear_error;
   int write_error;
+  int drain_error;
   unsigned writes;
   unsigned clears;
   unsigned drains;
@@ -43,6 +44,7 @@ int salts_playback_clear(salts_playback_t *p) {
 int salts_playback_drain(salts_playback_t *p, uint32_t timeout_ms) {
   if (!p || !timeout_ms) return SALTS_PLAYBACK_ERR_FORMAT;
   p->drains++;
+  if (p->drain_error) return SALTS_PLAYBACK_ERR_DEVICE;
   return p->count ? SALTS_PLAYBACK_ERR_TIMEOUT : SALTS_PLAYBACK_OK;
 }
 
@@ -373,16 +375,63 @@ static int test_snapshot_stalled_provider_and_device_clear(void) {
   return 0;
 }
 
+static int test_drain_device_error_cannot_become_completed(void) {
+  fake_provider_t p = {0};
+  salts_playback_t dev;
+  device_init(&dev);
+  turbo_tts_output_t *tts = NULL;
+  turbo_voice_coordinator_t *v = NULL;
+  CHECK(setup(&p, &dev, &tts, &v) == 0);
+  CHECK(admitted(v, 200u) == 0);
+
+  size_t written = 0u;
+  CHECK(turbo_voice_pump(v, 3u, &written) == TURBO_VOICE_OK);
+  CHECK(turbo_voice_get_state(v) == TURBO_VOICE_DRAIN_PENDING);
+  CHECK(dev.count == 1120u);
+  turbo_voice_snapshot_t snapshot;
+  turbo_voice_snapshot_init(&snapshot);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.blockers == TURBO_VOICE_BLOCK_PLAYBACK_DRAIN);
+
+  /* Once native drain reports a fatal error, no later clear or cancellation
+   * may manufacture a successful PLAYBACK_DRAINED / COMPLETED state. */
+  dev.drain_error = 1;
+  dev.clear_error = 1;
+  CHECK(turbo_voice_drain(v, 10u) == TURBO_VOICE_EDEVICE);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.state == TURBO_VOICE_CANCEL_PENDING);
+  CHECK((snapshot.blockers & TURBO_VOICE_BLOCK_FAULT) != 0u);
+  CHECK((snapshot.blockers & TURBO_VOICE_BLOCK_DEVICE_CLEAR) != 0u);
+  CHECK((snapshot.blockers & TURBO_VOICE_BLOCK_PLAYBACK_DRAIN) == 0u);
+  CHECK(turbo_voice_destroy(&v) == TURBO_VOICE_EBUSY);
+  CHECK(turbo_voice_pump(v, 1u, &written) == TURBO_VOICE_EDEVICE);
+  CHECK(turbo_voice_begin_input(v, 201u) == TURBO_VOICE_EBUSY);
+
+  dev.clear_error = 0;
+  CHECK(turbo_voice_pump(v, 1u, &written) == TURBO_VOICE_OK);
+  CHECK(turbo_voice_get_snapshot(v, &snapshot) == TURBO_VOICE_OK);
+  CHECK(snapshot.state == TURBO_VOICE_FAILED);
+  CHECK(snapshot.blockers == TURBO_VOICE_BLOCK_FAULT);
+  CHECK(dev.count == 0u && dev.clears == 1u);
+  CHECK(turbo_voice_drain(v, 10u) == TURBO_VOICE_EBUSY);
+  CHECK(turbo_voice_begin_input(v, 201u) == TURBO_VOICE_EBUSY);
+  CHECK(turbo_voice_destroy(&v) == TURBO_VOICE_OK);
+  CHECK(turbo_tts_destroy(&tts) == TURBO_TTS_OK);
+  return 0;
+}
+
 int main(void) {
   CHECK(test_admission_fifo_drain() == 0);
   CHECK(test_clear_failure_noncooperative() == 0);
   CHECK(test_errors_never_mark_completed() == 0);
   CHECK(test_begin_failure_retains_provider() == 0);
   CHECK(test_snapshot_stalled_provider_and_device_clear() == 0);
+  CHECK(test_drain_device_error_cannot_become_completed() == 0);
   puts("PASS M4.2 checked FINAL + quiesced input; ASR PARTIAL rejected");
   puts("PASS M4.2 FIFO/short-write/drain, generation and ASR-event isolation");
   puts("PASS M4.2 failed clear/noncooperative Provider retain borrowed DSO");
   puts("PASS M4.2 device and Provider failures cannot mark output played");
   puts("PASS M4.2 read-only blocker snapshot, failed clear and stalled DSO");
+  puts("PASS M4.2 fatal native drain fails closed and cannot report completion");
   return 0;
 }

@@ -78,3 +78,26 @@ if(BUILD_TESTING)
   set_tests_properties(turbo_agent_speech_whisper_negative
     PROPERTIES TIMEOUT 30)
 endif()
+
+# Deterministic positive Provider end-to-end conformance. Compile the SAME
+# production C11 source, but bind only a fake v1.9.5 C ABI model engine.
+# This does NOT assert real acoustic model performance.
+if(BUILD_TESTING AND UNIX)
+  find_package(Threads REQUIRED)
+  add_executable(test_turbo_agent_speech_whisper_mock
+    src/turbo_agent_speech_whisper.c
+    tests/test_turbo_agent_speech_whisper_mock.c)
+  target_include_directories(test_turbo_agent_speech_whisper_mock PRIVATE
+    ${WHISPER_INCLUDE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+  target_compile_features(test_turbo_agent_speech_whisper_mock PRIVATE c_std_11)
+  set_target_properties(test_turbo_agent_speech_whisper_mock PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+  target_link_libraries(test_turbo_agent_speech_whisper_mock PRIVATE
+    turbo_agent_speech_input Salts::CMeta Threads::Threads)
+  add_test(NAME turbo_agent_speech_whisper_mock_provider
+    COMMAND test_turbo_agent_speech_whisper_mock)
+  set_tests_properties(turbo_agent_speech_whisper_mock_provider PROPERTIES
+    TIMEOUT 30)
+endif()

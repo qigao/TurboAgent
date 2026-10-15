@@ -4,6 +4,7 @@ name: TurboAgent SpeechOutput M4 strict C11 fake TTS source conformance (#166)
   pull_request:
     paths:
       - 'speech_output/**'
+      - 'docs/design/cooperative-speech-output-tts.md'
       - 'CMakeLists.txt'
       - '.github/workflows/speech-output-m4-source.yml'
   workflow_dispatch:

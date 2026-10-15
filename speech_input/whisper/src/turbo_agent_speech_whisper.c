@@ -31,7 +31,17 @@ struct turbo_agent_speech_whisper_s {
   size_t max_samples, used_samples, max_text;
   uint32_t cpu_threads;
   uint32_t max_decode_ms;
+  uint32_t stationary_noise_guard;
   uint64_t decode_deadline_ms;
+  /* Constant-memory, caller-driven 20ms frame-power statistics.
+   * No raw PCM beyond the existing bounded verified inference buffer. */
+  uint64_t power_min, power_max;
+  uint32_t power_frames;
+  double power_mean, power_m2;
+  /* Optional correlation evidence: total <=3000*320 samples, all signed
+   * products and sums strictly fit int64_t. No second PCM owner. */
+  int64_t lag_cross;
+  uint64_t lag_energy;
   turbo_agent_speech_whisper_language_t language;
   uint64_t last_utterance, last_timestamp_us;
   int has_timestamp, active, has_nonzero_pcm, last_error;
@@ -98,6 +108,13 @@ static void wipe_utterance(turbo_agent_speech_whisper_t *owner) {
   owner->has_timestamp = 0;
   owner->last_timestamp_us = 0u;
   owner->decode_deadline_ms = 0u;
+  owner->power_min = UINT64_MAX;
+  owner->power_max = 0u;
+  owner->power_frames = 0u;
+  owner->power_mean = 0.0;
+  owner->power_m2 = 0.0;
+  owner->lag_cross = 0;
+  owner->lag_energy = 0u;
 }
 
 static void destroy_storage(turbo_agent_speech_whisper_t *owner) {
@@ -201,6 +218,7 @@ void turbo_agent_speech_whisper_config_init(
   config->cpu_threads = 2u;
   config->max_decode_ms = 30000u;
   config->language = TURBO_AGENT_WHISPER_LANGUAGE_AUTO;
+  config->stationary_noise_guard = 0u; /* no change to legacy opt-in Provider */
 }
 
 int turbo_agent_speech_whisper_create(
@@ -226,6 +244,7 @@ int turbo_agent_speech_whisper_create(
       config->cpu_threads > TURBO_AGENT_SPEECH_WHISPER_MAX_THREADS ||
       config->max_decode_ms == 0u ||
       config->max_decode_ms > TURBO_AGENT_SPEECH_WHISPER_MAX_DECODE_MS ||
+      config->stationary_noise_guard > 1u ||
       !valid_language(config->language))
     return TURBO_AGENT_SPEECH_EINVAL;
   for (size_t i = 0u; i < sizeof(config->expected_sha256); i++) {
@@ -243,7 +262,9 @@ int turbo_agent_speech_whisper_create(
   owner->max_text = (size_t)config->max_text_bytes;
   owner->cpu_threads = config->cpu_threads;
   owner->max_decode_ms = config->max_decode_ms;
+  owner->stationary_noise_guard = config->stationary_noise_guard;
   owner->language = config->language;
+  owner->power_min = UINT64_MAX;
   atomic_init(&owner->abort_requested, 0);
   atomic_init(&owner->in_decode, 0);
   owner->pcm_f32 = (float *)calloc(1u, bytes);
@@ -305,10 +326,34 @@ static int provider_accept(void *context, const int16_t *pcm,
     owner->last_error = TURBO_AGENT_SPEECH_ECAPACITY;
     return -1;
   }
+  /* Exact S16 frame sum of squares fits uint64_t:
+   * 320 * 32768^2 < 2^39. Statistics are updated only by the serialized
+   * Provider accept callback; abort() never accesses them. */
+  uint64_t frame_power = 0u;
+  int64_t previous = 0;
   for (size_t i = 0u; i < samples; i++) {
+    if (owner->stationary_noise_guard) {
+      const int64_t value = (int64_t)pcm[i];
+      frame_power += (uint64_t)(value * value);
+      if (i > 0u) {
+        owner->lag_cross += value * previous;
+        owner->lag_energy += (uint64_t)(value * value);
+      }
+      previous = value;
+    }
     owner->pcm_f32[owner->used_samples + i] =
         (float)pcm[i] * (1.0f / 32768.0f);
     if (pcm[i] != 0) owner->has_nonzero_pcm = 1;
+  }
+  if (owner->stationary_noise_guard) {
+    /* Welford online variance: fixed-size statistics per owner,
+     * no recording or second VAD/ASR model. */
+    const double delta = (double)frame_power - owner->power_mean;
+    owner->power_frames++;
+    owner->power_mean += delta / (double)owner->power_frames;
+    owner->power_m2 += delta * ((double)frame_power - owner->power_mean);
+    if (frame_power < owner->power_min) owner->power_min = frame_power;
+    if (frame_power > owner->power_max) owner->power_max = frame_power;
   }
   owner->used_samples += samples;
   owner->last_timestamp_us = timestamp_us;
@@ -332,6 +377,31 @@ static bool whisper_abort_callback(void *context) {
   return false;
 }
 
+/* Tight *uncorrelated stationary-power* rejection hypothesis, NOT VAD.
+ * Require >=1s accepted 20ms PCM, every frame nonzero, low frame-power
+ * variation AND weak absolute lag-1 sample correlation. This last term
+ * protects power-flattened coherent speech/tones from a false NO_SPEECH:
+ * RMS/AGC alone is not evidence of non-speech. Correlated or changing
+ * background noise can still hallucinate; no generic quality claim. */
+static int stationary_noise_candidate(
+    const turbo_agent_speech_whisper_t *owner) {
+  double variance;
+  double absolute_lag;
+  if (!owner->stationary_noise_guard || owner->power_frames < 50u ||
+      owner->power_min == 0u || owner->power_mean <= 0.0 ||
+      owner->lag_energy == 0u)
+    return 0;
+  /* Per 20ms power maximum is <2^39; doubling cannot overflow. */
+  if (owner->power_max > owner->power_min * 2u) return 0;
+  variance = owner->power_m2 / (double)owner->power_frames;
+  if (variance > 0.0144 * owner->power_mean * owner->power_mean) return 0;
+  /* Fail open to genuine decode when coherent structure exists. The
+   * accumulated <=960k PCM products safely fit int64_t. */
+  absolute_lag = owner->lag_cross < 0 ?
+      -(double)owner->lag_cross : (double)owner->lag_cross;
+  return absolute_lag < 0.12 * (double)owner->lag_energy;
+}
+
 static int provider_finish(void *context,
                            turbo_agent_speech_transcript_t *out_final) {
   turbo_agent_speech_whisper_t *owner = (turbo_agent_speech_whisper_t *)context;
@@ -343,9 +413,11 @@ static int provider_finish(void *context,
     owner->last_error = TURBO_AGENT_WHISPER_EABORT;
     return -1;
   }
-  /* Digital zero PCM is a deterministic silence-negative fixture, NOT
-   * acoustic VAD. Background noise hallucinations require separate testing. */
-  if (owner->used_samples == 0u || !owner->has_nonzero_pcm) {
+  /* Exact digital zero remains unchanged. The separately opt-in
+   * stationarity screen rejects only a conservative measured subclass of
+   * nonzero synthetic/background signals. It does not claim general VAD. */
+  if (owner->used_samples == 0u || !owner->has_nonzero_pcm ||
+      stationary_noise_candidate(owner)) {
     wipe_utterance(owner);
     owner->active = 0;
     *out_final = (turbo_agent_speech_transcript_t){

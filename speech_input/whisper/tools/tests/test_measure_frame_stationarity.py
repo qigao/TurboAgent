@@ -53,6 +53,36 @@ class StationarityTests(unittest.TestCase):
             self.assertGreater(summary["frame_power_cv"], 0.4)
             self.assertIsNone(summary["frame_power_max_min_ratio"])
 
+    def test_power_constant_correlated_tone_is_not_silenced(self):
+        # Equal power is NOT sufficient evidence of noise: a voiced surrogate
+        # with strong sample coherence must pass to the vendor decoder.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "flat-power-coherent.wav"
+            with wave.open(str(path), "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(16000)
+                for frame in range(60):
+                    output.writeframes(struct.pack(
+                        "<320h", *(1000 if (i // 20) % 2 else -1000
+                                   for i in range(320))))
+            result = measure.inspect_wav(path)
+            self.assertEqual(result["frame_power_cv"], 0.0)
+            self.assertEqual(result["frame_power_max_min_ratio"], 1.0)
+            self.assertGreater(result["lag1_abs_correlation"], 0.80)
+            self.assertEqual(result["stationarity_hypothesis"],
+                             "dynamic_or_unknown")
+
+    def test_flat_rms_jfk_generator_rejects_untrusted_source(self):
+        generator = load("fixed_rms_jfk_generator", "generate_agc_speech_probe.py")
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "wrong.wav"
+            source.write_bytes(b"no approved audio bytes")
+            with self.assertRaises(ValueError):
+                generator.generate(source, root / "output.wav")
+            self.assertFalse((root / "output.wav").exists())
+
     def test_short_sample_cannot_establish_stationarity(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "short.wav"

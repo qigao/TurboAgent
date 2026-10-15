@@ -25,7 +25,7 @@ jobs:
       github.event.label.name == 'speech-model-download-approved' &&
       github.repository == 'qigao/TurboAgent' &&
       github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' &&
-      github.event.pull_request.head.ref == 'test/speech-whisper-real-model-gated-137' &&
+      github.event.pull_request.head.ref == 'feature/speech-stationary-noise-admission-137' &&
       contains(github.event.pull_request.labels.*.name, 'speech-model-download-approved')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -172,6 +172,27 @@ jobs:
           assert manifest['profiles']['stationary-noise-quiet']['nonzero_samples'] > 0
           assert manifest['profiles']['stationary-noise-medium']['nonzero_samples'] > 0
           PY
+      - name: Generate trusted fixed-RMS spoken JFK stress probe without model access
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 speech_input/whisper/tools/generate_agc_speech_probe.py \
+            --source "$GITHUB_WORKSPACE/external/whisper-v195/samples/jfk.wav" \
+            --output "$MODEL_ROOT/jfk-agc-private.wav" \
+            --report /tmp/ta-real-asr-agc-provenance.json
+          # Local transformed audio must not be uploaded or misrepresented
+          # as an independently licensed natural speech corpus.
+          test -s "$MODEL_ROOT/jfk-agc-private.wav"
+      - name: Generate pinned soft, AGC-soft and short JFK speech-derived probes without weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 speech_input/whisper/tools/generate_speech_stress_probes.py \
+            --source "$GITHUB_WORKSPACE/external/whisper-v195/samples/jfk.wav" \
+            --output-dir "$MODEL_ROOT/jfk-speech-stress-private" \
+            --report /tmp/ta-real-asr-speech-stress-manifest.json
+          test -f "$MODEL_ROOT/jfk-speech-stress-private/jfk-soft-8.wav"
+          test -f "$MODEL_ROOT/jfk-speech-stress-private/jfk-mid-short-0p8s.wav"
       - name: Build upstream Whisper v1.9.5 CPU-only from exact SHA
         shell: bash
         run: |
@@ -256,6 +277,128 @@ jobs:
           python3 speech_input/whisper/tools/evaluate_non_speech_probe.py \
             --input-dir /tmp/ta-real-asr-nonspeech-private \
             --report /tmp/ta-real-asr-nonspeech-outcomes.json
+      - name: Qualify explicit guard on real JFK speech and exact stationary-noise probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cli="$GITHUB_WORKSPACE/build/speech-real-model/whisper/turboagent-whisper-transcribe"
+          test -x "$cli"
+          # This is a genuine-model regression, never the fake-engine C11 test.
+          # Keep all raw transcripts and speech/noise WAV bytes local to runner.
+          for profile in digital-zero stationary-noise-quiet stationary-noise-medium; do
+            timeout --signal=TERM --kill-after=10s 200s \
+              "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+              --sha256 "$MODEL_SHA256" \
+              --wav "$MODEL_ROOT/no-speech-probes/$profile.wav" \
+              --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+              --stationarity-guard 1 \
+              > "/tmp/ta-guard-$profile.stdout" \
+              2> "/tmp/ta-guard-$profile.stderr"
+            test ! -s "/tmp/ta-guard-$profile.stdout"
+            grep -Fq 'NO_SPEECH (no transcript emitted)' "/tmp/ta-guard-$profile.stderr"
+          done
+          timeout --signal=TERM --kill-after=10s 200s \
+            "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+            --sha256 "$MODEL_SHA256" \
+            --wav "$MODEL_ROOT/jfk-canonical.wav" \
+            --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+            --stationarity-guard 1 \
+            > /tmp/ta-real-asr-guard-jfk-private.txt \
+            2> /tmp/ta-real-asr-guard-jfk-private.stderr
+          test -s /tmp/ta-real-asr-guard-jfk-private.txt
+          python3 speech_input/whisper/tools/evaluate_asr.py \
+            --reference "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country." \
+            --transcript-file /tmp/ta-real-asr-guard-jfk-private.txt \
+            --language en --max-wer 0.65 --require-word country \
+            --report /tmp/ta-real-asr-guard-jfk-metrics.json
+          # False-rejection comparison on the SAME gain-normalized source.
+          # Guard ON must preserve the actual baseline vendor decoder output.
+          # Do not interpret this artificial AGC fixture as human ASR quality.
+          for guard in 0 1; do
+            timeout --signal=TERM --kill-after=10s 200s \
+              "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+                --sha256 "$MODEL_SHA256" \
+                --wav "$MODEL_ROOT/jfk-agc-private.wav" \
+                --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+                --stationarity-guard "$guard" \
+              > "/tmp/ta-real-asr-agc-guard-$guard.private.stdout" \
+              2> "/tmp/ta-real-asr-agc-guard-$guard.private.stderr"
+            test -s "/tmp/ta-real-asr-agc-guard-$guard.private.stdout"
+            python3 speech_input/whisper/tools/evaluate_asr.py \
+              --reference "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country." \
+              --transcript-file "/tmp/ta-real-asr-agc-guard-$guard.private.stdout" \
+              --language en \
+              --report "/tmp/ta-real-asr-agc-guard-$guard.metrics.json"
+          done
+          cmp -s /tmp/ta-real-asr-agc-guard-0.private.stdout \
+                 /tmp/ta-real-asr-agc-guard-1.private.stdout
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp')
+          baseline=json.loads((p/'ta-real-asr-agc-guard-0.metrics.json').read_text())
+          guarded=json.loads((p/'ta-real-asr-agc-guard-1.metrics.json').read_text())
+          report={
+              'source_kind':'pinned_jfk_gain_normalized_AGC_stress',
+              'baseline_emitted_speech_text':True,
+              'guard_preserved_exact_baseline_text':True,
+              'baseline_wer':baseline['word_error_rate'],
+              'guard_wer':guarded['word_error_rate'],
+              'acoustic_quality_certified':False,
+              'general_vad_certified':False,
+          }
+          (p/'ta-real-asr-agc-guard-comparison.json').write_text(
+              json.dumps(report,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          PY
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('/tmp/ta-real-asr-guard-jfk-metrics.json').read_text())
+          assert m['word_error_rate'] <= 0.65, m
+          result={
+            'test_kind':'real_whisper_tiny_opt_in_stationarity_guard',
+            'signal_gate':'three_generated_nonspeech_NO_SPEECH_zero_stdout',
+            'nonspeech_profiles':3,
+            'jfk_wer':m['word_error_rate'],
+            'jfk_cer':m['character_error_rate'],
+            'general_vad_certified':False,
+            'real_room_noise_certified':False,
+            'weights_uploaded':False,
+          }
+          Path('/tmp/ta-real-asr-guard-metrics.json').write_text(
+            json.dumps(result,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(result,indent=2,sort_keys=True))
+          PY
+      - name: Compare baseline against opt-in guard on genuine soft and short JFK voice derivatives
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cli="$GITHUB_WORKSPACE/build/speech-real-model/whisper/turboagent-whisper-transcribe"
+          mkdir -p /tmp/ta-real-asr-soft-jfk-private
+          for profile in jfk-soft-8 jfk-soft-64 jfk-agc-soft-8 jfk-agc-soft-32 jfk-mid-short-0p8s; do
+            for guard in 0 1; do
+              set +e
+              timeout --signal=TERM --kill-after=10s 200s \
+                "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+                  --sha256 "$MODEL_SHA256" \
+                  --wav "$MODEL_ROOT/jfk-speech-stress-private/$profile.wav" \
+                  --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+                  --stationarity-guard "$guard" \
+                > "/tmp/ta-real-asr-soft-jfk-private/$profile-guard$guard.stdout" \
+                2> "/tmp/ta-real-asr-soft-jfk-private/$profile-guard$guard.stderr"
+              status=$?
+              set -e
+              test "$status" -eq 0 || test "$status" -eq 4
+              printf '%s\n' "$status" > "/tmp/ta-real-asr-soft-jfk-private/$profile-guard$guard.exit"
+            done
+          done
+          python3 speech_input/whisper/tools/compare_speech_stress_outcomes.py \
+            --input-dir /tmp/ta-real-asr-soft-jfk-private \
+            --report /tmp/ta-real-asr-soft-jfk-comparison.json
+          # Exact equality alone is NOT certification of any transcript.
       - name: Reject real Whisper inference exceeding a 1ms monotonic decode deadline
         shell: bash
         run: |
@@ -331,6 +474,14 @@ jobs:
             /tmp/ta-real-asr-deadline-evidence.txt
             /tmp/ta-real-asr-nonspeech-fixture-metadata.json
             /tmp/ta-real-asr-nonspeech-outcomes.json
+            /tmp/ta-real-asr-guard-jfk-metrics.json
+            /tmp/ta-real-asr-guard-metrics.json
+            /tmp/ta-real-asr-agc-provenance.json
+            /tmp/ta-real-asr-agc-guard-0.metrics.json
+            /tmp/ta-real-asr-agc-guard-1.metrics.json
+            /tmp/ta-real-asr-agc-guard-comparison.json
+            /tmp/ta-real-asr-speech-stress-manifest.json
+            /tmp/ta-real-asr-soft-jfk-comparison.json
             /tmp/ta-real-asr-provider-linked-images.txt
             /tmp/ta-real-asr-host-linked-images.txt
             /tmp/ta-real-asr-provider-lifecycle.txt

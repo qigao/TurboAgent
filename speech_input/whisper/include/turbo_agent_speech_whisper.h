@@ -23,7 +23,7 @@ extern "C" {
 
 /* The optional shared-provider interface stays C11 even though the separately
  * installed whisper.cpp + ggml CPU-only inference engine is implemented in C++. */
-#define TURBO_AGENT_SPEECH_WHISPER_ABI_VERSION 1u
+#define TURBO_AGENT_SPEECH_WHISPER_ABI_VERSION 2u
 #define TURBO_AGENT_SPEECH_WHISPER_SHA256_BYTES 32u
 #define TURBO_AGENT_SPEECH_WHISPER_MAX_MODEL_BYTES (1024u * 1024u * 1024u)
 #define TURBO_AGENT_SPEECH_WHISPER_MAX_THREADS 16u
@@ -60,6 +60,13 @@ typedef struct turbo_agent_speech_whisper_config_s {
   uint32_t cpu_threads; /* 1..16; no opportunistic GPU fallback */
   uint32_t max_decode_ms; /* 1..120000; monotonic cooperative abort deadline */
   turbo_agent_speech_whisper_language_t language;
+  /* Opt-in deterministic PCM stationarity rejection:
+   * 0 (default) keeps previous behavior; 1 rejects only long (>1s)
+   * approximately constant frame-power sequences with NO_SPEECH.
+   * This is NOT general voice activity detection, not a model confidence
+   * score and not a substitute for evaluation on natural background noise.
+   * No extra inference engine, worker, owner or audio persistence. */
+  uint32_t stationary_noise_guard; /* exact 0 or 1; invalid values refused */
 } turbo_agent_speech_whisper_config_t;
 
 TURBO_AGENT_SPEECH_WHISPER_API void turbo_agent_speech_whisper_config_init(

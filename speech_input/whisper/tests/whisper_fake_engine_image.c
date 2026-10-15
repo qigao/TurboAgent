@@ -87,5 +87,11 @@ const char *whisper_full_get_segment_text(struct whisper_context *ctx,
     return "\033[31munsafe terminal output";
   if (getenv("TA_SPEECH_TEST_BIDI"))
     return "\xe2\x80\xae" "reversed display";
+  if (getenv("TA_SPEECH_TEST_C1"))
+    return "terminal" "\xc2\x9b" "rewritten";
+  if (getenv("TA_SPEECH_TEST_ARABIC_MARK"))
+    return "\xd8\x9c" "directional spoof";
+  if (getenv("TA_SPEECH_TEST_LINE_SEPARATOR"))
+    return "first" "\xe2\x80\xa8" "second";
   return " utterance";
 }

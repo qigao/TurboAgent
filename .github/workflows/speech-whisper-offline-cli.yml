@@ -2,6 +2,7 @@ name: SpeechWhisper offline WAV CLI real CPU and mock positive (#137)
 
 'on':
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'speech_input/whisper/tools/**'
       - 'speech_input/whisper/CMakeLists.txt'
@@ -358,10 +359,11 @@ jobs:
               --report "$source_dir/$name-private-report.json"
           done
           echo 'PASS: native C11 ABI2 outcomes match offline immutable PCM in six generated cases'
-      - name: Manual pinned public voice native ABI2 fake-vendor parity
-        # Explicit workflow_dispatch is the ONLY path to real audio retrieval.
-        # PR events never download original human voice clips.
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/test/speech-native-abi2-pcm-parity-146'
+      - name: Explicit label only pinned public voice C11 ABI2 parity
+        # ONLY a maintainer's explicit newly-added label event can fetch
+        # fixed licensed original audio on this exact same-repo Draft PR.
+        # Synchronize/reopen and reruns cannot reuse an existing label.
+        if: github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'speech-audio-source-approved' && github.event.pull_request.number == 162 && github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-native-abi2-pcm-parity-146' && github.run_attempt == 1
         shell: bash
         run: |
           set -euo pipefail

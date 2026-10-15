@@ -133,8 +133,16 @@ def evaluate(audio_root: Path, manifest_path: Path) -> dict:
     langs = defaultdict(lambda: [0, 0])
     conditions = defaultdict(lambda: [0, 0])
     total_bytes = 0
+    seen_digests = set()
     for item in manifest["samples"]:
+        # Reject exact-byte duplicates even if they have different paths,
+        # language labels or declared conditions. Repeated files cannot
+        # inflate an apparent sample denominator or Wilson interval.
+        digest = item.get("sha256") if isinstance(item, dict) else None
+        if isinstance(digest, str) and digest in seen_digests:
+            raise ValueError("duplicate WAV bytes in corpus")
         source, lang, condition, size, off, on = inspect_sample(root, item)
+        seen_digests.add(digest)
         total_bytes += size
         if total_bytes > MAX_AUDIO_BYTES:
             raise ValueError("bounded corpus byte budget exceeded")
@@ -156,6 +164,8 @@ def evaluate(audio_root: Path, manifest_path: Path) -> dict:
         "model_inference_used": False,
         "model_weights_downloaded": False,
         "human_labels_and_rights_independently_verified": False,
+        "speaker_independence_verified": False,
+        "wilson95_assumes_independent_recordings": True,
         "acoustic_vad_or_recognition_quality_certified": False,
         "source_label_scope": "caller_declared_not_verified",
         "sample_count": len(manifest["samples"]),

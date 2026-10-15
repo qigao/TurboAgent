@@ -13,6 +13,22 @@ permissions:
   packages: read
 
 jobs:
+  asr-metrics-no-weights:
+    name: Offline zh/ja CER and en WER evaluator (no model download)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test deterministic multilingual scoring and fail-closed transcript admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover \
+            -s speech_input/whisper/tools/tests \
+            -p 'test_*.py' -v
+
   real-whisper-binary-and-mock-cli:
     runs-on: ubuntu-24.04
     timeout-minutes: 90

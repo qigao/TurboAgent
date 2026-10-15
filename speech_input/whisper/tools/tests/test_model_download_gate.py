@@ -59,6 +59,30 @@ class MaintainerModelAdmission(unittest.TestCase):
         self.assertNotIn("ggml-tiny.bin", upload_block)
         self.assertNotIn("jfk-canonical.wav", upload_block)
 
+    def test_generated_noise_diagnostics_preserve_approval_and_no_raw_text_upload(self):
+        text = self.workflow
+        for required in (
+            "Generate original, license-independent zero and nonzero noise probes",
+            "generate_noise_fixtures.py",
+            "Observe real tiny-model response to generated non-speech",
+            "evaluate_non_speech_probe.py",
+            "/tmp/ta-real-asr-nonspeech-fixture-metadata.json",
+            "/tmp/ta-real-asr-nonspeech-outcomes.json",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+        self.assertLess(text.index("Download ONLY explicitly approved immutable MIT"),
+                        text.index("Observe real tiny-model response"))
+        upload = text.split("name: speech-whisper-real-model-gated-metrics-NO-WEIGHTS", 1)[1]
+        for forbidden in (
+            "/tmp/ta-real-asr-nonspeech-private",
+            "no-speech-probes/",
+            "stationary-noise-quiet.wav",
+            "stationary-noise-medium.wav",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, upload)
+
     def test_real_inference_is_not_replaced_by_fixture(self):
         text = self.workflow
         self.assertIn("Build upstream Whisper v1.9.5 CPU-only from exact SHA", text)

@@ -127,6 +127,62 @@ class PrivateIntakeToCorrelatedMetrics(unittest.TestCase):
                 evaluator.evaluate(private, manifest)
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "explicit local FFmpeg not installed")
+    def test_actual_ogg_vorbis_to_sha_pinned_private_corpus(self):
+        # Many potential source archives use Ogg; test the compressed input
+        # handoff all the way to the immutable ABI2 evaluator without
+        # acquiring any independently spoken recordings.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / "test-generated-only.wav"
+            synthetic_wav(source, correlated=True)
+            ffmpeg = Path(shutil.which("ffmpeg")).resolve(strict=True)
+            ogg = root / "compressed-generated-only.ogg"
+            command = [str(ffmpeg), "-nostdin", "-hide_banner",
+                       "-loglevel", "error", "-i", str(source),
+                       "-c:a", "libvorbis", "-qscale:a", "4",
+                       "-y", str(ogg)]
+            encode = subprocess.run(command, capture_output=True,
+                                    check=False, timeout=15)
+            self.assertEqual(encode.returncode, 0, encode.stderr[:500])
+            original_ogg = ogg.read_bytes()
+            self.assertGreater(len(original_ogg), 0)
+            private = root / "private"
+            private.mkdir()
+            prepared = private / "converted.wav"
+            provenance = private / "converted.private.json"
+            result = preparation.prepare(
+                ogg, hashlib.sha256(original_ogg).hexdigest(),
+                ffmpeg, prepared, provenance, True,
+                preparation.digest_file(ffmpeg))
+            self.assertTrue(result["no_model_or_network"])
+            self.assertGreaterEqual(result["frame_count"], FRAMES - 1)
+            self.assertLessEqual(result["frame_count"], FRAMES)
+            with wave.open(str(prepared), "rb") as stream:
+                self.assertEqual((stream.getframerate(), stream.getnchannels(),
+                                  stream.getsampwidth()), (16000, 1, 2))
+                self.assertEqual(stream.getnframes() % SAMPLES, 0)
+            evidence = json.loads(provenance.read_text(encoding="utf-8"))
+            self.assertEqual(evidence["source_sha256"],
+                             hashlib.sha256(original_ogg).hexdigest())
+            self.assertEqual(evidence["normalized_wav_sha256"],
+                             hashlib.sha256(prepared.read_bytes()).hexdigest())
+            manifest = root / "manifest-private.json"
+            manifest.write_text(json.dumps({"schema": 1, "samples": [
+                manifest_record(prepared, condition="equal_power")
+            ]}), encoding="utf-8")
+            report = evaluator.evaluate(private, manifest)
+            self.assertEqual(report["synthetic_controls"]["count"], 1)
+            self.assertEqual(report["synthetic_controls"]["not_human_speech_evidence"], True)
+            self.assertFalse(report["model_inference_used"])
+            self.assertFalse(report["acoustic_vad_or_recognition_quality_certified"])
+            self.assertIsNone(report["human_voice"]["guard_on_false_rejection"]["rate"])
+            payload = json.dumps(report)
+            for forbidden in ("compressed-generated-only.ogg",
+                              "converted.private.json", str(root),
+                              evidence["source_sha256"]):
+                self.assertNotIn(forbidden, payload)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "explicit local FFmpeg not installed")
     def test_rights_absent_refuses_before_audio_or_provenance_output(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

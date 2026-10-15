@@ -17,6 +17,10 @@ extern "C" {
  * user-visible FINAL. No speculative tokens, PARTIAL or tool output. */
 typedef struct turbo_voice_coordinator turbo_voice_coordinator_t;
 
+/* Prevent one event-loop tick or native drain from monopolizing its Owner. */
+#define TURBO_VOICE_MAX_POLL_BUDGET 8u
+#define TURBO_VOICE_MAX_DRAIN_MS 1000u
+
 typedef enum turbo_voice_state {
   TURBO_VOICE_READY = 0,
   TURBO_VOICE_INPUT = 1,

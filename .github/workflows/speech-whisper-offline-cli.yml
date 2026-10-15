@@ -295,6 +295,202 @@ jobs:
             test ! -s "$MODEL_FIXTURES/unsafe.stdout"
           done
           echo 'PASS: real C11 WAV/M2/M1/Provider pipeline and terminal/bidi injection refusal with deterministic fake acoustic engine'
+      - name: Compare real C11 ABI2 PCM/M1/M2/Provider with immutable generated boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$GITHUB_WORKSPACE/build/speech-cli-mock"
+          test -x build/speech-cli-mock/mock_whisper_cli
+          source_dir="$MODEL_FIXTURES/private-native-abi2"
+          mkdir -p "$source_dir"
+          chmod 700 "$source_dir"
+          python3 - <<'PY'
+          import os,struct,wave
+          from pathlib import Path
+          directory=Path(os.environ["MODEL_FIXTURES"])/"private-native-abi2"
+          for extra in (35,36,37):
+              path=directory/(f"lag1_{extra}.wav")
+              with wave.open(str(path),"wb") as output:
+                  output.setnchannels(1)
+                  output.setsampwidth(2)
+                  output.setframerate(16000)
+                  for frame in range(100):
+                      flips=140+int(frame<extra)
+                      values=[1000]
+                      for sample in range(1,320):
+                          values.append(-values[-1] if sample<=flips else values[-1])
+                      output.writeframes(struct.pack("<320h",*values))
+          state=0x41535231
+          for profile in ("uncorrelated_noise","correlated_periodic","digital_zero"):
+              path=directory/(profile+".wav")
+              with wave.open(str(path),"wb") as output:
+                  output.setnchannels(1)
+                  output.setsampwidth(2)
+                  output.setframerate(16000)
+                  for _ in range(60):
+                      samples=[]
+                      for i in range(320):
+                          if profile=="digital_zero":
+                              v=0
+                          elif profile=="correlated_periodic":
+                              v=-1000 if (i//40)&1 else 1000
+                          else:
+                              state ^= (state<<13)&0xffffffff
+                              state ^= state>>17
+                              state ^= (state<<5)&0xffffffff
+                              state &= 0xffffffff
+                              v=1000 if state&1 else -1000
+                          samples.append(v)
+                      output.writeframes(struct.pack("<320h",*samples))
+          print("PASS: six private deterministic PCM fixtures; no human voice or weights")
+          PY
+          cli="$GITHUB_WORKSPACE/build/speech-cli-mock/mock_whisper_cli"
+          model="$MODEL_FIXTURES/fake-model.bin"
+          model_sha="$(cat "$MODEL_FIXTURES/fake-model.sha256")"
+          for name in lag1_35 lag1_36 lag1_37 uncorrelated_noise correlated_periodic digital_zero; do
+            wav="$source_dir/$name.wav"
+            wav_sha="$(sha256sum "$wav" | awk '{print $1}')"
+            python3 speech_input/whisper/tools/verify_native_guard_pcm.py \
+              --source-wav "$wav" --source-sha256 "$wav_sha" \
+              --mock-cli "$cli" --fake-model "$model" \
+              --fake-model-sha256 "$model_sha" --language en \
+              --report "$source_dir/$name-private-report.json"
+          done
+          echo 'PASS: native C11 ABI2 outcomes match offline immutable PCM in six generated cases'
+      - name: Manual only: pinned publicly licensed original voice through exact ABI2 C11 fake-vendor parity
+        # Explicit workflow_dispatch is the ONLY path to real audio retrieval.
+        # PR events never download original human voice clips.
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/test/speech-native-abi2-pcm-parity-146'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          private="$(mktemp -d "$RUNNER_TEMP/speech-c11-real-pcm-XXXXXX")"
+          chmod 700 "$private"
+          trap 'rm -rf -- "$private"' EXIT
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$GITHUB_WORKSPACE/build/speech-cli-mock"
+          cli="$GITHUB_WORKSPACE/build/speech-cli-mock/mock_whisper_cli"
+          test -x "$cli"
+          model="$MODEL_FIXTURES/fake-model.bin"
+          model_sha="$(cat "$MODEL_FIXTURES/fake-model.sha256")"
+          ffmpeg_bin="$(realpath "$(command -v ffmpeg)")"
+          ffmpeg_sha="$(sha256sum "$ffmpeg_bin" | awk '{print $1}')"
+
+          # Exactly four pre-approved public original speech files, pinned
+          # to both Wikimedia SHA-1 and previously observed full SHA-256.
+          # No microphone, ASR model weights, raw transcript or audio upload.
+          while IFS='|' read -r lang url bytes sha1 sha256 canonical_sha; do
+            test -n "$lang" || continue
+            source="$private/$lang-original.ogg"
+            original_wav="$private/$lang-canonical.wav"
+            derivative_wav="$private/$lang-derived-energy.wav"
+            curl --fail --silent --show-error --location --retry 2 \
+              --connect-timeout 15 --max-time 60 --max-filesize 500000 \
+              --proto '=https' --proto-redir '=https' \
+              --user-agent 'TurboAgent-real-PCM-C11-parity/1.0 (qigao/TurboAgent)' \
+              "$url" --output "$source"
+            test "$(wc -c < "$source" | tr -d '[:space:]')" = "$bytes"
+            test "$(sha1sum "$source" | awk '{print $1}')" = "$sha1"
+            test "$(sha256sum "$source" | awk '{print $1}')" = "$sha256"
+
+            python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
+              --source "$source" --source-sha256 "$sha256" \
+              --ffmpeg "$ffmpeg_bin" --ffmpeg-sha256 "$ffmpeg_sha" \
+              --output-wav "$original_wav" \
+              --private-provenance "$private/$lang-provenance.json" \
+              --acknowledge-rights > "$private/$lang-preflight.json"
+            test "$(sha256sum "$original_wav" | awk '{print $1}')" = "$canonical_sha"
+
+            python3 - "$lang" "$original_wav" "$canonical_sha" "$derivative_wav" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import struct
+          import sys
+          import wave
+          sys.path.insert(0, "speech_input/whisper/tools")
+          from stress_stationarity_human import (
+              evaluate_bytes, make_wav, FRAME, MAX_STRESS_FRAMES,
+              MIN_STRESS_FRAMES, TARGET_FRAME_RMS,
+          )
+          from measure_frame_stationarity import inspect_wav_bytes
+
+          language, input_name, source_sha, output_name = sys.argv[1:]
+          source = Path(input_name).read_bytes()
+          assert hashlib.sha256(source).hexdigest() == source_sha
+          reference = evaluate_bytes(source, source_sha)
+          assert reference["original_energy_hypothesis"] == "dynamic_or_unknown"
+          with wave.open(input_name, "rb") as wav:
+              pcm = wav.readframes(wav.getnframes())
+          values = struct.unpack("<%dh" % (len(pcm)//2), pcm)
+          selected = []
+          for frame in range(len(values)//FRAME):
+              block = values[frame*FRAME:(frame+1)*FRAME]
+              power = sum(int(v)*int(v) for v in block)
+              if power:
+                  selected.append((block, power))
+              if len(selected) == MAX_STRESS_FRAMES:
+                  break
+          assert len(selected) >= MIN_STRESS_FRAMES
+          derived = []
+          for block, power in selected:
+              multiplier = TARGET_FRAME_RMS / ((power/FRAME)**0.5)
+              transformed = [round(sample * multiplier) for sample in block]
+              assert all(-32768 <= v <= 32767 for v in transformed)
+              derived.extend(transformed)
+          raw = struct.pack("<%dh" % len(derived), *derived)
+          wav_bytes = make_wav(raw)
+          measured = inspect_wav_bytes(wav_bytes)
+          assert measured["frame_count"] == len(selected)
+          assert measured["stationarity_hypothesis"] == reference["controlled_energy_equalization"]["equalized_frame_energy_hypothesis"]
+          assert (measured["frame_power_cv"] ==
+                  reference["controlled_energy_equalization"]["frame_power_cv"])
+          assert (measured["frame_power_max_min_ratio"] ==
+                  reference["controlled_energy_equalization"]["frame_power_max_min_ratio"])
+          fd = os.open(output_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(fd, "wb") as destination:
+              destination.write(wav_bytes)
+          print(json.dumps({
+              "language": language,
+              "evidence": "source-derived_edited_energy_only_not_natural_human",
+              "controlled_frames": len(selected),
+              "equalized_cv": measured["frame_power_cv"],
+              "equalized_ratio": measured["frame_power_max_min_ratio"],
+              "exact_canonical_sha_match": True,
+              "model_weights_used": False,
+              "audio_artifact_uploaded": False,
+          }, sort_keys=True))
+          PY
+
+            # Production C11 WAV/M2/M1/Provider + deterministic fake vendor.
+            # BOTH terminal classifications must agree with strict offline
+            # ABI2 lag-one predictor, never hardcode old power-only NO_SPEECH.
+            decoder_lang="$lang"
+            if [ "$lang" = whisper ]; then decoder_lang=en; fi
+            python3 speech_input/whisper/tools/verify_native_guard_pcm.py \
+              --source-wav "$original_wav" --source-sha256 "$canonical_sha" \
+              --mock-cli "$cli" --fake-model "$model" \
+              --fake-model-sha256 "$model_sha" --language "$decoder_lang" \
+              --report "$private/$lang-original-private-metadata.json"
+            derivative_sha="$(sha256sum "$derivative_wav" | awk '{print $1}')"
+            python3 speech_input/whisper/tools/verify_native_guard_pcm.py \
+              --source-wav "$derivative_wav" --source-sha256 "$derivative_sha" \
+              --mock-cli "$cli" --fake-model "$model" \
+              --fake-model-sha256 "$model_sha" --language "$decoder_lang" \
+              --report "$private/$lang-derived-private-metadata.json"
+          done <<'PINNED_HUMAN_SOURCE'
+          ja|https://upload.wikimedia.org/wikipedia/commons/b/b9/%E6%98%A5%E3%81%AF%E3%81%82%E3%81%91%E3%81%BC%E3%81%AE.ogg|264858|c7992ec2188ee94102f83e4eff22c4f9b9365d39|cad2f1545a3ac898362590ea636b8c09f1d77391b506790ae909e0e1ff1441f7|ccb16e8ea766bd2f4bf40ed09e5666ea6700edbd79343eb961fb13e9cafd6a03
+          zh|https://upload.wikimedia.org/wikipedia/commons/8/8a/Mandarin_Chinese-%E5%8D%97%E5%9B%BD%E5%B1%B1%E6%B2%B3.ogg|156728|2fb567da2edd9fc18160769b1c803bd9d072c273|304f11fa91ec51b2a2b9e4c11424f9944c6bdf3ee909440923511a86b5585b22|f246dded9eb91796c515f21b37f8e41b3357bdef3f6fe19552568c12653f0421
+          en|https://upload.wikimedia.org/wikipedia/commons/5/58/En-uk-Do_you_speak_English.ogg|21562|79b6f88e3db116fab8bc068cd523420406bef1c4|10829789c781d912ccbfdd9a4f5d4b3dbb2dac0a42af34610f7cf4497ad25deb|458ce0d1086ae8a5381ccc09878a630c016ebed42303a859e2030e2efbbe339e
+          whisper|https://upload.wikimedia.org/wikipedia/commons/e/e8/Whispering-example.ogg|30283|cc3b98f93353cf6ed8bb453669987afe7dd748bd|bbdbe95dfe4742e27845c03fba3a8caf9f0f5ad65e34e512fd5609d155e6304e|c81cf6b75800daf1070d3001f094877581bc68100f3c64cb43638491f89988d0
+          PINNED_HUMAN_SOURCE
+          # By design this step creates no GitHub artifact. Its private
+          # decoded/source/derivative PCM and vendor stub transcripts are
+          # erased automatically by the exit trap.
       - name: Archive pinned source and unmodified stdout/dependency evidence
         if: always()
         uses: actions/upload-artifact@v4

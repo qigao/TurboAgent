@@ -66,7 +66,7 @@ jobs:
             Where-Object { $_.Name -eq 'turbo_agent_speech_capture_salts.lib' } |
             Select-Object -First 1
           if (-not $library) { throw 'Missing native Salts Capture adapter archive' }
-          & (Get-Command Get-FileHash).Source $library.FullName -Algorithm SHA256 | Out-String
+          Get-FileHash -Path $library.FullName -Algorithm SHA256 | Format-List | Out-String | Write-Host
           "PASS: native Salts::Capture exactly imported, compiled, linked and no real microphone opened" |
             Tee-Object -FilePath "$env:RUNNER_TEMP\speech-capture-windows.txt"
       - uses: actions/upload-artifact@v4

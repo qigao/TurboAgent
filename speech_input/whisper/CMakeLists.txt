@@ -73,7 +73,7 @@ if(BUILD_TESTING)
     tests/test_turbo_agent_speech_whisper.c)
   target_compile_features(test_turbo_agent_speech_whisper PRIVATE c_std_11)
   target_link_libraries(test_turbo_agent_speech_whisper PRIVATE
-    turbo_agent_speech_whisper)
+    turbo_agent_speech_whisper Salts::Core)
   set_target_properties(test_turbo_agent_speech_whisper PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
   add_test(NAME turbo_agent_speech_whisper_negative

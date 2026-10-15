@@ -97,7 +97,7 @@ jobs:
           assert result["model_inference_used"] is False
           assert result["speaker_independence_verified"] is False
           print(json.dumps({
-              "evidence_kind": "independent_real_human_cc0_source",
+              "evidence_kind": "independent_real_human_licensed_source",
               "source_url": "https://commons.wikimedia.org/wiki/File:%E6%98%A5%E3%81%AF%E3%81%82%E3%81%91%E3%81%BC%E3%81%AE.ogg",
               "source_revision": "current-upload-2019-03-12",
               "source_sha1_verification": "PASS",
@@ -210,7 +210,7 @@ jobs:
           assert result["model_inference_used"] is False
           assert result["speaker_independence_verified"] is False
           print(json.dumps({
-              "evidence_kind": "independent_real_human_cc0_source",
+              "evidence_kind": "independent_real_human_licensed_source",
               "source_url": "https://commons.wikimedia.org/wiki/File:Mandarin_Chinese-%E5%8D%97%E5%9B%BD%E5%B1%B1%E6%B2%B3.ogg",
               "source_revision": "current-upload-2019-11-11",
               "source_sha1_verification": "PASS",
@@ -237,7 +237,7 @@ jobs:
 
   english-ccby-voice-no-model:
     if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146'
-    name: SHA1-pinned English CC-BY voice, Guard OFF/ON (no weights)
+    name: SHA256-pinned English CC-BY voice, Guard OFF/ON (no weights)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -256,6 +256,7 @@ jobs:
         env:
           CC0_URL: https://upload.wikimedia.org/wikipedia/commons/5/58/En-uk-Do_you_speak_English.ogg
           CC0_EXPECTED_SHA1: 79b6f88e3db116fab8bc068cd523420406bef1c4
+          CC0_EXPECTED_SHA256: 10829789c781d912ccbfdd9a4f5d4b3dbb2dac0a42af34610f7cf4497ad25deb
           CC0_EXPECTED_BYTES: '21562'
         run: |
           set -euo pipefail
@@ -276,8 +277,9 @@ jobs:
           original_sha256="$(sha256sum "$source" | awk '{print $1}')"
           # A second independent run must consume the *same* immutable
           # original bytes as the first confirmed human-voice observation.
-          # Initial English discovery is pinned by the Commons SHA-1 + size;
-          # record full SHA-256 now, then pin it on the next repeat run.
+          # Reproducibility gate: repeat the original English human clip
+          # with a separately observed and now immutable full SHA-256.
+          test "$original_sha256" = "$CC0_EXPECTED_SHA256"
 
           ffmpeg_bin="$(realpath "$(command -v ffmpeg)")"
           ffmpeg_sha256="$(sha256sum "$ffmpeg_bin" | awk '{print $1}')"
@@ -323,11 +325,11 @@ jobs:
           assert result["model_inference_used"] is False
           assert result["speaker_independence_verified"] is False
           print(json.dumps({
-              "evidence_kind": "independent_real_human_cc0_source",
+              "evidence_kind": "independent_real_human_licensed_source",
               "source_url": "https://commons.wikimedia.org/wiki/File:En-uk-Do_you_speak_English.ogg",
               "source_revision": "current-upload-2010-01-18",
               "source_sha1_verification": "PASS",
-              "source_sha256_independently_pinned": False,
+              "source_sha256_independently_pinned": True,
               "license": "CC-BY-3.0-US",
               "attribution": "Association Shtooka / Judith Franck; conversion only",
               "original_sha256": os.environ["CC0_SOURCE_SHA256"],

@@ -48,6 +48,35 @@ typedef enum turbo_voice_result {
   TURBO_VOICE_EDEVICE = -5
 } turbo_voice_result_t;
 
+/* C11 stable read-only snapshot of Host obligations. Caller owns storage,
+ * initializes exact struct_size / abi_version and calls on the SAME Owner.
+ * No PCM pointer or native handle escapes this snapshot. Bit flags represent
+ * distinct reasons a generation may not be safely retired or restarted. */
+#define TURBO_VOICE_SNAPSHOT_ABI_VERSION 1u
+typedef enum turbo_voice_blocker {
+  TURBO_VOICE_BLOCK_INPUT_QUIESCE = 1u << 0,
+  TURBO_VOICE_BLOCK_DEVICE_CLEAR = 1u << 1,
+  TURBO_VOICE_BLOCK_PROVIDER_SETTLE = 1u << 2,
+  TURBO_VOICE_BLOCK_PLAYBACK_DRAIN = 1u << 3,
+  TURBO_VOICE_BLOCK_HOST_APPROVAL = 1u << 4,
+  TURBO_VOICE_BLOCK_FAULT = 1u << 5
+} turbo_voice_blocker_t;
+
+typedef struct turbo_voice_snapshot {
+  size_t struct_size;
+  uint32_t abi_version;
+  uint64_t generation;
+  turbo_voice_state_t state;
+  uint32_t blockers;
+} turbo_voice_snapshot_t;
+
+/* init fills ABI identity; get_snapshot never mutates the Coordinator.
+ * A pending clear is an outstanding obligation, not evidence of a physical
+ * audio callback or a guarantee that a faulty device can recover. */
+void turbo_voice_snapshot_init(turbo_voice_snapshot_t *snapshot);
+int turbo_voice_get_snapshot(const turbo_voice_coordinator_t *voice,
+                             turbo_voice_snapshot_t *snapshot);
+
 /* Borrow both handles; host confirms installed Salts device uses exactly
  * 24000Hz mono S16 before create. Never open a device here. Host owns ASR,
  * microphone stop/join, Session authorization, Playback and TTS destruction. */

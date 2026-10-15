@@ -46,7 +46,9 @@ int salts_playback_drain(salts_playback_t *p, uint32_t timeout_ms) {
   fprintf(stderr, "FAIL real M4.2 DSO line %d: %s\n", __LINE__, #expr); \
   return 1; } } while (0)
 
-static int run_real_dso_case(int cancel_first) {
+static int run_real_dso_case(int mode) {
+  const int cancel_first = mode != 0;
+  const int cancel_before_frame = mode == 2;
   atomic_uint unloads;
   atomic_init(&unloads, 0u);
   fprintf(stderr, "DSO CASE %d: begin\n", cancel_first);
@@ -89,18 +91,23 @@ static int run_real_dso_case(int cancel_first) {
                                      "fake", "en") == TURBO_VOICE_OK);
   fprintf(stderr, "DSO CASE %d: worker created\n", cancel_first);
 
-  /* Actual DSO thread publishes a deterministic PCM frame through a C11
-   * condition variable. No spin, timer-based schedule or second host queue. */
-  REQUIRE(api->grant_pcm(ctx) == 0);
-  REQUIRE(api->wait_pcm_ready(ctx) == 0);
-  fprintf(stderr, "DSO CASE %d: worker frame ready\n", cancel_first);
+  /* Linux DSO pthread worker must reach its start latch. Cancel-before-PCM
+   * deliberately withholds grant_pcm, and therefore the ring stays empty. */
+  REQUIRE(api->wait_worker_started(ctx) == 0);
   size_t written = 0u;
-  REQUIRE(turbo_voice_pump(voice, 1u, &written) == TURBO_VOICE_OK);
-  REQUIRE(written == 960u && device.size == 960u);
-  for (size_t i = 0u; i < 480u; ++i) {
-    int16_t actual = 0;
-    memcpy(&actual, device.ring + 2u*i, sizeof(actual));
-    REQUIRE(actual == (int16_t)(1000u + i));
+  if (!cancel_before_frame) {
+    REQUIRE(api->grant_pcm(ctx) == 0);
+    REQUIRE(api->wait_pcm_ready(ctx) == 0);
+    fprintf(stderr, "DSO CASE %d: worker frame ready\n", mode);
+    REQUIRE(turbo_voice_pump(voice, 1u, &written) == TURBO_VOICE_OK);
+    REQUIRE(written == 960u && device.size == 960u);
+    for (size_t i = 0u; i < 480u; ++i) {
+      int16_t actual = 0;
+      memcpy(&actual, device.ring + 2u*i, sizeof(actual));
+      REQUIRE(actual == (int16_t)(1000u + i));
+    }
+  } else {
+    REQUIRE(device.size == 0u && device.writes == 0u);
   }
   const unsigned original_writes = device.writes;
   fprintf(stderr, "DSO CASE %d: PCM handed off\n", cancel_first);
@@ -162,12 +169,14 @@ static int run_real_dso_case(int cancel_first) {
   fprintf(stderr, "DSO CASE %d: dlclose returned\n", cancel_first);
   REQUIRE(atomic_load_explicit(&unloads, memory_order_acquire) == 1u);
   printf("PASS real C11 DSO: %s, worker settled/joined, one dlclose\n",
-         cancel_first ? "cancel-first + late PCM discarded" :
-                        "finish-first + independently drained");
+         cancel_before_frame ? "cancel before first PCM" :
+         (cancel_first ? "cancel after first PCM + late PCM discarded" :
+                         "finish-first + independently drained"));
   return 0;
 }
 
 int main(void) {
+  REQUIRE(run_real_dso_case(2) == 0);
   REQUIRE(run_real_dso_case(1) == 0);
   REQUIRE(run_real_dso_case(0) == 0);
   puts("PASS M4.2 real dlopen -> bounded worker -> settle -> join -> dlclose");

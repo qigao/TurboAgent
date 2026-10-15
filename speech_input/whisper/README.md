@@ -190,3 +190,30 @@ encoded C1 controls `U+0080..U+009F`, Arabic Letter Mark `U+061C`,
 Unicode direction overrides/isolation and U+2028/U+2029 line separators.
 Adversarial tests require a failed command and **zero transcript stdout**;
 the CLI does not silently normalize suspicious characters into a command.
+
+
+### Reproducible transcript scoring
+
+The same dependency-free tool supports English WER and Chinese/Japanese CER.
+It never downloads weights or exposes the raw speech transcript in the
+reported JSON metrics. A test with one English sample is **smoke evidence**,
+not a multilingual quality claim:
+
+```sh
+python3 -m unittest discover \
+  -s speech_input/whisper/tools/tests -p 'test_*.py' -v
+
+python3 speech_input/whisper/tools/evaluate_asr.py \
+  --reference 'And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.' \
+  --transcript-file /absolute/path/transcript.txt \
+  --language en --max-wer 0.65 --require-word country \
+  --report /absolute/path/acoustic-metrics.json
+```
+
+For Japanese or Chinese, select `--language ja` or `--language zh`
+and supply `--max-cer` with an explicit corpus-specific threshold.
+The evaluator computes both CER and WER numerically, but WER on
+unsegmented CJK phrases is **not** the recommended primary metric.
+It normalizes Unicode NFKC, case and punctuation consistently,
+rejects malformed UTF-8 and empty transcripts, and never alters
+the real model output in the operator-facing offline CLI.

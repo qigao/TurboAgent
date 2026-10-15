@@ -1,0 +1,139 @@
+name: SpeechWhisper M3 C11 owner source sanitizers (#137)
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/speech-whisper-source-sanitizers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+jobs:
+  real-owner-source:
+    name: Whisper C11 PCM / ${{ matrix.sanitizer }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, thread]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CC: gcc
+      SAN_KIND: ${{ matrix.sanitizer }}
+      SALTS_ROOT: /tmp/speech-whisper-exact-salts/sdk/linux-x64
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66
+      ASAN_OPTIONS: detect_leaks=1:detect_odr_violation=2:halt_on_error=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: d1be6fde11ac6e0407606b4e42fe72d34add8037
+          path: external/whisper-v195
+          submodules: recursive
+          persist-credentials: false
+      - name: Verify exact original Whisper C ABI header and native Salts crypto SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C external/whisper-v195 rev-parse HEAD)" = d1be6fde11ac6e0407606b4e42fe72d34add8037
+          mkdir -p /tmp/speech-whisper-exact-salts
+          expected_sha=6cf093dc053db98bb21b1788eb2fc1ada4df195e
+          actual_sha="$(gh api repos/qigao/salts/git/ref/tags/v2.3.0-rc.16 --jq .object.sha)"
+          test "$actual_sha" = "$expected_sha"
+          gh release download v2.3.0-rc.16 --repo qigao/salts \
+            --pattern Salts.Native.2.3.0-rc.16.nupkg \
+            --dir /tmp/speech-whisper-exact-salts
+          unzip -q /tmp/speech-whisper-exact-salts/Salts.Native.2.3.0-rc.16.nupkg \
+            -d /tmp/speech-whisper-exact-salts
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          sha256sum /tmp/speech-whisper-exact-salts/Salts.Native.2.3.0-rc.16.nupkg \
+            | tee /tmp/speech-whisper-salts.sha256
+          test -f external/whisper-v195/include/whisper.h
+          test -f external/whisper-v195/ggml/include/ggml.h
+      - name: Compile source-instrumented Whisper Provider + M1 PCM + real pthread abort fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build
+          sanitizer='-fsanitize=address -fsanitize=undefined'
+          if [ "$SAN_KIND" = thread ]; then sanitizer='-fsanitize=thread'; fi
+          mkdir -p /tmp/speech-whisper-source-m3
+          cat > /tmp/speech-whisper-source-m3/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.25)
+          project(WhisperProviderC11SourceSanitizers LANGUAGES C)
+          enable_testing()
+          set(CMAKE_C_STANDARD 11)
+          set(CMAKE_C_STANDARD_REQUIRED ON)
+          set(CMAKE_C_EXTENSIONS OFF)
+          find_package(Salts CONFIG REQUIRED
+            PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+          find_package(Threads REQUIRED)
+          add_executable(test_whisper_m3
+            "$ENV{GITHUB_WORKSPACE}/speech_input/src/turbo_agent_speech_input.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/src/turbo_agent_speech_whisper.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/tests/test_turbo_agent_speech_whisper_mock.c")
+          target_include_directories(test_whisper_m3 PRIVATE
+            "$ENV{GITHUB_WORKSPACE}/speech_input/include"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/include"
+            "$ENV{GITHUB_WORKSPACE}/external/whisper-v195/include"
+            "$ENV{GITHUB_WORKSPACE}/external/whisper-v195/ggml/include")
+          target_link_libraries(test_whisper_m3 PRIVATE
+            Salts::Core Threads::Threads m)
+          add_test(NAME whisper_provider_pcm_abort_owner
+            COMMAND test_whisper_m3)
+          CMAKE
+          cmake -S /tmp/speech-whisper-source-m3 \
+            -B "build/speech-whisper-m3-$SAN_KIND" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror -g -fno-omit-frame-pointer $sanitizer" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$sanitizer -Wl,-z,defs"
+          cmake --build "build/speech-whisper-m3-$SAN_KIND" --parallel 2
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path('build/speech-whisper-m3-'+os.environ['SAN_KIND'])
+          cmd=json.loads((root/'compile_commands.json').read_text())
+          wanted=['speech_input/src/turbo_agent_speech_input.c',
+                  'speech_input/whisper/src/turbo_agent_speech_whisper.c',
+                  'speech_input/whisper/tests/test_turbo_agent_speech_whisper_mock.c']
+          flags=['-fsanitize=thread'] if os.environ['SAN_KIND']=='thread' else ['-fsanitize=address','-fsanitize=undefined']
+          for name in wanted:
+              matches=[e for e in cmd if Path(e['file']).resolve()==Path(name).resolve()]
+              if len(matches)!=1 or not all(f in matches[0]['command'] for f in flags):
+                  raise SystemExit('Uninstrumented native Provider / PCM / abort source: '+name)
+          print('PASS: source-instrumented exactly one C11 M1, M3 Provider and concurrent stub TU')
+          PY
+      - name: Execute real M1 Provider cancel and strict fake Whisper API 10x
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ldd "build/speech-whisper-m3-$SAN_KIND/test_whisper_m3" \
+            | tee /tmp/speech-whisper-m3-linked-$SAN_KIND.txt
+          grep -F "$SALTS_ROOT/lib/libsalts.so" \
+            /tmp/speech-whisper-m3-linked-$SAN_KIND.txt
+          if grep -Fq 'not found' /tmp/speech-whisper-m3-linked-$SAN_KIND.txt; then exit 1; fi
+          ctest --test-dir "build/speech-whisper-m3-$SAN_KIND" \
+            --no-tests=error --output-on-failure --timeout 30 \
+            --repeat until-fail:10
+      - name: Upload unmodified source sanitizer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-whisper-m3-${{ matrix.sanitizer }}-source-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            /tmp/speech-whisper-salts.sha256
+            /tmp/speech-whisper-m3-linked-${{ matrix.sanitizer }}.txt
+            build/speech-whisper-m3-${{ matrix.sanitizer }}/compile_commands.json
+            build/speech-whisper-m3-${{ matrix.sanitizer }}/Testing/Temporary/LastTest.log

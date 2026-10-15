@@ -147,6 +147,8 @@ if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     tests/test_speech_whisper_real_model_dso.c)
   target_compile_features(test_turbo_agent_speech_whisper_real_model_dso
     PRIVATE c_std_11)
+  target_include_directories(test_turbo_agent_speech_whisper_real_model_dso
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   set_target_properties(test_turbo_agent_speech_whisper_real_model_dso
     PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
   target_link_libraries(test_turbo_agent_speech_whisper_real_model_dso

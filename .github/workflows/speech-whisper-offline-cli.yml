@@ -86,6 +86,21 @@ jobs:
               f.writeframes(struct.pack('<639h',*samples[:-1]))
           (root/'bad.wav').write_bytes(b'NOT_A_WAVE')
           PY
+      - name: Compare exact JFK spoken WAV and stationary noise power envelope without model bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C external/whisper-v195 rev-parse HEAD)" = d1be6fde11ac6e0407606b4e42fe72d34add8037
+          test -f external/whisper-v195/samples/jfk.wav
+          python3 speech_input/whisper/tools/generate_noise_fixtures.py \
+            --output-dir "$MODEL_FIXTURES/stationarity-noise" \
+            --report /tmp/speech-cli-stationary-fixtures-metadata.json
+          python3 speech_input/whisper/tools/measure_frame_stationarity.py \
+            --jfk-wav external/whisper-v195/samples/jfk.wav \
+            --noise-dir "$MODEL_FIXTURES/stationarity-noise" \
+            --report /tmp/speech-cli-stationarity-metrics.json
+          # The report describes energy variation only, not accepted VAD.
+          grep -Fq '"acoustic_vad_certified": false' /tmp/speech-cli-stationarity-metrics.json
       - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
         with:
           mode: read
@@ -149,6 +164,8 @@ jobs:
             | tee /tmp/speech-cli-real-dependencies.txt
           grep -F "$TURBO_WHISPER_SDK_ROOT/lib/libwhisper.so" \
             /tmp/speech-cli-real-dependencies.txt
+            /tmp/speech-cli-stationarity-metrics.json
+            /tmp/speech-cli-stationary-fixtures-metadata.json
           if grep -Fq 'not found' /tmp/speech-cli-real-dependencies.txt; then exit 1; fi
       - name: Reject malformed WAV, missing/wrong model SHA, unsupported format and implicit inputs
         shell: bash

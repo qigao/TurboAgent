@@ -9,6 +9,16 @@ int main() {
       snapshot.abi_version != TURBO_VOICE_SNAPSHOT_ABI_VERSION) return 3;
   if (turbo_voice_get_snapshot(nullptr, &snapshot) != TURBO_VOICE_EINVAL)
     return 4;
+  /* Published Playback safely rejects bad format before opening any device. */
+  salts_playback_config_t invalid_config{};
+  invalid_config.sample_rate = 12345u;
+  invalid_config.channels = 1u;
+  invalid_config.format = SALTS_PLAYBACK_FORMAT_S16;
+  invalid_config.buffer_duration_ms = 100u;
+  salts_playback_t *native = nullptr;
+  if (salts_playback_create(nullptr, &invalid_config, &native) !=
+      SALTS_PLAYBACK_ERR_FORMAT || native != nullptr)
+    return 5;
   const turbo_voice_coordinator_t *v = nullptr;
   return turbo_voice_get_generation(v) == 0u &&
          turbo_voice_get_state(v) == TURBO_VOICE_FAILED ? 0 : 1;

@@ -12,6 +12,10 @@ endif()
 add_library(turbo_agent_speech_input STATIC src/turbo_agent_speech_input.c)
 add_library(TurboAgent::SpeechInput ALIAS turbo_agent_speech_input)
 target_compile_features(turbo_agent_speech_input PUBLIC c_std_11)
+if(MSVC)
+  # Match the repository's C11 baseline: MSVC requires this for stdatomic.h.
+  target_compile_options(turbo_agent_speech_input PRIVATE /experimental:c11atomics)
+endif()
 set_target_properties(turbo_agent_speech_input PROPERTIES
   C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO
   EXPORT_NAME SpeechInput POSITION_INDEPENDENT_CODE ON)
@@ -36,8 +40,8 @@ if(BUILD_TESTING)
     COMMAND test_turbo_agent_speech_input)
 endif()
 
-# MSVC's C11 threads support varies across toolchains. Unix gets an
-# independent concurrent capture-producer stress / TSan source gate.
+# Unix uses pthreads for a real concurrent capture-producer stress / TSan
+# gate. The production module itself uses only standard C11 atomics.
 if(BUILD_TESTING AND UNIX)
   find_package(Threads REQUIRED)
   add_executable(test_turbo_agent_speech_concurrent

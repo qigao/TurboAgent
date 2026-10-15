@@ -68,7 +68,7 @@ class PrivateWavPreflightTests(unittest.TestCase):
             dest, provenance = root/"converted.wav", root/"private-metadata.json"
             ffmpeg = Path(sys.executable).resolve(strict=True)
             result = prep.prepare(src, hashlib.sha256(original).hexdigest(), ffmpeg,
-                                  dest, provenance, True, mock_decode)
+                                  dest, provenance, True, prep.digest_file(ffmpeg), mock_decode)
             self.assertEqual(len(calls), 1)
             self.assertEqual(result["frame_count"], 60)
             self.assertEqual(result["tail_samples_discarded"], 7)
@@ -92,7 +92,7 @@ class PrivateWavPreflightTests(unittest.TestCase):
             self.assertFalse(info["audio_downloaded"])
             with self.assertRaises(ValueError):
                 prep.prepare(src, info["source_sha256"], ffmpeg,
-                             dest, provenance, True, mock_decode)
+                             dest, provenance, True, prep.digest_file(ffmpeg), mock_decode)
 
     def test_source_sha_or_consent_fails_before_decoder(self):
         with tempfile.TemporaryDirectory() as td:
@@ -101,11 +101,12 @@ class PrivateWavPreflightTests(unittest.TestCase):
             ffmpeg = Path(sys.executable).resolve(strict=True)
             spy = mock.Mock(side_effect=AssertionError("must not decode"))
             args = (src, "0"*64, ffmpeg, root/"out.wav",
-                    root/"provenance.json", True, spy)
+                    root/"provenance.json", True, prep.digest_file(ffmpeg), spy)
             with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
                 prep.prepare(*args)
             args = (src, hashlib.sha256(src.read_bytes()).hexdigest(), ffmpeg,
-                    root/"out.wav", root/"provenance.json", False, spy)
+                    root/"out.wav", root/"provenance.json", False,
+                    prep.digest_file(ffmpeg), spy)
             with self.assertRaisesRegex(ValueError, "acknowledged"):
                 prep.prepare(*args)
             self.assertEqual(spy.call_count, 0)
@@ -114,7 +115,7 @@ class PrivateWavPreflightTests(unittest.TestCase):
             linked.symlink_to(src)
             with self.assertRaisesRegex(ValueError, "source must be"):
                 prep.prepare(linked, args[1], ffmpeg, root/"out.wav",
-                             root/"provenance.json", True, spy)
+                             root/"provenance.json", True, prep.digest_file(ffmpeg), spy)
             self.assertEqual(spy.call_count, 0)
 
     def test_mutated_decoder_fingerprint_rejected_before_private_output(self):
@@ -125,12 +126,13 @@ class PrivateWavPreflightTests(unittest.TestCase):
             runner, calls = decoder_response(pcm_frames(60), source.read_bytes())
             ffmpeg = Path(sys.executable).resolve(strict=True)
             dest, provenance = root/"out.wav", root/"provenance.json"
+            good_ffmpeg_sha = prep.digest_file(ffmpeg)
             with mock.patch.object(prep, "digest_file",
-                                   side_effect=["a"*64, "b"*64]):
+                                   side_effect=[good_ffmpeg_sha, "b"*64]):
                 with self.assertRaisesRegex(ValueError,
                                             "executable changed during conversion"):
                     prep.prepare(source, digest, ffmpeg, dest, provenance,
-                                 True, runner)
+                                 True, good_ffmpeg_sha, runner)
             self.assertEqual(len(calls), 1)
             self.assertFalse(dest.exists())
             self.assertFalse(provenance.exists())
@@ -144,7 +146,7 @@ class PrivateWavPreflightTests(unittest.TestCase):
             def call(runner):
                 return prep.prepare(src, source_digest, ffmpeg,
                                     root/"out.wav", root/"provenance.json",
-                                    True, runner)
+                                    True, prep.digest_file(ffmpeg), runner)
             cases = [
                 (lambda *_a, **_kw: SimpleNamespace(
                     returncode=2, stdout=b"", stderr=b"secret paths")),
@@ -172,7 +174,7 @@ class PrivateWavPreflightTests(unittest.TestCase):
             short, _ = decoder_response(pcm_frames(0, 319), src.read_bytes())
             with self.assertRaisesRegex(ValueError, "one complete frame"):
                 prep.prepare(src, digest, ffmpeg, root/"out.wav",
-                             root/"prov.json", True, short)
+                             root/"prov.json", True, prep.digest_file(ffmpeg), short)
             self.assertFalse((root/"out.wav").exists())
             oversized = root / "huge.dat"
             oversized.write_bytes(b"0" * (prep.MAX_SOURCE_BYTES + 1))
@@ -188,6 +190,7 @@ class PrivateWavPreflightTests(unittest.TestCase):
                 [sys.executable, str(SCRIPT), "--source", str(sample),
                  "--source-sha256", hashlib.sha256(sample.read_bytes()).hexdigest(),
                  "--ffmpeg", str(Path(sys.executable).resolve()),
+                 "--ffmpeg-sha256", prep.digest_file(Path(sys.executable).resolve()),
                  "--output-wav", str(root/"out.wav"),
                  "--private-provenance", str(root/"sidecar.json")],
                 capture_output=True, text=True, check=False)
@@ -241,7 +244,8 @@ class PrivateWavPreflightTests(unittest.TestCase):
             self.assertEqual(encode.returncode, 0, encode.stderr[:500])
             result = prep.prepare(
                 ogg, hashlib.sha256(ogg.read_bytes()).hexdigest(), ffmpeg,
-                root / "from-ogg.wav", root / "from-ogg.private.json", True)
+                root / "from-ogg.wav", root / "from-ogg.private.json", True,
+                prep.digest_file(ffmpeg))
             self.assertTrue(result["no_model_or_network"])
             self.assertGreaterEqual(result["frame_count"], 59)
             self.assertLessEqual(result["frame_count"], 60)
@@ -258,7 +262,8 @@ class PrivateWavPreflightTests(unittest.TestCase):
             ffmpeg = Path(shutil.which("ffmpeg")).resolve(strict=True)
             result = prep.prepare(
                 source, hashlib.sha256(source.read_bytes()).hexdigest(),
-                ffmpeg, root/"out.wav", root/"info.json", True)
+                ffmpeg, root/"out.wav", root/"info.json", True,
+                prep.digest_file(ffmpeg))
             self.assertEqual(result["frame_count"], 60)
             self.assertEqual(result["tail_samples_discarded"], 0)
             self.assertEqual(len((root/"out.wav").read_bytes()), 44 + 60*320*2)

@@ -20,6 +20,7 @@ jobs:
             condition: ordinary
             bytes: '30283'
             sha1: cc3b98f93353cf6ed8bb453669987afe7dd748bd
+            sha256: bbdbe95dfe4742e27845c03fba3a8caf9f0f5ad65e34e512fd5609d155e6304e
             source_url: https://upload.wikimedia.org/wikipedia/commons/e/e8/Whispering-example.ogg
             page_url: https://commons.wikimedia.org/wiki/File:Whispering-example.ogg
             license: CC0-1.0
@@ -30,6 +31,7 @@ jobs:
             condition: low_volume
             bytes: '12926'
             sha1: 9d7986ce0257056b679a6b199c42447b5df82962
+            sha256: 3725cf00284943531b0e899e3f7161117397cd3be8f6310a7beca26fbd6e0e3d
             source_url: https://upload.wikimedia.org/wikipedia/commons/1/1b/English_male_voice_speech_word_No.ogg
             page_url: https://commons.wikimedia.org/wiki/File:English_male_voice_speech_word_No.ogg
             license: CC-BY-SA-4.0
@@ -53,6 +55,7 @@ jobs:
           SRC_URL: ${{ matrix.source_url }}
           SRC_BYTES: ${{ matrix.bytes }}
           SRC_SHA1: ${{ matrix.sha1 }}
+          SRC_SHA256: ${{ matrix.sha256 }}
           SRC_KIND: ${{ matrix.kind }}
           SRC_CONDITION: ${{ matrix.condition }}
           SRC_LICENSE: ${{ matrix.license }}
@@ -74,6 +77,9 @@ jobs:
           test "$(wc -c < "$original" | tr -d '[:space:]')" = "$SRC_BYTES"
           test "$(sha1sum "$original" | awk '{print $1}')" = "$SRC_SHA1"
           original_sha256="$(sha256sum "$original" | awk '{print $1}')"
+          # Independent repeat acceptance: original media MUST match
+          # the full digest observed in the earlier source-only run.
+          test "$original_sha256" = "$SRC_SHA256"
 
           decoder="$(realpath "$(command -v ffmpeg)")"
           decoder_sha256="$(sha256sum "$decoder" | awk '{print $1}')"
@@ -133,7 +139,8 @@ jobs:
               "source_url": os.environ["SRC_PAGE"],
               "original_bytes": int(os.environ["SRC_BYTES"]),
               "source_sha1_verified": True,
-              "source_sha256_first_discovery": os.environ["ORIGINAL_SHA256"],
+              "original_source_sha256": os.environ["ORIGINAL_SHA256"],
+              "source_sha256_independently_pinned": True,
               "normalized_wav_sha256": converted["normalized_wav_sha256"],
               "license": os.environ["SRC_LICENSE"],
               "attribution": os.environ["SRC_CREDIT"],

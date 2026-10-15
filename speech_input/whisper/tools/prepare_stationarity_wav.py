@@ -212,7 +212,7 @@ def write_private_new(path: Path, blob: bytes) -> None:
 
 def prepare(source: Path, expected_sha: str, ffmpeg: Path,
             destination: Path, provenance: Path, rights_acknowledged: bool,
-            runner=None) -> dict:
+            expected_ffmpeg_sha: str, runner=None) -> dict:
     if not rights_acknowledged:
         raise ValueError("source license/consent must be explicitly acknowledged")
     if destination == provenance or destination == source or provenance == source:
@@ -224,7 +224,12 @@ def prepare(source: Path, expected_sha: str, ffmpeg: Path,
     source_bytes = read_pinned_source(source, expected_sha)
     # Pin the selected decoder before use and re-check after it exits.
     # A changed binary cannot be attributed to one immutable tool revision.
+    if (not isinstance(expected_ffmpeg_sha, str)
+            or not MAX_SOURCE_SHA.fullmatch(expected_ffmpeg_sha)):
+        raise ValueError("explicit lowercase decoder SHA-256 is required")
     decoder_sha_before = digest_file(ffmpeg)
+    if decoder_sha_before != expected_ffmpeg_sha:
+        raise ValueError("decoder executable SHA-256 mismatch")
     normalized, metadata = convert_snapshot(source_bytes, ffmpeg, runner)
     decoder_sha_after = digest_file(ffmpeg)
     if decoder_sha_before != decoder_sha_after:
@@ -264,6 +269,7 @@ def main() -> int:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--source-sha256", required=True)
     parser.add_argument("--ffmpeg", type=Path, required=True)
+    parser.add_argument("--ffmpeg-sha256", required=True)
     parser.add_argument("--output-wav", type=Path, required=True)
     parser.add_argument("--private-provenance", type=Path, required=True)
     parser.add_argument("--acknowledge-rights", action="store_true",
@@ -272,7 +278,7 @@ def main() -> int:
     try:
         report = prepare(args.source, args.source_sha256, args.ffmpeg,
                          args.output_wav, args.private_provenance,
-                         args.acknowledge_rights)
+                         args.acknowledge_rights, args.ffmpeg_sha256)
         print(json.dumps(report, sort_keys=True))
         return 0
     except (OSError, ValueError, TypeError, OverflowError) as exc:

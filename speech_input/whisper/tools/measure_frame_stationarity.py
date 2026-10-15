@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Inspect bounded frame-power stationarity WITHOUT classifying actual speech.
+
+This independent no-model diagnostic compares generated noise against the
+immutable upstream JFK spoken WAV. It is not a VAD, classifier or policy
+admission; thresholds are explicit test hypotheses for a future optional C11
+preflight. No raw audio, model or transcript is uploaded.
+"""
+import argparse
+import json
+from pathlib import Path
+import struct
+import sys
+import wave
+
+FRAME = 320
+RATE = 16000
+MAX_FRAMES = 3000
+MAX_FILE_BYTES = 4 * 1024 * 1024
+MIN_FRAMES = 50
+MAX_STATIONARY_CV = 0.12
+MAX_STATIONARY_POWER_RATIO = 2.0
+
+
+def inspect_wav(path: Path) -> dict:
+    if path.stat().st_size > MAX_FILE_BYTES:
+        raise ValueError("oversized WAV")
+    with wave.open(str(path), "rb") as wav:
+        if (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) != (RATE, 1, 2):
+            raise ValueError("expected strict mono 16000Hz signed PCM16")
+        frames = wav.getnframes()
+        if not 1 <= frames // FRAME <= MAX_FRAMES or frames % FRAME:
+            raise ValueError("incomplete or oversized 20ms frame sequence")
+        blocks = frames // FRAME
+        power = []
+        for _ in range(blocks):
+            raw = wav.readframes(FRAME)
+            if len(raw) != FRAME * 2:
+                raise ValueError("partial PCM read")
+            pcm = struct.unpack("<320h", raw)
+            power.append(sum(int(x) * int(x) for x in pcm))
+        if wav.readframes(1):
+            raise ValueError("undeclared additional PCM")
+    count = len(power)
+    total = sum(power)
+    if total == 0:
+        kind = "digital_zero"
+        cv = 0.0
+        ratio = 0.0
+    else:
+        avg = total / count
+        variance = sum((p - avg) ** 2 for p in power) / count
+        cv = (variance ** 0.5) / avg
+        smallest = min(power)
+        ratio = max(power) / smallest if smallest else None
+        # No quality assertion: this is only a stationarity *candidate*.
+        kind = ("stationary_candidate" if count >= MIN_FRAMES and
+                cv <= MAX_STATIONARY_CV and ratio is not None and
+                ratio <= MAX_STATIONARY_POWER_RATIO else "dynamic_or_unknown")
+    return {
+        "frame_count": count,
+        "sample_count": frames,
+        "zero_pcm": total == 0,
+        "stationarity_hypothesis": kind,
+        "frame_power_cv": round(cv, 6),
+        "frame_power_max_min_ratio": None if ratio is None else round(ratio, 6),
+        "minimum_frame_power": min(power),
+        "maximum_frame_power": max(power),
+        "voice_activity_certified": False,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--jfk-wav", type=Path, required=True)
+    parser.add_argument("--noise-dir", type=Path, required=True)
+    parser.add_argument("--report", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        items = {"official_jfk_spoken": inspect_wav(args.jfk_wav)}
+        for name in ("digital-zero", "stationary-noise-quiet",
+                     "stationary-noise-medium"):
+            items[name] = inspect_wav(args.noise_dir / (name + ".wav"))
+        if items["official_jfk_spoken"]["stationarity_hypothesis"] != "dynamic_or_unknown":
+            raise ValueError("stationarity rule would reject the pinned spoken JFK sample")
+        if items["digital-zero"]["stationarity_hypothesis"] != "digital_zero":
+            raise ValueError("failed explicit exact-zero gate")
+        for name in ("stationary-noise-quiet", "stationary-noise-medium"):
+            if items[name]["stationarity_hypothesis"] != "stationary_candidate":
+                raise ValueError(f"stationarity hypothesis failed on {name}")
+        payload = {
+            "model_weights_used": False,
+            "acoustic_vad_certified": False,
+            "hypothesis_only": True,
+            "min_evidence_frames": MIN_FRAMES,
+            "max_candidate_cv": MAX_STATIONARY_CV,
+            "max_candidate_power_ratio": MAX_STATIONARY_POWER_RATIO,
+            "records": items,
+        }
+        text = json.dumps(payload, sort_keys=True, indent=2) + "\n"
+        args.report.write_text(text, encoding="utf-8")
+        sys.stdout.write(text)
+        return 0
+    except (OSError, EOFError, ValueError, wave.Error) as exc:
+        sys.stderr.write(f"stationarity diagnostic rejected: {exc}\n")
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

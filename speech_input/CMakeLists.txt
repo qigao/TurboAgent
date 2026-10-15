@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # Configuring this directory alone provides a dependency-free C11 test path.
 # Full TurboAgent only includes this target when ENABLE_SPEECH_INPUT=ON.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(TurboAgentSpeechStandalone LANGUAGES C)
+  project(TurboAgentSpeechStandalone LANGUAGES C CXX)
   include(CTest)
   enable_testing()
   set(TURBO_SPEECH_STANDALONE ON)
@@ -53,4 +53,15 @@ if(BUILD_TESTING AND UNIX)
     COMMAND test_turbo_agent_speech_concurrent)
   set_tests_properties(turbo_agent_speech_input_concurrent
     PROPERTIES TIMEOUT 20)
+endif()
+
+# This is a consumer test only. The production target remains strict C11.
+if(BUILD_TESTING)
+  add_executable(test_turbo_agent_speech_cpp17
+    tests/test_turbo_agent_speech_cpp17.cpp)
+  target_link_libraries(test_turbo_agent_speech_cpp17
+    PRIVATE turbo_agent_speech_input)
+  target_compile_features(test_turbo_agent_speech_cpp17 PRIVATE cxx_std_17)
+  add_test(NAME turbo_agent_speech_input_cpp17
+    COMMAND test_turbo_agent_speech_cpp17)
 endif()

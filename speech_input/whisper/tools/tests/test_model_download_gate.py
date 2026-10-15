@@ -18,6 +18,8 @@ class MaintainerModelAdmission(unittest.TestCase):
         text = self.workflow
         self.assertIn("types: [labeled]", text)
         self.assertIn("github.event.action == 'labeled'", text)
+        self.assertIn("github.run_attempt == 1", text)
+        self.assertIn('test "${{ github.run_attempt }}" = 1', text)
         self.assertIn("github.event.label.name == 'speech-model-download-approved'", text)
         self.assertNotIn("types: [opened, reopened, synchronize, labeled]", text)
         self.assertNotIn("workflow_dispatch:", text)

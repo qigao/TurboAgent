@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   speexdsp-native-c11:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-noise-level-sweep-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-paired-asr-offline-167')
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-noise-level-sweep-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-paired-asr-offline-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-atomic-paired-wavs-167')
     name: SpeexDSP-1.2.1 C11 NS-only smoke, native source + licensed audio
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -243,4 +243,53 @@ jobs:
                 --filtered-sha256 "$(sha256sum "$root/known-$peak/mixed-processed-$db.raw" | awk '{print $1}')"
             done
           done
+          # Automatic fair three-arm preparation on ONE original approved
+          # CC0 whisper, with the same tested native C11 SpeexDSP executable.
+          # All WAVs/RAW/provenance remain in ephemeral 0700 private root.
+          mkdir -m 700 "$root/paired-wavs"
+          python3 speech_input/noise_lab/tools/prepare_paired_asr_wavs.py \
+            --source-wav "$root/whisper.wav" \
+            --source-sha256 "$(sha256sum "$root/whisper.wav" | awk '{print $1}')" \
+            --ns-probe "$probe" \
+            --ns-probe-sha256 "$(sha256sum "$probe" | awk '{print $1}')" \
+            --private-root "$root/paired-wavs"
+          PAIRED_ROOT="$root/paired-wavs" NS_ROOT="$root" python3 - <<'PY'
+          import hashlib, io, json, os, wave
+          from pathlib import Path
+          root = Path(os.environ["PAIRED_ROOT"])
+          source_dir = Path(os.environ["NS_ROOT"])
+          data = json.loads((root/"paired-private.json").read_text())
+          assert data["frame_count"] == 128
+          assert data["sample_rate"] == 16000
+          assert data["frame_samples"] == 320
+          assert data["model_weights_or_inference_used"] is False
+          assert data["ns_configuration"]["VAD"] is False
+          assert data["ns_configuration"]["AGC"] is False
+          for arm in ("original","ns12","ns18"):
+              source = root/(arm+".wav")
+              assert hashlib.sha256(source.read_bytes()).hexdigest() == (
+                  data["wavs"][arm]["sha256"])
+              with wave.open(str(source),"rb") as wav:
+                  assert (wav.getframerate(),wav.getnchannels(),
+                          wav.getsampwidth(),wav.getnframes()) == (16000,1,2,128*320)
+                  pcm = wav.readframes(wav.getnframes())
+              if arm == "original":
+                  assert source.read_bytes() == (source_dir/"whisper.wav").read_bytes()
+              else:
+                  db = -12 if arm == "ns12" else -18
+                  assert pcm == (source_dir/("whisper."+str(db)+".aligned.raw")).read_bytes()
+          assert sorted(item.name for item in root.iterdir()) == sorted([
+              "original.wav","ns12.wav","ns18.wav","paired-private.json"])
+          print(json.dumps({
+              "test_kind":"exact_same_real_whisper_three_arm_C11_SpeexDSP",
+              "arms":3,
+              "frames_each":128,
+              "source_pcm_identical":True,
+              "ns12_matches_native_aligned_output":True,
+              "ns18_matches_native_aligned_output":True,
+              "raw_transient_left_in_private_directory":False,
+              "model_weights_or_asr_used":False,
+              "actual_acoustic_wer_cer_measured":False
+          },sort_keys=True))
+          PY
           # No upload-artifact action. WAV/raw/provenance wiped on exit.

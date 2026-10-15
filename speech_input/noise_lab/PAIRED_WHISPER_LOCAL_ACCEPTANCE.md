@@ -45,6 +45,52 @@ Do not assume a 20ms real-device latency guarantee from this offline
 compensation: physical Capture timestamps, cancel-first, clock drift and
 DSO draining are independently open acceptance gates.
 
+## New private atomic three-arm WAV preparation (no model)
+
+The stacked Draft exposes
+`speech_input/noise_lab/tools/prepare_paired_asr_wavs.py` as an explicit
+**model-free local preprocessor**. It uses the already compiled native C11
+SpeexDSP diagnostic, not a second DSP implementation. It checks the source
+WAV's immutable SHA-256, private strict RIFF 16k mono S16LE 20ms frames
+(up to 3,000), and the *selected native SpeexDSP executable's SHA-256*
+before AND after both NS runs.
+
+Create an **empty**, newly owned, mode-0700 private directory. The source
+WAV and probe executable must already exist outside that directory:
+
+~~~sh
+set -eu
+umask 077
+mkdir -m 700 /private/paired-evidence
+python3 speech_input/noise_lab/tools/prepare_paired_asr_wavs.py \
+  --source-wav /private/input/unmodified-speech.wav \
+  --source-sha256 "$PINNED_SOURCE_WAV_SHA256" \
+  --ns-probe /private/build/ta_speex_ns_raw_probe \
+  --ns-probe-sha256 "$PINNED_NATIVE_PROBE_SHA256" \
+  --private-root /private/paired-evidence
+~~~
+
+It creates exactly four private files:
+`original.wav`, `ns12.wav`, `ns18.wav`, and
+`paired-private.json` (private SHA/provenance manifest). Both NS arms
+use **fresh independent** SpeexDSP owners, with the same 20ms primer
+compensation and explicit one-frame tail drain. The original WAV remains
+byte-exact; both processed WAVs contain precisely the original number of
+complete 20ms frames. The manifest has the three exact WAV SHA-256 strings
+needed by the WER/CER runner below. It is private and must not be uploaded.
+
+Transient input and NS output RAW files are deleted on success. If either
+native process fails, returns malformed metadata, changes the frame count,
+uses an unapproved VAD/AGC configuration, mutates the CLI/source SHA, or
+writes a non-0600 raw output, the operation fails closed and **rolls back
+all outputs**, leaving the initially empty directory empty. There is no
+raw-audio fallback, in-memory model inference or downloader.
+
+Draft [PR #176](https://github.com/qigao/TurboAgent/pull/176) separately proves
+that the exact real CC0 whispered source yields the same native C11 PCM
+bytes as the independently run NS-only diagnostic. This verifies file
+construction, **not** voice intelligibility or actual ASR WER/CER.
+
 ## Local invocation only
 
 Replace these illustrative paths and hashes with separately verified

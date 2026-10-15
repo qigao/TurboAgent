@@ -47,7 +47,9 @@ def new_private(path: Path, contents: bytes):
         raise
 
 
-def prepare(clean_source: bytes, private_root: Path) -> dict:
+def prepare(clean_source: bytes, private_root: Path, noise_peak: int = NOISE_PEAK) -> dict:
+    if type(noise_peak) is not int or noise_peak not in (100, 200, 400, 800):
+        raise ValueError("noise peak must be one of four controlled levels")
     if (not isinstance(clean_source, bytes) or not clean_source
             or len(clean_source)%640 or len(clean_source)>MAX_RAW_BYTES-32000):
         raise ValueError("source must be bounded S16 complete frames")
@@ -60,7 +62,7 @@ def prepare(clean_source: bytes, private_root: Path) -> dict:
     rng = random.Random(SEED)
     mixed = []
     for x in clean:
-        value = x + rng.randint(-NOISE_PEAK, NOISE_PEAK)
+        value = x + rng.randint(-noise_peak, noise_peak)
         if value < -32768 or value > 32767:
             raise ValueError("noise mix clipping disallowed")
         mixed.append(value)
@@ -82,7 +84,7 @@ def prepare(clean_source: bytes, private_root: Path) -> dict:
         "speech_frames": len(source) // SAMPLES_FRAME,
         "noise_only_preroll_frames": PRE_ROLL_FRAMES,
         "noise_seed": SEED,
-        "noise_max_amplitude": NOISE_PEAK,
+        "noise_max_amplitude": noise_peak,
         "no_raw_audio_in_report": True,
         "no_model_weights_or_transcripts": True,
     }
@@ -130,6 +132,7 @@ def main():
     p.add_argument("--source-raw",type=Path,required=True)
     p.add_argument("--source-sha256",required=True)
     p.add_argument("--private-root",type=Path,required=True)
+    p.add_argument("--noise-peak",type=int,choices=(100,200,400,800),default=400)
     e = sub.add_parser("score")
     for name in ("clean","mixed","filtered"):
         e.add_argument("--"+name,type=Path,required=True)
@@ -138,7 +141,7 @@ def main():
     try:
         if options.task=="prepare":
             payload=prepare(read_pinned(options.source_raw,options.source_sha256),
-                            options.private_root)
+                            options.private_root, options.noise_peak)
         else:
             payload=score(
                 read_pinned(options.clean, options.clean_sha256),

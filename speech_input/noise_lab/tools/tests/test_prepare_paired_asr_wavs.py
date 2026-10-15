@@ -165,6 +165,27 @@ class AtomicThreeArmTests(unittest.TestCase):
                     self.assertFalse(any(out.iterdir()),
                                      "Failed native must remove every RAW and WAV")
 
+    def test_native_timeout_after_writing_partial_raw_rolls_back_all_outputs(self):
+        for crash_arm in (1, 2):
+            with self.subTest(crash_arm=crash_arm):
+                with tempfile.TemporaryDirectory() as temp:
+                    src, exe, out = fixture(Path(temp))
+                    legitimate = NativeProbeStub()
+                    call_count = [0]
+
+                    def native_crash(command, **kwargs):
+                        call_count[0] += 1
+                        if call_count[0] == crash_arm:
+                            Path(command[2]).write_bytes(b"\x12" * 640)
+                            raise ValueError("native timeout after partial PCM")
+                        return legitimate(command, **kwargs)
+
+                    with self.assertRaisesRegex(ValueError, "timeout"):
+                        pair.prepare(src, sha(src), exe, sha(exe),
+                                     out, runner=native_crash)
+                    self.assertEqual(call_count[0], crash_arm)
+                    self.assertEqual(list(out.iterdir()), [])
+
     def test_binary_or_original_changes_during_native_inference(self):
         for kind in ("exe","source"):
             with self.subTest(kind=kind):

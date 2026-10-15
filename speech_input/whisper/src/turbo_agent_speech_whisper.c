@@ -386,7 +386,7 @@ static bool whisper_abort_callback(void *context) {
 static int stationary_noise_candidate(
     const turbo_agent_speech_whisper_t *owner) {
   double variance;
-  double absolute_lag;
+  uint64_t absolute_lag;
   if (!owner->stationary_noise_guard || owner->power_frames < 50u ||
       owner->power_min == 0u || owner->power_mean <= 0.0 ||
       owner->lag_energy == 0u)
@@ -395,11 +395,15 @@ static int stationary_noise_candidate(
   if (owner->power_max > owner->power_min * 2u) return 0;
   variance = owner->power_m2 / (double)owner->power_frames;
   if (variance > 0.0144 * owner->power_mean * owner->power_mean) return 0;
-  /* Fail open to genuine decode when coherent structure exists. The
-   * accumulated <=960k PCM products safely fit int64_t. */
-  absolute_lag = owner->lag_cross < 0 ?
-      -(double)owner->lag_cross : (double)owner->lag_cross;
-  return absolute_lag < 0.12 * (double)owner->lag_energy;
+  /* Exact strict 12/100 lag-1 boundary: fail open on equality.
+   * At most 3000 * 320 signed S16 values: the accumulated product
+   * magnitude is < 1.1e15 and multiplying by 100 stays < 1.1e17,
+   * safely below UINT64_MAX. An integer ratio prevents C/Python
+   * disagreement on an exact boundary caused by floating rounding. */
+  absolute_lag = (uint64_t)(owner->lag_cross < 0 ?
+      -owner->lag_cross : owner->lag_cross);
+  return UINT64_C(100) * absolute_lag <
+         UINT64_C(12) * owner->lag_energy;
 }
 
 static int provider_finish(void *context,

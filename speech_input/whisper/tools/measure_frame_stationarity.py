@@ -68,12 +68,14 @@ def inspect_wav_bytes(raw_bytes: bytes, *, include_pcm_digest=False) -> dict:
         cv = (variance ** 0.5) / avg
         smallest = min(power)
         ratio = max(power) / smallest if smallest else None
-        # No quality assertion: this is only a stationarity *candidate*.
+        # Strict 12/100 ratio is checked using full integers, exactly like
+        # the bounded C11 Provider. At equality voice/noise is unknown,
+        # so fail open to decode. This is not general acoustic VAD.
         kind = ("stationary_candidate" if count >= MIN_FRAMES and
                 cv <= MAX_STATIONARY_CV and ratio is not None and
                 ratio <= MAX_STATIONARY_POWER_RATIO and
                 lag_energy > 0 and
-                abs(lag_cross) < MAX_STATIONARY_LAG1_CORRELATION * lag_energy
+                100 * abs(lag_cross) < 12 * lag_energy
                 else "dynamic_or_unknown")
     report = {
         "frame_count": count,

@@ -14,6 +14,7 @@ struct ta_speex_ns_owner_s {
   SpeexPreprocessState *state;
   size_t used_frames;
   int failed;
+  int finished;
   int noise_suppress_db;
 };
 
@@ -80,6 +81,7 @@ int ta_speex_ns_process(ta_speex_ns_owner_t *owner,
       count != TA_SPEEX_NS_FRAME_SAMPLES)
     return TA_SPEEX_NS_EINVAL;
   if (owner->failed) return TA_SPEEX_NS_EFAILED;
+  if (owner->finished) return TA_SPEEX_NS_ESETTLED;
   if (owner->used_frames == TA_SPEEX_NS_MAX_FRAMES)
     return TA_SPEEX_NS_ECAPACITY;
 
@@ -95,6 +97,30 @@ int ta_speex_ns_process(ta_speex_ns_owner_t *owner,
   memcpy(output, local, sizeof(local));
   memset(local, 0, sizeof(local));
   ++owner->used_frames;
+  return TA_SPEEX_NS_OK;
+}
+
+int ta_speex_ns_finish(ta_speex_ns_owner_t *owner,
+                       int16_t *out_tail, size_t count) {
+  spx_int16_t silent_frame[TA_SPEEX_NS_FRAME_SAMPLES] = {0};
+  int rc;
+  if (!owner || !owner->state || !out_tail ||
+      count != TA_SPEEX_NS_FRAME_SAMPLES || owner->used_frames == 0u)
+    return TA_SPEEX_NS_EINVAL;
+  if (owner->failed) return TA_SPEEX_NS_EFAILED;
+  if (owner->finished) return TA_SPEEX_NS_ESETTLED;
+  /* The frame emitted after this zero-input drive may correspond to the
+   * prior *real* frame due to FFT overlap. The tool must prove the latency
+   * before treating it as the speech tail; never classify it as VAD. */
+  rc = speex_preprocess_run(owner->state, silent_frame);
+  if (rc < 0) {
+    memset(silent_frame, 0, sizeof(silent_frame));
+    owner->failed = 1;
+    return TA_SPEEX_NS_EENGINE;
+  }
+  memcpy(out_tail, silent_frame, sizeof(silent_frame));
+  memset(silent_frame, 0, sizeof(silent_frame));
+  owner->finished = 1;
   return TA_SPEEX_NS_OK;
 }
 

@@ -65,3 +65,15 @@ if(BUILD_TESTING)
   add_test(NAME turbo_agent_speech_input_cpp17
     COMMAND test_turbo_agent_speech_cpp17)
 endif()
+
+# M2 is separately selected; the M1-only build stays unchanged.
+option(ENABLE_SPEECH_CAPTURE_BRIDGE
+  "Build opt-in C11 PCM capture bridge and negative fixtures" OFF)
+option(ENABLE_SPEECH_CAPTURE_NATIVE
+  "Bind SpeechInput to the installed Salts::Capture native microphone owner" OFF)
+if(ENABLE_SPEECH_CAPTURE_NATIVE)
+  set(ENABLE_SPEECH_CAPTURE_BRIDGE ON)
+endif()
+if(ENABLE_SPEECH_CAPTURE_BRIDGE)
+  add_subdirectory(capture)
+endif()

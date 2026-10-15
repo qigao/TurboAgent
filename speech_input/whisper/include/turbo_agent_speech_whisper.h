@@ -27,6 +27,7 @@ extern "C" {
 #define TURBO_AGENT_SPEECH_WHISPER_SHA256_BYTES 32u
 #define TURBO_AGENT_SPEECH_WHISPER_MAX_MODEL_BYTES (1024u * 1024u * 1024u)
 #define TURBO_AGENT_SPEECH_WHISPER_MAX_THREADS 16u
+#define TURBO_AGENT_SPEECH_WHISPER_MAX_DECODE_MS 120000u
 
 typedef struct turbo_agent_speech_whisper_s turbo_agent_speech_whisper_t;
 
@@ -57,6 +58,7 @@ typedef struct turbo_agent_speech_whisper_config_s {
   uint32_t max_utterance_frames; /* 1..3000; <= M1 SpeechInput limit */
   uint32_t max_text_bytes; /* 1..4096; must fit M1 result copy contract */
   uint32_t cpu_threads; /* 1..16; no opportunistic GPU fallback */
+  uint32_t max_decode_ms; /* 1..120000; monotonic cooperative abort deadline */
   turbo_agent_speech_whisper_language_t language;
 } turbo_agent_speech_whisper_config_t;
 
@@ -78,7 +80,13 @@ TURBO_AGENT_SPEECH_WHISPER_API int turbo_agent_speech_whisper_provider(
     turbo_agent_speech_whisper_t *owner,
     turbo_agent_speech_provider_v1_t *out_provider);
 
-/* Only cancellation signal allowed from another thread. The owner remains
+/* Decode is time-bounded by an explicit monotonic abort deadline. Whisper
+ * polls this callback at its existing safe points: deadline abort is
+ * cooperative, NOT forced thread termination. The caller must settle finish
+ * before Provider/DSO destroy and must separately enforce any outer hard
+ * executor deadline where noninterruptible engine operations are possible.
+ *
+ * Only cancellation signal allowed from another thread. The owner remains
  * alive; it is forbidden to free a decoding Whisper context until the
  * synchronous Provider finish() returns, callback settled. */
 TURBO_AGENT_SPEECH_WHISPER_API int turbo_agent_speech_whisper_request_abort(

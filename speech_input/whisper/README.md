@@ -154,9 +154,14 @@ acoustic baseline **after repository maintainer authorization**:
    and the [official converted GGML tiny multilingual weights](https://huggingface.co/ggerganov/whisper.cpp)
    (HF repository metadata specifies MIT).
 2. On the same-repo stacked real-model validation PR, the maintainer applies
-   the exact GitHub label `speech-model-download-approved`. Label addition
-   is the explicit approval event; do **not** apply this label to an untrusted
-   or fork PR. The workflow hard-checks its branch and repository.
+   the exact GitHub label `speech-model-download-approved`. Only the
+   **label-addition event for that reviewed PR commit SHA** is authorization;
+   ordinary PR `synchronize` / `reopened` / `workflow_dispatch` events
+   cannot reuse an old label to download weights. After any source change,
+   remove and re-add the label only after reviewing the new SHA. Do **not**
+   label a fork or untrusted PR; the workflow enforces same-repository and
+   exact review branch. Its evidence includes the approved source SHA and
+   GitHub approval/trigger actors.
 3. This permits a **single ephemeral CI runner** to download precisely the
    official `ggml-tiny.bin` from pinned Hugging Face revision
    `5359861c739e955e79d9a303bcbc70fb988958b1`, **size 77,691,713 bytes**

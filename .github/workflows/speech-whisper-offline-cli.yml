@@ -6,6 +6,8 @@ name: SpeechWhisper offline WAV CLI real CPU and mock positive (#137)
       - 'speech_input/whisper/tools/**'
       - 'speech_input/whisper/CMakeLists.txt'
       - '.github/workflows/speech-whisper-offline-cli.yml'
+      - 'speech_input/noise_lab/tools/run_three_arm_native_c11_ci.sh'
+      - 'speech_input/noise_lab/tools/prepare_paired_asr_wavs.py'
   workflow_dispatch:
 
 permissions:
@@ -115,7 +117,7 @@ jobs:
       - name: Install CPU build utilities
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ninja-build nasm pkg-config ffmpeg
+          sudo apt-get install -y --no-install-recommends ninja-build nasm pkg-config libspeexdsp-dev ffmpeg ffmpeg
       - name: Build real reviewed Whisper.cpp v1.9.5 CPU shared SDK
         shell: bash
         run: |
@@ -489,6 +491,14 @@ jobs:
           STUDY_PINNED_ORIGINALS
           test "$case_count" = 3
           # No samples, model weights or fake transcripts in artifacts.
+      - name: Execute SHA-pinned three-arm SpeexDSP source on real C11 Provider, fake inference only
+        if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-speexdsp-3arm-c11-native-167'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No model download; uses existing fake-vendor DSO built above.
+          # All media, fake text, metrics remain private to runner temp.
+          bash speech_input/noise_lab/tools/run_three_arm_native_c11_ci.sh
       - name: Archive pinned source and unmodified stdout/dependency evidence
         if: always()
         uses: actions/upload-artifact@v4

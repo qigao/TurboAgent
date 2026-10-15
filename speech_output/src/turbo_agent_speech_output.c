@@ -141,16 +141,19 @@ int turbo_agent_speech_output_create(
   *out_output = NULL;
   if (!config || config->struct_size != sizeof(*config) ||
       config->abi_version != TURBO_AGENT_SPEECH_OUTPUT_ABI_VERSION ||
-      config->output.sample_rate_hz != TURBO_AGENT_TTS_RATE_HZ ||
-      config->output.channels != TURBO_AGENT_TTS_CHANNELS ||
-      config->output.bits_per_sample != TURBO_AGENT_TTS_BITS_PER_SAMPLE ||
-      config->output.frame_ms != TURBO_AGENT_TTS_FRAME_MS ||
       config->max_text_bytes < 1u ||
       config->max_text_bytes > TURBO_AGENT_TTS_MAX_TEXT_BYTES ||
       config->max_audio_ms < TURBO_AGENT_TTS_FRAME_MS ||
       config->max_audio_ms > TURBO_AGENT_TTS_MAX_AUDIO_MS ||
       config->max_audio_ms % TURBO_AGENT_TTS_FRAME_MS != 0u)
     return TURBO_TTS_EINVAL;
+  /* A syntactically valid but unavailable rate/channel/format is an
+   * explicit unsupported capability, never an implicit resampler. */
+  if (config->output.sample_rate_hz != TURBO_AGENT_TTS_RATE_HZ ||
+      config->output.channels != TURBO_AGENT_TTS_CHANNELS ||
+      config->output.bits_per_sample != TURBO_AGENT_TTS_BITS_PER_SAMPLE ||
+      config->output.frame_ms != TURBO_AGENT_TTS_FRAME_MS)
+    return TURBO_TTS_EUNSUPPORTED;
   if (!provider || provider->struct_size != sizeof(*provider) ||
       provider->abi_version != TURBO_AGENT_SPEECH_OUTPUT_ABI_VERSION ||
       !provider->begin || !provider->poll_pcm || !provider->request_cancel)
@@ -285,6 +288,13 @@ int turbo_agent_speech_output_pump(turbo_agent_speech_output_t *output,
   if (samples != 0u)
     return cancel_failed(output, TURBO_TTS_EPROVIDER);
   if (kind == TURBO_TTS_SOURCE_DONE) {
+    /* Nonempty approved text producing zero PCM must never silently look
+     * like a successful utterance or be confused with device drain. This
+     * kind is fully settled by Provider contract, so cleanup is safe. */
+    if (output->total_pcm_samples == 0u) {
+      finish_generation(output, TURBO_TTS_FAILED);
+      return TURBO_TTS_EPROVIDER;
+    }
     finish_generation(output, TURBO_TTS_SETTLED);
     return TURBO_TTS_OK;
   }

@@ -16,6 +16,13 @@ if(MSVC)
 else()
  target_compile_options(turbo_agent_speech_output PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
+
+# Standalone opt-in export only; not installed by the main TurboAgent build.
+include(GNUInstallDirs)
+install(TARGETS turbo_agent_speech_output
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(FILES include/turbo_agent_speech_output.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 if(BUILD_TESTING)
  add_executable(test_speech_output_fake tests/test_speech_output.c)
  target_link_libraries(test_speech_output_fake PRIVATE turbo_agent_speech_output)

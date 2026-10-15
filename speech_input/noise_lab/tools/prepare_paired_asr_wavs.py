@@ -143,14 +143,13 @@ def prepare(source: Path, source_sha: str, executable: Path,
             (-18, "ns18", TRANSIENT_NAMES[2], OUTPUT_NAMES[2]),
         ):
             ns_raw_file = private_root / raw_name
+            # Register before invoking the external process: even an
+            # exception/timeout AFTER the first file write must rollback it.
+            created.append(ns_raw_file)
             command = [str(executable), str(in_raw), str(ns_raw_file),
                        str(db), "--align-one-frame"]
             observed = runner(command, input=b"", capture_output=True,
                               timeout=45, check=False)
-            # A failed native process may still leave a partial output file.
-            # Register it for rollback BEFORE validating its return status.
-            if ns_raw_file.exists() or ns_raw_file.is_symlink():
-                created.append(ns_raw_file)
             if (type(observed.returncode) is not int
                     or observed.returncode != 0
                     or not isinstance(observed.stdout, bytes)

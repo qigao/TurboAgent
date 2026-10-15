@@ -102,7 +102,23 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             "-DTTS_M42_BUILD_ROOT=$GITHUB_WORKSPACE/build/speech-output-m41" \
             "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags" \
+            "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags" \
             "-DCMAKE_EXE_LINKER_FLAGS=$flags"
           cmake --build build/speech-voice-release --parallel 2
           LD_LIBRARY_PATH="$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib" \
             build/speech-voice-release/tts_voice_release_link
+          LD_LIBRARY_PATH="$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib" \
+            build/speech-voice-release/tts_voice_cpp17_release_link
+      - name: Reject M4.2 when M4.1 opt-in is absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cmake -S speech_output -B build/m42-no-playback -G Ninja \
+               -DENABLE_TTS_PLAYBACK_BRIDGE_TEST=OFF \
+               -DENABLE_TTS_VOICE_COORDINATOR_TEST=ON \
+               > "$RUNNER_TEMP/m42-no-playback.log" 2>&1; then
+            echo 'M4.2 unexpectedly configured without M4.1 Playback' >&2
+            exit 1
+          fi
+          grep -F 'M4.2 requires explicit M4.1 playback opt-in' \
+            "$RUNNER_TEMP/m42-no-playback.log"

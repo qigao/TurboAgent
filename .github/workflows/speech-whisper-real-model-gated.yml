@@ -172,6 +172,17 @@ jobs:
           assert manifest['profiles']['stationary-noise-quiet']['nonzero_samples'] > 0
           assert manifest['profiles']['stationary-noise-medium']['nonzero_samples'] > 0
           PY
+      - name: Generate trusted fixed-RMS spoken JFK stress probe without model access
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 speech_input/whisper/tools/generate_agc_speech_probe.py \
+            --source "$GITHUB_WORKSPACE/external/whisper-v195/samples/jfk.wav" \
+            --output "$MODEL_ROOT/jfk-agc-private.wav" \
+            --report /tmp/ta-real-asr-agc-provenance.json
+          # Local transformed audio must not be uploaded or misrepresented
+          # as an independently licensed natural speech corpus.
+          test -s "$MODEL_ROOT/jfk-agc-private.wav"
       - name: Build upstream Whisper v1.9.5 CPU-only from exact SHA
         shell: bash
         run: |
@@ -291,6 +302,46 @@ jobs:
             --transcript-file /tmp/ta-real-asr-guard-jfk-private.txt \
             --language en --max-wer 0.65 --require-word country \
             --report /tmp/ta-real-asr-guard-jfk-metrics.json
+          # False-rejection comparison on the SAME gain-normalized source.
+          # Guard ON must preserve the actual baseline vendor decoder output.
+          # Do not interpret this artificial AGC fixture as human ASR quality.
+          for guard in 0 1; do
+            timeout --signal=TERM --kill-after=10s 200s \
+              "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+                --sha256 "$MODEL_SHA256" \
+                --wav "$MODEL_ROOT/jfk-agc-private.wav" \
+                --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+                --stationarity-guard "$guard" \
+              > "/tmp/ta-real-asr-agc-guard-$guard.private.stdout" \
+              2> "/tmp/ta-real-asr-agc-guard-$guard.private.stderr"
+            test -s "/tmp/ta-real-asr-agc-guard-$guard.private.stdout"
+            python3 speech_input/whisper/tools/evaluate_asr.py \
+              --reference "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country." \
+              --transcript-file "/tmp/ta-real-asr-agc-guard-$guard.private.stdout" \
+              --language en \
+              --report "/tmp/ta-real-asr-agc-guard-$guard.metrics.json"
+          done
+          cmp -s /tmp/ta-real-asr-agc-guard-0.private.stdout \
+                 /tmp/ta-real-asr-agc-guard-1.private.stdout
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp')
+          baseline=json.loads((p/'ta-real-asr-agc-guard-0.metrics.json').read_text())
+          guarded=json.loads((p/'ta-real-asr-agc-guard-1.metrics.json').read_text())
+          report={
+              'source_kind':'pinned_jfk_gain_normalized_AGC_stress',
+              'baseline_emitted_speech_text':True,
+              'guard_preserved_exact_baseline_text':True,
+              'baseline_wer':baseline['word_error_rate'],
+              'guard_wer':guarded['word_error_rate'],
+              'acoustic_quality_certified':False,
+              'general_vad_certified':False,
+          }
+          (p/'ta-real-asr-agc-guard-comparison.json').write_text(
+              json.dumps(report,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          PY
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -387,6 +438,10 @@ jobs:
             /tmp/ta-real-asr-nonspeech-outcomes.json
             /tmp/ta-real-asr-guard-jfk-metrics.json
             /tmp/ta-real-asr-guard-metrics.json
+            /tmp/ta-real-asr-agc-provenance.json
+            /tmp/ta-real-asr-agc-guard-0.metrics.json
+            /tmp/ta-real-asr-agc-guard-1.metrics.json
+            /tmp/ta-real-asr-agc-guard-comparison.json
             /tmp/ta-real-asr-provider-linked-images.txt
             /tmp/ta-real-asr-host-linked-images.txt
             /tmp/ta-real-asr-provider-lifecycle.txt

@@ -1,0 +1,121 @@
+name: Speech M3 paired voiced/whispered study stimuli (#146)
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/speech-paired-voiced-whispered-study.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  paired-voiced-whispered-study-no-weights:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-paired-voiced-whispered-study-146'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install CPU-only FFmpeg (no ASR model)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Compare PLOS ONE original voiced, whispered and edited-envelope whispered clips
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          private="$(mktemp -d "$RUNNER_TEMP/speech-paired-study-XXXXXX")"
+          chmod 700 "$private"
+          trap 'rm -rf -- "$private"' EXIT
+          decoder="$(realpath "$(command -v ffmpeg)")"
+          decoder_sha="$(sha256sum "$decoder" | awk '{print $1}')"
+          case_count=0
+          while IFS='|' read -r stimulus suffix url published_sha1; do
+            test -n "$stimulus" || continue
+            case_count=$((case_count + 1))
+            original="$private/$stimulus.oga"
+            converted="$private/$stimulus.wav"
+            curl --fail --location --silent --show-error --retry 2 \
+              --connect-timeout 15 --max-time 45 --max-filesize 80000 \
+              --proto '=https' --proto-redir '=https' \
+              --user-agent 'TurboAgent-PLOS-paired-acoustic-study/1.0 (qigao/TurboAgent)' \
+              "$url" --output "$original"
+            byte_count="$(wc -c < "$original" | tr -d '[:space:]')"
+            test "$byte_count" -gt 5000
+            test "$byte_count" -lt 25000
+            test "$(head -c 4 "$original")" = 'OggS'
+            observed_sha1="$(sha1sum "$original" | awk '{print $1}')"
+            if [ -n "$published_sha1" ]; then
+              test "$observed_sha1" = "$published_sha1"
+            fi
+            observed_sha256="$(sha256sum "$original" | awk '{print $1}')"
+            python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
+              --source "$original" --source-sha256 "$observed_sha256" \
+              --ffmpeg "$decoder" --ffmpeg-sha256 "$decoder_sha" \
+              --output-wav "$converted" \
+              --private-provenance "$private/$stimulus.private.json" \
+              --acknowledge-rights > "$private/$stimulus.status.json"
+            STIMULUS="$stimulus" FILE_BYTES="$byte_count" \
+            ORIG_SHA1="$observed_sha1" ORIG_SHA256="$observed_sha256" \
+            PUBLISHED_SHA1="$published_sha1" WAV="$converted" \
+            python3 - <<'PY'
+          import hashlib
+          import io
+          import json
+          import os
+          import struct
+          import sys
+          import wave
+          from pathlib import Path
+          sys.path.insert(0, "speech_input/whisper/tools")
+          from measure_frame_stationarity import inspect_wav_bytes, FRAME
+          raw = Path(os.environ["WAV"]).read_bytes()
+          measures = inspect_wav_bytes(raw)
+          with wave.open(io.BytesIO(raw), "rb") as stream:
+              frames = stream.getnframes()
+              pcm = struct.unpack("<%dh" % frames, stream.readframes(frames))
+          power = [sum(int(x)*int(x) for x in pcm[i:i+FRAME])
+                   for i in range(0,len(pcm),FRAME)]
+          assert len(power) == measures["frame_count"]
+          assert len(power) >= 50
+          stimulus = os.environ["STIMULUS"]
+          assert stimulus in ("voiced", "whispered", "whispered_envelope_matched")
+          # The third file is explicitly processed by the source authors
+          # to match another sentence's spectro-temporal envelope; do NOT
+          # count it as another natural human speech utterance or person.
+          print(json.dumps({
+              "study": "Ruggles-Freyman-Oxenham-2014-PLOS-ONE-pone.0086980",
+              "doi": "10.1371/journal.pone.0086980",
+              "license": "CC-BY-4.0",
+              "attribution": "Ruggles D, Freyman R, Oxenham A (2014)",
+              "stimulus": stimulus,
+              "experimental_stimuli_not_independent_speaker_sample": True,
+              "naturally_recorded_unaltered": stimulus != "whispered_envelope_matched",
+              "original_bytes": int(os.environ["FILE_BYTES"]),
+              "original_sha1": os.environ["ORIG_SHA1"],
+              "original_sha1_previously_pinned": bool(os.environ["PUBLISHED_SHA1"]),
+              "original_sha256_first_observation": os.environ["ORIG_SHA256"],
+              "canonical_sha256": hashlib.sha256(raw).hexdigest(),
+              "complete_20ms_frames": len(power),
+              "zero_power_frames": sum(p == 0 for p in power),
+              "frame_power_cv": measures["frame_power_cv"],
+              "frame_power_ratio": measures["frame_power_max_min_ratio"],
+              "guard_on_predecode_no_speech": measures["stationarity_hypothesis"] in
+                  ("stationary_candidate", "digital_zero"),
+              "classification": measures["stationarity_hypothesis"],
+              "vendor_decode_called": False,
+              "wer_cer_or_hallucinations_measured": False,
+              "model_weights_downloaded": False,
+              "audio_or_transcript_uploaded": False,
+          }, sort_keys=True))
+          PY
+          done <<'STUDY_STIMULI'
+          voiced|s001|https://upload.wikimedia.org/wikipedia/commons/9/93/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s001.oga|
+          whispered|s002|https://upload.wikimedia.org/wikipedia/commons/2/25/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s002.oga|
+          whispered_envelope_matched|s003|https://upload.wikimedia.org/wikipedia/commons/2/29/Influence-of-Musical-Training-on-Understanding-Voiced-and-Whispered-Speech-in-Noise-pone.0086980.s003.oga|ecd2002718660eb5943b7a94b814272ca4068367
+          STUDY_STIMULI
+          test "$case_count" = 3
+          # No upload-artifact action or transcript; runner temp wiped.

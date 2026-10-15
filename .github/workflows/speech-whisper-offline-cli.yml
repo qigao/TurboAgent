@@ -376,7 +376,7 @@ jobs:
               local stdout="$private/$lang-$label.stdout"
               local stderr="$private/$lang-$label.stderr"
               "$cli" --model "$model" --sha256 "$model_sha" \
-                --wav "$wav" --language "$lang" \
+                --wav "$wav" --language "$decoder_lang" \
                 --stationarity-guard "$flag" --threads 1 --timeout-ms 30000 \
                 > "$stdout" 2> "$stderr"
               if [ "$expected" = FINAL ]; then
@@ -388,6 +388,10 @@ jobs:
                 grep -Fq 'NO_SPEECH (no transcript emitted)' "$stderr"
               fi
             }
+            # The Commons whisper recording is English; the "whisper"
+            # row label is a fixture identity, not a CLI language code.
+            decoder_lang="$lang"
+            if [ "$lang" = whisper ]; then decoder_lang=en; fi
             run_case original-off "$original_wav" 0 FINAL
             run_case original-on "$original_wav" 1 FINAL
             run_case derived-off "$derivative_wav" 0 FINAL

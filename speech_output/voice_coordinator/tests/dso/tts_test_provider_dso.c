@@ -4,16 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <threads.h>
+#include <pthread.h>
 #include <time.h>
 
-/* C11 test fixture: a real dlopen-loaded DSO with one real inference worker.
+/* C11 test fixture: a real dlopen-loaded DSO with one real Linux pthread inference worker.
  * No synthetic TTS model, no mic/speaker, no new host PCM queue or device.
  * The sole worker owns ONE 480-sample generation-scoped PCM block.
  * The host invokes all Provider callbacks on its serial control owner. */
 struct turbo_tts_test_dso {
   mtx_t mutex;
   cnd_t changed;
-  thrd_t worker;
+  pthread_t worker;
   uint64_t generation;
   int begun;
   int thread_created;
@@ -43,9 +44,9 @@ static void set_unload_observer(atomic_uint *observer) {
   unload_observer = observer;
 }
 
-static int worker_main(void *param) {
+static void *worker_main(void *param) {
   turbo_tts_test_dso_t *ctx = (turbo_tts_test_dso_t *)param;
-  if (mtx_lock(&ctx->mutex) != thrd_success) return -1;
+  if (mtx_lock(&ctx->mutex) != thrd_success) return NULL;
   ctx->worker_started = 1;
   ctx->counts.worker_started = 1u;
   cnd_broadcast(&ctx->changed);
@@ -65,12 +66,12 @@ static int worker_main(void *param) {
     (void)cnd_wait(&ctx->changed, &ctx->mutex);
 
   /* Terminal is a notification that this worker has no more callbacks
-   * or PCM. The host must still thrd_join before actual DSO unload. */
+   * or PCM. The host must still pthread_join before actual DSO unload. */
   ctx->worker_done = 1;
   ctx->counts.worker_done = 1u;
   cnd_broadcast(&ctx->changed);
   (void)mtx_unlock(&ctx->mutex);
-  return 0;
+  return NULL;
 }
 
 static int provider_begin(void *param, uint64_t generation,
@@ -92,7 +93,7 @@ static int provider_begin(void *param, uint64_t generation,
   ctx->begun = 1;
   (void)mtx_unlock(&ctx->mutex);
 
-  if (thrd_create(&ctx->worker, worker_main, ctx) != thrd_success)
+  if (pthread_create(&ctx->worker, NULL, worker_main, ctx) != 0)
     return -1;
   if (mtx_lock(&ctx->mutex) != thrd_success) return -1;
   ctx->thread_created = 1;
@@ -244,9 +245,7 @@ static int test_destroy(turbo_tts_test_dso_t **handle) {
   (void)mtx_unlock(&ctx->mutex);
   if (pending) return -2; /* no early Provider/DSO release */
   if (thread_created) {
-    int worker_rc = 0;
-    if (thrd_join(ctx->worker, &worker_rc) != thrd_success ||
-        worker_rc != 0) return -3;
+    if (pthread_join(ctx->worker, NULL) != 0) return -3;
   }
   memset(ctx->frame, 0, sizeof(ctx->frame));
   cnd_destroy(&ctx->changed);

@@ -25,7 +25,6 @@ static int test_invalid_model_and_digest(void) {
   unsigned char bytes[64] = {0};
   char cwd[4096], path[4200];
   FILE *file;
-  int rc;
   const char *fake = "not-a-valid-ggml-model-binary-for-negative-tests";
   const size_t fake_len = strlen(fake);
   CHECK(ta_getcwd(cwd, sizeof(cwd)) != NULL);

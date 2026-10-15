@@ -29,6 +29,7 @@ typedef struct turbo_tts_test_dso_api {
   int (*configure_provider)(turbo_tts_test_dso_t *context,
                             turbo_tts_provider_t *out_provider);
   int (*grant_pcm)(turbo_tts_test_dso_t *context);
+  int (*wait_worker_started)(turbo_tts_test_dso_t *context);
   int (*wait_pcm_ready)(turbo_tts_test_dso_t *context);
   int (*grant_settle)(turbo_tts_test_dso_t *context);
   int (*wait_worker_done)(turbo_tts_test_dso_t *context);

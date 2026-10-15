@@ -127,6 +127,24 @@ jobs:
           cmake --build build/speech-cli --target turboagent-whisper-transcribe \
             --parallel 2
           test -f build/speech-cli/whisper/turboagent-whisper-transcribe
+          # Model-free compile audit for the independent real-model DSO host.
+          # It must not require a model, link Whisper or trigger any download.
+          cmake --build build/speech-cli \
+            --target test_turbo_agent_speech_whisper_real_model_dso --parallel 2
+          host=build/speech-cli/whisper/test_turbo_agent_speech_whisper_real_model_dso
+          test -x "$host"
+          if ldd "$host" | grep -E 'lib(whisper|ggml)' ; then
+            echo 'Independent C11 host must not link vendor inference libraries' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          commands=json.loads(Path('build/speech-cli/compile_commands.json').read_text())
+          found=[r for r in commands if Path(r['file']).name=='test_speech_whisper_real_model_dso.c']
+          assert len(found)==1 and '-Werror' in found[0]['command'], found
+          print('PASS: real-model DSO host compiles as independent strict C11; zero model bytes')
+          PY
           ldd build/speech-cli/whisper/turboagent-whisper-transcribe \
             | tee /tmp/speech-cli-real-dependencies.txt
           grep -F "$TURBO_WHISPER_SDK_ROOT/lib/libwhisper.so" \

@@ -113,7 +113,8 @@ static int fake_poll(void *context, uint64_t generation, int16_t *pcm,
     *out_kind = TURBO_TTS_POLL_CANCELED;
     return 0;
   }
-  if (fake->mode == FAKE_WOULD_BLOCK && fake->step++ == 0u) {
+  if (fake->mode == FAKE_WOULD_BLOCK && fake->step == 0u) {
+    fake->step++;
     pcm[0] = 1234; /* discarded since out_samples=0 */
     *out_samples = 0u;
     *out_kind = TURBO_TTS_WOULD_BLOCK;

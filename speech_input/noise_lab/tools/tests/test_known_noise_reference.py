@@ -93,7 +93,7 @@ class KnownNoiseReferenceTests(unittest.TestCase):
                                    delta=0.001)
             self.assertEqual(report["clean_only_source_nonzero_frames_zeroed"],0)
             self.assertEqual(report["reference_ser_delta_db"],0.0)
-            mute = b"\\x00" * len(clean)
+            mute = b"\x00" * len(clean)
             silenced = ref.score(clean,noisy,noisy,mute)
             self.assertEqual(silenced["clean_only_source_nonzero_frames_zeroed"],60)
             self.assertEqual(silenced["clean_only_filter_ser_db"],0.0)

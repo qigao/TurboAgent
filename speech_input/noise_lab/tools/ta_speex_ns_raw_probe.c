@@ -39,13 +39,17 @@ int main(int argc, char **argv) {
   const int16_t *probe = NULL;
   ta_speex_ns_owner_t *owner = NULL;
   struct stat st;
-  int src = -1, dst = -1, rc = 2, db;
+  int src = -1, dst = -1, rc = 2, db, align = 0;
   size_t frames, i, j;
   int16_t input[TA_SPEEX_NS_FRAME_SAMPLES];
   int16_t output[TA_SPEEX_NS_FRAME_SAMPLES];
   uint64_t energy_before = 0u, energy_after = 0u;
-  if (argc != 4 || argv[1][0] != '/' || argv[2][0] != '/' ||
-      strcmp(argv[1], argv[2]) == 0) goto done;
+  if ((argc != 4 && argc != 5) || argv[1][0] != '/' ||
+      argv[2][0] != '/' || strcmp(argv[1], argv[2]) == 0) goto done;
+  if (argc == 5) {
+    if (strcmp(argv[4], "--align-one-frame") != 0) goto done;
+    align = 1;
+  }
   if (*(const uint8_t *)&endian_probe != 1u) goto done;
   if (strcmp(argv[3], "-12") == 0) db = -12;
   else if (strcmp(argv[3], "-18") == 0) db = -18;
@@ -69,9 +73,14 @@ int main(int argc, char **argv) {
       energy_before += (uint64_t)(a*a);
       energy_after += (uint64_t)(b*b);
     }
-    if (write_all(dst, output, sizeof(output)) != 0) goto done;
+    if ((!align || i != 0u) &&
+        write_all(dst, output, sizeof(output)) != 0) goto done;
   }
   if (ta_speex_ns_processed_frames(owner) != frames) goto done;
+  if (align) {
+    if (ta_speex_ns_finish(owner, output, 320u) != TA_SPEEX_NS_OK) goto done;
+    if (write_all(dst, output, sizeof(output)) != 0) goto done;
+  }
   {
     uint8_t extra;
     const ssize_t n = read(src, &extra, 1u);

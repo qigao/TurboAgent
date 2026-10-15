@@ -30,6 +30,16 @@ def make_wave(path: Path, kind: str, frames: int = 60):
             output.writeframes(struct.pack("<320h", *([amplitude, -amplitude] * 160)))
 
 
+def make_wave_amplitudes(path: Path, amplitudes: list[int]):
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16000)
+        for amplitude in amplitudes:
+            output.writeframes(
+                struct.pack("<320h", *([amplitude, -amplitude] * 160)))
+
+
 def entry(path, kind, language="none", condition="stationary",
           rights="generated_by_test"):
     return {"path": path.name,
@@ -145,6 +155,51 @@ class CorpusGateTests(unittest.TestCase):
             self.assertEqual(process.stdout, "")
             self.assertNotIn("secret_voice", process.stderr)
             self.assertNotIn("private-content", process.stderr)
+
+    def test_duplicate_audio_bytes_cannot_inflate_false_rejection_denominator(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            original = root / "voice-one.wav"
+            copied = root / "voice-two.wav"
+            make_wave(original, "constant")
+            copied.write_bytes(original.read_bytes())
+            manifest = root / "manifest.json"
+            first = entry(original, "human_voice", "en", "monotone", "creator_consent")
+            second = entry(copied, "human_voice", "ja", "low_volume", "creator_consent")
+            manifest.write_text(json.dumps({"schema": 1, "samples": [first, second]}))
+            with self.assertRaisesRegex(ValueError, "duplicate WAV bytes"):
+                corpus.evaluate(root, manifest)
+            # Not even counting identical source files under different labels.
+            manifest.write_text(json.dumps({"schema": 1, "samples": [first, first]}))
+            with self.assertRaisesRegex(ValueError, "duplicate WAV bytes"):
+                corpus.evaluate(root, manifest)
+
+    def test_cv_and_power_ratio_boundaries_follow_provider_rule(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sample = root / "bounds.wav"
+            manifest = root / "manifest.json"
+            # 30 frames at amplitude 1000, 30 at 1120 give CV ~0.113
+            # (candidate); 30 at 1150 give CV ~0.139 (decode).
+            # Neither crosses max/min power ratio 2.
+            # 99 frames of 1000 + one 1414 stay below power ratio 2;
+            # replacing 1414 with 1415 exceeds the exact ratio boundary.
+            probes = [
+                ([1000] * 30 + [1120] * 30, 1),
+                ([1000] * 30 + [1150] * 30, 0),
+                ([1000] * 99 + [1414], 1),
+                ([1000] * 99 + [1415], 0),
+            ]
+            for amplitudes, expected in probes:
+                with self.subTest(last=amplitudes[-1]):
+                    make_wave_amplitudes(sample, amplitudes)
+                    manifest.write_text(json.dumps({"schema": 1, "samples": [
+                        entry(sample, "synthetic")]}))
+                    result = corpus.evaluate(root, manifest)
+                    self.assertEqual(
+                        result["synthetic_controls"]["guard_on_predecode_rejections"],
+                        expected)
+                    self.assertFalse(result["acoustic_vad_or_recognition_quality_certified"])
 
     def test_unknown_rate_is_not_misreported_as_zero(self):
         self.assertIsNone(corpus.rate(0, 0)["rate"])

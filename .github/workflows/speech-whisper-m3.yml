@@ -1,0 +1,134 @@
+name: TurboAgent Whisper v1.9.5 real CPU C-API Provider (#137)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/speech-whisper-m3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+jobs:
+  real-whisper-cpu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WHISPER_SOURCE_SHA: d1be6fde11ac6e0407606b4e42fe72d34add8037
+      WHISPER_ROOT: /tmp/turboagent-whisper-v195-sdk
+      SALTS_ROOT: /tmp/turboagent-whisper-salts-sdk/sdk/linux-x64
+      TURBO_WHISPER_SDK_ROOT: /tmp/turboagent-whisper-v195-sdk
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout immutable reviewed upstream whisper.cpp C API and GGML
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: d1be6fde11ac6e0407606b4e42fe72d34add8037
+          path: external/whisper-v195
+          submodules: recursive
+          persist-credentials: false
+      - name: Require exact pinned Whisper source and no implicit model download
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C external/whisper-v195 rev-parse HEAD)" = "$WHISPER_SOURCE_SHA"
+          grep -F '#define WHISPER_SAMPLE_RATE 16000' external/whisper-v195/include/whisper.h
+          test -f external/whisper-v195/LICENSE
+          mkdir -p "$WHISPER_ROOT" /tmp/turboagent-whisper-salts-sdk
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - name: Host build utilities and exact published Salts.Native rc.16 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build nasm pkg-config
+          expected=6cf093dc053db98bb21b1788eb2fc1ada4df195e
+          actual="$(gh api repos/qigao/salts/git/ref/tags/v2.3.0-rc.16 --jq .object.sha)"
+          test "$actual" = "$expected"
+          gh release download v2.3.0-rc.16 --repo qigao/salts \
+            --pattern Salts.Native.2.3.0-rc.16.nupkg \
+            --dir /tmp/turboagent-whisper-salts-sdk
+          unzip -q /tmp/turboagent-whisper-salts-sdk/Salts.Native.2.3.0-rc.16.nupkg \
+            -d /tmp/turboagent-whisper-salts-sdk
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          sha256sum /tmp/turboagent-whisper-salts-sdk/Salts.Native.2.3.0-rc.16.nupkg \
+            > /tmp/turboagent-whisper-salts-sdk/salts-nupkg.sha256
+      - name: Compile and install actual Whisper v1.9.5 CPU-only source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S external/whisper-v195 -B build/external-whisper-v195 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_INSTALL_PREFIX=$WHISPER_ROOT" \
+            -DWHISPER_BUILD_IS_DEV=OFF -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_SERVER=OFF \
+            -DWHISPER_CURL=OFF -DWHISPER_SDL2=OFF \
+            -DWHISPER_COREML=OFF -DWHISPER_OPENVINO=OFF \
+            -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF \
+            -DGGML_METAL=OFF -DGGML_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build/external-whisper-v195 --parallel 2
+          cmake --install build/external-whisper-v195
+          test -f "$WHISPER_ROOT/lib/cmake/whisper/whisper-config.cmake"
+          test -f "$WHISPER_ROOT/include/whisper.h"
+          test -n "$(find "$WHISPER_ROOT/lib" -maxdepth 1 -name 'libwhisper.so*' -print -quit)"
+          echo "upstream_whisper_source=$WHISPER_SOURCE_SHA" > /tmp/ta-whisper-v195.txt
+          echo "cpu_only=TRUE" >> /tmp/ta-whisper-v195.txt
+          echo "upstream_model_download=DISABLED" >> /tmp/ta-whisper-v195.txt
+      - name: Build real optional C11 DSO and deterministic mock-Provider conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$WHISPER_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-whisper-m3/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cmake -S speech_input -B build/speech-m3 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            -DENABLE_SPEECH_WHISPER=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed/speech-whisper-m3" \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror"
+          cmake --build build/speech-m3 --parallel 2
+          test -f build/speech-m3/whisper/libturbo_agent_speech_whisper.so
+          nm -D --defined-only build/speech-m3/whisper/libturbo_agent_speech_whisper.so \
+            | tee /tmp/ta-whisper-v195-exported-symbols.txt
+          grep -F 'turbo_agent_speech_whisper_create' \
+            /tmp/ta-whisper-v195-exported-symbols.txt
+          ldd build/speech-m3/whisper/libturbo_agent_speech_whisper.so \
+            | tee /tmp/ta-whisper-v195-linked-libraries.txt
+          grep -F "$WHISPER_ROOT/lib/libwhisper.so" \
+            /tmp/ta-whisper-v195-linked-libraries.txt
+          if grep -Fq 'not found' /tmp/ta-whisper-v195-linked-libraries.txt; then
+            echo 'Unresolved external inference Provider native dependency' >&2
+            exit 1
+          fi
+          ctest --test-dir build/speech-m3 \
+            -R '^turbo_agent_speech_(whisper|input)_' \
+            --no-tests=error --output-on-failure --timeout 30 \
+            --repeat until-fail:3
+      - name: Preserve exact source/runtime and no-model provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-whisper-v195-real-cpu-source-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            /tmp/ta-whisper-v195.txt
+            /tmp/ta-whisper-v195-exported-symbols.txt
+            /tmp/ta-whisper-v195-linked-libraries.txt
+            /tmp/turboagent-whisper-salts-sdk/salts-nupkg.sha256
+            build/speech-m3/compile_commands.json
+            build/speech-m3/Testing/Temporary/LastTest.log
+            build/external-whisper-v195/compile_commands.json

@@ -179,6 +179,32 @@ class PrivateWavPreflightTests(unittest.TestCase):
             self.assertFalse((root/"out.wav").exists())
             self.assertFalse((root/"sidecar.json").exists())
 
+    def test_bounded_external_decoder_flood_and_hang_are_killed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            executable = Path(sys.executable).resolve(strict=True)
+            flood = root / "flood-decoder"
+            flood.write_text(
+                "#!" + str(executable) + "\n"
+                "import sys\n"
+                "sys.stdout.buffer.write(b'F' * 4000000)\n"
+                "sys.stdout.flush()\n", encoding="utf-8")
+            flood.chmod(0o700)
+            with self.assertRaisesRegex(ValueError, "bounded output"):
+                prep.bounded_decoder_run(
+                    [str(flood)], input=b"fake source", capture_output=True,
+                    timeout=5, check=False)
+            hung = root / "hung-decoder"
+            hung.write_text(
+                "#!" + str(executable) + "\n"
+                "import time\n"
+                "time.sleep(10)\n", encoding="utf-8")
+            hung.chmod(0o700)
+            with self.assertRaisesRegex(ValueError, "timed out"):
+                prep.bounded_decoder_run(
+                    [str(hung)], input=b"fake source", capture_output=True,
+                    timeout=0.2, check=False)
+
     @unittest.skipUnless(shutil.which("ffmpeg"), "optional local CPU ffmpeg absent")
     def test_actual_ffmpeg_pipe_only_cpu_decode(self):
         with tempfile.TemporaryDirectory() as td:

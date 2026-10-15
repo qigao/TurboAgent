@@ -108,6 +108,29 @@ static int parse_args(int argc, char **argv, cli_options_t *opts) {
   return (seen & 15u)==15u && path_absolute(opts->model_path) &&
          path_absolute(opts->wav_path) ? 0 : -1;
 }
+/* A valid UTF-8 transcript is not necessarily safe to emit verbatim to an
+ * operator's terminal. Reject control sequences and Unicode bidi overrides
+ * rather than truncating, rewriting or displaying a misleading transcript.
+ * M1 remains the sole transcript owner; the CLI adds display admission. */
+static int safe_preview_text(const char *utf8, size_t length) {
+  const unsigned char *p = (const unsigned char *)utf8;
+  for (size_t i=0; i<length; ++i) {
+    const unsigned char b = p[i];
+    if ((b < 0x20u && b != '\n' && b != '\t') || b == 0x7fu)
+      return 0; /* reject ANSI ESC, CR rewrites and other C0/C1 terminals */
+    if (i+2u < length && b == 0xe2u) {
+      if (p[i+1u] == 0x80u &&
+          ((p[i+2u] >= 0xaau && p[i+2u] <= 0xaeu) ||
+           p[i+2u] == 0x8eu || p[i+2u] == 0x8fu))
+        return 0; /* U+202A..202E / U+200E,U+200F bidi controls */
+      if (p[i+1u] == 0x81u &&
+          p[i+2u] >= 0xa6u && p[i+2u] <= 0xa9u)
+        return 0; /* U+2066..U+2069 isolate overrides */
+    }
+  }
+  return 1;
+}
+
 static uint16_t u16le(const uint8_t *p) {
   return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1]<<8u));
 }
@@ -227,6 +250,7 @@ static int transcribe(FILE *wav, const audio_span_t *audio,
     rc=0;
   } else if (kind==TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL &&
              length>0u && length<=TURBO_AGENT_SPEECH_MAX_TEXT_BYTES) {
+    if (!safe_preview_text(output, length)) goto cleanup;
     if (fwrite(output,1,length,stdout)!=length ||
         fputc('\n',stdout)==EOF) goto cleanup;
     rc=0;

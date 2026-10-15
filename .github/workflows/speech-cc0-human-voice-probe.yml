@@ -30,6 +30,7 @@ jobs:
         env:
           CC0_URL: https://upload.wikimedia.org/wikipedia/commons/b/b9/%E6%98%A5%E3%81%AF%E3%81%82%E3%81%91%E3%81%BC%E3%81%AE.ogg
           CC0_EXPECTED_SHA1: c7992ec2188ee94102f83e4eff22c4f9b9365d39
+          CC0_EXPECTED_SHA256: cad2f1545a3ac898362590ea636b8c09f1d77391b506790ae909e0e1ff1441f7
           CC0_EXPECTED_BYTES: '264858'
         run: |
           set -euo pipefail
@@ -48,6 +49,9 @@ jobs:
           actual_sha1="$(sha1sum "$source" | awk '{print $1}')"
           test "$actual_sha1" = "$CC0_EXPECTED_SHA1"
           original_sha256="$(sha256sum "$source" | awk '{print $1}')"
+          # A second independent run must consume the *same* immutable
+          # original bytes as the first confirmed human-voice observation.
+          test "$original_sha256" = "$CC0_EXPECTED_SHA256"
 
           ffmpeg_bin="$(realpath "$(command -v ffmpeg)")"
           ffmpeg_sha256="$(sha256sum "$ffmpeg_bin" | awk '{print $1}')"
@@ -117,3 +121,35 @@ jobs:
 
           # No upload-artifact action. All clip/manifest/provenance bytes
           # remain in RUNNER_TEMP until trap cleanup; no model download.
+
+  mandarin-cc0-source-digest-discovery:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-cc0-voice-probe-146'
+    name: Provisional Mandarin CC0 file digest only, no acoustic acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      CC0_URL: https://upload.wikimedia.org/wikipedia/commons/8/8a/Mandarin_Chinese-%E5%8D%97%E5%9B%BD%E5%B1%B1%E6%B2%B3.ogg
+    steps:
+      - name: Download exactly one author-CC0 Commons original into ephemeral private directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$(mktemp -d "${RUNNER_TEMP}/cc0-zh-discovery-XXXXXX")"
+          chmod 700 "$root"
+          trap 'rm -rf -- "$root"' EXIT
+          source="$root/mandarin-original.ogg"
+          curl --fail --location --silent --show-error --retry 2 \
+            --connect-timeout 15 --max-time 60 --max-filesize 500000 \
+            --proto '=https' --proto-redir '=https' \
+            --user-agent 'TurboAgent-CC0-voice-test/1.0 (qigao/TurboAgent)' \
+            "$CC0_URL" --output "$source"
+          bytes="$(wc -c < "$source" | tr -d '[:space:]')"
+          test "$bytes" -ge 100000
+          test "$bytes" -le 300000
+          test "$(head -c 4 "$source")" = OggS
+          sha1="$(sha1sum "$source" | awk '{print $1}')"
+          sha256="$(sha256sum "$source" | awk '{print $1}')"
+          printf '{"evidence_kind":"provisional_cc0_public_file_digest_only","language":"zh","bytes":%s,"sha1":"%s","sha256":"%s","real_speech_guard_measured":false,"model_weights_used":false,"audio_artifacts_uploaded":false}\n' "$bytes" "$sha1" "$sha256"
+          # Do NOT classify until this full SHA-256 is fixed in source and
+          # independently checked against the unchanged Commons original.

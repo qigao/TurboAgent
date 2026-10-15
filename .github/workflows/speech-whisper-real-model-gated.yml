@@ -25,7 +25,7 @@ jobs:
       github.event.label.name == 'speech-model-download-approved' &&
       github.repository == 'qigao/TurboAgent' &&
       github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' &&
-      github.event.pull_request.head.ref == 'test/speech-whisper-real-model-gated-137' &&
+      github.event.pull_request.head.ref == 'feature/speech-stationary-noise-admission-137' &&
       contains(github.event.pull_request.labels.*.name, 'speech-model-download-approved')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -256,6 +256,60 @@ jobs:
           python3 speech_input/whisper/tools/evaluate_non_speech_probe.py \
             --input-dir /tmp/ta-real-asr-nonspeech-private \
             --report /tmp/ta-real-asr-nonspeech-outcomes.json
+      - name: Qualify explicit guard on real JFK speech and exact stationary-noise probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/speech-model/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          cli="$GITHUB_WORKSPACE/build/speech-real-model/whisper/turboagent-whisper-transcribe"
+          test -x "$cli"
+          # This is a genuine-model regression, never the fake-engine C11 test.
+          # Keep all raw transcripts and speech/noise WAV bytes local to runner.
+          for profile in digital-zero stationary-noise-quiet stationary-noise-medium; do
+            timeout --signal=TERM --kill-after=10s 200s \
+              "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+              --sha256 "$MODEL_SHA256" \
+              --wav "$MODEL_ROOT/no-speech-probes/$profile.wav" \
+              --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+              --stationarity-guard 1 \
+              > "/tmp/ta-guard-$profile.stdout" \
+              2> "/tmp/ta-guard-$profile.stderr"
+            test ! -s "/tmp/ta-guard-$profile.stdout"
+            grep -Fq 'NO_SPEECH (no transcript emitted)' "/tmp/ta-guard-$profile.stderr"
+          done
+          timeout --signal=TERM --kill-after=10s 200s \
+            "$cli" --model "$MODEL_ROOT/ggml-tiny.bin" \
+            --sha256 "$MODEL_SHA256" \
+            --wav "$MODEL_ROOT/jfk-canonical.wav" \
+            --language en --threads 2 --timeout-ms 120000 --model-max-mib 128 \
+            --stationarity-guard 1 \
+            > /tmp/ta-real-asr-guard-jfk-private.txt \
+            2> /tmp/ta-real-asr-guard-jfk-private.stderr
+          test -s /tmp/ta-real-asr-guard-jfk-private.txt
+          python3 speech_input/whisper/tools/evaluate_asr.py \
+            --reference "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country." \
+            --transcript-file /tmp/ta-real-asr-guard-jfk-private.txt \
+            --language en --max-wer 0.65 --require-word country \
+            --report /tmp/ta-real-asr-guard-jfk-metrics.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('/tmp/ta-real-asr-guard-jfk-metrics.json').read_text())
+          assert m['word_error_rate'] <= 0.65, m
+          result={
+            'test_kind':'real_whisper_tiny_opt_in_stationarity_guard',
+            'signal_gate':'three_generated_nonspeech_NO_SPEECH_zero_stdout',
+            'nonspeech_profiles':3,
+            'jfk_wer':m['word_error_rate'],
+            'jfk_cer':m['character_error_rate'],
+            'general_vad_certified':False,
+            'real_room_noise_certified':False,
+            'weights_uploaded':False,
+          }
+          Path('/tmp/ta-real-asr-guard-metrics.json').write_text(
+            json.dumps(result,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(result,indent=2,sort_keys=True))
+          PY
       - name: Reject real Whisper inference exceeding a 1ms monotonic decode deadline
         shell: bash
         run: |
@@ -331,6 +385,8 @@ jobs:
             /tmp/ta-real-asr-deadline-evidence.txt
             /tmp/ta-real-asr-nonspeech-fixture-metadata.json
             /tmp/ta-real-asr-nonspeech-outcomes.json
+            /tmp/ta-real-asr-guard-jfk-metrics.json
+            /tmp/ta-real-asr-guard-metrics.json
             /tmp/ta-real-asr-provider-linked-images.txt
             /tmp/ta-real-asr-host-linked-images.txt
             /tmp/ta-real-asr-provider-lifecycle.txt

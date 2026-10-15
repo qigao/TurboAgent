@@ -124,6 +124,31 @@ jobs:
                 --after "$root/$sample.$db.aligned.raw" \
                 --after-sha256 "$(sha256sum "$root/$sample.$db.aligned.raw" | awk '{print $1}')" \
                 --kind "$sample" --db "$db"
+              # Gate the same licensed WAV bytes before and after an
+              # explicitly compensated 20ms flush; this is NOT WER/CER.
+              CHECK_DIR="$root" CHECK_SAMPLE="$sample" CHECK_DB="$db" python3 - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, "speech_input/noise_lab/tools")
+          from evaluate_ns_pcm_pair import evaluate
+          root=Path(os.environ["CHECK_DIR"])
+          name=os.environ["CHECK_SAMPLE"]; db=int(os.environ["CHECK_DB"])
+          before=(root/(name+".raw")).read_bytes()
+          aligned=(root/(name+"."+str(db)+".aligned.raw")).read_bytes()
+          report=evaluate(before, aligned, name, db)
+          assert report["best_bounded_alignment_shift_samples"] == 0
+          assert report["undelivered_tail_samples_if_no_flush"] == 0
+          assert report["frames"] == len(before)//640
+          assert report["no_speech_decision_authorized"] is False
+          if name == "steady":
+              assert report["energy_ratio"] < 0.5
+          if name == "whisper":
+              assert report["aligned_cosine_similarity"] > 0.99
+              assert report["guard_after_ns_20ms_stationarity"] == "dynamic_or_unknown"
+              assert report["after_power"] > 0
+          if name == "road":
+              assert report["guard_after_ns_20ms_stationarity"] == "dynamic_or_unknown"
+          PY
               python3 speech_input/noise_lab/tools/evaluate_ns_pcm_pair.py \
                 --before "$root/$sample.raw" \
                 --before-sha256 "$(sha256sum "$root/$sample.raw" | awk '{print $1}')" \

@@ -167,7 +167,9 @@ int turbo_voice_interrupt(turbo_voice_coordinator_t *v,
 int turbo_voice_pump(turbo_voice_coordinator_t *v,
                      size_t poll_budget, size_t *out_written) {
   if (out_written) *out_written = 0u;
-  if (!v || !out_written || !poll_budget) return TURBO_VOICE_EINVAL;
+  if (!v || !out_written || !poll_budget ||
+      poll_budget > TURBO_VOICE_MAX_POLL_BUDGET)
+    return TURBO_VOICE_EINVAL;
   if (v->state == TURBO_VOICE_SPEAKING) {
     int rc = turbo_tts_playback_bridge_pump(v->bridge,
                                             poll_budget, out_written);
@@ -227,7 +229,8 @@ int turbo_voice_pump(turbo_voice_coordinator_t *v,
 }
 
 int turbo_voice_drain(turbo_voice_coordinator_t *v, uint32_t timeout_ms) {
-  if (!v || !timeout_ms) return TURBO_VOICE_EINVAL;
+  if (!v || !timeout_ms || timeout_ms > TURBO_VOICE_MAX_DRAIN_MS)
+    return TURBO_VOICE_EINVAL;
   if (v->state != TURBO_VOICE_DRAIN_PENDING || !v->bridge)
     return TURBO_VOICE_EBUSY;
   int rc = turbo_tts_playback_bridge_drain(v->bridge, timeout_ms);

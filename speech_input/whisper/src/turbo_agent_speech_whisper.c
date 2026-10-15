@@ -379,6 +379,15 @@ static int provider_finish(void *context,
   atomic_store_explicit(&owner->in_decode, 1, memory_order_release);
   rc = whisper_full(owner->engine, params, owner->pcm_f32,
                     (int)owner->used_samples);
+  /* A third-party engine may finish without polling the abort callback after
+   * its last segment. The deadline is an admission rule, not merely a hint
+   * passed to Whisper: fail closed before inspecting or exposing results. */
+  {
+    const uint64_t settled_at = monotonic_milliseconds();
+    if (settled_at == 0u || settled_at >= owner->decode_deadline_ms) {
+      atomic_store_explicit(&owner->abort_requested, 1, memory_order_release);
+    }
+  }
   atomic_store_explicit(&owner->in_decode, 0, memory_order_release);
   if (atomic_load_explicit(&owner->abort_requested, memory_order_acquire)) {
     owner->last_error = TURBO_AGENT_WHISPER_EABORT;

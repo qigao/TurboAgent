@@ -182,6 +182,11 @@ turbo_tts_playback_bridge_get_state(const turbo_tts_playback_bridge_t *b) {
   return b ? b->state : TURBO_TTS_PLAYBACK_FAILED;
 }
 
+int turbo_tts_playback_bridge_has_pending_clear(
+    const turbo_tts_playback_bridge_t *b) {
+  return b && b->clear_needed != 0;
+}
+
 int turbo_tts_playback_bridge_destroy(turbo_tts_playback_bridge_t **handle) {
   if (!handle || !*handle) return TURBO_TTS_PLAYBACK_EINVAL;
   turbo_tts_playback_bridge_t *b = *handle;

@@ -21,6 +21,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Install reviewed system FFmpeg for local synthetic-only conversion tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          command -v ffmpeg
+          ffmpeg -version | head -n 1
       - name: Test deterministic multilingual scoring and fail-closed transcript admission
         shell: bash
         run: |

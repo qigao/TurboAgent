@@ -20,7 +20,7 @@ import wave
 
 WHISPER_TOOLS = Path(__file__).resolve().parents[2] / "whisper" / "tools"
 sys.path.insert(0, str(WHISPER_TOOLS))
-from evaluate_asr import _read_transcript, _words, score  # noqa: E402
+from evaluate_asr import _words, score  # noqa: E402
 from measure_frame_stationarity import inspect_wav_bytes  # noqa: E402
 from prepare_stationarity_wav import bounded_decoder_run  # noqa: E402
 
@@ -147,8 +147,17 @@ def evaluate(cli: Path, cli_sha: str, model: Path, model_sha: str,
     if not os.access(cli, os.X_OK):
         raise ValueError("CLI must be executable")
     _sha_file(model, model_sha, model_max_mib * 1024 * 1024)
-    _sha_file(reference_file, reference_sha, 4097)
-    reference = _read_transcript(reference_file)
+    # Snapshot the reference once: hash and normalization must use identical
+    # source bytes. No path, source content or digest is sent to the CLI.
+    _check_local_file(reference_file)
+    with reference_file.open("rb") as source:
+        original_reference = source.read(4098)
+    if (not 1 <= len(original_reference) <= 4097
+            or not isinstance(reference_sha, str)
+            or not PIN.fullmatch(reference_sha)
+            or hashlib.sha256(original_reference).hexdigest() != reference_sha):
+        raise ValueError("private reference SHA-256 mismatch")
+    reference = _text_from_cli(original_reference)
     critical = []
     for word in critical_words:
         if not isinstance(word, str):
@@ -171,6 +180,14 @@ def evaluate(cli: Path, cli_sha: str, model: Path, model_sha: str,
     for name, (path, _) in zip(CONDITIONS, wavs):
         measures[name] = _run_one(cli, model, model_sha, path, language,
                                   reference, tuple(critical), model_max_mib, runner)
+    # Recheck ALL original paths and immutable byte digests after inference,
+    # including the CLI image and model. A file modified during a long
+    # three-arm decode MUST NOT produce a reproducible-looking quality report.
+    _sha_file(cli, cli_sha, MAX_CLI_BYTES)
+    _sha_file(model, model_sha, model_max_mib * 1024 * 1024)
+    _sha_file(reference_file, reference_sha, 4097)
+    for path, expected_sha in wavs:
+        _sha_file(path, expected_sha, MAX_WAV_BYTES)
     base = measures["original"]
     for key in ("ns12", "ns18"):
         current = measures[key]

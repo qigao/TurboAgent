@@ -27,7 +27,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libspeexdsp-dev pkg-config ninja-build ffmpeg
           test "$(pkg-config --modversion speexdsp)" = 1.2.1
-          dpkg-query -W -f='speexdsp-pkg=\${Version}\n' libspeexdsp-dev
+          dpkg-query -W -f='speexdsp-pkg=${Version}\n' libspeexdsp-dev
           pkg-config --cflags --libs speexdsp
           # Distro package build itself is not compiled with our sanitizers;
           # only the test-only strict C11 owner and harness are instrumented.

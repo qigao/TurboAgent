@@ -101,6 +101,41 @@ class PairedASRValidation(unittest.TestCase):
             self.assertIsNone(n["cer"])
             self.assertIsNone(n["wer_delta_from_original"])
 
+    def test_model_or_wav_changed_during_decode_refuses_fake_quality_report(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)
+            args=list(fixture(root))
+            calls=[]
+            def mutate_model(*a,**kw):
+                calls.append(1)
+                if len(calls)==1:
+                    args[2].write_bytes(b"MODEL TAMPERED AFTER VERIFIED SHA")
+                return SimpleNamespace(returncode=0,stdout=b"Hello world\\n",
+                                       stderr=b"")
+            with self.assertRaisesRegex(ValueError,"SHA-256 mismatch"):
+                paired.evaluate(*args[:7],*args[7:9],"en",runner=mutate_model)
+            self.assertEqual(len(calls),3)
+
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)
+            args=list(fixture(root))
+            def mutate_wav(*a,**kw):
+                args[5][0].write_bytes(wave_bytes(900))
+                return SimpleNamespace(returncode=0,stdout=b"Hello world\\n",
+                                       stderr=b"")
+            with self.assertRaisesRegex(ValueError,"SHA-256 mismatch"):
+                paired.evaluate(*args[:7],*args[7:9],"en",runner=mutate_wav)
+
+    def test_unicode_bidi_and_oversized_private_output_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            args=fixture(Path(td))
+            for malicious in ("spoof\\u202Econtent".encode("utf-8"),
+                              b"a"*4098, b"bad\\x00control", b"\\xff"):
+                def fake(*a,**kw):
+                    return SimpleNamespace(returncode=0,stdout=malicious,stderr=b"")
+                with self.assertRaises((ValueError,UnicodeError)):
+                    paired.evaluate(*args[:7],*args[7:9],"en",runner=fake)
+
     def test_model_digest_and_wav_format_fail_before_engine_runs(self):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td)

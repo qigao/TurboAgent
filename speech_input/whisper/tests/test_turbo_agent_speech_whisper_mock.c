@@ -472,6 +472,63 @@ static int equal_power_distinct_waveforms_characterization(void) {
   return 0;
 }
 
+
+/* Native C11 parity witnesses for the separately offline Python corpus
+ * stationarity evaluator. Every fixture is synthetic and energy-defined,
+ * NOT a real voice. The 1414/1415 pair isolates the exact 2x power-ratio
+ * boundary while keeping CV below 0.12. */
+static int stationarity_cv_and_ratio_boundaries(void) {
+  const uint32_t frames_per_case[4]={60u,60u,100u,100u};
+  const int expected_noise[4]={1,0,1,0};
+  for (unsigned scenario=0u;scenario<4u;++scenario) {
+    turbo_agent_speech_whisper_t *owner=NULL;
+    turbo_agent_speech_provider_v1_t api;
+    turbo_agent_speech_input_t *m1=NULL;
+    turbo_agent_speech_config_t opts;
+    turbo_agent_speech_transcript_kind_t kind;
+    char result[100]={0};
+    size_t pumped=0u,length=0u;
+    const uint64_t id=200u+(uint64_t)scenario;
+    const int before=atomic_load(&st_decode_calls);
+    REQUIRE(create_owner_ex(&owner,30000u,120u,1u)==0);
+    REQUIRE(turbo_agent_speech_whisper_provider(owner,&api)==0);
+    turbo_agent_speech_config_init(&opts);
+    opts.max_utterance_frames=120u;
+    opts.max_text_bytes=100u;
+    REQUIRE(turbo_agent_speech_create(&opts,&api,&m1)==0);
+    REQUIRE(turbo_agent_speech_begin(m1,id)==0);
+    for (uint32_t frame=0u;frame<frames_per_case[scenario];++frame) {
+      int16_t pcm[320];
+      int16_t amplitude=1000;
+      if (scenario==0u && frame>=30u) amplitude=1120;
+      if (scenario==1u && frame>=30u) amplitude=1150;
+      if (scenario==2u && frame==99u) amplitude=1414;
+      if (scenario==3u && frame==99u) amplitude=1415;
+      for (size_t i=0u;i<320u;++i)
+        pcm[i]=(int16_t)((i&1u) ? amplitude : -amplitude);
+      REQUIRE(turbo_agent_speech_offer_frame(
+          m1,id,pcm,320u,(frame+1u)*20000u)==0);
+      REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0 && pumped==1u);
+    }
+    REQUIRE(turbo_agent_speech_request_finish(m1)==0);
+    REQUIRE(turbo_agent_speech_pump(m1,1u,&pumped)==0);
+    REQUIRE(turbo_agent_speech_take_final(
+        m1,result,sizeof(result),&length,&kind)==0);
+    if (expected_noise[scenario]) {
+      REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_NO_SPEECH);
+      REQUIRE(length==0u && result[0]=='\0');
+      REQUIRE(atomic_load(&st_decode_calls)==before);
+    } else {
+      REQUIRE(kind==TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL);
+      REQUIRE(length==11u && strcmp(result," recognized")==0);
+      REQUIRE(atomic_load(&st_decode_calls)==before+1);
+    }
+    REQUIRE(turbo_agent_speech_destroy(&m1)==0);
+    REQUIRE(turbo_agent_speech_whisper_destroy(&owner)==0);
+  }
+  return 0;
+}
+
 int main(void) {
   atomic_init(&st_decode_entered,0);
   atomic_init(&st_hold_until_abort,0);
@@ -488,6 +545,7 @@ int main(void) {
   REQUIRE(stationary_power_test(1,1)==0); /* dynamic envelope reaches engine */
   REQUIRE(stationarity_threshold_and_generation_reset()==0);
   REQUIRE(equal_power_distinct_waveforms_characterization()==0);
+  REQUIRE(stationarity_cv_and_ratio_boundaries()==0);
   puts("Whisper mock C-ABI PCM/cancel/deadline/stationary opt-in admission PASS");
   return 0;
 }

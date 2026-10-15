@@ -43,6 +43,10 @@ def evaluate_bytes(source_bytes: bytes, expected_sha256: str) -> dict:
             or not PIN.fullmatch(expected_sha256)
             or hashlib.sha256(source_bytes).hexdigest() != expected_sha256):
         raise ValueError("source WAV missing, unbounded or SHA-256 mismatch")
+    if (len(source_bytes) < 12 or source_bytes[:4] != b"RIFF"
+            or source_bytes[8:12] != b"WAVE"
+            or int.from_bytes(source_bytes[4:8], "little") != len(source_bytes)-8):
+        raise ValueError("source WAV RIFF container length mismatch")
     original = inspect_wav_bytes(source_bytes)
     with wave.open(io.BytesIO(source_bytes), "rb") as wav:
         source_pcm = wav.readframes(wav.getnframes())

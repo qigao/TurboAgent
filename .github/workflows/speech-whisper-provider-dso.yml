@@ -1,0 +1,163 @@
+name: SpeechWhisper M3 real Provider ELF lease and unload (#137)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/whisper/tests/whisper_fake_engine_image.c'
+      - 'speech_input/whisper/tests/test_speech_whisper_provider_image.c'
+      - '.github/workflows/speech-whisper-provider-dso.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  actual-provider-image:
+    name: C11 Provider DSO / ${{ matrix.kind }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [address, thread]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SAN_KIND: ${{ matrix.kind }}
+      CC: gcc
+      SALTS_ROOT: /tmp/speech-whisper-dso-salts/sdk/linux-x64
+      ASAN_OPTIONS: detect_leaks=1:detect_odr_violation=2:halt_on_error=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: d1be6fde11ac6e0407606b4e42fe72d34add8037
+          path: external/whisper-v195
+          submodules: recursive
+          persist-credentials: false
+      - name: Confirm exact Whisper ABI and released Salts cryptography owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C external/whisper-v195 rev-parse HEAD)" = d1be6fde11ac6e0407606b4e42fe72d34add8037
+          mkdir -p /tmp/speech-whisper-dso-salts
+          test "$(gh api repos/qigao/salts/git/ref/tags/v2.3.0-rc.16 --jq .object.sha)" = 6cf093dc053db98bb21b1788eb2fc1ada4df195e
+          gh release download v2.3.0-rc.16 --repo qigao/salts \
+            --pattern Salts.Native.2.3.0-rc.16.nupkg \
+            --dir /tmp/speech-whisper-dso-salts
+          unzip -q /tmp/speech-whisper-dso-salts/Salts.Native.2.3.0-rc.16.nupkg \
+            -d /tmp/speech-whisper-dso-salts
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          sha256sum /tmp/speech-whisper-dso-salts/Salts.Native.2.3.0-rc.16.nupkg > /tmp/speech-whisper-dso-salts.sha256
+      - name: Compile separately loadable C11 Provider with mock C ABI at strict source sanitizer flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build binutils
+          sanitizer='-fsanitize=address -fsanitize=undefined'
+          if [ "$SAN_KIND" = thread ]; then sanitizer='-fsanitize=thread'; fi
+          mkdir -p /tmp/speech-whisper-dso-owner
+          cat > /tmp/speech-whisper-dso-owner/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.25)
+          project(WhisperDsoDrainC11 LANGUAGES C)
+          enable_testing()
+          set(CMAKE_C_STANDARD 11)
+          set(CMAKE_C_STANDARD_REQUIRED ON)
+          set(CMAKE_C_EXTENSIONS OFF)
+          find_package(Salts CONFIG REQUIRED
+            PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+          find_package(Threads REQUIRED)
+          add_library(speech_whisper_test_image SHARED
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/src/turbo_agent_speech_whisper.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/tests/whisper_fake_engine_image.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/src/turbo_agent_speech_input.c")
+          set_target_properties(speech_whisper_test_image PROPERTIES
+            C_VISIBILITY_PRESET hidden)
+          target_compile_definitions(speech_whisper_test_image PRIVATE
+            TURBO_AGENT_SPEECH_WHISPER_BUILD)
+          target_include_directories(speech_whisper_test_image PRIVATE
+            "$ENV{GITHUB_WORKSPACE}/speech_input/include"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/include"
+            "$ENV{GITHUB_WORKSPACE}/external/whisper-v195/include"
+            "$ENV{GITHUB_WORKSPACE}/external/whisper-v195/ggml/include")
+          target_link_libraries(speech_whisper_test_image PRIVATE
+            Salts::Core Threads::Threads)
+          target_link_options(speech_whisper_test_image PRIVATE
+            "LINKER:-z,defs")
+          add_executable(test_provider_dso
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/tests/test_speech_whisper_provider_image.c"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/src/turbo_agent_speech_input.c")
+          target_include_directories(test_provider_dso PRIVATE
+            "$ENV{GITHUB_WORKSPACE}/speech_input/include"
+            "$ENV{GITHUB_WORKSPACE}/speech_input/whisper/include")
+          target_link_libraries(test_provider_dso PRIVATE
+            Salts::Core Threads::Threads ${CMAKE_DL_LIBS})
+          add_test(NAME whisper_provider_real_dso_settle
+            COMMAND test_provider_dso "$<TARGET_FILE:speech_whisper_test_image>")
+          set_tests_properties(whisper_provider_real_dso_settle
+            PROPERTIES TIMEOUT 45)
+          CMAKE
+          cmake -S /tmp/speech-whisper-dso-owner \
+            -B "build/speech-whisper-dso-$SAN_KIND" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror -g -fno-omit-frame-pointer $sanitizer" \
+            "-DCMAKE_SHARED_LINKER_FLAGS=$sanitizer" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$sanitizer -Wl,-z,defs"
+          cmake --build "build/speech-whisper-dso-$SAN_KIND" --parallel 2
+          SAN_FLAGS="$sanitizer" python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path('build/speech-whisper-dso-'+os.environ['SAN_KIND'])
+          commands=json.loads((root/'compile_commands.json').read_text())
+          expected={
+            'speech_input/whisper/src/turbo_agent_speech_whisper.c':1,
+            'speech_input/whisper/tests/whisper_fake_engine_image.c':1,
+            'speech_input/whisper/tests/test_speech_whisper_provider_image.c':1,
+            'speech_input/src/turbo_agent_speech_input.c':2
+          }
+          flags=os.environ['SAN_FLAGS'].split()
+          for name,count in expected.items():
+              matches=[r for r in commands if Path(r['file']).resolve()==Path(name).resolve()]
+              if len(matches)!=count or any(any(f not in r['command'] for f in flags) for r in matches):
+                  raise SystemExit(f'Missing independently built+instrumented {name}: {len(matches)}')
+          print('PASS: producer DSO and independent C11 host each actually source instrumented')
+          PY
+          image="build/speech-whisper-dso-$SAN_KIND/libspeech_whisper_test_image.so"
+          test -f "$image"
+          nm -D --defined-only "$image" | tee "/tmp/speech-whisper-dso-export-$SAN_KIND.txt"
+          grep -F ' T turbo_agent_speech_whisper_create' "/tmp/speech-whisper-dso-export-$SAN_KIND.txt"
+          if nm -D -u "$image" | grep -E ' U (turbo_agent_speech_|whisper_full|whisper_free|whisper_init_from_buffer)' ; then
+            echo 'Consumer/Provider DSO escaped own fake-Whisper/M1 symbols' >&2
+            exit 1
+          fi
+      - name: Dlopen exact Provider, reject active unload, and prove 60 generation settle and dlclose 5x
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          export image="$GITHUB_WORKSPACE/build/speech-whisper-dso-$SAN_KIND/libspeech_whisper_test_image.so"
+          ldd "$image" | tee "/tmp/speech-whisper-dso-loader-$SAN_KIND.txt"
+          grep -F "$SALTS_ROOT/lib/libsalts.so" "/tmp/speech-whisper-dso-loader-$SAN_KIND.txt"
+          if grep -Fq 'not found' "/tmp/speech-whisper-dso-loader-$SAN_KIND.txt"; then exit 1; fi
+          ctest --test-dir "build/speech-whisper-dso-$SAN_KIND" \
+            --no-tests=error --output-on-failure --timeout 45 \
+            --repeat until-fail:5
+      - name: Archive source and real DSO unload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-whisper-provider-dso-${{ matrix.kind }}-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            /tmp/speech-whisper-dso-salts.sha256
+            /tmp/speech-whisper-dso-export-${{ matrix.kind }}.txt
+            /tmp/speech-whisper-dso-loader-${{ matrix.kind }}.txt
+            build/speech-whisper-dso-${{ matrix.kind }}/compile_commands.json
+            build/speech-whisper-dso-${{ matrix.kind }}/Testing/Temporary/LastTest.log

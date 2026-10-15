@@ -1,0 +1,154 @@
+name: Speech M3 real whispered and quiet original voice acceptance (#146)
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/speech-real-whisper-quiet.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  real-quiet-human-nomodel:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-real-whisper-quiet-146'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: explicitly-whispered-english-CC0
+            kind: whispered
+            condition: ordinary
+            bytes: '30283'
+            sha1: cc3b98f93353cf6ed8bb453669987afe7dd748bd
+            source_url: https://upload.wikimedia.org/wikipedia/commons/e/e8/Whispering-example.ogg
+            page_url: https://commons.wikimedia.org/wiki/File:Whispering-example.ogg
+            license: CC0-1.0
+            credit: Mx. Granger; self-published American English whisper
+            group: commons_whisper_2014
+          - name: explicitly-quiet-english-CCBYSA4
+            kind: explicitly_quiet
+            condition: low_volume
+            bytes: '12926'
+            sha1: 9d7986ce0257056b679a6b199c42447b5df82962
+            source_url: https://upload.wikimedia.org/wikipedia/commons/1/1b/English_male_voice_speech_word_No.ogg
+            page_url: https://commons.wikimedia.org/wiki/File:English_male_voice_speech_word_No.ogg
+            license: CC-BY-SA-4.0
+            credit: Anatoly larkin; "No" quietly spoken, converted solely for analysis
+            group: commons_quiet_2020
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install local CPU decoder, no model provider
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Confirm licensing-pinned original, private conversion and only numeric gate summary
+        shell: bash
+        env:
+          SRC_URL: ${{ matrix.source_url }}
+          SRC_BYTES: ${{ matrix.bytes }}
+          SRC_SHA1: ${{ matrix.sha1 }}
+          SRC_KIND: ${{ matrix.kind }}
+          SRC_CONDITION: ${{ matrix.condition }}
+          SRC_LICENSE: ${{ matrix.license }}
+          SRC_CREDIT: ${{ matrix.credit }}
+          SRC_PAGE: ${{ matrix.page_url }}
+          SRC_GROUP: ${{ matrix.group }}
+        run: |
+          set -euo pipefail
+          umask 077
+          private="$(mktemp -d "${RUNNER_TEMP}/voice-original-XXXXXX")"
+          chmod 700 "$private"
+          trap 'rm -rf -- "$private"' EXIT
+          original="$private/original.ogg"
+          curl --fail --silent --show-error --location --retry 2 \
+            --max-time 60 --connect-timeout 15 --max-filesize 150000 \
+            --proto '=https' --proto-redir '=https' \
+            --user-agent 'TurboAgent-licensed-voice-test/1.0 (qigao/TurboAgent)' \
+            "$SRC_URL" -o "$original"
+          test "$(wc -c < "$original" | tr -d '[:space:]')" = "$SRC_BYTES"
+          test "$(sha1sum "$original" | awk '{print $1}')" = "$SRC_SHA1"
+          original_sha256="$(sha256sum "$original" | awk '{print $1}')"
+
+          decoder="$(realpath "$(command -v ffmpeg)")"
+          decoder_sha256="$(sha256sum "$decoder" | awk '{print $1}')"
+          python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
+            --source "$original" --source-sha256 "$original_sha256" \
+            --ffmpeg "$decoder" --ffmpeg-sha256 "$decoder_sha256" \
+            --output-wav "$private/converted.wav" \
+            --private-provenance "$private/evidence.private.json" \
+            --acknowledge-rights > "$private/conversion-status.private.json"
+
+          PRIVATE_DIR="$private" ORIGINAL_SHA256="$original_sha256" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          folder = Path(os.environ["PRIVATE_DIR"])
+          converted = json.loads((folder / "evidence.private.json").read_text())
+          kind = os.environ["SRC_KIND"]
+          manifest = {
+              "schema": 2,
+              "samples": [{
+                  "path": "converted.wav",
+                  "sha256": converted["normalized_wav_sha256"],
+                  "source_kind": "human_voice",
+                  "language": "en",
+                  "condition": os.environ["SRC_CONDITION"],
+                  "rights_basis": "public_license",
+                  "speaker_group": os.environ["SRC_GROUP"],
+              }],
+          }
+          manifest_file = folder / "evidence.private-manifest.json"
+          manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+          os.chmod(manifest_file, 0o600)
+          sys.path.insert(0, "speech_input/whisper/tools")
+          from evaluate_stationarity_corpus import evaluate
+          from measure_frame_stationarity import inspect_wav_bytes
+          result = evaluate(folder, manifest_file)
+          raw = (folder / "converted.wav").read_bytes()
+          measures = inspect_wav_bytes(raw)
+          human = result["human_voice"]
+          frames = converted["frames"]
+          assert result["sample_count"] == 1 and frames > 0
+          assert human["guard_off_rejections"] == 0
+          assert human["guard_on_rejections"] in (0, 1)
+          assert result["model_inference_used"] is False
+          if kind == "explicitly_quiet":
+              # Entire genuine quiet utterance is <1 sec; the 50-frame
+              # hypothesis must not reject it just due to low power.
+              assert 0 < frames < 50
+              assert human["guard_on_rejections"] == 0
+          else:
+              # Whispered 2.6s source allows an actual >=50-frame check.
+              assert frames >= 50
+          print(json.dumps({
+              "evidence_kind": "unmodified_human_whisper_or_quiet_recording",
+              "label_from_source_not_reanalyzed": kind,
+              "source_url": os.environ["SRC_PAGE"],
+              "original_bytes": int(os.environ["SRC_BYTES"]),
+              "source_sha1_verified": True,
+              "source_sha256_first_discovery": os.environ["ORIGINAL_SHA256"],
+              "normalized_wav_sha256": converted["normalized_wav_sha256"],
+              "license": os.environ["SRC_LICENSE"],
+              "attribution": os.environ["SRC_CREDIT"],
+              "language": "en",
+              "frames": frames,
+              "duration_seconds": frames / 50,
+              "frame_power_cv": measures["frame_power_cv"],
+              "frame_power_ratio": measures["frame_power_max_min_ratio"],
+              "guard_off_no_speech": human["guard_off_rejections"],
+              "guard_on_no_speech": human["guard_on_rejections"],
+              "guard_on_short_input_negative_gate": frames < 50,
+              "actual_whisper_model_used": False,
+              "transcript_or_intelligibility_measured": False,
+              "speaker_population_quality_certified": False,
+              "audio_or_transcript_artifact_uploaded": False,
+          }, sort_keys=True))
+          PY
+          # No artifacts or media output. Ephemeral private directory wiped.

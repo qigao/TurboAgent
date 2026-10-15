@@ -325,14 +325,16 @@ static int provider_accept(void *context, const int16_t *pcm,
    * Provider accept callback; abort() never accesses them. */
   uint64_t frame_power = 0u;
   for (size_t i = 0u; i < samples; i++) {
-    const int64_t value = (int64_t)pcm[i];
-    frame_power += (uint64_t)(value * value);
+    if (owner->stationary_noise_guard) {
+      const int64_t value = (int64_t)pcm[i];
+      frame_power += (uint64_t)(value * value);
+    }
     owner->pcm_f32[owner->used_samples + i] =
         (float)pcm[i] * (1.0f / 32768.0f);
     if (pcm[i] != 0) owner->has_nonzero_pcm = 1;
   }
   if (owner->stationary_noise_guard) {
-    /* Welford online variance: 16 bytes of bounded statistics per owner,
+    /* Welford online variance: fixed-size statistics per owner,
      * no recording or second VAD/ASR model. */
     const double delta = (double)frame_power - owner->power_mean;
     owner->power_frames++;

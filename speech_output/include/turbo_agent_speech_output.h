@@ -42,7 +42,8 @@ typedef enum turbo_agent_tts_result_e {
 typedef enum turbo_agent_tts_state_e {
   TURBO_TTS_IDLE = 0,
   TURBO_TTS_SYNTHESIZING = 1,
-  TURBO_TTS_PLAYBACK_DRAINING = 2,
+  /* Final Provider PCM still staged for the host writer. NOT device playback. */
+  TURBO_TTS_STAGING_DRAINING = 2,
   TURBO_TTS_CANCEL_PENDING = 3,
   TURBO_TTS_SETTLED = 4,
   TURBO_TTS_CANCELED = 5,

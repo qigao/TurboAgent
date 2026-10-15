@@ -66,6 +66,47 @@ jobs:
           set -euo pipefail
           ctest --test-dir build/speech-output-m4 --output-on-failure \
             --timeout 25
+      - name: Verify standalone installed C11 and C++17 consumers
+        shell: bash
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          CFLAGS: ${{ matrix.flags }}
+        run: |
+          set -euo pipefail
+          prefix="$GITHUB_WORKSPACE/build/speech-output-m4/installed"
+          cmake --install build/speech-output-m4 --prefix "$prefix"
+          test -f "$prefix/include/turbo_agent_speech_output.h"
+          archive="$(find "$prefix" -name 'libturbo_agent_speech_output.a' -print -quit)"
+          test -n "$archive"
+          cat > /tmp/tts_m4_public_c11.c <<'C'
+          #include <turbo_agent_speech_output.h>
+          int main(void) {
+            turbo_agent_tts_config_t cfg;
+            turbo_agent_tts_config_init(&cfg);
+            return cfg.abi_version == 1u &&
+                   cfg.output.sample_rate_hz == 24000u &&
+                   cfg.output.frame_ms == 20u ? 0 : 1;
+          }
+          C
+          cat > /tmp/tts_m4_public_cpp17.cpp <<'CPP'
+          #include <turbo_agent_speech_output.h>
+          #include <type_traits>
+          static_assert(std::is_standard_layout<turbo_agent_tts_provider_v1_t>::value,
+                        "TTS v1 must be plain C ABI");
+          int main() {
+            turbo_agent_tts_provider_v1_t api{};
+            turbo_agent_tts_provider_v1_init(&api);
+            return api.abi_version == 1u ? 0 : 1;
+          }
+          CPP
+          "$CC" -std=c11 $CFLAGS -I"$prefix/include" \
+            /tmp/tts_m4_public_c11.c "$archive" -o /tmp/tts_m4_public_c11
+          "$CXX" -std=c++17 $CFLAGS -I"$prefix/include" \
+            /tmp/tts_m4_public_cpp17.cpp "$archive" -o /tmp/tts_m4_public_cpp17
+          /tmp/tts_m4_public_c11
+          /tmp/tts_m4_public_cpp17
+          echo 'PASS: independently installed, consumed, and executed both public ABIs'
       - name: Verify default OFF, no model and no Playback device backend
         shell: bash
         run: |

@@ -17,6 +17,7 @@ jobs:
     env:
       SOURCE_URL: https://upload.wikimedia.org/wikipedia/commons/e/e2/Back-up_white_noise.ogg
       SOURCE_EXPECTED_SHA1: 71500b016280d285ac6854bd46eef6373847247e
+      SOURCE_EXPECTED_SHA256: 7d70594ef7ba1bd7a34136ab7140420d016fd730acc6c124a1a02fe6c75337d0
       SOURCE_EXPECTED_BYTES: '120796'
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +46,8 @@ jobs:
           test "$(wc -c < "$source" | tr -d '[:space:]')" = "$SOURCE_EXPECTED_BYTES"
           test "$(sha1sum "$source" | awk '{print $1}')" = "$SOURCE_EXPECTED_SHA1"
           source_sha256="$(sha256sum "$source" | awk '{print $1}')"
+          # Second run pins the full originally observed source digest.
+          test "$source_sha256" = "$SOURCE_EXPECTED_SHA256"
 
           selected_ffmpeg="$(realpath "$(command -v ffmpeg)")"
           selected_ffmpeg_sha256="$(sha256sum "$selected_ffmpeg" | awk '{print $1}')"
@@ -78,6 +81,8 @@ jobs:
           os.chmod(mf, 0o600)
           sys.path.insert(0, 'speech_input/whisper/tools')
           from evaluate_stationarity_corpus import evaluate
+          from measure_frame_stationarity import inspect_wav
+          energy = inspect_wav(folder / "road-noise.wav")
           result = evaluate(folder, mf)
           metric = result["real_noise"]
           assert result["sample_count"] == 1
@@ -91,10 +96,15 @@ jobs:
               "attribution": "Ke4roh; converted to 16k mono S16LE solely for analysis",
               "source_page": "https://commons.wikimedia.org/wiki/File:Back-up_white_noise.ogg",
               "source_sha1_verification": "PASS",
-              "source_sha256_independently_pinned": False,
+              "source_sha256_independently_pinned": True,
               "original_sha256": os.environ["SOURCE_SHA256"],
               "canonical_wav_sha256": info["normalized_wav_sha256"],
               "frames": info["frames"],
+              "frame_power_cv": energy["frame_power_cv"],
+              "frame_power_max_min_ratio": energy["frame_power_max_min_ratio"],
+              "minimum_frame_power": energy["minimum_frame_power"],
+              "maximum_frame_power": energy["maximum_frame_power"],
+              "stationarity_hypothesis": energy["stationarity_hypothesis"],
               "real_noise_count": 1,
               "guard_off_predecode_rejections":
                   metric["guard_off_predecode_rejections"],

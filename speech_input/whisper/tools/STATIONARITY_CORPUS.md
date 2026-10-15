@@ -71,10 +71,15 @@ Only explicit caller-supplied files are read. Every WAV must be 16 kHz, mono,
 signed PCM16, complete 20 ms frames, at most 60 seconds, at most 4 MiB, with
 an exact hash match. The tool bounds its corpus at 256 files / 128 MiB.
 Missing files, digest mismatch, unsafe paths, symbolic links, unsupported
-format or duplicate manifest keys fail closed without publishing raw data.
+format, duplicate manifest keys, and exact-byte duplicate WAV digests fail
+closed without publishing raw data. Repeating one identical recording under
+several paths/language labels cannot inflate the observed sample denominator.
 
 The report contains aggregate counts and, where the denominator is positive,
-a Wilson 95% confidence interval. `human_voice.guard_on_false_rejection`
+a Wilson 95% interval under an **independent-recordings assumption**
+that this tool cannot verify (multiple clips from one speaker may be highly
+correlated; speaker-level population uncertainty remains unknown).
+`human_voice.guard_on_false_rejection`
 means a **caller-labelled** human recording would be classified as no speech
 before the model is invoked; it is **not** an observed Whisper transcription
 error rate. The `real_noise` metrics describe pre-decode screening only;

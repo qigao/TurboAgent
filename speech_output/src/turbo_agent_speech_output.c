@@ -10,7 +10,8 @@ struct turbo_tts_output {
 static int valid_text(const char *s,size_t n) {
  size_t i=0;if(!s||!n||n>MAX_TEXT)return 0;
  while(i<n){unsigned char a=(unsigned char)s[i++];unsigned k=0;unsigned cp=0;
-  if(a<32||a==127)return 0;if(a<128)continue;
+  if(a<32||a==127)return 0;
+   if(a<128)continue;
   if(a>=194&&a<=223){k=1;cp=a&31;}else if(a>=224&&a<=239){k=2;cp=a&15;}
   else if(a>=240&&a<=244){k=3;cp=a&7;}else return 0;
   if(n-i<k)return 0;
@@ -22,10 +23,12 @@ static int valid_text(const char *s,size_t n) {
  return 1;
 }
 void turbo_tts_provider_init(turbo_tts_provider_t *p) {
- if(!p)return;memset(p,0,sizeof(*p));p->struct_size=sizeof(*p);p->abi_version=TURBO_TTS_ABI_VERSION;
+ if(!p)return;
+ memset(p,0,sizeof(*p));p->struct_size=sizeof(*p);p->abi_version=TURBO_TTS_ABI_VERSION;
 }
 int turbo_tts_create(const turbo_tts_provider_t *p,turbo_tts_output_t **out){
- if(!out)return -1;*out=NULL;
+ if(!out)return -1;
+ *out=NULL;
  if(!p||p->struct_size!=sizeof(*p)||p->abi_version!=TURBO_TTS_ABI_VERSION||
     !p->begin||!p->poll||!p->cancel)return -1;
  turbo_tts_output_t *o=calloc(1,sizeof(*o));if(!o)return -2;
@@ -42,7 +45,8 @@ int turbo_tts_begin(turbo_tts_output_t *o,uint64_t g,const char *text,size_t len
  o->state=TURBO_TTS_ACTIVE;return 0;
 }
 int turbo_tts_poll(turbo_tts_output_t *o,int16_t *buf,size_t capacity,size_t *n,turbo_tts_poll_t *kind){
- if(!n||!kind)return -1;*n=0;*kind=TURBO_TTS_WOULD_BLOCK;
+ if(!n||!kind)return -1;
+ *n=0;*kind=TURBO_TTS_WOULD_BLOCK;
  if(!o||!buf||capacity!=TURBO_TTS_SAMPLES_PER_FRAME||o->state!=TURBO_TTS_ACTIVE)return -1;
  size_t produced=0;turbo_tts_poll_t k=TURBO_TTS_WOULD_BLOCK;
  int rc=o->provider.poll(o->provider.context,o->generation,buf,capacity,&produced,&k);
@@ -57,13 +61,15 @@ int turbo_tts_poll(turbo_tts_output_t *o,int16_t *buf,size_t capacity,size_t *n,
  *n=produced;*kind=k;return 0;
 }
 int turbo_tts_cancel(turbo_tts_output_t *o){
- if(!o)return -1;if(o->state==TURBO_TTS_CANCELED)return 0;
+ if(!o)return -1;
+ if(o->state==TURBO_TTS_CANCELED)return 0;
  if(o->state!=TURBO_TTS_ACTIVE)return -1;
  o->provider.cancel(o->provider.context,o->generation);
  o->state=TURBO_TTS_CANCELED;memset(o->text,0,MAX_TEXT+1u);return 0;
 }
 turbo_tts_state_t turbo_tts_state(const turbo_tts_output_t *o){return o?o->state:TURBO_TTS_FAILED;}
 int turbo_tts_destroy(turbo_tts_output_t **p){
- if(!p||!*p)return -1;turbo_tts_output_t *o=*p;if(o->state==TURBO_TTS_ACTIVE)return -2;
+ if(!p||!*p)return -1;
+ turbo_tts_output_t *o=*p;if(o->state==TURBO_TTS_ACTIVE)return -2;
  memset(o->text,0,MAX_TEXT+1u);free(o->text);free(o);*p=NULL;return 0;
 }

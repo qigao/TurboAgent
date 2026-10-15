@@ -36,6 +36,19 @@ if(BUILD_TESTING)
     PROPERTIES TIMEOUT 20)
 endif()
 
+if(BUILD_TESTING AND UNIX)
+  find_package(Threads REQUIRED)
+  add_executable(test_turbo_agent_speech_capture_concurrent
+    tests/test_turbo_agent_speech_capture_concurrent.c)
+  target_compile_features(test_turbo_agent_speech_capture_concurrent PRIVATE c_std_11)
+  target_link_libraries(test_turbo_agent_speech_capture_concurrent PRIVATE
+    turbo_agent_speech_capture_bridge Threads::Threads)
+  add_test(NAME turbo_agent_speech_capture_bridge_concurrent
+    COMMAND test_turbo_agent_speech_capture_concurrent)
+  set_tests_properties(turbo_agent_speech_capture_bridge_concurrent
+    PROPERTIES TIMEOUT 30)
+endif()
+
 # Salts Capture is an explicit optional native provider, not a required
 # dependency of TurboAgent::SpeechInput or its portable capture bridge.
 # A requested but absent Salts::Capture target is a hard configuration error.

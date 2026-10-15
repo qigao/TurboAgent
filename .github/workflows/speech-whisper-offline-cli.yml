@@ -192,7 +192,7 @@ jobs:
             --wav "$MODEL_FIXTURES/s16-mono-16000.wav" --language en \
             --timeout-ms 30000 > /tmp/speech-cli-mock-positive.txt
           test "$(cat /tmp/speech-cli-mock-positive.txt)" = ' utterance'
-          for adversarial in TA_SPEECH_TEST_ESCAPE TA_SPEECH_TEST_BIDI; do
+          for adversarial in TA_SPEECH_TEST_ESCAPE TA_SPEECH_TEST_BIDI TA_SPEECH_TEST_C1 TA_SPEECH_TEST_ARABIC_MARK TA_SPEECH_TEST_LINE_SEPARATOR; do
             set +e
             env "$adversarial=1" build/speech-cli-mock/mock_whisper_cli \
               --model "$model" --sha256 "$sha" \

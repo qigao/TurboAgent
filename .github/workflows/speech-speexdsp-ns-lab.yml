@@ -116,6 +116,14 @@ jobs:
           for sample in steady whisper road; do
             for db in -12 -18; do
               "$probe" "$root/$sample.raw" "$root/$sample.$db.raw" "$db"
+              "$probe" "$root/$sample.raw" \
+                "$root/$sample.$db.aligned.raw" "$db" --align-one-frame
+              python3 speech_input/noise_lab/tools/evaluate_ns_pcm_pair.py \
+                --before "$root/$sample.raw" \
+                --before-sha256 "$(sha256sum "$root/$sample.raw" | awk '{print $1}')" \
+                --after "$root/$sample.$db.aligned.raw" \
+                --after-sha256 "$(sha256sum "$root/$sample.$db.aligned.raw" | awk '{print $1}')" \
+                --kind "$sample" --db "$db"
               python3 speech_input/noise_lab/tools/evaluate_ns_pcm_pair.py \
                 --before "$root/$sample.raw" \
                 --before-sha256 "$(sha256sum "$root/$sample.raw" | awk '{print $1}')" \

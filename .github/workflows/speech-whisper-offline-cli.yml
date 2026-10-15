@@ -358,7 +358,7 @@ jobs:
               --report "$source_dir/$name-private-report.json"
           done
           echo 'PASS: native C11 ABI2 outcomes match offline immutable PCM in six generated cases'
-      - name: Manual only: pinned publicly licensed original voice through exact ABI2 C11 fake-vendor parity
+      - name: Manual pinned public voice native ABI2 fake-vendor parity
         # Explicit workflow_dispatch is the ONLY path to real audio retrieval.
         # PR events never download original human voice clips.
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/test/speech-native-abi2-pcm-parity-146'

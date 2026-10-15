@@ -265,10 +265,79 @@ static int test_zero_write_backpressure_and_device_loss(void) {
   return 0;
 }
 
+static int test_failed_clear_retains_owner_until_success(void) {
+  fake_synth_t f = {0};
+  turbo_tts_output_t *source = NULL;
+  salts_playback_t *device = fake_device_new();
+  turbo_tts_playback_bridge_t *bridge = NULL;
+  CHECK(device != NULL);
+  CHECK(create_source(&f, &source) == 0);
+  CHECK(turbo_tts_playback_bridge_create(source, device, &bridge) ==
+        TURBO_TTS_PLAYBACK_OK);
+  device->clear_error = 1;
+  CHECK(turbo_tts_playback_bridge_cancel(bridge) ==
+        TURBO_TTS_PLAYBACK_EDEVICE);
+  CHECK(f.cancel_count == 1u);
+  CHECK(turbo_tts_playback_bridge_get_state(bridge) ==
+        TURBO_TTS_PLAYBACK_CANCEL_PENDING);
+  CHECK(turbo_tts_playback_bridge_destroy(&bridge) ==
+        TURBO_TTS_PLAYBACK_EBUSY);
+  size_t accepted = 100u;
+  /* No Provider callback/early unload until the device clear succeeds. */
+  CHECK(turbo_tts_playback_bridge_pump(bridge, 1u, &accepted) ==
+        TURBO_TTS_PLAYBACK_EDEVICE && accepted == 0u);
+  CHECK(f.polls == 0u && device->clears == 0u);
+  device->clear_error = 0;
+  CHECK(turbo_tts_playback_bridge_cancel(bridge) ==
+        TURBO_TTS_PLAYBACK_OK);
+  CHECK(device->clears == 1u && f.cancel_count == 1u);
+  CHECK(turbo_tts_playback_bridge_pump(bridge, 1u, &accepted) ==
+        TURBO_TTS_PLAYBACK_OK);
+  CHECK(turbo_tts_playback_bridge_get_state(bridge) ==
+        TURBO_TTS_PLAYBACK_CANCELED);
+  CHECK(turbo_tts_playback_bridge_destroy(&bridge) ==
+        TURBO_TTS_PLAYBACK_OK);
+  CHECK(turbo_tts_destroy(&source) == TURBO_TTS_OK);
+  free(device);
+  return 0;
+}
+
+static int test_explicit_cancel_of_source_done_discards_ring(void) {
+  fake_synth_t f = {0};
+  turbo_tts_output_t *source = NULL;
+  salts_playback_t *device = fake_device_new();
+  turbo_tts_playback_bridge_t *bridge = NULL;
+  CHECK(device != NULL);
+  CHECK(create_source(&f, &source) == 0);
+  CHECK(turbo_tts_playback_bridge_create(source, device, &bridge) ==
+        TURBO_TTS_PLAYBACK_OK);
+  size_t bytes = 0u;
+  CHECK(turbo_tts_playback_bridge_pump(bridge, 3u, &bytes) ==
+        TURBO_TTS_PLAYBACK_OK);
+  CHECK(turbo_tts_playback_bridge_get_state(bridge) ==
+        TURBO_TTS_PLAYBACK_SOURCE_DONE);
+  CHECK(device->count == 1120u);
+  CHECK(turbo_tts_playback_bridge_cancel(bridge) ==
+        TURBO_TTS_PLAYBACK_OK);
+  CHECK(device->clears == 1u && device->count == 0u);
+  CHECK(f.cancel_count == 0u); /* Source already terminated; ring only */
+  CHECK(turbo_tts_playback_bridge_pump(bridge, 1u, &bytes) ==
+        TURBO_TTS_PLAYBACK_OK);
+  CHECK(turbo_tts_playback_bridge_get_state(bridge) ==
+        TURBO_TTS_PLAYBACK_CANCELED);
+  CHECK(turbo_tts_playback_bridge_destroy(&bridge) ==
+        TURBO_TTS_PLAYBACK_OK);
+  CHECK(turbo_tts_destroy(&source) == TURBO_TTS_OK);
+  free(device);
+  return 0;
+}
+
 int main(void) {
   CHECK(test_ordered_short_write_and_bounded_drain() == 0);
   CHECK(test_cancel_before_settle_quiesces_writer_and_ring() == 0);
   CHECK(test_zero_write_backpressure_and_device_loss() == 0);
+  CHECK(test_failed_clear_retains_owner_until_success() == 0);
+  CHECK(test_explicit_cancel_of_source_done_discards_ring() == 0);
   puts("PASS: playback borrowed owner, 480+80 S16 PCM FIFO, short write retry");
   puts("PASS: no second queue, cancel-first quiesce/clear and late PCM discard");
   puts("PASS: zero-write full-ring, device loss, source vs device drain states");

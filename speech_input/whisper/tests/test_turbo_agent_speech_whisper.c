@@ -52,6 +52,13 @@ static int test_invalid_model_and_digest(void) {
   CHECK(turbo_agent_speech_whisper_create(&c, &owner) ==
         TURBO_AGENT_SPEECH_EINVAL);
   c.cpu_threads = 2u;
+  c.max_decode_ms = 0u;
+  CHECK(turbo_agent_speech_whisper_create(&c, &owner) ==
+        TURBO_AGENT_SPEECH_EINVAL);
+  c.max_decode_ms = TURBO_AGENT_SPEECH_WHISPER_MAX_DECODE_MS + 1u;
+  CHECK(turbo_agent_speech_whisper_create(&c, &owner) ==
+        TURBO_AGENT_SPEECH_EINVAL);
+  c.max_decode_ms = 30000u;
   c.max_utterance_frames = TURBO_AGENT_SPEECH_MAX_UTTERANCE_FRAMES + 1u;
   CHECK(turbo_agent_speech_whisper_create(&c, &owner) ==
         TURBO_AGENT_SPEECH_EINVAL);

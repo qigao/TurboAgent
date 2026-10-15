@@ -148,6 +148,12 @@ static int test_admission_fifo_drain(void) {
   turbo_tts_output_t *tts = NULL;
   turbo_voice_coordinator_t *v = NULL;
   CHECK(setup(&p, &dev, &tts, &v) == 0);
+  size_t invalid_written = 100u;
+  CHECK(turbo_voice_pump(v, TURBO_VOICE_MAX_POLL_BUDGET + 1u,
+                         &invalid_written) == TURBO_VOICE_EINVAL &&
+        invalid_written == 0u);
+  CHECK(turbo_voice_drain(v, TURBO_VOICE_MAX_DRAIN_MS + 1u) ==
+        TURBO_VOICE_EINVAL);
   CHECK(turbo_voice_begin_input(v, 7u) == TURBO_VOICE_OK);
   CHECK(turbo_voice_asr_event(v, 7u, TURBO_VOICE_ASR_PARTIAL) ==
         TURBO_VOICE_IGNORED && p.begins == 0u);

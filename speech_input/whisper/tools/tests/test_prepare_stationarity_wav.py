@@ -117,6 +117,24 @@ class PrivateWavPreflightTests(unittest.TestCase):
                              root/"provenance.json", True, spy)
             self.assertEqual(spy.call_count, 0)
 
+    def test_mutated_decoder_fingerprint_rejected_before_private_output(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = make_source(root)
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            runner, calls = decoder_response(pcm_frames(60), source.read_bytes())
+            ffmpeg = Path(sys.executable).resolve(strict=True)
+            dest, provenance = root/"out.wav", root/"provenance.json"
+            with mock.patch.object(prep, "digest_file",
+                                   side_effect=["a"*64, "b"*64]):
+                with self.assertRaisesRegex(ValueError,
+                                            "executable changed during conversion"):
+                    prep.prepare(source, digest, ffmpeg, dest, provenance,
+                                 True, runner)
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(dest.exists())
+            self.assertFalse(provenance.exists())
+
     def test_decoder_crash_timeout_or_oversized_output_fails_closed(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

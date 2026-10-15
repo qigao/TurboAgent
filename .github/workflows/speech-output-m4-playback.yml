@@ -67,11 +67,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ matrix.sanitize }}" = address ]; then flags="-fsanitize=address,undefined"
+          elif [ "${{ matrix.sanitize }}" = thread ]; then flags="-fsanitize=thread"
+          else flags="-fsanitize=undefined"; fi
           cmake -S speech_output/playback/ci/installed-consumer \
             -B build/speech-playback-release -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DTTS_M41_BUILD_ROOT=$GITHUB_WORKSPACE/build/speech-output-m41" \
+            "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror $flags" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$flags"
           cmake --build build/speech-playback-release --parallel 2
-          # Native import/link test uses function pointers. Never opens device.
+          # Link forces the actual current-head bridge object and published device\n          # symbols without creating or opening any audio device.
           LD_LIBRARY_PATH="$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib" \
             build/speech-playback-release/tts_playback_release_link
       - name: Audit playback no-fallback and no-human-model-network

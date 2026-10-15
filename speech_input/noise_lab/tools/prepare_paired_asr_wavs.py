@@ -86,7 +86,7 @@ def wav_pcm(pinned_wav: bytes) -> tuple[bytes, int]:
     with wave.open(io.BytesIO(pinned_wav), "rb") as stream:
         frames = stream.getnframes()
         pcm = stream.readframes(frames)
-    if (frames < 1 or frames > MAX_FRAMES or frames % FRAME != 0
+    if (frames < FRAME or frames > MAX_FRAMES * FRAME or frames % FRAME != 0
             or len(pcm) != frames * 2
             or metrics["sample_count"] != frames):
         raise ValueError("invalid exact 320-S16 sample framing")

@@ -16,7 +16,9 @@ import re
 import stat
 import subprocess
 import sys
+import threading
 import wave
+from types import SimpleNamespace
 
 from measure_frame_stationarity import inspect_wav_bytes
 
@@ -59,7 +61,77 @@ def read_pinned_source(path: Path, expected_sha: str) -> bytes:
     return raw
 
 
-def convert_snapshot(raw: bytes, ffmpeg: Path, runner=subprocess.run):
+
+def bounded_decoder_run(command, *, input, capture_output, timeout, check):
+    """Avoid subprocess.run's unbounded capture when a decoder misbehaves.
+
+    Read stdout/stderr concurrently with the child and kill on capped output.
+    The input writer runs in a separate thread so the process cannot deadlock
+    after filling its stdout pipe while waiting for more source bytes.
+    """
+    if not capture_output or check or not isinstance(input, bytes):
+        raise ValueError("invalid bounded decoder invocation")
+    process = subprocess.Popen(command, stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout_chunks, stderr_chunks = [], []
+    fault = [False]
+    writer_errors = []
+
+    def reader(stream, chunks, limit):
+        used = 0
+        try:
+            while True:
+                block = stream.read(65536)
+                if not block:
+                    break
+                used += len(block)
+                if used > limit:
+                    fault[0] = True
+                    process.kill()
+                    break
+                chunks.append(block)
+        except (OSError, ProcessLookupError) as exc:
+            writer_errors.append(exc)
+        finally:
+            stream.close()
+
+    def writer():
+        try:
+            process.stdin.write(input)
+            process.stdin.close()
+        except (OSError, BrokenPipeError, ValueError):
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+
+    threads = [
+        threading.Thread(target=reader,
+                         args=(process.stdout, stdout_chunks, MAX_DECODE_BYTES),
+                         daemon=True),
+        threading.Thread(target=reader, args=(process.stderr, stderr_chunks, 16384),
+                         daemon=True),
+        threading.Thread(target=writer, daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    timed_out = False
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        process.wait()
+    finally:
+        for thread in threads:
+            thread.join(timeout=5)
+    if timed_out or fault[0] or writer_errors or any(t.is_alive() for t in threads):
+        raise ValueError("decoder timed out or exceeded bounded output")
+    return SimpleNamespace(returncode=process.returncode,
+                           stdout=b"".join(stdout_chunks),
+                           stderr=b"".join(stderr_chunks))
+
+def convert_snapshot(raw: bytes, ffmpeg: Path, runner=None):
     if not isinstance(raw, bytes) or not raw or len(raw) > MAX_SOURCE_BYTES:
         raise ValueError("invalid source snapshot")
     if not ffmpeg.is_absolute() or ffmpeg.is_symlink() or not ffmpeg.is_file():
@@ -77,6 +149,8 @@ def convert_snapshot(raw: bytes, ffmpeg: Path, runner=subprocess.run):
         "-c:a", "pcm_s16le", "-f", "s16le",
         "-t", "61", "-fs", str(MAX_DECODE_BYTES), "pipe:1",
     ]
+    if runner is None:
+        runner = bounded_decoder_run
     try:
         result = runner(command, input=raw, capture_output=True,
                         timeout=45, check=False)
@@ -138,7 +212,7 @@ def write_private_new(path: Path, blob: bytes) -> None:
 
 def prepare(source: Path, expected_sha: str, ffmpeg: Path,
             destination: Path, provenance: Path, rights_acknowledged: bool,
-            runner=subprocess.run) -> dict:
+            runner=None) -> dict:
     if not rights_acknowledged:
         raise ValueError("source license/consent must be explicitly acknowledged")
     if destination == provenance or destination == source or provenance == source:

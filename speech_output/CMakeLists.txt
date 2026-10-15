@@ -20,12 +20,17 @@ target_include_directories(turbo_agent_speech_output PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 
-if(NOT TURBO_TTS_STANDALONE)
-  include(GNUInstallDirs)
+include(GNUInstallDirs)
+if(TURBO_TTS_STANDALONE)
+  # Make the public C11 ABI independently consumable in M4.0 without
+  # installing any Agent, Salts, playback-device or model dependency.
+  install(TARGETS turbo_agent_speech_output
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+else()
   install(TARGETS turbo_agent_speech_output EXPORT TurboAgentTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-  install(FILES include/turbo_agent_speech_output.h DESTINATION include)
 endif()
+install(FILES include/turbo_agent_speech_output.h DESTINATION include)
 
 if(BUILD_TESTING)
   add_executable(test_turbo_agent_speech_output

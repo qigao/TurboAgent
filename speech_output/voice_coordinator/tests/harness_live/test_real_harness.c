@@ -729,6 +729,7 @@ static int test_all_composed_cases(void) {
 }
 
 
+#ifndef M42_REAL_VENDOR_NEGATIVE
 /* M3 genuine C11 Provider source from exact separate Draft #145.
  * This executable links its v1.9.5 public Whisper C API to a TEST-ONLY
  * no-weights deterministic engine. No actual acoustic inference is claimed,
@@ -960,12 +961,89 @@ static int test_actual_m3_whisper_provider_handoff(void) {
   return 0;
 }
 
+#else /* M42_REAL_VENDOR_NEGATIVE: genuine Whisper/GGML CPU C API */
+
+/* Real upstream v1.9.5 CPU library is dynamically linked to the same
+ * executable as the actual TurboAgent Harness, M1/M2 and current-head M4.
+ * Only the model bytes are deliberately invalid. No weights or audio.
+ * Wrong hash MUST fail before upstream model init; correct hash of corrupt
+ * bytes MUST reach and be rejected by the real Whisper loader.
+ * Neither scenario may create an M3 Owner, Harness run or playback output. */
+static int test_real_whisper_cpu_no_weights_negative(void) {
+  static const char invalid_model[] =
+      "not-a-valid-ggml-model-binary-for-negative-tests";
+  char file_path[] = "/tmp/turboagent-m42-v195-real-XXXXXX";
+  int file = mkstemp(file_path);
+  VERIFY(file >= 0);
+  const size_t model_bytes = sizeof(invalid_model);
+  ssize_t written = write(file, invalid_model, model_bytes);
+  VERIFY(close(file) == 0 && written == (ssize_t)model_bytes);
+
+  uint8_t sha[32] = {0};
+  VERIFY(cmeta_sha256(invalid_model, model_bytes, sha) == 0);
+  turbo_agent_speech_whisper_config_t cfg;
+  turbo_agent_speech_whisper_config_init(&cfg);
+  cfg.model_path = file_path; /* absolute and Host supplied */
+  cfg.language = TURBO_AGENT_WHISPER_LANGUAGE_EN;
+  cfg.max_model_bytes = 1024u;
+  cfg.max_utterance_frames = 10u;
+  cfg.max_text_bytes = 128u;
+  cfg.cpu_threads = 1u;
+  cfg.max_decode_ms = 30000u;
+  cfg.stationary_noise_guard = 0u;
+  memcpy(cfg.expected_sha256, sha, sizeof(sha));
+  turbo_agent_speech_whisper_t *owner = NULL;
+
+  cfg.expected_sha256[0] ^= 0x53u;
+  VERIFY(turbo_agent_speech_whisper_create(&cfg, &owner) ==
+         TURBO_AGENT_WHISPER_EINTEGRITY && owner == NULL);
+  cfg.expected_sha256[0] ^= 0x53u;
+  VERIFY(turbo_agent_speech_whisper_create(&cfg, &owner) ==
+         TURBO_AGENT_WHISPER_EMODEL && owner == NULL);
+
+  cfg.max_model_bytes = 3u;
+  VERIFY(turbo_agent_speech_whisper_create(&cfg, &owner) ==
+         TURBO_AGENT_WHISPER_EMODEL && owner == NULL);
+  cfg.max_model_bytes = 1024u;
+  cfg.model_path = "relative-fallback-must-never-load.ggml";
+  VERIFY(turbo_agent_speech_whisper_create(&cfg, &owner) ==
+         TURBO_AGENT_SPEECH_EINVAL && owner == NULL);
+  cfg.model_path = file_path;
+  VERIFY(unlink(file_path) == 0);
+  VERIFY(turbo_agent_speech_whisper_create(&cfg, &owner) ==
+         TURBO_AGENT_WHISPER_EMODEL && owner == NULL);
+  cmeta_crypto_clear(sha, sizeof(sha));
+
+  /* Fail-closed even with the actual previously bound original M1/M2,
+   * Harness/Session and current-head VoiceCoordinator symbols present.
+   * A rejected model cannot cause tool authority, TTS or ring writes. */
+  voice_fixture_t voice;
+  VERIFY(voice_create_pending(&voice) == 0);
+  VERIFY(voice.provider.begins == 0u && voice.sink.writes == 0u);
+  VERIFY(turbo_voice_get_state(voice.voice) == TURBO_VOICE_INPUT);
+  VERIFY(turbo_voice_interrupt(voice.voice, 42u) == TURBO_VOICE_OK);
+  VERIFY(turbo_voice_input_quiesced(voice.voice, 42u) == TURBO_VOICE_OK);
+  VERIFY(voice_destroy(&voice) == 0);
+  VERIFY(turbo_agent_speech_whisper_destroy(&owner) ==
+         TURBO_AGENT_SPEECH_EINVAL);
+
+  puts("PASS real Whisper v1.9.5 CPU library rejects corrupt GGML model");
+  puts("PASS SHA mismatch/missing/relative/over-limit model: zero speech output");
+  puts("PASS original M1/M2/Harness/M4.2 linked, no inference without weights");
+  return 0;
+}
+#endif /* M42_REAL_VENDOR_NEGATIVE */
+
 int main(void) {
   VERIFY(test_actual_completed_harness() == 0);
   VERIFY(test_actual_cancelled_harness() == 0);
   VERIFY(test_actual_timed_out_harness() == 0);
   VERIFY(test_all_composed_cases() == 0);
+#ifndef M42_REAL_VENDOR_NEGATIVE
   VERIFY(test_actual_m3_whisper_provider_handoff() == 0);
+#else
+  VERIFY(test_real_whisper_cpu_no_weights_negative() == 0);
+#endif
   puts("PASS real bounded executor/Agent/Session/Harness FINAL ownership gates");
   return 0;
 }

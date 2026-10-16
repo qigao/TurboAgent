@@ -66,3 +66,51 @@ target_link_libraries(test_tts_m42_actual_harness PRIVATE
 add_test(NAME tts_m42_actual_harness
   COMMAND test_tts_m42_actual_harness)
 set_tests_properties(tts_m42_actual_harness PROPERTIES TIMEOUT 90)
+
+# M4.3 opt-in REAL upstream Whisper v1.9.5 CPU runtime with NO model weights.
+# Do not link the original test-only fake engine into this second executable.
+# Public M1/M2, actual Harness/Session and current-head M4 still use the
+# identical published/source ABI. This tests only real CPU/model rejection.
+if(NOT DEFINED ENV{TURBO_WHISPER_SDK_ROOT} OR
+   NOT IS_DIRECTORY "$ENV{TURBO_WHISPER_SDK_ROOT}")
+  message(FATAL_ERROR "Genuine Whisper runtime negative requires explicit CPU SDK root")
+endif()
+find_package(whisper 1.9.5 EXACT CONFIG REQUIRED
+  PATHS "$ENV{TURBO_WHISPER_SDK_ROOT}"
+  NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+if(NOT TARGET whisper)
+  message(FATAL_ERROR "Pinned genuine Whisper CPU SDK does not export target whisper")
+endif()
+add_executable(test_tts_m42_real_whisper_cpu_no_weights
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness_live/test_real_harness.c"
+  "${VOICE_M42_M3_SOURCE_ROOT}/speech_input/whisper/src/turbo_agent_speech_whisper.c")
+target_compile_features(test_tts_m42_real_whisper_cpu_no_weights PRIVATE c_std_11)
+set_target_properties(test_tts_m42_real_whisper_cpu_no_weights PROPERTIES
+  C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_compile_definitions(test_tts_m42_real_whisper_cpu_no_weights PRIVATE
+  M42_REAL_VENDOR_NEGATIVE=1)
+target_include_directories(test_tts_m42_real_whisper_cpu_no_weights PRIVATE
+  "${VOICE_M42_WORKSPACE}/speech_output/include"
+  "${VOICE_M42_WORKSPACE}/speech_output/playback/include"
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/include"
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness/include"
+  "${VOICE_M42_M3_SOURCE_ROOT}/speech_input/whisper/include"
+  "$ENV{SALTS_UTILS_ROOT}/include"
+  "$ENV{SALTS_ROOT}/include")
+target_compile_options(test_tts_m42_real_whisper_cpu_no_weights PRIVATE
+  -Wall -Wextra -Wpedantic -Werror)
+target_link_libraries(test_tts_m42_real_whisper_cpu_no_weights PRIVATE
+  "${VOICE_M42_PREBUILT_ROOT}/voice_coordinator/tests/harness/libturbo_voice_harness_final_gate.a"
+  "${VOICE_M42_PREBUILT_ROOT}/voice_coordinator/libturbo_tts_voice_coordinator.a"
+  "${VOICE_M42_PREBUILT_ROOT}/playback/libturbo_tts_playback_bridge.a"
+  "${VOICE_M42_PREBUILT_ROOT}/libturbo_agent_speech_output.a"
+  turbo_agent_speech_capture_bridge
+  TurboAgent::Harness
+  Salts::JsonParser
+  Salts::Core
+  whisper
+  Threads::Threads)
+add_test(NAME tts_m42_real_whisper_cpu_no_weights
+  COMMAND test_tts_m42_real_whisper_cpu_no_weights)
+set_tests_properties(tts_m42_real_whisper_cpu_no_weights
+  PROPERTIES TIMEOUT 30)

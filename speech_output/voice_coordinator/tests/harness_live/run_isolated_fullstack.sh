@@ -71,6 +71,21 @@ echo 'PASS one attached isolated null-sink PCM producer, zero physical devices'
 
 # Genuine production Harness, original native M2, original M3 Provider and
 # currently built M4 + the true loaded pthread TTS Provider image.
+# When source-level TSan is selected, the fullstack MUST resolve the
+# original source-instrumented Playback shared library, never the
+# prebuilt released one whose SPSC atomic synchronization is opaque.
+if [[ -n "${M42_SOURCE_TSAN_LIB_DIR:-}" ]]; then
+  test -f "$M42_SOURCE_TSAN_LIB_DIR/libsalts_playback.so"
+  export LD_LIBRARY_PATH="$M42_SOURCE_TSAN_LIB_DIR:${LD_LIBRARY_PATH:-}"
+  ldd "$harness_root/build/ci-linux-release/bin/test_tts_m42_real_virtual_fullstack" |
+    tee "$isolated/source-playback-loaded.txt"
+  grep -F "libsalts_playback.so => $M42_SOURCE_TSAN_LIB_DIR/libsalts_playback.so" \
+    "$isolated/source-playback-loaded.txt"
+  echo "PASS original source-TSan real Playback native library selected"
+  test_command=(ctest --test-dir "$harness_root/build/ci-linux-release")
+else
+  test_command=(ctest --preset ci-linux-release)
+fi
 cd "$harness_root"
 # Keep the original 8x Release acceptance default; a separate source
 # TSan job can explicitly request 2x bounded race-detection repetitions.
@@ -79,7 +94,7 @@ if [[ ! "$repeats" =~ ^[1-9][0-9]?$ ]] || (( repeats > 20 )); then
   echo "unsupported fullstack repeat count: $repeats" >&2
   exit 1
 fi
-ctest --preset ci-linux-release \
+"${test_command[@]}" \
   -R '^tts_m42_real_virtual_fullstack$' \
   --repeat until-fail:"$repeats" --verbose --output-on-failure --timeout 60 |
   tee "$isolated/fullstack-live.log"

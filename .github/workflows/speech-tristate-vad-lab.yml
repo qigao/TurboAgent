@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   native-c11-tristate-vad:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-tristate-vad-c11-184'
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-tristate-vad-c11-184' || github.event.pull_request.head.ref == 'test/speech-tristate-vad-ns-sidecar-184')
     name: Bounded C11 tri-state voice/noise/uncertain (no model weights)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -178,3 +178,27 @@ jobs:
           test "$count" = 6
           # No upload-artifact actions. Every WAV, raw S16, source Ogg
           # and private provenance object is deleted by the EXIT trap.
+
+  speex-c11-tristate-sidecar:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-tristate-vad-ns-sidecar-184'
+    name: Side-by-side SpeexDSP NS vs C11 tri-state on real private speech/noise
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install exact reviewed CPU-only native SpeexDSP and FFmpeg for isolated lab
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libspeexdsp-dev pkg-config ninja-build ffmpeg
+      - name: Compare true C11 VAD on paired source-clean, real field noise and SpeexDSP arms
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A separately tested script; no real Whisper executable, no
+          # model weights, private original Ogg/RAW/WAV deleted by exit trap.
+          bash speech_input/vad_lab/tools/run_tri_state_ns_sidecar_ci.sh

@@ -58,7 +58,11 @@ restore_sdk() {
     echo "missing exact release asset: $repo@$tag/$asset" >&2
     return 1
   fi
-  digest="$(sha256sum "$nupkg" | awk '{print $1}')"
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum "$nupkg" | awk '{print $1}')"
+  else
+    digest="$(shasum -a 256 "$nupkg" | awk '{print $1}')"
+  fi
   printf 'repo=%s tag=%s asset=%s sha256=%s\n' \
     "$repo" "$tag" "$asset" "$digest" >> "$sdk_manifest"
   unzip -q "$nupkg" -d "$dir/package"

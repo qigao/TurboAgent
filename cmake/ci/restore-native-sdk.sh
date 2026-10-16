@@ -15,43 +15,65 @@ fi
 sdk_root="${RUNNER_TEMP:?RUNNER_TEMP is required}/turboagent-release-sdks"
 mkdir -p "$sdk_root"
 
+# Each dependency is selected by an exact published Release Tag supplied by the
+# shared native SDK workflow. Never resolve "latest", git refs, or source SHA.
+sdk_manifest="$sdk_root/native-sdk-release-manifest.txt"
+: > "$sdk_manifest"
+
 restore_sdk() {
   local repo="$1"
-  local pattern="$2"
+  local package_id="$2"
   local name="$3"
   local config_rel="$4"
+  local tag="$5"
   local dir="$sdk_root/$name"
-  local tag
+  local asset
   local nupkg
+  local published
+  local digest
 
-  # Include prereleases and select by publication time across all pages.
-  if ! tag="$(gh api "repos/$repo/releases?per_page=100" --paginate --slurp |
-      jq -er '[.[][] | select(.draft == false and .published_at != null)] | max_by(.published_at) | .tag_name // empty')"; then
-    echo "failed to resolve latest published release for $repo" >&2
+  if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+    echo "invalid exact release tag for $repo: '$tag'" >&2
     return 1
   fi
-  printf 'Restoring %s@%s (%s)\n' "$repo" "$tag" "$rid" >&2
-  rm -rf "$dir" || return 1
-  mkdir -p "$dir/download" "$dir/package" || return 1
-  gh release download "$tag" --repo "$repo" --pattern "$pattern" \
-    --dir "$dir/download" --clobber || return 1
-  nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)" || return 1
-  if [[ -z "$nupkg" ]]; then
-    echo "missing downloaded Native package for $repo@$tag" >&2
+  if ! published="$(gh api "repos/$repo/releases/tags/$tag" \
+      --jq 'if (.draft == false and .published_at != null) then "yes" else "no" end')"; then
+    echo "published Release Tag not found: $repo@$tag" >&2
     return 1
   fi
-  unzip -q "$nupkg" -d "$dir/package" || return 1
+  if [[ "$published" != "yes" ]]; then
+    echo "release is draft or unpublished: $repo@$tag" >&2
+    return 1
+  fi
+
+  asset="${package_id}.${tag#v}.nupkg"
+  printf 'Restoring %s@%s asset %s (%s)\n' "$repo" "$tag" "$asset" "$rid" >&2
+  rm -rf -- "$dir"
+  mkdir -p "$dir/download" "$dir/package"
+  gh release download "$tag" --repo "$repo" --pattern "$asset" \
+    --dir "$dir/download" --clobber
+
+  nupkg="$dir/download/$asset"
+  if [[ ! -f "$nupkg" ]]; then
+    echo "missing exact release asset: $repo@$tag/$asset" >&2
+    return 1
+  fi
+  digest="$(sha256sum "$nupkg" | awk '{print $1}')"
+  printf 'repo=%s tag=%s asset=%s sha256=%s\n' \
+    "$repo" "$tag" "$asset" "$digest" >> "$sdk_manifest"
+  unzip -q "$nupkg" -d "$dir/package"
+
   local root="$dir/package/sdk/$rid"
   if [[ ! -f "$root/$config_rel" ]]; then
-    echo "missing restored SDK config: $root/$config_rel" >&2
+    echo "missing installed SDK config for exact release: $root/$config_rel" >&2
     return 1
   fi
   printf '%s\n' "$root"
 }
 
-salts_root="$(restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts 'lib/cmake/Salts/SaltsConfig.cmake')"
-utils_root="$(restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')"
-chttp_root="$(restore_sdk qigao/chttp 'CHttp.Native.*.nupkg' chttp 'lib/cmake/Chttp/ChttpConfig.cmake')"
+salts_root="$(restore_sdk qigao/salts Salts.Native salts 'lib/cmake/Salts/SaltsConfig.cmake' "${SALTS_RELEASE_TAG:?SALTS_RELEASE_TAG is required}")"
+utils_root="$(restore_sdk qigao/salts-utils SaltsUtils.Native salts-utils 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake' "${SALTS_UTILS_RELEASE_TAG:?SALTS_UTILS_RELEASE_TAG is required}")"
+chttp_root="$(restore_sdk qigao/chttp CHttp.Native chttp 'lib/cmake/Chttp/ChttpConfig.cmake' "${CHTTP_RELEASE_TAG:?CHTTP_RELEASE_TAG is required}")"
 
 {
   echo "SALTS_ROOT=$salts_root"
@@ -73,8 +95,8 @@ if [[ "$rid" == android-* ]]; then
 fi
 
 if [[ "$with_praktor" == "1" ]]; then
-  turboscript_root="$(restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript 'lib/cmake/TurboScript/TurboScriptConfig.cmake')"
-  praktor_root="$(restore_sdk qigao/praktor 'Praktor.Native.*.nupkg' praktor 'lib/cmake/Praktor/PraktorConfig.cmake')"
+  turboscript_root="$(restore_sdk qigao/TurboScript TurboScript.Native turboscript 'lib/cmake/TurboScript/TurboScriptConfig.cmake' "${TURBOSCRIPT_RELEASE_TAG:?TURBOSCRIPT_RELEASE_TAG is required}")"
+  praktor_root="$(restore_sdk qigao/praktor Praktor.Native praktor 'lib/cmake/Praktor/PraktorConfig.cmake' "${PRAKTOR_RELEASE_TAG:?PRAKTOR_RELEASE_TAG is required}")"
   {
     echo "TURBOSCRIPT_ROOT=$turboscript_root"
     echo "PRAKTOR_ROOT=$praktor_root"
@@ -82,6 +104,6 @@ if [[ "$with_praktor" == "1" ]]; then
 fi
 
 if [[ "$with_wasm" == "1" ]]; then
-  turbowasm_root="$(restore_sdk qigao/turbowasm 'TurboWasm.Native.*.nupkg' turbowasm 'lib/cmake/TurboWasm/TurboWasmConfig.cmake')"
+  turbowasm_root="$(restore_sdk qigao/turbowasm TurboWasm.Native turbowasm 'lib/cmake/TurboWasm/TurboWasmConfig.cmake' "${TURBOWASM_RELEASE_TAG:?TURBOWASM_RELEASE_TAG is required}")"
   echo "TURBOWASM_ROOT=$turbowasm_root" >> "$GITHUB_ENV"
 fi

@@ -9,6 +9,7 @@ name: SpeechWhisper offline WAV CLI real CPU and mock positive (#137)
       - 'speech_input/noise_lab/tools/run_three_arm_native_c11_ci.sh'
       - 'speech_input/noise_lab/tools/prepare_paired_asr_wavs.py'
       - 'speech_input/noise_lab/tools/run_multilingual_three_arm_c11_ci.sh'
+      - 'speech_input/noise_lab/tools/run_recorded_road_native_c11_ci.sh'
       - 'speech_input/noise_lab/tools/run_three_arm_native_c11_ci.sh'
   workflow_dispatch:
 
@@ -501,6 +502,15 @@ jobs:
           # No model download; uses existing fake-vendor DSO built above.
           # All media, fake text, metrics remain private to runner temp.
           bash speech_input/noise_lab/tools/run_three_arm_native_c11_ci.sh
+      - name: Compare recorded road-noise/whisper overlay and noise-only via real C11 Guard (FAKE vendor)
+        if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-recorded-noise-native-guard-167'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This does not run the real ASR. It only checks that the
+          # strict C11 capture/provider admits genuine speech, while
+          # noise-only is measured separately with a fake inference engine.
+          bash speech_input/noise_lab/tools/run_recorded_road_native_c11_ci.sh
       - name: Archive pinned source and unmodified stdout/dependency evidence
         if: always()
         uses: actions/upload-artifact@v4

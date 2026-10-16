@@ -55,3 +55,15 @@ if(ENABLE_TTS_HOST_HANDOFF_TEST)
   endif()
   add_subdirectory(tests/host)
 endif()
+
+# Test-only Harness execution terminal->canonical user-visible FINAL projection.
+# This compiles original public Harness/App headers and real Salts JSON parser
+# against an explicit TEST DOUBLE for Harness; real Harness execution separate.
+option(ENABLE_TTS_HARNESS_FINAL_GATE_TEST
+  "Qualify Host-approved Harness terminal projection; no Agent execution" OFF)
+if(ENABLE_TTS_HARNESS_FINAL_GATE_TEST)
+  if(NOT BUILD_TESTING)
+    message(FATAL_ERROR "Harness final gate requires BUILD_TESTING")
+  endif()
+  add_subdirectory(tests/harness)
+endif()

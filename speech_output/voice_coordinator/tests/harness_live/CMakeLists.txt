@@ -34,6 +34,39 @@ if(NOT EXISTS "${VOICE_M42_PREBUILT_ROOT}/libturbo_agent_speech_output.a" OR
   message(FATAL_ERROR "Current-head M4.0/M4.1/M4.2 concrete archives missing")
 endif()
 
+# True TTS Provider DSO shared image with a true pthread worker, now
+# exercised beside the genuine bounded TurboAgent::Harness/Agent/Session.
+# Linux-only, test-only; NEVER added to installed TurboAgentTargets.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR "Host + TTS Provider dlopen conformance is Linux only")
+endif()
+if(NOT EXISTS "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/dso/tts_test_provider_dso.c" OR
+   NOT EXISTS "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/dso/tts_test_dso.h")
+  message(FATAL_ERROR "Missing unchanged original TTS Provider DSO fixture")
+endif()
+add_library(tts_m42_combined_provider_dso SHARED
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/dso/tts_test_provider_dso.c")
+target_compile_features(tts_m42_combined_provider_dso PRIVATE c_std_11)
+set_target_properties(tts_m42_combined_provider_dso PROPERTIES
+  C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO
+  C_VISIBILITY_PRESET hidden POSITION_INDEPENDENT_CODE ON)
+target_include_directories(tts_m42_combined_provider_dso PRIVATE
+  "${VOICE_M42_WORKSPACE}/speech_output/include"
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/dso")
+target_link_libraries(tts_m42_combined_provider_dso PRIVATE Threads::Threads)
+target_compile_options(tts_m42_combined_provider_dso PRIVATE
+  -Wall -Wextra -Wpedantic -Werror)
+target_sources(test_tts_m42_actual_harness PRIVATE
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness_live/test_real_harness_tts_dso.c")
+target_include_directories(test_tts_m42_actual_harness PRIVATE
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/dso")
+target_compile_definitions(test_tts_m42_actual_harness PRIVATE
+  M42_REAL_TTS_DSO=1
+  TEST_TTS_DSO_PATH="$<TARGET_FILE:tts_m42_combined_provider_dso>")
+target_link_libraries(test_tts_m42_actual_harness PRIVATE
+  "${CMAKE_DL_LIBS}")
+add_dependencies(test_tts_m42_actual_harness tts_m42_combined_provider_dso)
+
 add_executable(test_tts_m42_actual_harness
   "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness_live/test_real_harness.c"
   "${VOICE_M42_M3_SOURCE_ROOT}/speech_input/whisper/src/turbo_agent_speech_whisper.c"

@@ -39,6 +39,13 @@ jobs:
           ref: 0.11.22
           path: build/pinned-capture-miniaudio
           persist-credentials: false
+      - name: Check out exact one-file private C11 callback admission fix candidate
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 4e1c77f8f9992c666c9ac0a77e9f0454a0b8b53a
+          path: build/pinned-saltsutils-capture-atomic-candidate
+          persist-credentials: false
       - name: Verify native Capture adapter original immutable source identity
         shell: bash
         run: |
@@ -53,6 +60,10 @@ jobs:
           test -f build/pinned-saltsutils-capture-source/capture/src/capture_linux.c
           test -f build/pinned-saltsutils-capture-source/capture/src/capture_video_linux.c
           test -f build/pinned-saltsutils-capture-source/capture/src/capture_screen_linux.c
+          test "$(git -C build/pinned-saltsutils-capture-atomic-candidate rev-parse HEAD)" = '4e1c77f8f9992c666c9ac0a77e9f0454a0b8b53a'
+          test -f build/pinned-saltsutils-capture-atomic-candidate/capture/src/capture_audio_miniaudio.c
+          grep -Fq 'callback_admitted' build/pinned-saltsutils-capture-atomic-candidate/capture/src/capture_audio_miniaudio.c
+          ! grep -F 'ctx->capture->state != SALTS_CAPTURE_STATE_RUNNING' build/pinned-saltsutils-capture-atomic-candidate/capture/src/capture_audio_miniaudio.c
           test -f build/pinned-capture-miniaudio/miniaudio.h
 
       - name: Restore original SHA-pinned published Salts and SaltsUtils SDKs
@@ -102,6 +113,7 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
             -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread \
             "-DM42_CAPTURE_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-saltsutils-capture-source" \
+            "-DM42_CAPTURE_AUDIO_PATCH_SOURCE=$GITHUB_WORKSPACE/build/pinned-saltsutils-capture-atomic-candidate/capture/src/capture_audio_miniaudio.c" \
             "-DM42_MINIAUDIO_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-capture-miniaudio" \
             "-DM42_M2_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-capture-speech-source" \
             "-DM42_CURRENT_SOURCE=$GITHUB_WORKSPACE"
@@ -129,3 +141,5 @@ jobs:
             speech_output/voice_coordinator/tests/virtual_capture/test_virtual_pulse_native_capture.c
           test -f build/m42-capture-source-tsan/test_m42_original_capture_source_tsan
           test -z "$(git -C build/pinned-saltsutils-capture-source diff --name-only)"
+          test -z "$(git -C build/pinned-saltsutils-capture-atomic-candidate diff --name-only)"
+          echo 'PASS original rc.11 Capture modules plus exact Draft #653 atomic audio candidate, no source modifications'

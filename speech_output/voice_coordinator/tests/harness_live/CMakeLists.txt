@@ -2,6 +2,13 @@
 if(NOT TARGET TurboAgent::Harness OR NOT TARGET TurboAgent::Agent)
   message(FATAL_ERROR "Original full-source real Harness/Agent must be built")
 endif()
+if(NOT TARGET turbo_agent_speech_input OR
+   NOT TARGET turbo_agent_speech_capture_bridge)
+  message(FATAL_ERROR "Original pinned M1/M2 production targets are required")
+endif()
+if(ENABLE_SPEECH_CAPTURE_NATIVE)
+  message(FATAL_ERROR "No real device may be opened by this test")
+endif()
 if(NOT TARGET Salts::JsonParser OR NOT TARGET Salts::Playback)
   message(FATAL_ERROR "Actual released Salts JsonParser/Playback targets required")
 endif()
@@ -31,6 +38,7 @@ target_link_libraries(test_tts_m42_actual_harness PRIVATE
   "${VOICE_M42_PREBUILT_ROOT}/playback/libturbo_tts_playback_bridge.a"
   "${VOICE_M42_PREBUILT_ROOT}/libturbo_agent_speech_output.a"
   TurboAgent::Harness
+  turbo_agent_speech_capture_bridge
   Salts::JsonParser
   Threads::Threads)
 add_test(NAME tts_m42_actual_harness

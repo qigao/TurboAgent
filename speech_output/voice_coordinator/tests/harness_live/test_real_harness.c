@@ -1035,7 +1035,9 @@ int m42_real_m3_checked_final_for_tts_dso(
                                         &n, &kind) == TURBO_AGENT_SPEECH_OK);
   VERIFY(kind == TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL &&
          n == 10u && strcmp(transcript, " utterance") == 0);
-  VERIFY(turbo_agent_speech_take_final(input, transcript, capacity,
+  char rejected_duplicate[64] = {0};
+  VERIFY(turbo_agent_speech_take_final(input, rejected_duplicate,
+                                        sizeof(rejected_duplicate),
                                         &n, &kind) == TURBO_AGENT_SPEECH_ESTATE);
   VERIFY(speech_test_fake_total_decodes() == before_decodes + 1);
   VERIFY(turbo_voice_asr_event(voice, 43u,
@@ -1051,6 +1053,7 @@ int m42_real_m3_checked_final_for_tts_dso(
   VERIFY(turbo_agent_speech_whisper_destroy(&owner) ==
          TURBO_AGENT_SPEECH_OK && owner == NULL);
   VERIFY(speech_test_fake_total_frees() == before_frees + 1);
+  puts("PASS same-generation original M1/M2/M3 checked FINAL before loaded TTS DSO");
   return 0;
 }
 #endif /* M42_REAL_TTS_DSO */

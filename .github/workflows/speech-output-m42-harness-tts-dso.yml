@@ -338,52 +338,12 @@ jobs:
             observed="$(grep -Fc "$marker" "$RUNNER_TEMP/m42-real-harness-tts-dso-repetitions.log" || true)"
             test "$observed" = 20 || { echo "missing real TTS DSO lifecycle evidence: $marker ($observed)" >&2; exit 1; }
           done
-          # Four true loaded-TTS-worker cases each consume an original
-          # M1/M2/M3 checked FINAL for this SAME 42 generation.
-          admitted="$(grep -Fc 'PASS same-generation original M1/M2/M3 checked FINAL before loaded TTS DSO' \
+          # All four live TTS Provider DSO scenarios must now consume an
+          # ORIGINAL M1/M2/M3 checked FINAL for their SAME generation.
+          accepted="$(grep -Fc 'PASS same-generation original M1/M2/M3 checked FINAL before loaded TTS DSO' \
             "$RUNNER_TEMP/m42-real-harness-tts-dso-repetitions.log" || true)"
-          test "$admitted" = 80 || { echo "missing true ASR-to-TTS same-generation handoffs: $admitted / 80" >&2; exit 1; }
-          ctest --preset ci-linux-release -R '^tts_m42_real_whisper_cpu_no_weights
-      - name: Verify isolation and original source SHA after build
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git -C build/pinned-harness-source rev-parse HEAD)" = '9e51d377bd84ee91ce5a47c94f24f73e4e01bba7'
-          test -z "$(git -C build/pinned-harness-source diff --name-only -- ':!build/**')"
-          test -f build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness
-          exe="build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness"
-          # This executable MUST import the actual production Harness DSO.
-          readelf -d "$exe" | grep -F 'libturbo_agent_harness.so'
-          nm -D "$exe" | grep -E ' U turbo_agent_harness_start_text($|@)'
-          # Original pinned M1/M2 source is compiled into this same process.
-          # --defined-only excludes references to a missing external shim.
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_begin'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_capture_bridge_offer'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_take_final'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_create'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_provider'
-          vendor_exe="build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_real_whisper_cpu_no_weights"
-          test -x "$vendor_exe"
-          # Verify actual upstream CPU Whisper and original production Harness.
-          readelf -d "$vendor_exe" | grep -F 'libwhisper.so'
-          readelf -d "$vendor_exe" | grep -F 'libturbo_agent_harness.so'
-          nm -D "$vendor_exe" | grep -F ' U whisper_init_from_buffer_with_params'
-          nm --defined-only "$vendor_exe" | grep -F ' turbo_agent_speech_whisper_create'
-          dso_image="build/pinned-harness-source/build/ci-linux-release/bin/libtts_m42_combined_provider_dso.so"
-          test -f "$dso_image"
-          nm -D --defined-only "$dso_image" | grep -F ' T turbo_tts_test_dso_entry'
-          # Explicit dlopen, not link-owned image (no accidental reference).
-          if readelf -d "$exe" | grep -F 'libtts_m42_combined_provider_dso.so'; then
-            echo 'TTS DSO was linked instead of loaded and unload tested' >&2
-            exit 1
-          fi
-          LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}" \
-            ldd "$vendor_exe" | tee "$RUNNER_TEMP/m42-whisper-real-no-weights-needed.txt"
-          if grep -F 'not found' "$RUNNER_TEMP/m42-whisper-real-no-weights-needed.txt"; then
-            echo 'real v1.9.5 vendor or Harness runtime unresolved' >&2
-            exit 1
-          fi
- --repeat until-fail:10 --verbose --timeout 30
+          test "$accepted" = 80 || { echo "missing original M3-to-TTS same-generation witness: $accepted / 80" >&2; exit 1; }
+          ctest --preset ci-linux-release -R '^tts_m42_real_whisper_cpu_no_weights$' --repeat until-fail:10 --verbose --timeout 30
       - name: Verify isolation and original source SHA after build
         shell: bash
         run: |

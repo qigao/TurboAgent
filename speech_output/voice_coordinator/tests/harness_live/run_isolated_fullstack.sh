@@ -58,6 +58,16 @@ echo 'PASS isolated fullstack OS Pulse source and sink audited (zero hardware ca
 ) &
 feed_pid="$!"
 sleep 1
+# The isolated software sink MUST have exactly one active PCM producer.
+# Without an attached stream the monitor can yield startup silence, which
+# M3 must correctly refuse rather than accidentally authorizing a turn.
+sink_inputs="$(pactl list short sink-inputs | awk 'NF { n++ } END { print n+0 }')"
+test "$sink_inputs" = 1 || {
+  echo "refusing absent/extra virtual PCM feeder: sink_inputs=$sink_inputs" >&2
+  pactl list short sink-inputs >&2
+  exit 1
+}
+echo 'PASS one attached isolated null-sink PCM producer, zero physical devices'
 
 # Genuine production Harness, original native M2, original M3 Provider and
 # currently built M4 + the true loaded pthread TTS Provider image.

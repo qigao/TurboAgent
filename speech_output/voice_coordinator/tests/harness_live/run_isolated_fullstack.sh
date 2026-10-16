@@ -71,10 +71,32 @@ echo 'PASS one attached isolated null-sink PCM producer, zero physical devices'
 
 # Genuine production Harness, original native M2, original M3 Provider and
 # currently built M4 + the true loaded pthread TTS Provider image.
+# When source-level TSan is selected, the fullstack MUST resolve the
+# original source-instrumented Playback shared library, never the
+# prebuilt released one whose SPSC atomic synchronization is opaque.
+if [[ -n "${M42_SOURCE_TSAN_LIB_DIR:-}" ]]; then
+  test -f "$M42_SOURCE_TSAN_LIB_DIR/libsalts_playback.so"
+  export LD_LIBRARY_PATH="$M42_SOURCE_TSAN_LIB_DIR:${LD_LIBRARY_PATH:-}"
+  ldd "$harness_root/build/ci-linux-release/bin/test_tts_m42_real_virtual_fullstack" |
+    tee "$isolated/source-playback-loaded.txt"
+  grep -F "libsalts_playback.so => $M42_SOURCE_TSAN_LIB_DIR/libsalts_playback.so" \
+    "$isolated/source-playback-loaded.txt"
+  echo "PASS original source-TSan real Playback native library selected"
+  test_command=(ctest --test-dir "$harness_root/build/ci-linux-release")
+else
+  test_command=(ctest --preset ci-linux-release)
+fi
 cd "$harness_root"
-ctest --preset ci-linux-release \
+# Keep the original 8x Release acceptance default; a separate source
+# TSan job can explicitly request 2x bounded race-detection repetitions.
+repeats="${M42_FULLSTACK_REPEATS:-8}"
+if [[ ! "$repeats" =~ ^[1-9][0-9]?$ ]] || (( repeats > 20 )); then
+  echo "unsupported fullstack repeat count: $repeats" >&2
+  exit 1
+fi
+"${test_command[@]}" \
   -R '^tts_m42_real_virtual_fullstack$' \
-  --repeat until-fail:8 --verbose --output-on-failure --timeout 60 |
+  --repeat until-fail:"$repeats" --verbose --output-on-failure --timeout 60 |
   tee "$isolated/fullstack-live.log"
 for marker in \
   'PASS shipped Capture callback stop/join -> original M1/M2/M3 one-shot checked FINAL' \
@@ -82,11 +104,11 @@ for marker in \
   'PASS full published Capture+Playback + actual Harness + true TTS DSO: cancel/clear/late-reject/join/unload' \
   'PASS same-process actual M1/M2/M3 -> Harness -> loaded TTS worker -> BOTH published Salts audio DSOs'; do
   count="$(grep -Fc "$marker" "$isolated/fullstack-live.log" || true)"
-  expected=8
+  expected="$repeats"
   # Exactly TWO complete Capture/M3 checked FINAL passages per CTest:
   # normal-drain then cancellation. The other markers occur once per case.
   if [[ "$marker" == 'PASS shipped Capture callback stop/join -> original M1/M2/M3 one-shot checked FINAL' ]]; then
-    expected=16
+    expected="$((repeats * 2))"
   fi
   if [[ "$count" != "$expected" ]]; then
     echo "missing fullstack exact native lifecycle evidence: $marker ($count/$expected)" >&2
@@ -121,4 +143,4 @@ if grep -F 'not found' "$isolated/fullstack-needed.txt"; then
   echo "one or more real published SDK dependencies unresolved" >&2
   exit 1
 fi
-echo 'PASS 8/8 fullstack original M1/M2/M3 + true Harness + loaded TTS worker + both published Salts virtual audio DSOs'
+echo "PASS $repeats/$repeats fullstack original M1/M2/M3 + true Harness + loaded TTS worker + both published Salts virtual audio DSOs"

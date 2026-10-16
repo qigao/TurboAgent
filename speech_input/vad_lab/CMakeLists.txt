@@ -35,6 +35,22 @@ if(BUILD_TESTING)
     COMMAND test_ta_speech_vad_lab)
   set_tests_properties(ta_speech_vad_lab_c11_bounded_owner
     PROPERTIES TIMEOUT 30)
+
+  # Independent deterministic frequency-domain diagnostic controls, not
+  # production voice-rejection admission.
+  add_executable(test_ta_speech_vad_multiband
+    tests/test_ta_speech_vad_multiband.c)
+  target_link_libraries(test_ta_speech_vad_multiband PRIVATE ta_speech_vad_lab)
+  set_target_properties(test_ta_speech_vad_multiband PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+  if(NOT MSVC)
+    target_compile_options(test_ta_speech_vad_multiband PRIVATE
+      -Wall -Wextra -Wpedantic -Werror -Wconversion -Wshadow)
+  endif()
+  add_test(NAME ta_speech_vad_multiband_synthetic_controls
+    COMMAND test_ta_speech_vad_multiband)
+  set_tests_properties(ta_speech_vad_multiband_synthetic_controls
+    PROPERTIES TIMEOUT 30)
 endif()
 
 # Only the private CLI needs POSIX nofollow/open functions. The C11 library

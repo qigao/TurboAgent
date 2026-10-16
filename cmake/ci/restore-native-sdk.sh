@@ -17,7 +17,8 @@ mkdir -p "$sdk_root"
 
 # Each dependency is selected by an exact published Release Tag supplied by the
 # shared native SDK workflow. Never resolve "latest", git refs, or source SHA.
-sdk_manifest="$sdk_root/native-sdk-release-manifest.txt"
+sdk_manifest="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}/build/release-provenance/$rid.txt"
+mkdir -p -- "$(dirname -- "$sdk_manifest")"
 : > "$sdk_manifest"
 
 restore_sdk() {

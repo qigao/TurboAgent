@@ -70,6 +70,7 @@ ctest --test-dir "$build_dir" \
 
 for marker in \
     'PASS actual published Salts Capture callback start/stop/join:' \
+    'PASS actual Capture stop blocks on held native callback, then joins before destroy' \
     'PASS original M1/M2 native Capture Salts adapter:' \
     'PASS native published Capture cancellation stop/join' \
     'PASS released Capture DSO + ORIGINAL M2 Salts adapter on isolated PulseAudio'; do

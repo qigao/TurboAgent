@@ -28,7 +28,7 @@ function Restore-Sdk(
   if ($LASTEXITCODE -ne 0) {
     throw "published Release Tag not found: $Repo@$Tag"
   }
-  $release = ($metadata -join "\n") | ConvertFrom-Json
+  $release = ($metadata -join "`n") | ConvertFrom-Json
   if ($release.draft -or -not $release.published_at -or $release.tag_name -cne $Tag) {
     throw "release is draft, unpublished or mismatched: $Repo@$Tag"
   }

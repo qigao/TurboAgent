@@ -47,6 +47,16 @@ include(CMakeOptions.cmake)
 include(Sanitizers)
 include(CmakeUtils)
 
+# Run with the build preset's runtime environment, without duplicating SDK paths.
+add_custom_target(run-program
+    COMMAND "${CMAKE_COMMAND}" -DLOCAL_ACTION=run
+            "-DTURBOAGENT_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunLocal.cmake"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL
+    VERBATIM)
+set_target_properties(run-program PROPERTIES FOLDER "Tools")
+
 set(_turboagent_dependency_roots SALTS_ROOT SALTS_UTILS_ROOT CHTTP_ROOT)
 if(ENABLE_WASM_TOOLS)
   list(APPEND _turboagent_dependency_roots TURBOWASM_ROOT)

@@ -2,45 +2,46 @@
     "version": 6,
     "include": [
         "presets/BuildPresets.json",
-        "presets/TestPresets.json",
-        "presets/AndroidPresets.json"
+        "presets/TestPresets.json"
     ],
     "configurePresets": [
         {
             "name": "base-win-dev-user",
             "hidden": true,
             "displayName": "Developer Build (Windows, Base)",
-            "inherits": [
-                "dev-win-msvc-ninja",
-                "pkg-vcpkg"
-            ]
+            "inherits": "dev-win-msvc-ninja",
+            "cacheVariables": { "ENABLE_SANITIZER_ADDRESS": "ON" }
         },
         {
             "name": "base-win-release-user",
             "hidden": true,
             "displayName": "Release Build (Windows, Base)",
-            "inherits": [
-                "release-win-msvc-ninja",
-                "pkg-vcpkg"
-            ]
+            "inherits": "release-win-msvc-ninja",
+            "cacheVariables": { "ENABLE_TESTS": true, "BUILD_TESTS": true, "BUILD_BENCHMARKS": false }
         },
         {
             "name": "base-linux-dev-user",
             "hidden": true,
             "displayName": "Developer Build (Linux, Base)",
-            "inherits": [
-                "dev-linux-ninja",
-                "pkg-vcpkg"
-            ]
+            "inherits": "dev-linux-ninja",
+            "cacheVariables": { "ENABLE_SANITIZER_ADDRESS": "ON" }
+        },
+        {
+            "name": "base-linux-release-user",
+            "hidden": true,
+            "inherits": "release-linux-ninja",
+            "cacheVariables": { "ENABLE_TESTS": true, "BUILD_TESTS": true, "BUILD_TESTING": true, "BUILD_BENCHMARKS": false }
+        },
+        {
+            "name": "base-linux-sdk-package",
+            "hidden": true,
+            "inherits": "release-linux-ninja",
+            "cacheVariables": { "ENABLE_SANITIZER_ADDRESS": "OFF", "ENABLE_TESTS": "OFF", "BUILD_TESTS": "OFF", "BUILD_EXAMPLES": "OFF" }
         },
         {
             "name": "base-ci-release",
             "hidden": true,
-            "inherits": [
-                "release-mode",
-                "pkg-vcpkg"
-            ],
-            "generator": "Ninja",
+            "inherits": ["release-mode", "base-ninja"],
             "cacheVariables": {
                 "ENABLE_TESTS": true,
                 "BUILD_TESTS": true,
@@ -53,6 +54,64 @@
                 "ENABLE_CODING_TOOLS": true,
                 "ENABLE_MCP_TOOLS": true,
                 "ENABLE_CODEX_BRIDGE": true
+            }
+        },
+        {
+            "name": "base-ci-praktor",
+            "hidden": true,
+            "inherits": "base-ci-release",
+            "cacheVariables": { "ENABLE_PRAKTOR_TOOLS": true }
+        },
+        {
+            "name": "base-ci-windows-release",
+            "hidden": true,
+            "inherits": ["base-ci-release", "ISWindows", "Msvc", "flags-msvc"],
+            "environment": {
+                "TURBOAGENT_PROFILE": "ci-windows-release",
+                "TURBOAGENT_SDK_RID": "windows-x64"
+            },
+            "cacheVariables": { "ENABLE_PRAKTOR_TOOLS": false }
+        },
+        {
+            "name": "base-ci-linux-release",
+            "hidden": true,
+            "inherits": ["base-ci-praktor", "ISLinux", "Gcc", "flags-gnu"],
+            "environment": {
+                "TURBOAGENT_PROFILE": "ci-linux-release",
+                "TURBOAGENT_SDK_RID": "linux-x64",
+                "VCPKG_TARGET_TRIPLET": "x64-linux",
+                "VCPKG_HOST_TRIPLET": "x64-linux"
+            }
+        },
+        {
+            "name": "base-ci-macos-release",
+            "hidden": true,
+            "inherits": ["base-ci-praktor", "ISMac", "AppleClang", "flags-darwin"],
+            "environment": {
+                "TURBOAGENT_PROFILE": "ci-macos-release",
+                "TURBOAGENT_SDK_RID": "macos-arm64",
+                "VCPKG_TARGET_TRIPLET": "arm64-osx",
+                "VCPKG_HOST_TRIPLET": "arm64-osx"
+            },
+            "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "arm64", "ENABLE_TESTS": false, "BUILD_TESTS": false, "BUILD_TESTING": false }
+        },
+        {
+            "name": "base-ci-android-release",
+            "hidden": true,
+            "inherits": ["base-ci-praktor", "ISLinux", "android-base"],
+            "environment": {
+                "TURBOAGENT_PROFILE": "ci-android-release",
+                "TURBOAGENT_SDK_RID": "android-arm64-v8a",
+                "VCPKG_TARGET_TRIPLET": "arm64-android",
+                "VCPKG_HOST_TRIPLET": "x64-linux"
+            },
+            "cacheVariables": {
+                "ANDROID_ABI": "arm64-v8a",
+                "ANDROID_PLATFORM": "android-26",
+                "ENABLE_TESTS": false,
+                "BUILD_TESTS": false,
+                "BUILD_TESTING": false,
+                "ENABLE_CODEX_BRIDGE": false
             }
         }
     ]

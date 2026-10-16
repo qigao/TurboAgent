@@ -1,0 +1,105 @@
+name: TurboAgent local build
+dotEnv: [.env]
+input_policy: strict
+inputs:
+  HOST:
+    type: string
+    default: windows
+    enum: [windows, unix]
+  PRESET:
+    type: string
+    default: win-release-user
+  TASK:
+    type: string
+    default: all
+    enum: [all, configure, refresh, build, test, install, run]
+  TARGET:
+    type: string
+    default: ''
+    description: Optional single CMake target for local builds
+  TEST_REGEX:
+    type: string
+    default: ''
+    description: Optional CTest test-name regular expression
+  RUN_PROGRAM:
+    type: string
+    default: ''
+    description: Executable path, absolute or relative to the repository root
+  RUN_ARGS:
+    type: string
+    default: '[]'
+    description: JSON array of program argument strings for TASK=run
+  TEST:
+    type: string
+    default: '1'
+    enum: ['0', '1']
+  INSTALL:
+    type: string
+    default: '0'
+    enum: ['0', '1']
+  CACHE_ACTION:
+    type: string
+    default: none
+    enum: [none, clone, sync]
+  FRESH:
+    type: string
+    default: '0'
+    enum: ['0', '1']
+tasks:
+  - name: validate-options
+    program: cmake
+    args: ['-DLOCAL_ACTION=validate', '-P', cmake/RunLocal.cmake]
+    working_dir: .
+    env:
+      TURBOAGENT_LOCAL_TASK: '{{ TASK }}'
+      TURBOAGENT_LOCAL_TARGET: '{{ TARGET }}'
+      TURBOAGENT_LOCAL_TEST_REGEX: '{{ TEST_REGEX }}'
+      TURBOAGENT_LOCAL_TEST: '{{ TEST }}'
+      TURBOAGENT_LOCAL_INSTALL: '{{ INSTALL }}'
+      TURBOAGENT_RUN_PROGRAM: '{{ RUN_PROGRAM }}'
+      TURBOAGENT_RUN_ARGS: '{{ RUN_ARGS }}'
+
+  - name: clone-cache
+    depends_on: [validate-options]
+    when: "$CACHE_ACTION == 'clone'"
+    program: git
+    args: [clone, 'https://github.com/qigao/vcpkg-cache.git', '{{ env.VCPKG_CACHE_REPOSITORY_ROOT }}']
+    timeout: 10m
+
+  - name: sync-cache
+    depends_on: [validate-options]
+    when: "$CACHE_ACTION == 'sync'"
+    program: git
+    args: ['-C', '{{ env.VCPKG_CACHE_REPOSITORY_ROOT }}', pull, '--ff-only']
+    timeout: 10m
+
+  - name: cmake-windows
+    depends_on: [clone-cache, sync-cache]
+    when: "$HOST == 'windows'"
+    uses: cmake/workflows/cmake-windows.yml
+    vars:
+      PRESET: '{{ PRESET }}'
+      TASK: '{{ TASK }}'
+      TARGET: '{{ TARGET }}'
+      TEST_REGEX: '{{ TEST_REGEX }}'
+      RUN_PROGRAM: '{{ RUN_PROGRAM }}'
+      RUN_ARGS: '{{ RUN_ARGS }}'
+      TEST: '{{ TEST }}'
+      INSTALL: '{{ INSTALL }}'
+      FRESH: '{{ FRESH }}'
+      VSDEVCMD_BAT: '{{ env.VSDEVCMD_BAT }}'
+
+  - name: cmake-unix
+    depends_on: [clone-cache, sync-cache]
+    when: "$HOST == 'unix'"
+    uses: cmake/workflows/cmake.yml
+    vars:
+      PRESET: '{{ PRESET }}'
+      TASK: '{{ TASK }}'
+      TARGET: '{{ TARGET }}'
+      TEST_REGEX: '{{ TEST_REGEX }}'
+      RUN_PROGRAM: '{{ RUN_PROGRAM }}'
+      RUN_ARGS: '{{ RUN_ARGS }}'
+      TEST: '{{ TEST }}'
+      INSTALL: '{{ INSTALL }}'
+      FRESH: '{{ FRESH }}'

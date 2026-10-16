@@ -15,8 +15,8 @@ TurboAgent.Native **不发布 NuGet dependency metadata**；依赖 SDK 的来源
 | Praktor.Native | `v0.4.8` |
 | TurboWasm.Native | `v0.2.1` |
 
-[Unix](../../cmake/ci/restore-native-sdk.sh) 与
-[Windows](../../cmake/ci/restore-native-sdk.ps1) SDK restore 严格校验指定的
+[共享 Bash SDK restore](../../cmake/ci/restore-native-sdk.sh)（Windows 使用 Git Bash）
+严格校验指定的
 GitHub Release 已发布、不是 Draft，并仅下载标签对应的**完整版本号包名**。
 缺失 Tag、发布资产或目标 RID 的 CMake package config 时立即失败，
 不会拉取其他标签、Git SHA、源码候选或旧 SDK。
@@ -34,6 +34,10 @@ Job Object 回收修复（Salts #1230）。TurboAgent #193 需要待该修复进
 
 第三方 C/C++ 依赖（SQLite、Chttp Crypto 组件所需的 GmSSL）仍由项目的
 vcpkg manifest/toolchain 解析，也不写入 Native package 的版本依赖元数据。
+
+本地可通过 [Praktor 构建入口](../../cmake/BUILD.md) 从仓库 `.env` 提供共享路径，
+编排现有 presets，并用 SDK restore 的 JSON 输出传递依赖根。CI 继续使用原有
+GitHub Actions 入口与默认 `GITHUB_ENV` 输出。
 
 ## CI 与发布构建入口
 

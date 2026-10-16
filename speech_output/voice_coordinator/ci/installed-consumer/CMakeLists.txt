@@ -9,6 +9,9 @@ find_package(SaltsUtils CONFIG REQUIRED
 if(NOT TARGET Salts::Playback)
   message(FATAL_ERROR "Published SDK does not export Salts::Playback")
 endif()
+if(NOT TARGET Salts::Capture)
+  message(FATAL_ERROR "Published SDK does not export Salts::Capture")
+endif()
 if(NOT DEFINED TTS_M42_BUILD_ROOT)
   message(FATAL_ERROR "M4.2 exact-head build root required")
 endif()
@@ -31,7 +34,7 @@ target_include_directories(tts_voice_release_link PRIVATE
 # Force current HEAD coordinator->bridge->SpeechOutput and the ACTUAL released
 # playback target. No fake symbols or device open in this linked smoke.
 target_link_libraries(tts_voice_release_link PRIVATE
-  "${_voice}" "${_bridge}" "${_source}" Salts::Playback)
+  "${_voice}" "${_bridge}" "${_source}" Salts::Playback Salts::Capture)
 
 # Separate installed C++17 header/link witness; no device is instantiated.
 add_executable(tts_voice_cpp17_release_link verify_installed_voice.cpp)
@@ -43,4 +46,4 @@ target_include_directories(tts_voice_cpp17_release_link PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/../../../playback/include"
   "${CMAKE_CURRENT_LIST_DIR}/../../../include")
 target_link_libraries(tts_voice_cpp17_release_link PRIVATE
-  "${_voice}" "${_bridge}" "${_source}" Salts::Playback)
+  "${_voice}" "${_bridge}" "${_source}" Salts::Playback Salts::Capture)

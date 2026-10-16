@@ -129,7 +129,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
             throw "MSVC x64 toolchain is required"
           }
-          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          "VSDEVCMD_BAT=$vs\Common7\Tools\VsDevCmd.bat" >> $env:GITHUB_ENV
           # The setup actions expose Windows-native paths; presets consume CMake paths.
           foreach ($name in @('VCPKG_ROOT', 'VCPKG_CACHE_REPOSITORY_ROOT', 'RE2C_ROOT')) {
             $path = [Environment]::GetEnvironmentVariable($name)
@@ -148,10 +148,10 @@ jobs:
 
       - name: Restore native SDKs on Windows
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64 -WithWasm
+        run: bash cmake/ci/restore-native-sdk.sh windows-x64 0 1
 
       - name: Configure on Unix
         if: runner.os != 'Windows'
@@ -163,7 +163,7 @@ jobs:
       - name: Configure on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --preset ci-windows-release
+        run: call cmake\ci\run-vsdevcmd.cmd cmake --preset ci-windows-release
 
       - name: Build on Unix
         if: runner.os != 'Windows'
@@ -175,7 +175,7 @@ jobs:
       - name: Build on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset ci-windows-release
+        run: call cmake\ci\run-vsdevcmd.cmd cmake --build --preset ci-windows-release
 
       - name: Verify Linux PraktorTools has no executable-bound CSTL hash dependency
         if: success() && matrix.rid == 'linux-x64'
@@ -203,7 +203,7 @@ jobs:
       - name: Test on Windows
         if: runner.os == 'Windows' && matrix.tests
         shell: cmd
-        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release
+        run: call cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release
 
       - name: Install on Unix
         if: runner.os != 'Windows'
@@ -215,7 +215,7 @@ jobs:
       - name: Install on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset install-ci-windows-release
+        run: call cmake\ci\run-vsdevcmd.cmd cmake --build --preset install-ci-windows-release
 
       - name: Record SDK provenance
         shell: bash

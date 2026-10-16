@@ -1,631 +1,258 @@
 {
     "version": 6,
-    "include": [
-        "CMakePresets.json"
-    ],
+    "include": ["CMakePresets.json"],
     "configurePresets": [
         {
-            "name": "vcpkg-cache-ci",
+            "name": "local-environment",
             "hidden": true,
-            "inherits": "vcpkg-cache",
-            "environment": {
-                "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{VCPKG_CACHE_REPOSITORY_ROOT}",
-                "VCPKG_BINARY_SOURCES": "$penv{VCPKG_BINARY_SOURCES}"
-            }
-        },
-        {
-            "name": "vcpkg-cache-linux",
-            "hidden": true,
-            "inherits": "vcpkg-cache",
-            "cacheVariables": {
-                "VCPKG_HOST_TRIPLET": "x64-linux"
-            },
-            "environment": {
-                "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{HOME}/.cache/qigao/vcpkg-cache"
-            }
-        },
-        {
-            "name": "vcpkg-cache-windows",
-            "hidden": true,
-            "inherits": "vcpkg-cache",
-            "cacheVariables": {
-                "VCPKG_HOST_TRIPLET": "x64-windows"
-            },
-            "environment": {
-                "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{LOCALAPPDATA}/qigao/vcpkg-cache",
-                "RE2C_ROOT": "$env{PROJECT_ROOT}/external/pkgs/re2c/windows-x64"
-            }
+            "environment": { "PKG_ROOT": "$penv{PKG_ROOT}", "VCPKG_ROOT": "$penv{VCPKG_ROOT}" }
         },
         {
             "name": "vcpkg-cache",
             "hidden": true,
             "toolchainFile": "$env{VCPKG_CACHE_REPOSITORY_ROOT}/cmake/QigaoVcpkgToolchain.cmake",
             "environment": {
-                "VCPKG_BINARY_SOURCES": "clear;default,readwrite;nugettimeout,1800;nugetconfig,${sourceDir}/cmake/vcpkg-cache.nuget.config,read",
+                "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{VCPKG_CACHE_REPOSITORY_ROOT}",
+                "VCPKG_BINARY_SOURCES": "$penv{VCPKG_BINARY_SOURCES}",
                 "VCPKG_OVERLAY_PORTS": "$env{VCPKG_CACHE_REPOSITORY_ROOT}/ports",
                 "RE2C_ROOT": "$penv{RE2C_ROOT}",
                 "PATH": "$env{RE2C_ROOT}/bin${pathListSep}$penv{PATH}"
             }
         },
         {
-            "name": "win-toolchain",
+            "name": "local-dependencies",
+            "hidden": true,
+            "inherits": "local-environment",
+            "environment": {
+                "TURBOAGENT_SDK_SUFFIX": "",
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts$env{TURBOAGENT_SDK_SUFFIX}/$env{TURBOAGENT_CONFIG}",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils$env{TURBOAGENT_SDK_SUFFIX}/$env{TURBOAGENT_CONFIG}",
+                "CHTTP_ROOT": "$env{PKG_ROOT}/chttp$env{TURBOAGENT_SDK_SUFFIX}/$env{TURBOAGENT_CONFIG}",
+                "TURBOWASM_ROOT": "$env{PKG_ROOT}/turbowasm$env{TURBOAGENT_SDK_SUFFIX}/$env{TURBOAGENT_CONFIG}"
+            },
+            "cacheVariables": { "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent$env{TURBOAGENT_SDK_SUFFIX}/$env{TURBOAGENT_CONFIG}" }
+        },
+        {
+            "name": "local-debug",
+            "hidden": true,
+            "inherits": "local-dependencies",
+            "environment": { "TURBOAGENT_CONFIG": "debug", "TURBOAGENT_VCPKG_CONFIG_SUFFIX": "/debug" }
+        },
+        {
+            "name": "local-release",
+            "hidden": true,
+            "inherits": "local-dependencies",
+            "environment": { "TURBOAGENT_CONFIG": "release", "TURBOAGENT_VCPKG_CONFIG_SUFFIX": "" }
+        },
+        {
+            "name": "native-paths",
+            "hidden": true,
+            "inherits": "local-environment",
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/$env{TURBOAGENT_HOST}",
+                "TURBOAGENT_VCPKG_PREFIX": "$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}$env{TURBOAGENT_VCPKG_CONFIG_SUFFIX}"
+            },
+            "cacheVariables": {
+                "FSM_ROOT": "$env{PKG_ROOT}/libfsm",
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+                "VCPKG_TARGET_TRIPLET": "$env{VCPKG_TARGET_TRIPLET}",
+                "CMAKE_PREFIX_PATH": "$env{TURBOAGENT_VCPKG_PREFIX}"
+            }
+        },
+        {
+            "name": "windows-runtime",
             "hidden": true,
             "environment": {
-                "PROJECT_ROOT": "C:/projects/cpp",
-                "PKG_ROOT": "$env{PROJECT_ROOT}/external/pkgs/turboagent-sdk-20261010",
-                "VCPKG_ROOT": "C:/tools/vcpkg"
-            },
-            "cacheVariables": {},
-            "inherits": [
-                "vcpkg-cache-windows"
-            ]
+                "PATH": "$env{TURBOAGENT_BUILD_DIR}/bin${pathListSep}$env{TURBOAGENT_VCPKG_PREFIX}/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$env{TURBOWASM_ROOT}/bin${pathListSep}$env{RE2C_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
         },
         {
             "name": "win-paths",
             "hidden": true,
-            "inherits": "win-toolchain",
+            "inherits": ["native-paths", "windows-runtime", "vcpkg-cache"],
+            "environment": { "TURBOAGENT_HOST": "windows", "VCPKG_TARGET_TRIPLET": "x64-windows" },
             "cacheVariables": {
-                "FSM_ROOT": "$env{PKG_ROOT}/libfsm",
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/windows",
-                "PKG_CONFIG_EXECUTABLE": "${sourceDir}/vcpkg_installed/windows/x64-windows/tools/pkgconf/pkgconf.exe",
-                "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "VCPKG_MANIFEST_MODE": "ON"
+                "VCPKG_HOST_TRIPLET": "x64-windows",
+                "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe"
             },
-            "architecture": {
-                "value": "x64",
-                "strategy": "external"
-            },
-            "toolset": {
-                "value": "host=x64",
-                "strategy": "external"
-            }
+            "architecture": { "value": "x64", "strategy": "external" },
+            "toolset": { "value": "host=x64", "strategy": "external" }
         },
         {
             "name": "linux-paths",
             "hidden": true,
-            "cacheVariables": {
-                "FSM_ROOT": "$env{PKG_ROOT}/libfsm",
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/linux",
-                "VCPKG_TARGET_TRIPLET": "x64-linux",
-                "VCPKG_MANIFEST_MODE": "ON"
-            },
-            "environment": {
-                "PKG_ROOT": "/opt",
-                "VCPKG_ROOT": "/opt/vcpkg"
-            },
-            "inherits": [
-                "vcpkg-cache-linux"
-            ]
+            "inherits": ["native-paths", "vcpkg-cache"],
+            "environment": { "TURBOAGENT_HOST": "linux", "VCPKG_TARGET_TRIPLET": "x64-linux" },
+            "cacheVariables": { "VCPKG_HOST_TRIPLET": "x64-linux" }
         },
         {
-            "name": "android-win-environment",
-            "hidden": true,
-            "inherits": "win-toolchain",
-            "environment": {
-                "ANDROID_SDK_ROOT": "$penv{LOCALAPPDATA}/Android/Sdk",
-                "ANDROID_NDK_VERSION": "28.2.13676358",
-                "ANDROID_NDK_HOME": "$env{ANDROID_SDK_ROOT}/ndk/$env{ANDROID_NDK_VERSION}"
-            },
-            "cacheVariables": {}
+            "name": "win-dev-user",
+            "inherits": ["base-win-dev-user", "local-debug", "win-paths"],
+            "binaryDir": "$env{TURBOAGENT_BUILD_DIR}",
+            "environment": { "TURBOAGENT_BUILD_DIR": "${sourceDir}/build/Msvc" }
+        },
+        {
+            "name": "win-release-user",
+            "inherits": ["base-win-release-user", "local-release", "win-paths"],
+            "binaryDir": "$env{TURBOAGENT_BUILD_DIR}",
+            "environment": { "TURBOAGENT_BUILD_DIR": "${sourceDir}/build/Msvc-Release" }
+        },
+        {
+            "name": "linux-dev-user",
+            "inherits": ["base-linux-dev-user", "local-debug", "linux-paths"]
+        },
+        {
+            "name": "linux-release-user",
+            "inherits": ["base-linux-release-user", "local-release", "linux-paths"]
+        },
+        {
+            "name": "linux-sdk-package",
+            "inherits": ["base-linux-sdk-package", "local-release", "linux-paths"],
+            "binaryDir": "${sourceDir}/build/linux-gcc-sdk-package"
         },
         {
             "name": "android-win-user-paths",
             "hidden": true,
-            "inherits": [
-                "vcpkg-cache-windows",
-                "android-win-paths",
-                "ISWindows"
-            ],
-            "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent-android/$env{ANDROID_BUILD_VARIANT}",
-                "FSM_ROOT": "$env{PKG_ROOT}/libfsm-android",
-                "PKG_CONFIG_EXECUTABLE": "${sourceDir}/vcpkg_installed/$env{ANDROID_BUILD_VARIANT}/x64-windows/tools/pkgconf/pkgconf.exe",
+            "inherits": ["vcpkg-cache", "local-environment", "android-win-paths"],
+            "environment": {
+                "TURBOAGENT_SDK_SUFFIX": "-android",
+                "ANDROID_NDK_HOME": "$penv{ANDROID_NDK_HOME}",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/$env{ANDROID_BUILD_VARIANT}"
-            }
-        },
-        {
-            "name": "win-dev-user",
-            "cacheVariables": {
-                "ENABLE_SANITIZER_ADDRESS": "ON",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/windows/x64-windows/debug",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent/debug"
             },
-            "environment": {
-                "PATH": "${sourceDir}/build/Msvc/bin${pathListSep}${sourceDir}/vcpkg_installed/windows/x64-windows/debug/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$env{TURBOWASM_ROOT}/bin${pathListSep}$env{RE2C_ROOT}/bin${pathListSep}$penv{PATH}",
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
-                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
-                "CHTTP_ROOT": "$env{PKG_ROOT}/chttp/debug",
-                "TURBOWASM_ROOT": "$env{PKG_ROOT}/turbowasm/debug"
-            },
-            "inherits": [
-                "base-win-dev-user",
-                "win-paths"
-            ]
-        },
-        {
-            "name": "win-release-user",
-            "cacheVariables": {
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/windows/x64-windows",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent/release",
-                "ENABLE_TESTS": true,
-                "BUILD_TESTS": true,
-                "BUILD_BENCHMARKS": false
-            },
-            "environment": {
-                "PATH": "${sourceDir}/build/Msvc-Release/bin${pathListSep}${sourceDir}/vcpkg_installed/windows/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$env{TURBOWASM_ROOT}/bin${pathListSep}$env{RE2C_ROOT}/bin${pathListSep}$penv{PATH}",
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
-                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
-                "CHTTP_ROOT": "$env{PKG_ROOT}/chttp/release",
-                "TURBOWASM_ROOT": "$env{PKG_ROOT}/turbowasm/release"
-            },
-            "inherits": [
-                "base-win-release-user",
-                "win-paths"
-            ]
-        },
-        {
-            "name": "linux-dev-user",
-            "cacheVariables": {
-                "ENABLE_SANITIZER_ADDRESS": "ON",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/linux/x64-linux/debug",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent/debug"
-            },
-            "inherits": [
-                "base-linux-dev-user",
-                "linux-paths"
-            ],
-            "environment": {
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
-                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
-                "CHTTP_ROOT": "$env{PKG_ROOT}/chttp/debug",
-                "TURBOWASM_ROOT": "$env{PKG_ROOT}/turbowasm/debug"
-            }
-        },
-        {
-            "name": "linux-release-user",
-            "cacheVariables": {
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/linux/x64-linux",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent/release"
-            },
-            "inherits": [
-                "release-linux-ninja",
-                "linux-paths"
-            ],
-            "environment": {
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
-                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
-                "CHTTP_ROOT": "$env{PKG_ROOT}/chttp/release",
-                "TURBOWASM_ROOT": "$env{PKG_ROOT}/turbowasm/release"
-            }
-        },
-        {
-            "name": "linux-sdk-package",
-            "binaryDir": "${sourceDir}/build/linux-gcc-sdk-package",
-            "cacheVariables": {
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/linux/x64-linux",
-                "ENABLE_SANITIZER_ADDRESS": "OFF",
-                "ENABLE_TESTS": "OFF",
-                "BUILD_TESTS": "OFF",
-                "BUILD_EXAMPLES": "OFF",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent/release"
-            },
-            "inherits": [
-                "release-linux-ninja",
-                "linux-paths"
-            ],
-            "environment": {
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
-                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
-                "CHTTP_ROOT": "$env{PKG_ROOT}/chttp/release",
-                "TURBOWASM_ROOT": "$env{PKG_ROOT}/turbowasm/release"
-            }
-        },
-        {
-            "name": "android-dependencies-debug",
-            "hidden": true,
             "cacheVariables": {
                 "CMAKE_PREFIX_PATH": "",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent-android/debug"
-            },
-            "environment": {
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/debug",
-                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/debug",
-                "CHTTP_ROOT": "$env{PKG_ROOT}/chttp-android/debug",
-                "TURBOWASM_ROOT": "$env{PKG_ROOT}/turbowasm-android/debug"
-            }
-        },
-        {
-            "name": "android-dependencies-release",
-            "hidden": true,
-            "cacheVariables": {
-                "CMAKE_PREFIX_PATH": "",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turboagent-android/release"
-            },
-            "environment": {
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release",
-                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release",
-                "CHTTP_ROOT": "$env{PKG_ROOT}/chttp-android/release",
-                "TURBOWASM_ROOT": "$env{PKG_ROOT}/turbowasm-android/release"
+                "FSM_ROOT": "$env{PKG_ROOT}/libfsm-android",
+                "VCPKG_HOST_TRIPLET": "x64-windows",
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+                "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe"
             }
         },
         {
             "name": "android-arm64-v8a-debug-win",
-            "environment": {
-                "ANDROID_BUILD_VARIANT": "android-arm64-v8a-debug"
-            },
-            "inherits": [
-                "android-arm64-v8a-debug",
-                "android-dependencies-debug",
-                "android-win-user-paths",
-                "android-win-environment"
-            ],
-            "cacheVariables": {}
+            "inherits": ["android-arm64-v8a-debug", "android-win-user-paths", "local-debug"]
         },
         {
             "name": "android-arm64-v8a-release-win",
-            "environment": {
-                "ANDROID_BUILD_VARIANT": "android-arm64-v8a-release"
-            },
-            "inherits": [
-                "android-arm64-v8a-release",
-                "android-dependencies-release",
-                "android-win-user-paths",
-                "android-win-environment"
-            ],
-            "cacheVariables": {}
+            "inherits": ["android-arm64-v8a-release", "android-win-user-paths", "local-release"]
         },
         {
             "name": "android-x86_64-debug-win",
-            "environment": {
-                "ANDROID_BUILD_VARIANT": "android-x86_64-debug"
-            },
-            "inherits": [
-                "android-x86_64-debug",
-                "android-dependencies-debug",
-                "android-win-user-paths",
-                "android-win-environment"
-            ],
-            "cacheVariables": {}
+            "inherits": ["android-x86_64-debug", "android-win-user-paths", "local-debug"]
         },
         {
             "name": "android-x86_64-release-win",
-            "environment": {
-                "ANDROID_BUILD_VARIANT": "android-x86_64-release"
-            },
-            "inherits": [
-                "android-x86_64-release",
-                "android-dependencies-release",
-                "android-win-user-paths",
-                "android-win-environment"
-            ],
-            "cacheVariables": {}
+            "inherits": ["android-x86_64-release", "android-win-user-paths", "local-release"]
         },
         {
             "name": "android-x86-debug-win",
-            "environment": {
-                "ANDROID_BUILD_VARIANT": "android-x86-debug"
-            },
-            "inherits": [
-                "android-x86-debug",
-                "android-dependencies-debug",
-                "android-win-user-paths",
-                "android-win-environment"
-            ],
-            "cacheVariables": {}
+            "inherits": ["android-x86-debug", "android-win-user-paths", "local-debug"]
         },
         {
             "name": "android-x86-release-win",
+            "inherits": ["android-x86-release", "android-win-user-paths", "local-release"]
+        },
+        {
+            "name": "ci-sdk",
+            "hidden": true,
+            "inherits": "vcpkg-cache",
+            "binaryDir": "$env{TURBOAGENT_BUILD_DIR}",
             "environment": {
-                "ANDROID_BUILD_VARIANT": "android-x86-release"
+                "TURBOAGENT_BUILD_DIR": "${sourceDir}/build/$env{TURBOAGENT_PROFILE}",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/$env{TURBOAGENT_PROFILE}",
+                "TURBOAGENT_VCPKG_PREFIX": "$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}",
+                "SALTS_ROOT": "$penv{SALTS_ROOT}",
+                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
+                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
+                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}"
             },
-            "inherits": [
-                "android-x86-release",
-                "android-dependencies-release",
-                "android-win-user-paths",
-                "android-win-environment"
-            ],
-            "cacheVariables": {}
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+                "VCPKG_TARGET_TRIPLET": "$env{VCPKG_TARGET_TRIPLET}",
+                "VCPKG_HOST_TRIPLET": "$env{VCPKG_HOST_TRIPLET}",
+                "CMAKE_PREFIX_PATH": "$env{TURBOAGENT_VCPKG_PREFIX}",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/$env{TURBOAGENT_SDK_RID}"
+            }
+        },
+        {
+            "name": "ci-praktor",
+            "hidden": true,
+            "inherits": "ci-sdk",
+            "environment": { "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}", "PRAKTOR_ROOT": "$penv{PRAKTOR_ROOT}" }
+        },
+        {
+            "name": "ci-unix-runtime",
+            "hidden": true,
+            "inherits": "ci-praktor",
+            "environment": {
+                "TURBOAGENT_LIBRARY_PATH": "$env{TURBOAGENT_BUILD_DIR}/bin:$env{TURBOAGENT_VCPKG_PREFIX}/lib:$env{SALTS_ROOT}/lib:$env{SALTS_ROOT}/bin:$env{SALTS_UTILS_ROOT}/lib:$env{SALTS_UTILS_ROOT}/bin:$env{CHTTP_ROOT}/lib:$env{CHTTP_ROOT}/bin:$env{TURBOWASM_ROOT}/lib:$env{TURBOWASM_ROOT}/bin:$env{TURBOSCRIPT_ROOT}/lib:$env{TURBOSCRIPT_ROOT}/bin:$env{PRAKTOR_ROOT}/lib:$env{PRAKTOR_ROOT}/bin"
+            }
         },
         {
             "name": "ci-windows-release",
             "displayName": "CI / SDK Release (windows-x64)",
-            "inherits": [
-                "base-ci-release",
-                "vcpkg-cache-ci",
-                "ISWindows",
-                "Msvc",
-                "flags-msvc"
-            ],
-            "binaryDir": "${sourceDir}/build/${presetName}",
-            "cacheVariables": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci-windows-release",
-                "VCPKG_TARGET_TRIPLET": "$penv{QIGAO_VCPKG_WINDOWS_TRIPLET}",
-                "VCPKG_HOST_TRIPLET": "$penv{QIGAO_VCPKG_WINDOWS_HOST_TRIPLET}",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/ci-windows-release/$penv{QIGAO_VCPKG_WINDOWS_TRIPLET}",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/windows-x64",
-                "ENABLE_PRAKTOR_TOOLS": false
-            },
+            "inherits": ["windows-runtime", "ci-sdk", "base-ci-windows-release"],
             "environment": {
-                "SALTS_ROOT": "$penv{SALTS_ROOT}",
-                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
-                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}",
-                "PATH": "${sourceDir}/build/ci-windows-release/bin${pathListSep}${sourceDir}/vcpkg_installed/ci-windows-release/$penv{QIGAO_VCPKG_WINDOWS_TRIPLET}/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CHTTP_ROOT}/bin${pathListSep}$env{TURBOWASM_ROOT}/bin${pathListSep}$env{RE2C_ROOT}/bin${pathListSep}$penv{PATH}"
+                "VCPKG_TARGET_TRIPLET": "$penv{QIGAO_VCPKG_WINDOWS_TRIPLET}",
+                "VCPKG_HOST_TRIPLET": "$penv{QIGAO_VCPKG_WINDOWS_HOST_TRIPLET}"
             }
         },
         {
             "name": "ci-linux-release",
             "displayName": "CI / SDK Release (linux-x64)",
-            "inherits": [
-                "base-ci-release",
-                "vcpkg-cache-ci",
-                "ISLinux",
-                "Gcc",
-                "flags-gnu"
-            ],
-            "binaryDir": "${sourceDir}/build/${presetName}",
-            "cacheVariables": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci-linux-release",
-                "VCPKG_TARGET_TRIPLET": "x64-linux",
-                "VCPKG_HOST_TRIPLET": "x64-linux",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/ci-linux-release/x64-linux",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/linux-x64",
-                "ENABLE_PRAKTOR_TOOLS": true
-            },
-            "environment": {
-                "SALTS_ROOT": "$penv{SALTS_ROOT}",
-                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
-                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}",
-                "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
-                "PRAKTOR_ROOT": "$penv{PRAKTOR_ROOT}",
-                "LD_LIBRARY_PATH": "${sourceDir}/build/ci-linux-release/bin:${sourceDir}/vcpkg_installed/ci-linux-release/x64-linux/lib:$env{SALTS_ROOT}/lib:$env{SALTS_ROOT}/bin:$env{SALTS_UTILS_ROOT}/lib:$env{SALTS_UTILS_ROOT}/bin:$env{CHTTP_ROOT}/lib:$env{CHTTP_ROOT}/bin:$env{TURBOWASM_ROOT}/lib:$env{TURBOWASM_ROOT}/bin:$env{TURBOSCRIPT_ROOT}/lib:$env{TURBOSCRIPT_ROOT}/bin:$env{PRAKTOR_ROOT}/lib:$env{PRAKTOR_ROOT}/bin:$penv{LD_LIBRARY_PATH}"
-            }
+            "inherits": ["ci-unix-runtime", "base-ci-linux-release"],
+            "environment": { "LD_LIBRARY_PATH": "$env{TURBOAGENT_LIBRARY_PATH}:$penv{LD_LIBRARY_PATH}" }
         },
         {
             "name": "ci-macos-release",
             "displayName": "CI / SDK Release (macos-arm64)",
-            "inherits": [
-                "base-ci-release",
-                "vcpkg-cache-ci",
-                "ISMac",
-                "AppleClang",
-                "flags-darwin"
-            ],
-            "binaryDir": "${sourceDir}/build/${presetName}",
-            "cacheVariables": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci-macos-release",
-                "VCPKG_TARGET_TRIPLET": "arm64-osx",
-                "VCPKG_HOST_TRIPLET": "arm64-osx",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/ci-macos-release/arm64-osx",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/macos-arm64",
-                "ENABLE_PRAKTOR_TOOLS": true,
-                "CMAKE_OSX_ARCHITECTURES": "arm64",
-                "ENABLE_TESTS": false,
-                "BUILD_TESTS": false,
-                "BUILD_TESTING": false
-            },
-            "environment": {
-                "SALTS_ROOT": "$penv{SALTS_ROOT}",
-                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
-                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}",
-                "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
-                "PRAKTOR_ROOT": "$penv{PRAKTOR_ROOT}",
-                "DYLD_LIBRARY_PATH": "${sourceDir}/build/ci-macos-release/bin:${sourceDir}/vcpkg_installed/ci-macos-release/arm64-osx/lib:$env{SALTS_ROOT}/lib:$env{SALTS_ROOT}/bin:$env{SALTS_UTILS_ROOT}/lib:$env{SALTS_UTILS_ROOT}/bin:$env{CHTTP_ROOT}/lib:$env{CHTTP_ROOT}/bin:$env{TURBOWASM_ROOT}/lib:$env{TURBOWASM_ROOT}/bin:$env{TURBOSCRIPT_ROOT}/lib:$env{TURBOSCRIPT_ROOT}/bin:$env{PRAKTOR_ROOT}/lib:$env{PRAKTOR_ROOT}/bin:$penv{DYLD_LIBRARY_PATH}"
-            }
+            "inherits": ["ci-unix-runtime", "base-ci-macos-release"],
+            "environment": { "DYLD_LIBRARY_PATH": "$env{TURBOAGENT_LIBRARY_PATH}:$penv{DYLD_LIBRARY_PATH}" }
         },
         {
             "name": "ci-android-release",
             "displayName": "CI / SDK Release (android-arm64-v8a)",
-            "inherits": [
-                "base-ci-release",
-                "vcpkg-cache-ci",
-                "ISLinux",
-                "android-base"
-            ],
-            "binaryDir": "${sourceDir}/build/${presetName}",
-            "cacheVariables": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/ci-android-release",
-                "VCPKG_TARGET_TRIPLET": "arm64-android",
-                "VCPKG_HOST_TRIPLET": "x64-linux",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed/ci-android-release/arm64-android",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/sdk/android-arm64-v8a",
-                "ENABLE_PRAKTOR_TOOLS": true,
-                "ANDROID_ABI": "arm64-v8a",
-                "ANDROID_PLATFORM": "android-26",
-                "ENABLE_TESTS": false,
-                "BUILD_TESTS": false,
-                "BUILD_TESTING": false,
-                "ENABLE_CODEX_BRIDGE": false
-            },
-            "environment": {
-                "SALTS_ROOT": "$penv{SALTS_ROOT}",
-                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-                "CHTTP_ROOT": "$penv{CHTTP_ROOT}",
-                "TURBOWASM_ROOT": "$penv{TURBOWASM_ROOT}",
-                "TURBOSCRIPT_ROOT": "$penv{TURBOSCRIPT_ROOT}",
-                "PRAKTOR_ROOT": "$penv{PRAKTOR_ROOT}",
-                "ANDROID_NDK_HOME": "$penv{ANDROID_NDK_HOME}"
-            }
+            "inherits": ["ci-praktor", "base-ci-android-release"],
+            "environment": { "ANDROID_NDK_HOME": "$penv{ANDROID_NDK_HOME}" }
         }
     ],
     "buildPresets": [
-        {
-            "name": "win-dev-user",
-            "configurePreset": "win-dev-user"
-        },
-        {
-            "name": "win-release-user",
-            "configurePreset": "win-release-user"
-        },
-        {
-            "name": "linux-dev-user",
-            "configurePreset": "linux-dev-user"
-        },
-        {
-            "name": "linux-release-user",
-            "configurePreset": "linux-release-user"
-        },
-        {
-            "name": "linux-sdk-package",
-            "configurePreset": "linux-sdk-package"
-        },
-        {
-            "name": "android-arm64-v8a-debug-win",
-            "configurePreset": "android-arm64-v8a-debug-win"
-        },
-        {
-            "name": "android-arm64-v8a-release-win",
-            "configurePreset": "android-arm64-v8a-release-win"
-        },
-        {
-            "name": "android-x86_64-debug-win",
-            "configurePreset": "android-x86_64-debug-win"
-        },
-        {
-            "name": "android-x86_64-release-win",
-            "configurePreset": "android-x86_64-release-win"
-        },
-        {
-            "name": "android-x86-debug-win",
-            "configurePreset": "android-x86-debug-win"
-        },
-        {
-            "name": "android-x86-release-win",
-            "configurePreset": "android-x86-release-win"
-        },
-        {
-            "name": "install-android-arm64-v8a-debug-win",
-            "configurePreset": "android-arm64-v8a-debug-win",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-android-arm64-v8a-release-win",
-            "configurePreset": "android-arm64-v8a-release-win",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-android-x86_64-debug-win",
-            "configurePreset": "android-x86_64-debug-win",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-android-x86_64-release-win",
-            "configurePreset": "android-x86_64-release-win",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-android-x86-debug-win",
-            "configurePreset": "android-x86-debug-win",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-android-x86-release-win",
-            "configurePreset": "android-x86-release-win",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-dev-user",
-            "configurePreset": "win-dev-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "install-win-release-user",
-            "configurePreset": "win-release-user",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "ci-windows-release",
-            "configurePreset": "ci-windows-release"
-        },
-        {
-            "name": "install-ci-windows-release",
-            "configurePreset": "ci-windows-release",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "ci-linux-release",
-            "configurePreset": "ci-linux-release"
-        },
-        {
-            "name": "install-ci-linux-release",
-            "configurePreset": "ci-linux-release",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "ci-macos-release",
-            "configurePreset": "ci-macos-release"
-        },
-        {
-            "name": "install-ci-macos-release",
-            "configurePreset": "ci-macos-release",
-            "targets": [
-                "install"
-            ]
-        },
-        {
-            "name": "ci-android-release",
-            "configurePreset": "ci-android-release"
-        },
-        {
-            "name": "install-ci-android-release",
-            "configurePreset": "ci-android-release",
-            "targets": [
-                "install"
-            ]
-        }
+        {"name": "win-dev-user", "configurePreset": "win-dev-user"},
+        {"name": "win-release-user", "configurePreset": "win-release-user"},
+        {"name": "linux-dev-user", "configurePreset": "linux-dev-user"},
+        {"name": "linux-release-user", "configurePreset": "linux-release-user"},
+        {"name": "linux-sdk-package", "configurePreset": "linux-sdk-package"},
+        {"name": "android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win"},
+        {"name": "android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win"},
+        {"name": "android-x86_64-debug-win", "configurePreset": "android-x86_64-debug-win"},
+        {"name": "android-x86_64-release-win", "configurePreset": "android-x86_64-release-win"},
+        {"name": "android-x86-debug-win", "configurePreset": "android-x86-debug-win"},
+        {"name": "android-x86-release-win", "configurePreset": "android-x86-release-win"},
+        {"name": "install-android-arm64-v8a-debug-win", "inherits": ["android-arm64-v8a-debug-win", "base-install"]},
+        {"name": "install-android-arm64-v8a-release-win", "inherits": ["android-arm64-v8a-release-win", "base-install"]},
+        {"name": "install-android-x86_64-debug-win", "inherits": ["android-x86_64-debug-win", "base-install"]},
+        {"name": "install-android-x86_64-release-win", "inherits": ["android-x86_64-release-win", "base-install"]},
+        {"name": "install-android-x86-debug-win", "inherits": ["android-x86-debug-win", "base-install"]},
+        {"name": "install-android-x86-release-win", "inherits": ["android-x86-release-win", "base-install"]},
+        {"name": "install-win-dev-user", "inherits": ["win-dev-user", "base-install"]},
+        {"name": "install-win-release-user", "inherits": ["win-release-user", "base-install"]},
+        {"name": "install-linux-dev-user", "inherits": ["linux-dev-user", "base-install"]},
+        {"name": "install-linux-release-user", "inherits": ["linux-release-user", "base-install"]},
+        {"name": "install-linux-sdk-package", "inherits": ["linux-sdk-package", "base-install"]},
+        {"name": "ci-windows-release", "configurePreset": "ci-windows-release"},
+        {"name": "install-ci-windows-release", "inherits": ["ci-windows-release", "base-install"]},
+        {"name": "ci-linux-release", "configurePreset": "ci-linux-release"},
+        {"name": "install-ci-linux-release", "inherits": ["ci-linux-release", "base-install"]},
+        {"name": "ci-macos-release", "configurePreset": "ci-macos-release"},
+        {"name": "install-ci-macos-release", "inherits": ["ci-macos-release", "base-install"]},
+        {"name": "ci-android-release", "configurePreset": "ci-android-release"},
+        {"name": "install-ci-android-release", "inherits": ["ci-android-release", "base-install"]}
     ],
     "testPresets": [
-        {
-            "name": "win-dev-user",
-            "inherits": "base-test",
-            "configurePreset": "win-dev-user"
-        },
-        {
-            "name": "win-release-user",
-            "inherits": "base-test",
-            "configurePreset": "win-release-user"
-        },
-        {
-            "name": "linux-dev-user",
-            "inherits": "base-test",
-            "configurePreset": "linux-dev-user"
-        },
-        {
-            "name": "linux-release-user",
-            "inherits": "base-test",
-            "configurePreset": "linux-release-user"
-        },
-        {
-            "name": "ci-windows-release",
-            "inherits": "base-test",
-            "configurePreset": "ci-windows-release"
-        },
-        {
-            "name": "ci-linux-release",
-            "inherits": "base-test",
-            "configurePreset": "ci-linux-release"
-        }
+        {"name": "win-dev-user", "inherits": "base-test", "configurePreset": "win-dev-user"},
+        {"name": "win-release-user", "inherits": "base-test", "configurePreset": "win-release-user"},
+        {"name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user"},
+        {"name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user"},
+        {"name": "ci-windows-release", "inherits": "base-test", "configurePreset": "ci-windows-release"},
+        {"name": "ci-linux-release", "inherits": "base-test", "configurePreset": "ci-linux-release"}
     ]
 }

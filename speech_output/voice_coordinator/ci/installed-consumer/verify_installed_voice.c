@@ -1,4 +1,5 @@
 #include "turbo_agent_voice_coordinator.h"
+#include <salts_capture.h>
 
 /* Exercise exact current-head archived symbol resolution against real
  * published Salts::Playback without creating/starting an audio device. */
@@ -19,6 +20,11 @@ int main(void) {
   if (salts_playback_create(NULL, &invalid_config, &native) !=
       SALTS_PLAYBACK_ERR_FORMAT || native != NULL)
     return 5;
+  /* REAL released Salts::Capture rejects malformed PCM config before
+   * allocating or opening a native microphone. No permission prompt. */
+  salts_audio_capture_config_t invalid_capture = {12345, 1, 16, 20};
+  if (salts_audio_capture_create(NULL, &invalid_capture) != NULL)
+    return 6;
   if (turbo_voice_get_generation(NULL) != 0u) return 1;
   if (turbo_voice_get_state(NULL) != TURBO_VOICE_FAILED) return 2;
   return 0;

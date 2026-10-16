@@ -35,6 +35,28 @@ jobs:
           test -f build/pinned-m2-source/speech_input/src/turbo_agent_speech_input.c
           test -f build/pinned-m2-source/speech_input/capture/src/turbo_agent_speech_capture_bridge.c
           test -f build/pinned-m2-source/speech_input/capture/include/turbo_agent_speech_capture.h
+      - name: Check out exact M3 Provider for source-instrumented sanitizers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/TurboAgent
+          ref: 4614360e6ee2e174d96cbdd9ce41c5388c81d064
+          path: build/pinned-m3-source
+          persist-credentials: false
+      - name: Check out exact Whisper.cpp v1.9.5 header for source sanitizers
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: d1be6fde11ac6e0407606b4e42fe72d34add8037
+          path: build/pinned-whisper-header
+          persist-credentials: false
+      - name: Verify original model-free M3 source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C build/pinned-m3-source rev-parse HEAD)" = '4614360e6ee2e174d96cbdd9ce41c5388c81d064'
+          test "$(git -C build/pinned-whisper-header rev-parse HEAD)" = 'd1be6fde11ac6e0407606b4e42fe72d34add8037'
+          test -f build/pinned-m3-source/speech_input/whisper/tests/test_turbo_agent_speech_whisper_mock.c
+          test -f build/pinned-whisper-header/ggml/include/ggml-cpu.h
       - name: Download exact published Salts and SaltsUtils NuGet SDK archives
         shell: bash
         run: |
@@ -77,6 +99,11 @@ jobs:
             -DENABLE_TTS_NATIVE_DSO_TEST=ON \
             -DENABLE_TTS_HOST_HANDOFF_TEST=ON \
             -DENABLE_TTS_HARNESS_FINAL_GATE_TEST=ON \
+            -DENABLE_TTS_M3_WHISPER_SANITIZER_TEST=ON \
+            "-DSPEECH_M3_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-m3-source" \
+            "-DSPEECH_M3_WHISPER_HEADER_ROOT=$GITHUB_WORKSPACE/build/pinned-whisper-header" \
+            -DSPEECH_M3_PINNED_SHA=4614360e6ee2e174d96cbdd9ce41c5388c81d064 \
+            -DSPEECH_M3_WHISPER_PINNED_SHA=d1be6fde11ac6e0407606b4e42fe72d34add8037 \
             "-DSPEECH_M2_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-m2-source" \
             "-DSALTS_PLAYBACK_INCLUDE_DIR=$SALTS_UTILS_ROOT/include" \
             "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror -fno-omit-frame-pointer $flags" \
@@ -84,6 +111,8 @@ jobs:
             "-DCMAKE_EXE_LINKER_FLAGS=$flags"
           cmake --build build/speech-output-m41 --parallel 2
           ctest --test-dir build/speech-output-m41 --output-on-failure
+          # Fail if the original C11 M3 Provider was not actually built/tested.
+          test -x build/speech-output-m41/voice_coordinator/tests/m3/test_tts_m42_original_m3_whisper_sanitized
       - name: Link actual published Salts Playback imported CMake target
         shell: bash
         run: |

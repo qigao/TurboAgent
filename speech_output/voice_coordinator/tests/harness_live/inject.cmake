@@ -16,6 +16,5 @@ if(NOT DEFINED VOICE_M42_PINNED_HARNESS_SHA OR
 endif()
 # This callback runs after the original root project() but defers test target
 # creation until the REAL Harness, Agent and Salts targets have been declared.
-cmake_language(DEFER CALL add_subdirectory
-  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness_live"
-  "${CMAKE_BINARY_DIR}/m42-live-harness")
+cmake_language(DEFER CALL include
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness_live/CMakeLists.txt")

@@ -1,17 +1,30 @@
 # Original Salts Capture Linux source TSan (virtual-only)
 
-This **independent opt-in Linux Draft** continues #206. It rebuilds the
-**unchanged SaltsUtils v4.3.0-rc.11 Capture C11 Linux production source**
-with `-fsanitize=thread`, alongside the **unchanged upstream miniaudio
-0.11.22 native audio backend**, then runs the actual original TurboAgent M1
+This **independent opt-in Linux Draft** continues #206. Its source
+test originally compiled the **unchanged SaltsUtils v4.3.0-rc.11 Capture
+Linux C11 production closure** with `-fsanitize=thread` and exposed a
+real concurrent read/write data race at
+`capture/src/capture_audio_miniaudio.c:50`: the audio callback read the
+plain public `capture->state` while Linux start/stop wrote it.
+The unsuppressed original-source [negative CI #38865018002](https://github.com/qigao/TurboAgent/actions/runs/38865018002)
+failed as required, preserving the baseline evidence.
+
+The positive acceptance retains **every other original rc.11 Capture,
+video, screen and miniaudio source file** and substitutes ONLY
+`capture_audio_miniaudio.c` from exact
+[SaltsUtils Draft #653 commit `4e1c77f`](https://github.com/qigao/salts-utils/pull/653).
+That patch introduces a **private C11 atomic callback admission gate**
+instead of racing a public plain state enum. The original miniaudio
+0.11.22 native backend remains unchanged. It runs actual original M1
 SpeechInput and M2 `SpeechCaptureSalts` adapter from immutable SHA
 `9e51d377bd84ee91ce5a47c94f24f73e4e01bba7`.
 
 The source build deliberately includes original video/screen dispatchers:
 `capture_video.c`, `capture_linux.c`, `capture_audio_miniaudio.c`,
 `capture_video_linux.c`, `capture_screen_linux.c` and
-`miniaudio_impl.c`. All are production implementations from the
-tag, **not test stand-ins for `salts_capture_*` functions**. They link
+`miniaudio_impl.c`. All are genuine production implementations, with
+only the exact explicitly pinned **private atomic Capture source fix**
+different from the tag; **no test stand-ins for `salts_capture_*`**. They link
 original Linux PipeWire/X11 runtime libraries; only the audio path is
 opened in this test.
 
@@ -35,6 +48,10 @@ then stop and destroy settle safely. The original M2 native adapter must
 refuse early destroy, copy precisely-sized S16LE frames into the single
 M1 bounded queue, stop/join before original M1 one-shot FINAL, and
 ensure cancellation is terminal with no FINAL.
+
+The candidate's unsuppressed [positive CI #38865851955](https://github.com/qigao/TurboAgent/actions/runs/38865851955)
+passed **6/6** full native callback stop/join and M1/M2 one-shot
+FINAL/cancellation cases with no race reports.
 
 The executable has `DT_NEEDED libsalts_capture.so` whose loader path
 must be **the newly source-built TSan library**, never the installed

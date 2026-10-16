@@ -81,6 +81,12 @@ int main(int argc, char **argv) {
          "\"minimum_nonzero_frame_power\":%" PRIu64 ","
          "\"mean_spectral_concentration\":%.6f,"
          "\"mean_peak_autocorrelation\":%.6f,"
+         "\"mean_sparse_band_share\":[%.6f,%.6f,%.6f,%.6f],"
+         "\"mean_sparse_band_entropy\":%.6f,"
+         "\"mean_sparse_band_flux\":%.6f,"
+         "\"sparse_band_observed_frames\":%" PRIu32 ","
+         "\"sparse_band_flux_transitions\":%" PRIu32 ","
+         "\"sparse_band_is_calibrated_classifier\":false,"
          "\"decision\":\"%s\","
          "\"non_speech_only_when_all_digital_zero\":true,"
          "\"diagnostic_only\":true,"
@@ -96,6 +102,14 @@ int main(int argc, char **argv) {
          result.minimum_nonzero_frame_power,
          result.mean_spectral_concentration,
          result.mean_peak_autocorrelation,
+         result.mean_sparse_band_share[0],
+         result.mean_sparse_band_share[1],
+         result.mean_sparse_band_share[2],
+         result.mean_sparse_band_share[3],
+         result.mean_sparse_band_entropy,
+         result.mean_sparse_band_flux,
+         result.sparse_band_observed_frames,
+         result.sparse_band_flux_transitions,
          result.decision == TA_VAD_LAB_NON_SPEECH_CONFIDENT ?
             "NON_SPEECH_CONFIDENT" :
             result.decision == TA_VAD_LAB_SPEECH_PRESENT ?

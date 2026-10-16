@@ -234,7 +234,7 @@ jobs:
         if: matrix.rid == 'windows-x64' && matrix.tests && github.event_name == 'workflow_dispatch'
         shell: cmd
         run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release --no-tests=error --output-on-failure --repeat until-fail:20 -R "^test_turbo_coding_workspace$"
+          call cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release --no-tests=error --output-on-failure --repeat until-fail:20 -R "^test_turbo_coding_workspace$"
 
       - name: Test on Windows
         if: runner.os == 'Windows' && matrix.tests

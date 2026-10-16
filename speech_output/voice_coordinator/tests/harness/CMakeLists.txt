@@ -44,7 +44,8 @@ target_include_directories(turbo_voice_harness_final_gate PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
   PRIVATE ${_host_public_paths})
 target_link_libraries(turbo_voice_harness_final_gate
-  PUBLIC turbo_tts_voice_coordinator)
+  PUBLIC turbo_tts_voice_coordinator
+  PRIVATE Salts::JsonParser)
 target_compile_options(turbo_voice_harness_final_gate PRIVATE
   -Wall -Wextra -Wpedantic -Werror)
 

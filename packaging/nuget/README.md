@@ -2,15 +2,35 @@
 
 TurboAgent 的 native SDK package，由 `qigao/TurboAgent` 自己构建、验证和发布。
 
-TurboAgent.Native **不发布 NuGet dependency metadata**，因此 package 本身不保留
-Salts / SaltsUtils / CHttp / TurboWasm / Praktor 的任何版本号。发布 CI 与仓库 CI 通过
-[`Windows`](../../cmake/ci/restore-native-sdk.ps1) 和
-[`Unix`](../../cmake/ci/restore-native-sdk.sh) SDK restore 脚本，每轮重新查询各依赖
-的全部 GitHub Releases，按 `published_at` 选择最新已发布版本，包含 prerelease，
-排除草稿。日志记录本轮选中的 tag，不作为后续构建的版本锁定；无已发布版本、
-缺少 Native package 或目标平台 SDK 时直接失败，不回退旧包。
-该解析使用 [GitHub Releases API](https://docs.github.com/en/rest/releases/releases#list-releases)，
-兼容性由正式构建和 CTest 验证。
+TurboAgent.Native **不发布 NuGet dependency metadata**；依赖 SDK 的来源由构建时的
+**已发布 Release Tag** 明确固定，而非 Git commit SHA 或浮动的“最新发布”。
+`native-sdk-build.yml` 为四平台统一指定以下精确标签（2026-10-16）：
+
+| SDK | 固定 Release Tag |
+| --- | --- |
+| Salts.Native | `v2.3.0-rc.17` |
+| SaltsUtils.Native | `v4.3.0-rc.11` |
+| CHttp.Native | `v2.1.0-rc.6` |
+| TurboScript.Native | `v3.0.10` |
+| Praktor.Native | `v0.4.8` |
+| TurboWasm.Native | `v0.2.1` |
+
+[Unix](../../cmake/ci/restore-native-sdk.sh) 与
+[Windows](../../cmake/ci/restore-native-sdk.ps1) SDK restore 严格校验指定的
+GitHub Release 已发布、不是 Draft，并仅下载标签对应的**完整版本号包名**。
+缺失 Tag、发布资产或目标 RID 的 CMake package config 时立即失败，
+不会拉取其他标签、Git SHA、源码候选或旧 SDK。
+每个实际下载的 `.nupkg` 的 Tag、文件名、SHA-256 会写入本轮 native SDK 的
+`turboagent-sdk-manifest.txt`，供独立消费者按发布包溯源。
+
+`TurboAgent CI` 的 `workflow_dispatch` 可以指定 `salts_release_tag` 来验收
+一个**已经正式发布**的新标签；正常 PR、main 与版本发布仍使用文件中固定的
+Release Tag。候选通过后需要单独修改固定标签并运行完整 CI，不能只凭
+源代码 SHA 的测试结果声明正式 SDK 已兼容。
+
+**注意：** `v2.3.0-rc.17` 不包含后续合并至 Salts `master` 的 Windows
+Job Object 回收修复（Salts #1230）。TurboAgent #193 需要待该修复进入新的
+正式 Salts.Native Release 后，使用那个真实 Tag/发布包进行最终复验。
 
 第三方 C/C++ 依赖（SQLite、Chttp Crypto 组件所需的 GmSSL）仍由项目的
 vcpkg manifest/toolchain 解析，也不写入 Native package 的版本依赖元数据。
@@ -93,7 +113,7 @@ Praktor 当前不发布 Windows SDK，因此：
 
 ## Consume
 
-从最新发布包还原 native SDK graph 后，为目标平台设置环境变量：
+从上述固定 Release Tag 的发布包还原 native SDK graph 后，为目标平台设置环境变量：
 
 - `SALTS_ROOT`
 - `SALTS_UTILS_ROOT`

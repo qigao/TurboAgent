@@ -109,6 +109,8 @@ target_link_libraries(test_m42_original_capture_source_tsan PRIVATE
   Salts::Platform Threads::Threads)
 target_compile_options(test_m42_original_capture_source_tsan PRIVATE
   -Wall -Wextra -Wpedantic -Werror)
+target_compile_definitions(test_m42_original_capture_source_tsan PRIVATE
+  M42_CAPTURE_SOURCE_TSAN=1)
 add_test(NAME m42_original_capture_source_tsan_virtual_start_stop
   COMMAND test_m42_original_capture_source_tsan)
 set_tests_properties(m42_original_capture_source_tsan_virtual_start_stop

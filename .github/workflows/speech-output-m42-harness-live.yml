@@ -239,7 +239,21 @@ jobs:
           set -euo pipefail
           cd build/pinned-harness-source
           cmake --build --preset ci-linux-release --target test_tts_m42_actual_harness --parallel 2
-          ctest --preset ci-linux-release -R '^tts_m42_actual_harness$' --output-on-failure --timeout 90
+          ctest --preset ci-linux-release -R '^tts_m42_actual_harness
+      - name: Verify isolation and original source SHA after build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C build/pinned-harness-source rev-parse HEAD)" = '9e51d377bd84ee91ce5a47c94f24f73e4e01bba7'
+          test -z "$(git -C build/pinned-harness-source diff --name-only -- ':!build/**')"
+          test -f build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness
+          exe="build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness"
+          # Executable MUST import the real production Harness DSO; this is
+          # not the earlier ABI-double-only conformance executable.
+          readelf -d "$exe" | grep -F 'libturbo_agent_harness.so'
+          nm -D "$exe" | grep -E ' U turbo_agent_harness_start_text($|@)'
+
+ --repeat until-fail:20 --verbose --timeout 90
       - name: Verify isolation and original source SHA after build
         shell: bash
         run: |

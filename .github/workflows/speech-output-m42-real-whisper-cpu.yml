@@ -326,7 +326,8 @@ jobs:
           cd build/pinned-harness-source
           export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
           cmake --build --preset ci-linux-release --target test_tts_m42_actual_harness test_tts_m42_real_whisper_cpu_no_weights --parallel 2
-          ctest --preset ci-linux-release -R '^tts_m42_actual_harness
+          ctest --preset ci-linux-release -R '^tts_m42_actual_harness$' --repeat until-fail:20 --verbose --timeout 90
+          ctest --preset ci-linux-release -R '^tts_m42_real_whisper_cpu_no_weights$' --repeat until-fail:10 --verbose --timeout 30
       - name: Verify isolation and original source SHA after build
         shell: bash
         run: |
@@ -347,7 +348,7 @@ jobs:
           nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_provider'
           vendor_exe="build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_real_whisper_cpu_no_weights"
           test -x "$vendor_exe"
-          # Second test MUST dynamically link actual vendor + production Harness.
+          # Verify actual upstream CPU Whisper and original production Harness.
           readelf -d "$vendor_exe" | grep -F 'libwhisper.so'
           readelf -d "$vendor_exe" | grep -F 'libturbo_agent_harness.so'
           nm -D "$vendor_exe" | grep -F ' U whisper_init_from_buffer_with_params'
@@ -358,42 +359,3 @@ jobs:
             echo 'real v1.9.5 vendor or Harness runtime unresolved' >&2
             exit 1
           fi
- --repeat until-fail:20 --verbose --timeout 90
-          ctest --preset ci-linux-release -R '^tts_m42_real_whisper_cpu_no_weights
-      - name: Verify isolation and original source SHA after build
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git -C build/pinned-harness-source rev-parse HEAD)" = '9e51d377bd84ee91ce5a47c94f24f73e4e01bba7'
-          test -z "$(git -C build/pinned-harness-source diff --name-only -- ':!build/**')"
-          test -f build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness
-          exe="build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness"
-          # This executable MUST import the actual production Harness DSO.
-          readelf -d "$exe" | grep -F 'libturbo_agent_harness.so'
-          nm -D "$exe" | grep -E ' U turbo_agent_harness_start_text($|@)'
-          # Original pinned M1/M2 source is compiled into this same process.
-          # --defined-only excludes references to a missing external shim.
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_begin'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_capture_bridge_offer'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_take_final'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_create'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_provider'
- --repeat until-fail:10 --verbose --timeout 30
-      - name: Verify isolation and original source SHA after build
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git -C build/pinned-harness-source rev-parse HEAD)" = '9e51d377bd84ee91ce5a47c94f24f73e4e01bba7'
-          test -z "$(git -C build/pinned-harness-source diff --name-only -- ':!build/**')"
-          test -f build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness
-          exe="build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness"
-          # This executable MUST import the actual production Harness DSO.
-          readelf -d "$exe" | grep -F 'libturbo_agent_harness.so'
-          nm -D "$exe" | grep -E ' U turbo_agent_harness_start_text($|@)'
-          # Original pinned M1/M2 source is compiled into this same process.
-          # --defined-only excludes references to a missing external shim.
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_begin'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_capture_bridge_offer'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_take_final'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_create'
-          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_provider'

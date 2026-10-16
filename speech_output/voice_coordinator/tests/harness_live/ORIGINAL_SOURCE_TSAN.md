@@ -52,16 +52,28 @@ current M4 Coordinator .a.
 
 ## Explicit limitations / non-claims
 
-The installed **released** SaltsUtils Native 4.3.0-rc.11
-`libsalts_capture.so` and `libsalts_playback.so`, Salts.Native,
-CHttp.Native, original third-party SQLite and actual Whisper.cpp
-v1.9.5 vendor CPU library are **prebuilt or independently linked**
-and not rebuilt under TSan in this job. The M3 Whisper Provider C11
-source is instrumented but uses a test-only v1.9.5 vendor ABI for
-the model-free positive. The original Salts native Playback source
-null-backend test is source-instrumented, but its published binary is
-not. The virtual Capture OS callback in the fullstack test is real
-but the released Capture DSO **is not itself** source TSan-instrumented.
+The officially installed **released** SaltsUtils Native 4.3.0-rc.11
+`libsalts_capture.so` remains **prebuilt and uninstrumented** in this
+focused source-TSan job. The original published Playback binary is
+also not retroactively instrumented; instead the *exact original
+SaltsUtils 4.3.0-rc.11 Playback source* is additionally rebuilt as a
+real, dynamically loaded `libsalts_playback.so` (NOT the null test
+backend) together with the exact original Salts rc17 C11 SPSC
+release/acquire implementation and genuine PulseAudio/miniaudio native
+backend. CI hard-requires `ldd` to resolve the fullstack executable's
+Playback SONAME to this original source-TSan build rather than
+silently using the uninstrumented published image.
+
+The installed Salts.Native, CHttp.Native, original third-party SQLite
+and actual Whisper.cpp v1.9.5 vendor CPU engine remain uninstrumented.
+The original M3 Whisper Provider itself **is source-instrumented** but
+uses a model-free fake vendor C ABI for positive results. An
+independent original miniaudio `SALTS_PLAYBACK_TEST_NULL_BACKEND=1`
+source test is also instrumented under TSan; the full virtual
+PulseAudio test instead uses the genuine native source backend. The
+published Capture's OS callback is genuine and calls instrumented
+original M2, but its **prebuilt Capture DSO is still not full-source
+TSan-instrumented**; that is a separate outstanding gate.
 
 No physical microphone/speaker, real ASR model, licensed TTS voice,
 human speech accuracy, acoustic AEC/barge-in, user permissions or

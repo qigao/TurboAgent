@@ -253,6 +253,13 @@ jobs:
           ref: v4.3.0-rc.11
           path: build/pinned-saltsutils-source
           persist-credentials: false
+      - name: Pin actual original Salts 2.3.0-rc.16 SPSC ring source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: v2.3.0-rc.16
+          path: build/pinned-salts-source
+          persist-credentials: false
       - name: Pin original miniaudio 0.11.22 from official vcpkg baseline
         uses: actions/checkout@v4
         with:
@@ -265,6 +272,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C build/pinned-saltsutils-source describe --tags --exact-match)" = 'v4.3.0-rc.11'
+          test "$(git -C build/pinned-salts-source describe --tags --exact-match)" = 'v2.3.0-rc.16'
+          test -f build/pinned-salts-source/concurrency/src/spsc_ring.c
+          test -f build/pinned-salts-source/concurrency/include/salts/spsc_ring.h
           test "$(git -C build/pinned-miniaudio-source describe --tags --exact-match)" = '0.11.22'
           test -f build/pinned-miniaudio-source/miniaudio.h
           test -f build/pinned-saltsutils-source/playback/src/salts_playback.c
@@ -314,11 +324,14 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
             "-DSALTSUTILS_RELEASE_SOURCE=$GITHUB_WORKSPACE/build/pinned-saltsutils-source" \
             "-DMINIAUDIO_RELEASE_SOURCE=$GITHUB_WORKSPACE/build/pinned-miniaudio-source" \
+            "-DM42_SALTS_ORIGINAL_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-salts-source" \
             "-DM42_CURRENT_SOURCE=$GITHUB_WORKSPACE" \
             -DM42_ORIGINAL_AUDIO_TSAN=ON
           cmake --build build/m42-original-native-null --parallel 2
           test -x build/m42-original-native-null/test_m42_original_salts_null_native
           nm build/m42-original-native-null/libm42_salts_playback_original_native_null.a | grep -F __tsan_init
+          nm --defined-only build/m42-original-native-null/libm42_salts_playback_original_native_null.a | grep -F ' T cmeta_spsc_ring_write_release'
+          nm --defined-only build/m42-original-native-null/libm42_salts_playback_original_native_null.a | grep -F ' T cmeta_spsc_ring_read_acquire'
           nm build/m42-original-native-null/libm42_native_coordinator_original_source.a | grep -F __tsan_init
           test -x build/m42-original-native-null/test_m42_published_capture_device_rejection
       - name: Repeat actual callback and real released Capture no-device rejection

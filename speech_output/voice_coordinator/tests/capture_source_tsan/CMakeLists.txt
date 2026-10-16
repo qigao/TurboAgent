@@ -40,13 +40,26 @@ if(NOT TARGET Salts::Core OR NOT TARGET Salts::Platform)
   message(FATAL_ERROR "Published Salts::Core/Platform native ABI is required")
 endif()
 
+# Only the audio Capture implementation may be supplied from exact
+# SaltsUtils Draft #653 candidate; dispatcher/video/screen/miniaudio remain
+# identical to the pinned rc11 release. No runtime backend fallback.
+set(M42_CAPTURE_AUDIO_C11
+  "${M42_CAPTURE_SOURCE_ROOT}/capture/src/capture_audio_miniaudio.c")
+if(DEFINED M42_CAPTURE_AUDIO_PATCH_SOURCE)
+  if(NOT EXISTS "${M42_CAPTURE_AUDIO_PATCH_SOURCE}")
+    message(FATAL_ERROR "Explicit Capture source-TSan atomic admission candidate absent")
+  endif()
+  set(M42_CAPTURE_AUDIO_C11 "${M42_CAPTURE_AUDIO_PATCH_SOURCE}")
+endif()
+message(STATUS "Original Capture audio TSan input: ${M42_CAPTURE_AUDIO_C11}")
+
 # Match the original Linux SaltsUtils Capture production source closure.
 # Audio, video and screen dispatcher definitions are all linked, not replaced
 # with simplified test stubs. Only the audited virtual AUDIO ID may be opened.
 add_library(m42_original_capture_source_tsan SHARED
   "${M42_CAPTURE_SOURCE_ROOT}/capture/src/capture_video.c"
   "${M42_CAPTURE_SOURCE_ROOT}/capture/src/miniaudio_impl.c"
-  "${M42_CAPTURE_SOURCE_ROOT}/capture/src/capture_audio_miniaudio.c"
+  "${M42_CAPTURE_AUDIO_C11}"
   "${M42_CAPTURE_SOURCE_ROOT}/capture/src/capture_linux.c"
   "${M42_CAPTURE_SOURCE_ROOT}/capture/src/capture_video_linux.c"
   "${M42_CAPTURE_SOURCE_ROOT}/capture/src/capture_screen_linux.c")

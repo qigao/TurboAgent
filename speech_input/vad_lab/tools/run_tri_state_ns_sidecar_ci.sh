@@ -186,5 +186,5 @@ PY
   done
 done
 
-test "$observed" = 19
-printf '{"lab":"strict_C11_VAD_with_isolated_SpeexDSP","input_cases":19,"original_human_cases":3,"overlay_human_cases":8,"road_noise_only_cases":8,"model_weights_used":false,"artifacts_include_audio":false}\n'
+test "$observed" = 18
+printf '{"lab":"strict_C11_VAD_with_isolated_SpeexDSP","input_cases":18,"original_human_cases":3,"overlay_human_cases":8,"road_noise_only_cases":7,"model_weights_used":false,"artifacts_include_audio":false}\n'

@@ -133,7 +133,11 @@ static int capture_to_original_checked_final(const char *exact_capture_id,
 
   size_t total_pumped = 0u;
   const uint64_t input_deadline = cmeta_monotonic_ms() + MAX_AUDIO_WAIT_MS;
-  while (total_pumped == 0u) {
+  /* Backend initialization can deliver a leading silent period even when
+   * the isolated monitor is already streaming nonzero synthetic PCM.
+   * Admit a bounded, nontrivial set of REAL native callbacks; never
+   * manufacture/replace microphone samples or retry with a fake ASR. */
+  while (total_pumped < 8u) {
     REQUIRE(cmeta_monotonic_ms() < input_deadline);
     REQUIRE(turbo_agent_speech_salts_capture_first_error(capture) ==
             TURBO_AGENT_SPEECH_OK);
@@ -159,6 +163,10 @@ static int capture_to_original_checked_final(const char *exact_capture_id,
             TURBO_AGENT_SPEECH_OK);
     total_pumped += pumped;
   }
+  fprintf(stderr,
+          "Native M3 terminal witness: state=%d, accepted=%zu, model_error=%d\n",
+          (int)turbo_agent_speech_get_state(input), total_pumped,
+          turbo_agent_speech_whisper_last_error(whisper));
   REQUIRE(turbo_agent_speech_get_state(input) == TURBO_AGENT_SPEECH_FINAL);
   size_t bytes = 0u;
   turbo_agent_speech_transcript_kind_t kind = TURBO_AGENT_SPEECH_NONE;

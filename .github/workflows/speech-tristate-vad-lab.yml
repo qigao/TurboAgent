@@ -1,0 +1,180 @@
+name: Speech tri-state C11 VAD isolated diagnostic (#184)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/vad_lab/**'
+      - '.github/workflows/speech-tristate-vad-lab.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-c11-tristate-vad:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-tristate-vad-c11-184'
+    name: Bounded C11 tri-state voice/noise/uncertain (no model weights)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install deterministic CPU-only audio converter and C11 build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg ninja-build
+          test -x "$(command -v ffmpeg)"
+      - name: Build strict C11 lab and verify real bounded Owner / settle semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S speech_input/vad_lab -B build/speech-vad-lab -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+          cmake --build build/speech-vad-lab --parallel 2
+          ctest --test-dir build/speech-vad-lab --output-on-failure
+
+          cmake -S speech_input/vad_lab -B build/speech-vad-lab-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            "-DCMAKE_C_FLAGS=-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+          cmake --build build/speech-vad-lab-asan --parallel 2
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1 \
+            ctest --test-dir build/speech-vad-lab-asan --output-on-failure
+      - name: Validate digital-zero negative and pinned authentic human/road-noise source via C11
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          private="$(mktemp -d "$RUNNER_TEMP/speech-vad-184-XXXXXX")"
+          chmod 700 "$private"
+          trap 'rm -rf -- "$private"' EXIT
+          probe="$GITHUB_WORKSPACE/build/speech-vad-lab/ta_speech_vad_lab_raw_probe"
+          test -x "$probe"
+
+          PRIVATE_ROOT="$private" python3 - <<'PY'
+          import json,os,stat,struct
+          from pathlib import Path
+          root=Path(os.environ["PRIVATE_ROOT"])
+          for name,frames,value in (("zero_49",49,0),
+                                    ("zero_50",50,0),
+                                    ("nonzero_single",60,0)):
+              data=bytearray(frames*320*2)
+              if name=="nonzero_single":
+                  data[320*30*2:320*30*2+2]=struct.pack("<h",1)
+              path=root/(name+".raw")
+              with path.open("xb") as out: out.write(data)
+              path.chmod(0o600)
+              assert stat.S_IMODE(path.stat().st_mode)==0o600
+          PY
+          for name in zero_49 zero_50 nonzero_single; do
+            "$probe" "$private/$name.raw" > "$private/$name.metrics.json"
+          done
+          PRIVATE_ROOT="$private" python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ["PRIVATE_ROOT"])
+          values={name:json.loads((root/(name+".metrics.json")).read_text())
+                  for name in ("zero_49","zero_50","nonzero_single")}
+          assert values["zero_49"]["decision"]=="UNCERTAIN"
+          assert values["zero_50"]["decision"]=="NON_SPEECH_CONFIDENT"
+          assert values["zero_50"]["nonzero_frames"]==0
+          assert values["nonzero_single"]["decision"]!="NON_SPEECH_CONFIDENT"
+          assert values["nonzero_single"]["nonzero_frames"]==1
+          assert all(m["diagnostic_only"] and not m["real_model_or_language_certified"]
+                     for m in values.values())
+          print(json.dumps({
+            "test":"C11_boundary_digitally_zero_only",
+            "digital_zero_49":"UNCERTAIN",
+            "digital_zero_50":"NON_SPEECH_CONFIDENT",
+            "one_real_nonzero_sample":"NOT_CONFIDENT_NON_SPEECH",
+            "actual_model_used":False
+          },sort_keys=True))
+          PY
+
+          ffmpeg="$(realpath "$(command -v ffmpeg)")"
+          ffmpeg_sha="$(sha256sum "$ffmpeg" | awk '{print $1}')"
+          count=0
+          while IFS='|' read -r name bytes sha1 sha256 canonical frames voice url; do
+            test -n "$name" || continue
+            count=$((count+1))
+            case "$name" in ja|zh|en|whisper|quiet|road) ;; *) exit 2 ;; esac
+            curl --fail --location --silent --show-error --retry 2 \
+              --connect-timeout 15 --max-time 60 --max-filesize 500000 \
+              --proto '=https' --proto-redir '=https' \
+              --user-agent 'TurboAgent-tri-state-vad-lab/1.0 (qigao/TurboAgent)' \
+              "$url" --output "$private/$name.ogg"
+            test "$(wc -c < "$private/$name.ogg" | tr -d '[:space:]')" = "$bytes"
+            test "$(sha1sum "$private/$name.ogg" | awk '{print $1}')" = "$sha1"
+            test "$(sha256sum "$private/$name.ogg" | awk '{print $1}')" = "$sha256"
+            python3 speech_input/whisper/tools/prepare_stationarity_wav.py \
+              --source "$private/$name.ogg" --source-sha256 "$sha256" \
+              --ffmpeg "$ffmpeg" --ffmpeg-sha256 "$ffmpeg_sha" \
+              --output-wav "$private/$name.wav" \
+              --private-provenance "$private/$name.private.json" \
+              --acknowledge-rights > "$private/$name.private.status.json"
+            test "$(sha256sum "$private/$name.wav" | awk '{print $1}')" = "$canonical"
+            WAV_INPUT="$private/$name.wav" RAW_OUTPUT="$private/$name.raw" \
+              EXPECTED_FRAMES="$frames" python3 - <<'PY'
+          import os,stat,wave
+          from pathlib import Path
+          original=Path(os.environ["WAV_INPUT"])
+          output=Path(os.environ["RAW_OUTPUT"])
+          expected=int(os.environ["EXPECTED_FRAMES"])
+          with wave.open(str(original),"rb") as wav:
+              assert (wav.getframerate(),wav.getnchannels(),
+                      wav.getsampwidth(),wav.getnframes()) == (
+                          16000,1,2,expected*320)
+              raw=wav.readframes(wav.getnframes())
+          assert len(raw)==expected*640
+          with output.open("xb") as dst: dst.write(raw)
+          output.chmod(0o600)
+          assert stat.S_IMODE(output.stat().st_mode)==0o600
+          PY
+            "$probe" "$private/$name.raw" > "$private/$name.metrics.json"
+            METADATA="$private/$name.metrics.json" SAMPLE="$name" \
+              HUMAN="$voice" FRAME_COUNT="$frames" python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          data=json.loads(Path(os.environ["METADATA"]).read_text())
+          human=os.environ["HUMAN"]=="human"
+          expected=int(os.environ["FRAME_COUNT"])
+          assert data["frames"]==expected
+          assert data["schema"]==1
+          assert data["samples_per_frame"]==320
+          assert data["diagnostic_only"] is True
+          assert data["real_model_or_language_certified"] is False
+          assert data["non_speech_only_when_all_digital_zero"] is True
+          if human:
+              assert data["nonzero_frames"]>0
+              assert data["decision"] != "NON_SPEECH_CONFIDENT"
+          print(json.dumps({
+             "test":"exact_SHA_source_bounded_C11_acoustic_VAD",
+             "category":os.environ["SAMPLE"],
+             "is_real_original_human_speech":human,
+             "frames":expected,
+             "nonzero_frames":data["nonzero_frames"],
+             "decision":data["decision"],
+             "voicing_cue_frames":data["voicing_cue_frames"],
+             "tonal_cue_frames":data["tonal_cue_frames"],
+             "power_modulation_events":data["power_modulation_events"],
+             "mean_peak_autocorrelation":data["mean_peak_autocorrelation"],
+             "mean_spectral_concentration":data["mean_spectral_concentration"],
+             "production_VAD_enabled":False,
+             "actual_ASR_quality_measured":False,
+             "source_audio_uploaded":False
+          },sort_keys=True))
+          PY
+          done <<'PINNED_MEDIA'
+          ja|264858|c7992ec2188ee94102f83e4eff22c4f9b9365d39|cad2f1545a3ac898362590ea636b8c09f1d77391b506790ae909e0e1ff1441f7|ccb16e8ea766bd2f4bf40ed09e5666ea6700edbd79343eb961fb13e9cafd6a03|740|human|https://upload.wikimedia.org/wikipedia/commons/b/b9/%E6%98%A5%E3%81%AF%E3%81%82%E3%81%91%E3%81%BC%E3%81%AE.ogg
+          zh|156728|2fb567da2edd9fc18160769b1c803bd9d072c273|304f11fa91ec51b2a2b9e4c11424f9944c6bdf3ee909440923511a86b5585b22|f246dded9eb91796c515f21b37f8e41b3357bdef3f6fe19552568c12653f0421|749|human|https://upload.wikimedia.org/wikipedia/commons/8/8a/Mandarin_Chinese-%E5%8D%97%E5%9B%BD%E5%B1%B1%E6%B2%B3.ogg
+          en|21562|79b6f88e3db116fab8bc068cd523420406bef1c4|10829789c781d912ccbfdd9a4f5d4b3dbb2dac0a42af34610f7cf4497ad25deb|458ce0d1086ae8a5381ccc09878a630c016ebed42303a859e2030e2efbbe339e|95|human|https://upload.wikimedia.org/wikipedia/commons/5/58/En-uk-Do_you_speak_English.ogg
+          whisper|30283|cc3b98f93353cf6ed8bb453669987afe7dd748bd|bbdbe95dfe4742e27845c03fba3a8caf9f0f5ad65e34e512fd5609d155e6304e|c81cf6b75800daf1070d3001f094877581bc68100f3c64cb43638491f89988d0|128|human|https://upload.wikimedia.org/wikipedia/commons/e/e8/Whispering-example.ogg
+          quiet|12926|9d7986ce0257056b679a6b199c42447b5df82962|3725cf00284943531b0e899e3f7161117397cd3be8f6310a7beca26fbd6e0e3d|6f4f58227166088ba2745d51af05553b01be557b5a2a9d2e04edcbff21d9730a|18|human|https://upload.wikimedia.org/wikipedia/commons/1/1b/English_male_voice_speech_word_No.ogg
+          road|120796|71500b016280d285ac6854bd46eef6373847247e|7d70594ef7ba1bd7a34136ab7140420d016fd730acc6c124a1a02fe6c75337d0|cd9023210066ea6ad618fe386d86c6e9469d4b9a19ba170d5032eb76fb30c808|375|noise|https://upload.wikimedia.org/wikipedia/commons/e/e2/Back-up_white_noise.ogg
+          PINNED_MEDIA
+          test "$count" = 6
+          # No upload-artifact actions. Every WAV, raw S16, source Ogg
+          # and private provenance object is deleted by the EXIT trap.

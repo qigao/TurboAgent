@@ -6,6 +6,7 @@ name: SpeechOutput M4.2 actual bounded Harness execution to TTS
       - '.github/workflows/speech-output-m42-harness-live.yml'
 permissions:
   contents: read
+  packages: read
 jobs:
   native-playback:
     if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'feature/speech-output-m42-real-harness-run'

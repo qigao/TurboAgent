@@ -72,9 +72,64 @@ echo 'PASS one attached isolated null-sink PCM producer, zero physical devices'
 # Genuine production Harness, original native M2, original M3 Provider and
 # currently built M4 + the true loaded pthread TTS Provider image.
 cd "$harness_root"
+# Exact 8 iterations remain the acceptance default. Source TSan runs a
+# smaller but bounded separate original-binary matrix, never a skipped case.
+repeats="${M42_FULLSTACK_REPEATS:-8}"
+if [[ ! "$repeats" =~ ^[1-9][0-9]?$ ]] || (( repeats > 20 )); then
+  echo "unsupported fullstack repeat count: $repeats" >&2
+  exit 1
+fi
 ctest --preset ci-linux-release \
-  -R '^tts_m42_real_virtual_fullstack$' \
-  --repeat until-fail:8 --verbose --output-on-failure --timeout 60 |
+  -R '^tts_m42_real_virtual_fullstack
+  tee "$isolated/fullstack-live.log"
+for marker in \
+  'PASS shipped Capture callback stop/join -> original M1/M2/M3 one-shot checked FINAL' \
+  'PASS full published Capture+Playback + actual Harness + true TTS DSO: 480-byte backpressure/native drain/join/unload' \
+  'PASS full published Capture+Playback + actual Harness + true TTS DSO: cancel/clear/late-reject/join/unload' \
+  'PASS same-process actual M1/M2/M3 -> Harness -> loaded TTS worker -> BOTH published Salts audio DSOs'; do
+  count="$(grep -Fc "$marker" "$isolated/fullstack-live.log" || true)"
+  expected="$repeats"
+  # Exactly TWO complete Capture/M3 checked FINAL passages per CTest:
+  # normal-drain then cancellation. The other markers occur once per case.
+  if [[ "$marker" == 'PASS shipped Capture callback stop/join -> original M1/M2/M3 one-shot checked FINAL' ]]; then
+    expected="$((repeats * 2))"
+  fi
+  if [[ "$count" != "$expected" ]]; then
+    echo "missing fullstack exact native lifecycle evidence: $marker ($count/$expected)" >&2
+    exit 1
+  fi
+done
+exe="$harness_root/build/ci-linux-release/bin/test_tts_m42_real_virtual_fullstack"
+test -x "$exe"
+for soname in libsalts_capture.so libsalts_playback.so libturbo_agent_harness.so; do
+  readelf -d "$exe" | grep -F "$soname"
+done
+for symbol in salts_capture_start salts_capture_stop salts_playback_create \
+              salts_playback_start salts_playback_drain salts_playback_clear \
+              turbo_agent_harness_start_text; do
+  nm -D "$exe" | grep -F " U $symbol"
+done
+for symbol in turbo_agent_speech_salts_capture_create \
+              turbo_agent_speech_whisper_create \
+              turbo_voice_admit_harness_completed_final; do
+  nm --defined-only "$exe" | grep -F " T $symbol"
+done
+
+image="$harness_root/build/ci-linux-release/bin/libtts_m42_combined_provider_dso.so"
+test -f "$image"
+nm -D --defined-only "$image" | grep -F ' T turbo_tts_test_dso_entry'
+if readelf -d "$exe" | grep -F 'libtts_m42_combined_provider_dso.so'; then
+  echo "TTS shared image is linked, not actually dlopened by Host" >&2
+  exit 1
+fi
+ldd "$exe" | tee "$isolated/fullstack-needed.txt"
+if grep -F 'not found' "$isolated/fullstack-needed.txt"; then
+  echo "one or more real published SDK dependencies unresolved" >&2
+  exit 1
+fi
+echo "PASS $repeats/$repeats fullstack original M1/M2/M3 + true Harness + loaded TTS worker + both published Salts virtual audio DSOs"
+ \
+  --repeat until-fail:"$repeats" --verbose --output-on-failure --timeout 60 |
   tee "$isolated/fullstack-live.log"
 for marker in \
   'PASS shipped Capture callback stop/join -> original M1/M2/M3 one-shot checked FINAL' \

@@ -215,8 +215,14 @@ static int run_real_harness_tts_dso(int scenario) {
     if (scenario != 2) {
       CHECK_DSO(api->grant_pcm(context) == 0);
       CHECK_DSO(api->wait_pcm_ready(context) == 0);
-      CHECK_DSO(turbo_voice_pump(voice, 1u, &written) == TURBO_VOICE_OK);
-      CHECK_DSO(written == 960u && fake_native.used == 960u);
+      size_t total_written = 0u;
+      for (unsigned flush_tick = 0u; flush_tick < 10u &&
+           total_written < 960u; ++flush_tick) {
+        CHECK_DSO(turbo_voice_pump(voice, 1u, &written) == TURBO_VOICE_OK);
+        total_written += written;
+      }
+      CHECK_DSO(total_written == 960u && fake_native.used == 960u);
+      CHECK_DSO(fake_native.writes == 6u); /* six exact 160-byte writes */
       for (size_t k = 0u; k < 480u; ++k) {
         int16_t sample = 0;
         memcpy(&sample, fake_native.bytes + 2u*k, sizeof(sample));

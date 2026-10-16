@@ -12,7 +12,7 @@ if(NOT EXISTS "${VOICE_M42_PREBUILT_ROOT}/libturbo_agent_speech_output.a" OR
 endif()
 
 add_executable(test_tts_m42_actual_harness
-  "${CMAKE_CURRENT_SOURCE_DIR}/test_real_harness.c")
+  "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness_live/test_real_harness.c")
 target_compile_features(test_tts_m42_actual_harness PRIVATE c_std_11)
 set_target_properties(test_tts_m42_actual_harness PROPERTIES
   C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)

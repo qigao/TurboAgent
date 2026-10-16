@@ -44,3 +44,14 @@ if(ENABLE_TTS_NATIVE_DSO_TEST)
   endif()
   add_subdirectory(tests/dso)
 endif()
+
+# Explicit Host boundary composition only: use original pinned M1/M2 input
+# rather than copying either module or switching the production build graph.
+option(ENABLE_TTS_HOST_HANDOFF_TEST
+  "Qualify real M1/M2 Capture join and M4.2 checked FINAL handoff" OFF)
+if(ENABLE_TTS_HOST_HANDOFF_TEST)
+  if(NOT BUILD_TESTING)
+    message(FATAL_ERROR "M4.2 Host integration requires BUILD_TESTING")
+  endif()
+  add_subdirectory(tests/host)
+endif()

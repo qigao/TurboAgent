@@ -158,6 +158,16 @@ jobs:
           SDK_PRESET: ${{ matrix.preset }}
         run: cmake --build --preset "$SDK_PRESET"
 
+      - name: Inspect real Linux ELF/DSO hidden hash_bytes references after linker failure
+        if: failure() && matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Diagnostic only: preserve the FAILED status of Build on Unix.
+          # Does not execute untrusted SDK code, change link flags, or
+          # weaken Salts's static CSTL symbol-visibility policy.
+          bash cmake/ci/audit-hidden-hash-dso-linux.sh build/ci-linux-release
+
       - name: Build on Windows
         if: runner.os == 'Windows'
         shell: cmd

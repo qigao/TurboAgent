@@ -116,8 +116,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export LD_LIBRARY_PATH="$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
-          bash speech_output/voice_coordinator/tests/virtual_capture/run_isolated_capture_source_tsan.sh \
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/build/m42-capture-source-tsan:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          bash speech_output/voice_coordinator/tests/capture_source_tsan/run_isolated_capture_source_tsan.sh \
             build/m42-capture-source-tsan
       - name: Verify no physical audio/device and unchanged immutable input sources
         shell: bash

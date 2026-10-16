@@ -1,7 +1,12 @@
+#define _POSIX_C_SOURCE 200809L
 #include "turbo_agent_voice_harness_final_gate.h"
 #include "turbo_agent_harness.h"
 #include "turbo_agent_voice_coordinator.h"
 #include "turbo_agent_speech_capture.h"
+#include "turbo_agent_speech_whisper.h"
+#include <cmeta_crypto.h>
+#include <unistd.h>
+
 
 #include <json_parser.h>
 #include <salts/clock.h>
@@ -409,6 +414,7 @@ typedef struct inprocess_capture {
   turbo_agent_speech_capture_bridge_t *bridge; /* borrowed */
   int start, callback_done, can_exit, callback_result;
   size_t callback_bytes;
+  int zero_pcm;
 } inprocess_capture_t;
 static void *inprocess_capture_worker(void *context) {
   inprocess_capture_t *s = (inprocess_capture_t *)context;
@@ -417,8 +423,10 @@ static void *inprocess_capture_worker(void *context) {
   (void)pthread_mutex_unlock(&s->mutex);
 
   uint8_t raw[TURBO_AGENT_SPEECH_CAPTURE_PCM_BYTES] = {0};
-  raw[0] = 0x34u; raw[1] = 0x12u; /* signed 0x1234 LE */
-  raw[2] = 0xffu; raw[3] = 0xffu; /* signed -1 */
+  if (!s->zero_pcm) {
+    raw[0] = 0x34u; raw[1] = 0x12u; /* signed 0x1234 LE */
+    raw[2] = 0xffu; raw[3] = 0xffu; /* signed -1 */
+  }
   s->callback_result = turbo_agent_speech_capture_bridge_offer(
       s->bridge, raw, s->callback_bytes, 1000u);
   memset(raw, 0xaa, sizeof(raw)); /* borrowed data reused after offer */
@@ -720,11 +728,244 @@ static int test_all_composed_cases(void) {
   return 0;
 }
 
+
+/* M3 genuine C11 Provider source from exact separate Draft #145.
+ * This executable links its v1.9.5 public Whisper C API to a TEST-ONLY
+ * no-weights deterministic engine. No actual acoustic inference is claimed,
+ * no vendor C++ is introduced in the Host/Agent boundary, and no downloaded
+ * model or microphone is used. The original M1/M2 + Harness are REAL. */
+extern int speech_test_fake_total_decodes(void);
+extern int speech_test_fake_total_frees(void);
+
+static int create_approved_mock_model(
+    turbo_agent_speech_whisper_t **out_owner, int wrong_sha) {
+  static const char model_bytes[] = "MOCK_C11_VALIDATED_MODEL";
+  char path[] = "/tmp/turboagent-m42-whisper-XXXXXX";
+  if (!out_owner) return TURBO_AGENT_SPEECH_EINVAL;
+  *out_owner = NULL;
+  int fd = mkstemp(path);
+  if (fd < 0) return TURBO_AGENT_WHISPER_EIO;
+  ssize_t saved = write(fd, model_bytes, sizeof(model_bytes));
+  if (close(fd) != 0 || saved != (ssize_t)sizeof(model_bytes)) {
+    (void)unlink(path);
+    return TURBO_AGENT_WHISPER_EIO;
+  }
+  uint8_t sha[32];
+  if (cmeta_sha256(model_bytes, sizeof(model_bytes), sha) != 0) {
+    (void)unlink(path);
+    return TURBO_AGENT_WHISPER_EIO;
+  }
+  turbo_agent_speech_whisper_config_t config;
+  turbo_agent_speech_whisper_config_init(&config);
+  config.model_path = path;
+  config.language = TURBO_AGENT_WHISPER_LANGUAGE_EN;
+  config.cpu_threads = 1u;
+  config.max_model_bytes = 1024u;
+  config.max_utterance_frames = 10u;
+  config.max_text_bytes = 128u;
+  config.max_decode_ms = 30000u;
+  config.stationary_noise_guard = 0u;
+  memcpy(config.expected_sha256, sha, sizeof(sha));
+  if (wrong_sha) config.expected_sha256[0] ^= 0x5au;
+  int rc = turbo_agent_speech_whisper_create(&config, out_owner);
+  /* This one verified snapshot is already copied by the Provider.
+   * No file path can be reopened for a second version or fallback. */
+  (void)unlink(path);
+  cmeta_crypto_clear(sha, sizeof(sha));
+  return rc;
+}
+
+typedef enum m3_handoff_case {
+  M3_FINAL_TO_REAL_HARNESS = 0,
+  M3_ZERO_PCM_REJECTS_HARNESS = 1,
+  M3_CANCEL_BEFORE_FINAL = 2
+} m3_handoff_case_t;
+
+static int test_original_m3_provider_with_real_harness(m3_handoff_case_t mode) {
+  turbo_agent_speech_whisper_t *owner = NULL;
+  turbo_agent_speech_provider_v1_t asr_callbacks;
+  turbo_agent_speech_input_t *input = NULL;
+  turbo_agent_speech_capture_bridge_t *capture = NULL;
+  voice_fixture_t voice;
+  const int decode_before = speech_test_fake_total_decodes();
+  const int frees_before = speech_test_fake_total_frees();
+
+  VERIFY(create_approved_mock_model(&owner, 0) == TURBO_AGENT_SPEECH_OK);
+  VERIFY(owner != NULL);
+  VERIFY(turbo_agent_speech_whisper_provider(owner, &asr_callbacks) ==
+         TURBO_AGENT_SPEECH_OK);
+  VERIFY(asr_callbacks.abi_version == TURBO_AGENT_SPEECH_INPUT_ABI_VERSION);
+  turbo_agent_speech_config_t config;
+  turbo_agent_speech_config_init(&config);
+  config.queue_frames = 4u;
+  config.max_utterance_frames = 10u;
+  config.max_text_bytes = 128u;
+  VERIFY(turbo_agent_speech_create(&config, &asr_callbacks, &input) ==
+         TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_agent_speech_capture_bridge_create(input, 42u, &capture) ==
+         TURBO_AGENT_SPEECH_OK);
+  VERIFY(voice_create_pending(&voice) == 0);
+  VERIFY(turbo_agent_speech_capture_bridge_begin(capture) ==
+         TURBO_AGENT_SPEECH_OK);
+
+  inprocess_capture_t w;
+  VERIFY(inprocess_capture_init(&w, capture,
+         TURBO_AGENT_SPEECH_CAPTURE_PCM_BYTES) == 0);
+  w.zero_pcm = (mode == M3_ZERO_PCM_REJECTS_HARNESS);
+  pthread_t thread;
+  VERIFY(pthread_create(&thread, NULL, inprocess_capture_worker, &w) == 0);
+  inprocess_capture_allow(&w, 0);
+  VERIFY(inprocess_capture_wait(&w) == 0);
+  VERIFY(w.callback_result == TURBO_AGENT_SPEECH_OK);
+  VERIFY(voice.provider.begins == 0u && voice.sink.writes == 0u);
+  size_t pumped = 0u;
+  VERIFY(turbo_agent_speech_pump(input, 1u, &pumped) ==
+         TURBO_AGENT_SPEECH_OK && pumped == 1u);
+  char partial[64];
+  size_t length = 0u;
+  uint64_t revision = 0u;
+  VERIFY(turbo_agent_speech_read_partial(input, partial, sizeof(partial),
+         &length, &revision) == TURBO_AGENT_SPEECH_ESTATE);
+  VERIFY(speech_test_fake_total_decodes() == decode_before);
+  /* Even a real M3 active Provider cannot be unloaded while M1 owns it. */
+  VERIFY(turbo_agent_speech_whisper_destroy(&owner) ==
+         TURBO_AGENT_SPEECH_EBUSY && owner != NULL);
+
+  VERIFY(turbo_agent_speech_capture_bridge_stop_admission(capture) ==
+         TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_voice_get_state(voice.voice) == TURBO_VOICE_INPUT);
+  inprocess_capture_allow(&w, 1);
+  VERIFY(pthread_join(thread, NULL) == 0);
+  inprocess_capture_destroy(&w);
+  uint8_t late[TURBO_AGENT_SPEECH_CAPTURE_PCM_BYTES] = {0};
+  VERIFY(turbo_agent_speech_capture_bridge_offer(
+         capture, late, sizeof(late), 2000u) == TURBO_AGENT_SPEECH_ESTATE);
+
+  if (mode == M3_CANCEL_BEFORE_FINAL) {
+    VERIFY(turbo_agent_speech_capture_bridge_cancel(capture) ==
+           TURBO_AGENT_SPEECH_OK);
+  } else {
+    VERIFY(turbo_agent_speech_capture_bridge_finish(capture) ==
+           TURBO_AGENT_SPEECH_OK);
+  }
+  VERIFY(turbo_agent_speech_capture_bridge_destroy(&capture) ==
+         TURBO_AGENT_SPEECH_OK);
+
+  if (mode == M3_CANCEL_BEFORE_FINAL) {
+    VERIFY(turbo_agent_speech_get_state(input) ==
+           TURBO_AGENT_SPEECH_CANCELED);
+    VERIFY(turbo_voice_interrupt(voice.voice, 42u) == TURBO_VOICE_OK);
+    VERIFY(turbo_voice_input_quiesced(voice.voice, 42u) == TURBO_VOICE_OK);
+    VERIFY(speech_test_fake_total_decodes() == decode_before);
+  } else {
+    VERIFY(turbo_agent_speech_pump(input, 1u, &pumped) ==
+           TURBO_AGENT_SPEECH_OK && pumped == 0u);
+    char final_text[128];
+    turbo_agent_speech_transcript_kind_t kind = TURBO_AGENT_SPEECH_NONE;
+    VERIFY(turbo_agent_speech_take_final(
+        input, final_text, sizeof(final_text), &length, &kind) ==
+        TURBO_AGENT_SPEECH_OK);
+    if (mode == M3_ZERO_PCM_REJECTS_HARNESS) {
+      VERIFY(kind == TURBO_AGENT_SPEECH_TRANSCRIPT_NO_SPEECH &&
+             length == 0u && final_text[0] == '\0');
+      VERIFY(speech_test_fake_total_decodes() == decode_before);
+      VERIFY(turbo_voice_interrupt(voice.voice, 42u) == TURBO_VOICE_OK);
+      VERIFY(turbo_voice_input_quiesced(voice.voice, 42u) == TURBO_VOICE_OK);
+    } else {
+      /* Vendor engine is a deterministic test C API. The M3 Provider's
+       * original model admission, S16->float PCM and UTF-8 final copy are
+       * genuine. The transcript is NOT a privileged assistant instruction. */
+      VERIFY(kind == TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL &&
+             length == 10u && strcmp(final_text, " utterance") == 0);
+      VERIFY(speech_test_fake_total_decodes() == decode_before + 1);
+      VERIFY(turbo_agent_speech_take_final(
+          input, final_text, sizeof(final_text), &length, &kind) ==
+          TURBO_AGENT_SPEECH_ESTATE);
+      VERIFY(turbo_voice_asr_event(voice.voice, 42u,
+             TURBO_VOICE_ASR_CHECKED_FINAL) == TURBO_VOICE_OK);
+      VERIFY(turbo_voice_input_quiesced(voice.voice, 42u) == TURBO_VOICE_OK);
+      VERIFY(turbo_voice_get_state(voice.voice) == TURBO_VOICE_WAIT_APPROVAL);
+      VERIFY(voice.provider.begins == 0u);
+
+      cmeta_threadpool_t *pool = create_pool();
+      VERIFY(pool != NULL);
+      turbo_agent_harness_t *harness =
+          create_harness(pool, success_transport, NULL);
+      VERIFY(harness != NULL);
+      turbo_agent_harness_execution_t *execution = NULL;
+      VERIFY(turbo_agent_harness_start_text(
+          harness, final_text, NULL, &execution) == SALTS_OK);
+      VERIFY(turbo_agent_harness_execution_wait(execution, 20000u) ==
+             SALTS_OK);
+      turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_FAILED;
+      VERIFY(turbo_agent_harness_execution_get_status(execution, &status) ==
+             SALTS_OK && status == TURBO_AGENT_EXECUTION_COMPLETED);
+      const char *run = turbo_agent_app_last_run_id(
+          turbo_agent_harness_app(harness));
+      VERIFY(run != NULL && run[0] != '\0');
+      char expected[160];
+      size_t count = strlen(run);
+      VERIFY(count > 0u && count < sizeof(expected));
+      memcpy(expected, run, count + 1u);
+      VERIFY(turbo_voice_admit_harness_completed_final(
+          voice.voice, 42u, harness, execution, expected,
+          0, "local", "en") == TURBO_VOICE_EBUSY);
+      VERIFY(turbo_voice_admit_harness_completed_final(
+          voice.voice, 42u, harness, execution, expected,
+          1, "local", "en") == TURBO_VOICE_OK);
+      VERIFY(voice.provider.begins == 1u);
+      size_t written = 0u;
+      for (unsigned i = 0u; i < 24u &&
+           turbo_voice_get_state(voice.voice) !=
+           TURBO_VOICE_DRAIN_PENDING; ++i)
+        VERIFY(turbo_voice_pump(voice.voice, 1u, &written) ==
+               TURBO_VOICE_OK);
+      VERIFY(turbo_voice_get_state(voice.voice) ==
+             TURBO_VOICE_DRAIN_PENDING);
+      VERIFY(voice.sink.used == 960u);
+      VERIFY(turbo_voice_drain(voice.voice, 10u) == TURBO_VOICE_EBUSY);
+      voice.sink.used = 0u; /* no actual speaker */
+      VERIFY(turbo_voice_drain(voice.voice, 10u) == TURBO_VOICE_OK);
+      VERIFY(turbo_voice_get_state(voice.voice) == TURBO_VOICE_COMPLETED);
+      turbo_agent_harness_execution_release(execution);
+      turbo_agent_harness_release(harness);
+      cmeta_threadpool_destroy(pool);
+    }
+  }
+  if (mode != M3_FINAL_TO_REAL_HARNESS)
+    VERIFY(voice.provider.begins == 0u && voice.sink.writes == 0u);
+  VERIFY(voice_destroy(&voice) == 0);
+  VERIFY(turbo_agent_speech_destroy(&input) == TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_agent_speech_whisper_destroy(&owner) ==
+         TURBO_AGENT_SPEECH_OK && owner == NULL);
+  VERIFY(speech_test_fake_total_frees() == frees_before + 1);
+  return 0;
+}
+
+static int test_actual_m3_whisper_provider_handoff(void) {
+  turbo_agent_speech_whisper_t *bad_owner = NULL;
+  int before = speech_test_fake_total_decodes();
+  VERIFY(create_approved_mock_model(&bad_owner, 1) ==
+         TURBO_AGENT_WHISPER_EINTEGRITY && bad_owner == NULL);
+  VERIFY(speech_test_fake_total_decodes() == before);
+  VERIFY(test_original_m3_provider_with_real_harness(
+      M3_FINAL_TO_REAL_HARNESS) == 0);
+  VERIFY(test_original_m3_provider_with_real_harness(
+      M3_ZERO_PCM_REJECTS_HARNESS) == 0);
+  VERIFY(test_original_m3_provider_with_real_harness(
+      M3_CANCEL_BEFORE_FINAL) == 0);
+  puts("PASS real M3 SHA/admission and model-free v1.9.5 C ABI mock decode");
+  puts("PASS real M1/M2 -> real M3 C11 Provider -> real Harness -> bounded M4.2");
+  puts("PASS Whisper zero-frame/no-final/cancel produces zero Harness/TTS");
+  return 0;
+}
+
 int main(void) {
   VERIFY(test_actual_completed_harness() == 0);
   VERIFY(test_actual_cancelled_harness() == 0);
   VERIFY(test_actual_timed_out_harness() == 0);
   VERIFY(test_all_composed_cases() == 0);
+  VERIFY(test_actual_m3_whisper_provider_handoff() == 0);
   puts("PASS real bounded executor/Agent/Session/Harness FINAL ownership gates");
   return 0;
 }

@@ -67,3 +67,15 @@ if(ENABLE_TTS_HARNESS_FINAL_GATE_TEST)
   endif()
   add_subdirectory(tests/harness)
 endif()
+
+# Strict optional original M3 source ASan/UBSan/TSan conformance against
+# the original pinned M1 target and upstream public v1.9.5 headers.
+# The vendor engine is a deterministic original M3 TEST DOUBLE: no weights.
+option(ENABLE_TTS_M3_WHISPER_SANITIZER_TEST
+  "Instrument original M3 C11 Provider under all M4 sanitizers" OFF)
+if(ENABLE_TTS_M3_WHISPER_SANITIZER_TEST)
+  if(NOT ENABLE_TTS_HOST_HANDOFF_TEST OR NOT BUILD_TESTING)
+    message(FATAL_ERROR "M3 sanitizer requires original pinned M1/M2 Host test")
+  endif()
+  add_subdirectory(tests/m3)
+endif()

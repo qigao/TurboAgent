@@ -139,6 +139,57 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64 -WithWasm
 
+      # Diagnostic-only, isolated from release/package pins. The official SDKs
+      # are restored above; this exact source candidate replaces only the
+      # Windows Salts root for the downstream lifecycle regression.
+      - name: Checkout exact Salts Job Object candidate
+        if: matrix.rid == 'windows-x64'
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: 42e04613b9f1a5ec02d5526f982e25b55e69259c
+          path: _candidate/salts
+          persist-credentials: false
+
+      - name: Verify exact upstream candidate source SHA
+        if: matrix.rid == 'windows-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sha = (git -C "_candidate/salts" rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sha -ne "42e04613b9f1a5ec02d5526f982e25b55e69259c") {
+            throw "Salts source mismatch: $sha"
+          }
+
+      - name: Build and install isolated Windows Salts candidate SDK
+        if: matrix.rid == 'windows-x64'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          pushd "_candidate\salts"
+          if errorlevel 1 exit /b 1
+          cmake --preset win-release-ci -DCMAKE_SUPPRESS_REGENERATION=ON -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF -DCMETA_BUILD_BENCHMARKS=OFF
+          if errorlevel 1 exit /b 1
+          cmake --build --preset win-release-ci --parallel 2
+          if errorlevel 1 exit /b 1
+          cmake --build --preset install-win-release-ci --parallel 2
+          if errorlevel 1 exit /b 1
+          popd
+
+      - name: Select only this exact Windows candidate SDK
+        if: matrix.rid == 'windows-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE "_candidate/salts/stage/sdk/windows-x64"))
+          $config = Join-Path $root "lib/cmake/Salts/SaltsConfig.cmake"
+          if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
+            throw "Missing exact-source candidate SDK: $config"
+          }
+          "SALTS_ROOT=$($root.Replace('\', '/'))" >> $env:GITHUB_ENV
+          "SALTS_CANDIDATE_SHA=42e04613b9f1a5ec02d5526f982e25b55e69259c" >> $env:GITHUB_ENV
+
       - name: Configure on Unix
         if: runner.os != 'Windows'
         shell: bash
@@ -150,6 +201,26 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --preset ci-windows-release
+
+      - name: Assert Windows TurboAgent consumed exact Salts candidate
+        if: matrix.rid == 'windows-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:SALTS_CANDIDATE_SHA -ne "42e04613b9f1a5ec02d5526f982e25b55e69259c") {
+            throw "Unexpected candidate source"
+          }
+          $cacheFile = "build/ci-windows-release/CMakeCache.txt"
+          $entries = @(Get-Content -LiteralPath $cacheFile | Where-Object { $_ -match '^Salts_DIR:PATH=' })
+          if ($entries.Count -ne 1) { throw "Missing unique Salts_DIR CMake cache entry" }
+          $actual = ($entries[0] -split '=', 2)[1]
+          $expected = Join-Path $env:SALTS_ROOT "lib/cmake/Salts"
+          $actualFull = [IO.Path]::GetFullPath($actual)
+          $expectedFull = [IO.Path]::GetFullPath($expected)
+          if ($actualFull -ine $expectedFull) {
+            throw "Wrong Salts SDK used: $actualFull (expected $expectedFull)"
+          }
+          Write-Host "Exact Salts source $env:SALTS_CANDIDATE_SHA used: $actualFull"
 
       - name: Build on Unix
         if: runner.os != 'Windows'
@@ -196,6 +267,12 @@ jobs:
         env:
           SDK_PRESET: ${{ matrix.preset }}
         run: ctest --preset "$SDK_PRESET"
+
+      - name: Repeat Windows legacy cancellation and workspace cleanup (20x)
+        if: matrix.rid == 'windows-x64' && matrix.tests
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release --no-tests=error --output-on-failure --repeat until-fail:20 -R "^test_turbo_coding_workspace$"
 
       - name: Test on Windows
         if: runner.os == 'Windows' && matrix.tests

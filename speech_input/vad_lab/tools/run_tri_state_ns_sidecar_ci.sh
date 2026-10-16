@@ -86,6 +86,17 @@ assert r["frames"]==int(os.environ["VAD_FRAMES"])
 assert r["diagnostic_only"] is True
 assert r["real_model_or_language_certified"] is False
 assert r["non_speech_only_when_all_digital_zero"] is True
+assert r["sparse_band_is_calibrated_classifier"] is False
+shares=r["mean_sparse_band_share"]
+assert len(shares)==4 and all(0<=v<=1.00001 for v in shares)
+assert 0<=r["mean_sparse_band_entropy"]<=1.00001
+assert 0<=r["mean_sparse_band_flux"]<=1.00001
+assert r["sparse_band_observed_frames"]<=r["above_floor_frames"]
+assert r["sparse_band_flux_transitions"]<=r["sparse_band_observed_frames"]
+if r["sparse_band_observed_frames"]:
+    assert abs(sum(shares)-1.0)<0.00001
+else:
+    assert sum(shares)==0.0
 if known:
     assert r["nonzero_frames"]>0
     assert r["decision"]!="NON_SPEECH_CONFIDENT"
@@ -100,6 +111,11 @@ print(json.dumps({
   "power_modulation_events":r["power_modulation_events"],
   "peak_autocorrelation":r["mean_peak_autocorrelation"],
   "spectral_concentration":r["mean_spectral_concentration"],
+  "mean_sparse_band_share":shares,
+  "mean_sparse_band_entropy":r["mean_sparse_band_entropy"],
+  "mean_sparse_band_flux":r["mean_sparse_band_flux"],
+  "sparse_band_observed_frames":r["sparse_band_observed_frames"],
+  "sparse_band_flux_transitions":r["sparse_band_flux_transitions"],
   "current_production_guard_changed":False,
   "real_ASR_quality_or_noise_hallucination_measured":False
 },sort_keys=True))
@@ -187,4 +203,42 @@ PY
 done
 
 test "$observed" = 18
+
+# Paired source/noise comparisons use exact matching recorded field-noise
+# samples; report DISTANCE without inventing a binary voice cutoff.
+PAIRED_REPORT_ROOT="$private" python3 - <<'PY'
+import json,os
+from pathlib import Path
+root=Path(os.environ["PAIRED_REPORT_ROOT"])
+samples=[json.loads((root/("observation-%s.json"%i)).read_text())
+         for i in range(18)]
+for group,left,right in (
+    ("road8",5,6),("road8_ns12",7,8),("road8_ns18",9,10),
+    ("road16",12,13),("road16_ns12",14,15),
+    ("road16_ns18",16,17)
+):
+    voice=samples[left]; noise=samples[right]
+    assert voice["decision"]!="NON_SPEECH_CONFIDENT"
+    assert noise["decision"]!="NON_SPEECH_CONFIDENT"
+    va=voice["mean_sparse_band_share"]
+    na=noise["mean_sparse_band_share"]
+    delta=sum(abs(a-b) for a,b in zip(va,na))
+    assert len(va)==len(na)==4
+    assert 0<=delta<=2.00001
+    print(json.dumps({
+        "test_kind":"matched_real_voice_noise_four_sparse_probe_group_distance",
+        "recorded_noise_scale":group,
+        "band_share_l1_distance":round(delta,6),
+        "band_entropy_delta":round(
+            voice["mean_sparse_band_entropy"] -
+            noise["mean_sparse_band_entropy"],6),
+        "band_flux_delta":round(
+            voice["mean_sparse_band_flux"] -
+            noise["mean_sparse_band_flux"],6),
+        "voiced_source_decision":voice["decision"],
+        "recorded_noise_only_decision":noise["decision"],
+        "acoustic_classifier_certified":False,
+        "real_ASR_hallucination_measured":False
+    },sort_keys=True))
+PY
 printf '{"lab":"strict_C11_VAD_with_isolated_SpeexDSP","input_cases":18,"original_human_cases":3,"overlay_human_cases":8,"road_noise_only_cases":7,"model_weights_used":false,"artifacts_include_audio":false}\n'

@@ -200,6 +200,42 @@ jobs:
           SDK_PRESET: ${{ matrix.preset }}
         run: ctest --preset "$SDK_PRESET"
 
+      # Manual Release-Tag qualification is strictly an installed-package
+      # consumer test. Prove CMake consumed the published .nupkg identified
+      # by the tag and digest, never a source-SHA candidate or stale cache.
+      - name: Verify Windows published Salts Release Tag and CMake origin
+        if: matrix.rid == 'windows-x64' && matrix.tests && github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $manifest = Join-Path $env:GITHUB_WORKSPACE "build/release-provenance/windows-x64.txt"
+          if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "No SDK release provenance" }
+          $tag = $env:SALTS_RELEASE_TAG
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$') {
+            throw "Invalid published Salts tag: $tag"
+          }
+          $asset = "Salts.Native.$($tag.Substring(1)).nupkg"
+          $prefix = "repo=qigao/salts tag=$tag asset=$asset sha256="
+          $records = @(Get-Content -LiteralPath $manifest | Where-Object { $_.StartsWith($prefix) })
+          if ($records.Count -ne 1 -or $records[0].Substring($prefix.Length) -cnotmatch '^[0-9a-f]{64}$') {
+            throw "Missing or ambiguous exact published Salts asset digest"
+          }
+          $cache = "build/ci-windows-release/CMakeCache.txt"
+          $entries = @(Get-Content -LiteralPath $cache | Where-Object { $_ -match '^Salts_DIR:PATH=' })
+          if ($entries.Count -ne 1) { throw "Missing unique installed Salts_DIR" }
+          $actual = [IO.Path]::GetFullPath(($entries[0] -split '=', 2)[1])
+          $expected = [IO.Path]::GetFullPath((Join-Path $env:SALTS_ROOT "lib/cmake/Salts"))
+          if ($actual -ine $expected) {
+            throw "Salts package provenance mismatch: $actual vs $expected"
+          }
+          Write-Host "Published SDK acceptance: tag=$tag asset=$asset; CMake installed root verified"
+
+      - name: Repeat Windows released-Salts workspace cancellation (20x)
+        if: matrix.rid == 'windows-x64' && matrix.tests && github.event_name == 'workflow_dispatch'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release --no-tests=error --output-on-failure --repeat until-fail:20 -R "^test_turbo_coding_workspace$"
+
       - name: Test on Windows
         if: runner.os == 'Windows' && matrix.tests
         shell: cmd

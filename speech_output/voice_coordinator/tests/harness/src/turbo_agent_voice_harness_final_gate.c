@@ -1,4 +1,5 @@
 #include "turbo_agent_voice_harness_final_gate.h"
+#include <turbo_agent_state.h>
 
 #include <json_parser.h>
 #include <stdlib.h>
@@ -58,6 +59,21 @@ int turbo_voice_admit_harness_completed_final(
   int rc = TURBO_VOICE_EBUSY;
   if (!result_status || strcmp(result_status, "completed") != 0 ||
       !result_run_id || strcmp(result_run_id, expected_run_id) != 0)
+    goto cleanup;
+
+  /* If the Harness's App advanced to a newer run while taking the result,
+   * the old run must not be spoken. Never silently bind to latest output. */
+  current_run_id = turbo_agent_app_last_run_id(app);
+  if (!current_run_id || strcmp(current_run_id, expected_run_id) != 0) {
+    rc = TURBO_VOICE_ESTALE;
+    goto cleanup;
+  }
+
+  /* Preflight canonical borrowed final text BEFORE the public malloc-copy.
+   * The same canonical accessor underlies turbo_agent_app_result_text. */
+  const char *canonical = turbo_agent_state_final_answer_text(state);
+  if (!canonical || !canonical[0] ||
+      strlen(canonical) > TURBO_TTS_MAX_TEXT_BYTES)
     goto cleanup;
 
   /* Original Agent result API owns the canonical final-answer projection.

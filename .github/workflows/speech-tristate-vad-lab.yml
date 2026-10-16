@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   native-c11-tristate-vad:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-tristate-vad-c11-184' || github.event.pull_request.head.ref == 'test/speech-tristate-vad-ns-sidecar-184')
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-tristate-vad-c11-184' || github.event.pull_request.head.ref == 'test/speech-tristate-vad-ns-sidecar-184' || github.event.pull_request.head.ref == 'test/speech-multiband-vad-features-184')
     name: Bounded C11 tri-state voice/noise/uncertain (no model weights)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -147,6 +147,17 @@ jobs:
           assert data["diagnostic_only"] is True
           assert data["real_model_or_language_certified"] is False
           assert data["non_speech_only_when_all_digital_zero"] is True
+          assert data["sparse_band_is_calibrated_classifier"] is False
+          bands=data["mean_sparse_band_share"]
+          assert len(bands)==4
+          assert all(0.0<=x<=1.00001 for x in bands)
+          assert 0.0<=data["mean_sparse_band_entropy"]<=1.00001
+          assert 0.0<=data["mean_sparse_band_flux"]<=1.00001
+          assert data["sparse_band_flux_transitions"]<=data["sparse_band_observed_frames"]
+          if data["sparse_band_observed_frames"]:
+              assert abs(sum(bands)-1.0)<0.00001
+          else:
+              assert sum(bands)==0.0
           if human:
               assert data["nonzero_frames"]>0
               assert data["decision"] != "NON_SPEECH_CONFIDENT"
@@ -162,6 +173,11 @@ jobs:
              "power_modulation_events":data["power_modulation_events"],
              "mean_peak_autocorrelation":data["mean_peak_autocorrelation"],
              "mean_spectral_concentration":data["mean_spectral_concentration"],
+             "mean_sparse_band_share":bands,
+             "mean_sparse_band_entropy":data["mean_sparse_band_entropy"],
+             "mean_sparse_band_flux":data["mean_sparse_band_flux"],
+             "sparse_band_observed_frames":data["sparse_band_observed_frames"],
+             "sparse_band_flux_transitions":data["sparse_band_flux_transitions"],
              "production_VAD_enabled":False,
              "actual_ASR_quality_measured":False,
              "source_audio_uploaded":False
@@ -180,7 +196,7 @@ jobs:
           # and private provenance object is deleted by the EXIT trap.
 
   speex-c11-tristate-sidecar:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-tristate-vad-ns-sidecar-184'
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-tristate-vad-ns-sidecar-184' || github.event.pull_request.head.ref == 'test/speech-multiband-vad-features-184'
     name: Side-by-side SpeexDSP NS vs C11 tri-state on real private speech/noise
     runs-on: ubuntu-24.04
     timeout-minutes: 30

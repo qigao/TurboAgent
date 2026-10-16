@@ -33,19 +33,41 @@ struct ta_vad_lab_owner {
   uint64_t previous_power;
   double concentration_sum;
   double correlation_sum;
+  /* Aggregate-only 4 coarse groups of 12 FIXED sparse DFT probes.
+   * Never cache a prior PCM frame or any transcript/audio path. */
+  double sparse_band_share_sum[TA_VAD_LAB_SPARSE_BAND_COUNT];
+  double previous_band_share[TA_VAD_LAB_SPARSE_BAND_COUNT];
+  double sparse_band_entropy_sum;
+  double sparse_band_flux_sum;
+  uint32_t sparse_band_observed_frames;
+  uint32_t sparse_band_flux_transitions;
+  uint32_t previous_band_valid;
   uint32_t settled;
 };
 
 _Static_assert(TA_VAD_LAB_FRAME_SAMPLES == 320u,
                "20ms S16 ABI is fixed at 16kHz/320 samples");
+_Static_assert(TA_VAD_LAB_SPARSE_BAND_COUNT == 4u,
+               "sparse spectral diagnostic has exactly four groups");
+_Static_assert(sizeof(struct ta_vad_lab_owner) <= 512u,
+               "C11 VAD must have constant and bounded owner state");
 _Static_assert(sizeof(int16_t) == 2u,
                "candidate requires exact 16bit signed PCM");
 
+/* A fixed-length sparse DFT *probe* group, not a full-band filterbank.
+ * Group 0 covers 250,450,650Hz probes; group 1 covers 850..1550Hz,
+ * group 2 covers 2150..3950Hz; group 3 covers 5150..7550Hz. These
+ * samples of the spectrum do NOT measure all energy in a frequency band.
+ * All outputs are aggregates and must not become a reject threshold. */
 static double spectral_concentration(const ta_vad_lab_owner_t *owner,
-                                     const int16_t *pcm) {
+                                     const int16_t *pcm,
+                                     double band_share[TA_VAD_LAB_SPARSE_BAND_COUNT],
+                                     int *has_sparse_energy) {
+  double group_energy[TA_VAD_LAB_SPARSE_BAND_COUNT] = {0.0};
   double total = 0.0;
   double largest = 0.0;
   size_t bin;
+  size_t band;
   for (bin = 0u; bin < TA_VAD_LAB_SPECTRAL_BINS; ++bin) {
     double before = 0.0;
     double earlier = 0.0;
@@ -63,9 +85,40 @@ static double spectral_concentration(const ta_vad_lab_owner_t *owner,
     /* Clamp tiny floating-point negative cancellation to zero. */
     if (e < 0.0) e = 0.0;
     total += e;
+    group_energy[bin / 3u] += e;
     if (e > largest) largest = e;
   }
+  *has_sparse_energy = total > 0.0;
+  for (band = 0u; band < TA_VAD_LAB_SPARSE_BAND_COUNT; ++band)
+    band_share[band] = total > 0.0 ? group_energy[band] / total : 0.0;
   return total > 0.0 ? largest / total : 0.0;
+}
+
+static void update_sparse_band_observations(
+    ta_vad_lab_owner_t *owner,
+    const double band_share[TA_VAD_LAB_SPARSE_BAND_COUNT]) {
+  const double inv_log_4 = 0.7213475204444817036799623405009;
+  double entropy = 0.0;
+  double flux = 0.0;
+  size_t i;
+  for (i = 0u; i < TA_VAD_LAB_SPARSE_BAND_COUNT; ++i) {
+    const double fraction = band_share[i];
+    owner->sparse_band_share_sum[i] += fraction;
+    if (fraction > 0.0)
+      entropy -= fraction * log(fraction);
+    if (owner->previous_band_valid)
+      flux += fabs(fraction - owner->previous_band_share[i]);
+    owner->previous_band_share[i] = fraction;
+  }
+  owner->sparse_band_entropy_sum += entropy * inv_log_4;
+  ++owner->sparse_band_observed_frames;
+  if (owner->previous_band_valid) {
+    /* Total variation distance of normalized sparse spectral groups,
+     * range [0,1], insensitive to uniform overall amplitude scaling. */
+    owner->sparse_band_flux_sum += 0.5 * flux;
+    ++owner->sparse_band_flux_transitions;
+  }
+  owner->previous_band_valid = 1u;
 }
 
 /* Normalized positive time-domain autocorrelation, pitch-like diagnostic.
@@ -147,17 +200,28 @@ ta_vad_lab_error_t ta_vad_lab_accept(ta_vad_lab_owner_t *owner,
   owner->previous_power = power;
 
   if (nonzero != 0u && power >= UINT64_C(1310720)) {
-    const double concentration = spectral_concentration(owner, pcm);
+    double band_share[TA_VAD_LAB_SPARSE_BAND_COUNT] = {0.0};
+    int has_sparse_energy = 0;
+    const double concentration = spectral_concentration(
+        owner, pcm, band_share, &has_sparse_energy);
     const double correlation = max_positive_correlation(pcm);
     ++owner->above_floor_count;
     owner->concentration_sum += concentration;
     owner->correlation_sum += correlation;
+    if (has_sparse_energy)
+      update_sparse_band_observations(owner, band_share);
+    else
+      owner->previous_band_valid = 0u;
     /* High periodicity with multiple spectral probes may be a voiced
      * syllable, but is NOT a sufficient basis for a speech/no-speech gate. */
     if (correlation >= 0.62 && concentration < 0.82)
       ++owner->voicing_count;
     if (correlation >= 0.75 && concentration >= 0.72)
       ++owner->tonal_count;
+  } else {
+    /* Silence / below-floor input interrupts spectral flux continuity.
+     * No cross-gap transition is falsely recorded as a speech feature. */
+    owner->previous_band_valid = 0u;
   }
   ++owner->frame_count;
   return TA_VAD_LAB_OK;
@@ -185,6 +249,24 @@ ta_vad_lab_error_t ta_vad_lab_settle(ta_vad_lab_owner_t *owner,
     output.mean_peak_autocorrelation =
         owner->correlation_sum / (double)owner->above_floor_count;
   }
+  output.sparse_band_observed_frames =
+      owner->sparse_band_observed_frames;
+  output.sparse_band_flux_transitions =
+      owner->sparse_band_flux_transitions;
+  if (owner->sparse_band_observed_frames != 0u) {
+    size_t band;
+    for (band = 0u; band < TA_VAD_LAB_SPARSE_BAND_COUNT; ++band)
+      output.mean_sparse_band_share[band] =
+          owner->sparse_band_share_sum[band] /
+          (double)owner->sparse_band_observed_frames;
+    output.mean_sparse_band_entropy =
+        owner->sparse_band_entropy_sum /
+        (double)owner->sparse_band_observed_frames;
+  }
+  if (owner->sparse_band_flux_transitions != 0u)
+    output.mean_sparse_band_flux =
+        owner->sparse_band_flux_sum /
+        (double)owner->sparse_band_flux_transitions;
   /* "Confident no voice" is limited to >=1s of BYTE-EXACT digital zero.
    * No nonzero audio, including alarms, power-stationary speech, dynamic
    * broadband noise or silence+voice, can be rejected by this prototype. */

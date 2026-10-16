@@ -35,4 +35,21 @@ for libdir in "$build_root/bin" "$SALTS_ROOT/lib" "$SALTS_UTILS_ROOT/lib" "$PRAK
   done < <(find -L "$libdir" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
 done
 printf 'AUDIT: scanned=%s DSOs_with_hash_bytes_undefined=%s\n' "$scanned" "$found"
+printf 'AUDIT: dynamic providers of hash_bytes from scanned ELF DSOs:\n'
+for libdir in "$build_root/bin" "$SALTS_ROOT/lib" "$SALTS_UTILS_ROOT/lib" "$PRAKTOR_ROOT/lib"; do
+  test -d "$libdir" || continue
+  while IFS= read -r -d '' soname; do
+    matches="$(nm -D --defined-only "$soname" 2>/dev/null |
+      grep -E '[[:space:]][TW][[:space:]]+hash_bytes(@|$)' || true)"
+    if test -n "$matches"; then
+      printf 'AUDIT: DSO provides dynamically: %s\n%s\n' "$soname" "$matches"
+    fi
+  done < <(find -L "$libdir" -maxdepth 1 -type f \
+    \( -name '*.so' -o -name '*.so.*' \) -print0)
+done
+if command -v ninja >/dev/null && test -f "$build_root/build.ninja"; then
+  printf 'AUDIT: producer shared-object exact link command:\n'
+  ninja -C "$build_root" -t commands bin/libpraktor_tools.so |
+    tail -n 1 || true
+fi
 printf 'AUDIT: main linker failure remains authoritative; no flags changed\n'

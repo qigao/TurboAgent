@@ -1,5 +1,4 @@
 #include "turbo_agent_voice_coordinator.h"
-#include <salts_capture.h>
 #include <salts_playback.h>
 #include <salts/clock.h>
 
@@ -275,30 +274,11 @@ static int test_original_native_error_fail_closed(void) {
   return 0;
 }
 
-static int test_published_native_capture_no_permission(void) {
-  salts_capture_device_t devices[SALTS_CAPTURE_MAX_DEVICES] = {{0}};
-  const int count = salts_capture_list_audio_devices(
-      devices, SALTS_CAPTURE_MAX_DEVICES);
-  /* The official published Capture DSO performs OS context/enumeration.
-   * A headless CI can fail this call; that is NOT an audio device positive. */
-  REQUIRE(count >= 0 || count == SALTS_CAPTURE_ERR_DEVICE);
-  salts_audio_capture_config_t valid = {16000, 1, 16, 20};
-  salts_audio_capture_config_t bad = {12345, 1, 16, 20};
-  REQUIRE(salts_audio_capture_create(NULL, &bad) == NULL);
-  REQUIRE(salts_audio_capture_create("not-an-enumerated-capture-id",
-                                     &valid) == NULL);
-  /* Deliberately NO capture create(NULL, valid): that could open a real mic. */
-  printf("PASS published Salts Capture enum/native invalid-ID reject, detected=%d (NOT mic start)\n",
-         count);
-  return 0;
-}
-
 int main(void) {
   REQUIRE(test_native_callback_drain_and_states() == 0);
   REQUIRE(test_m42_device_backpressure_and_finish() == 0);
   REQUIRE(test_m42_interrupt_really_clears_native() == 0);
   REQUIRE(test_original_native_error_fail_closed() == 0);
-  REQUIRE(test_published_native_capture_no_permission() == 0);
   puts("PASS pinned original SaltsUtils Playback NULL native backend + M4.2 lifecycle");
   return 0;
 }

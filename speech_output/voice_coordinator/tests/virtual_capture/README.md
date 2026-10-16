@@ -43,6 +43,18 @@ implicitly resampled/coalesced/truncated.
    atomics and timestamp order; stop and wait for native thread exit.
    Verify no callbacks arrive after stop (explicit bounded observation),
    then destroy the released native handle.
+**Stop/callback interleaving (additional strict gate):** the real published
+Capture callback deliberately blocks behind a timed C11/POSIX condition
+variable while a separate serialized control operation calls the published
+`salts_capture_stop`. The host first proves stop **has not returned**
+while the callback is still borrowing native data. It then explicitly
+releases the callback, joins the stop worker, checks both callbacks and
+stop are fully settled and verifies no subsequent callback can occur.
+The callback watchdog releases on timeout rather than forcing DSO
+destruction, but the test still fails. This uses original `ma_device_stop`,
+not an adapter-simulated stop or a synthetic pthread standing in for the
+OS audio callback.
+
 2. Create the original M1 bounded queue and immutable original M2 Salts
    Native Adapter using the same exact virtual-source ID. Real native
    callback immediately copies borrowed frames to M1; fake ASR Provider

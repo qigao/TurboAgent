@@ -1034,11 +1034,20 @@ static int test_real_whisper_cpu_no_weights_negative(void) {
 }
 #endif /* M42_REAL_VENDOR_NEGATIVE */
 
+#ifdef M42_REAL_TTS_DSO
+/* Bound to the real test-only dlopen image; no harness or TTS Provider
+ * function implementation is shadowed in this main test translation unit. */
+int m42_real_harness_tts_dso_conformance(void);
+#endif
+
 int main(void) {
   VERIFY(test_actual_completed_harness() == 0);
   VERIFY(test_actual_cancelled_harness() == 0);
   VERIFY(test_actual_timed_out_harness() == 0);
   VERIFY(test_all_composed_cases() == 0);
+#ifdef M42_REAL_TTS_DSO
+  VERIFY(m42_real_harness_tts_dso_conformance() == 0);
+#endif
 #ifndef M42_REAL_VENDOR_NEGATIVE
   VERIFY(test_actual_m3_whisper_provider_handoff() == 0);
 #else

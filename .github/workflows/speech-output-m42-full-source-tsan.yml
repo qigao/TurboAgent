@@ -239,7 +239,7 @@ jobs:
         run: |
           set -euo pipefail
           libdir="build/pinned-harness-source/build/ci-linux-release/bin"
-          for dso in libturbo_agent_harness.so libturbo_agent_agent.so libtts_m42_combined_provider_dso.so; do
+          for dso in libturbo_agent_harness.so libturbo_agent.so libtts_m42_combined_provider_dso.so; do
             test -f "$libdir/$dso"
             nm -D "$libdir/$dso" | grep -F '__tsan_init'
           done

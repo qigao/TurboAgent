@@ -961,6 +961,100 @@ static int test_actual_m3_whisper_provider_handoff(void) {
   return 0;
 }
 
+#ifdef M42_REAL_TTS_DSO
+/* Called by the true Harness + live TTS DSO fixture. This is a genuine
+ * ORIGINAL M1/M2/M3 checked FINAL for the SAME generation 42; no arbitrary
+ * Host-only CHECKED_FINAL injection is permitted on the DSO path. The M3
+ * vendor inference behind the real C11 Provider remains the approved
+ * deterministic test-only Whisper C API, with NO weight download. */
+int m42_real_m3_checked_final_for_tts_dso(
+    turbo_voice_coordinator_t *voice, char *transcript, size_t capacity) {
+  turbo_agent_speech_whisper_t *owner = NULL;
+  turbo_agent_speech_provider_v1_t provider;
+  turbo_agent_speech_input_t *input = NULL;
+  turbo_agent_speech_capture_bridge_t *capture = NULL;
+  const int before_decodes = speech_test_fake_total_decodes();
+  const int before_frees = speech_test_fake_total_frees();
+  VERIFY(voice && transcript && capacity >= 64u);
+  transcript[0] = '\0';
+  VERIFY(turbo_voice_get_state(voice) == TURBO_VOICE_INPUT);
+  VERIFY(turbo_voice_get_generation(voice) == 42u);
+  VERIFY(create_approved_mock_model(&owner, 0) == TURBO_AGENT_SPEECH_OK);
+  VERIFY(owner != NULL);
+  VERIFY(turbo_agent_speech_whisper_provider(owner, &provider) ==
+         TURBO_AGENT_SPEECH_OK);
+  turbo_agent_speech_config_t config;
+  turbo_agent_speech_config_init(&config);
+  config.queue_frames = 4u;
+  config.max_utterance_frames = 10u;
+  config.max_text_bytes = 128u;
+  VERIFY(turbo_agent_speech_create(&config, &provider, &input) ==
+         TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_agent_speech_capture_bridge_create(
+      input, 42u, &capture) == TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_agent_speech_capture_bridge_begin(capture) ==
+         TURBO_AGENT_SPEECH_OK);
+
+  inprocess_capture_t worker;
+  VERIFY(inprocess_capture_init(
+      &worker, capture, TURBO_AGENT_SPEECH_CAPTURE_PCM_BYTES) == 0);
+  pthread_t thread;
+  VERIFY(pthread_create(&thread, NULL, inprocess_capture_worker,
+                        &worker) == 0);
+  inprocess_capture_allow(&worker, 0);
+  VERIFY(inprocess_capture_wait(&worker) == 0);
+  VERIFY(worker.callback_result == TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_voice_get_state(voice) == TURBO_VOICE_INPUT);
+  VERIFY(speech_test_fake_total_decodes() == before_decodes);
+  size_t pumped = 0u;
+  VERIFY(turbo_agent_speech_pump(input, 1u, &pumped) ==
+         TURBO_AGENT_SPEECH_OK && pumped == 1u);
+  /* Real original Whisper C11 owner remains busy until its utterance has
+   * fully settled. The in-flight vendor callback cannot be unloaded. */
+  VERIFY(turbo_agent_speech_whisper_destroy(&owner) ==
+         TURBO_AGENT_SPEECH_EBUSY);
+  VERIFY(turbo_agent_speech_capture_bridge_stop_admission(capture) ==
+         TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_voice_get_state(voice) == TURBO_VOICE_INPUT);
+  inprocess_capture_allow(&worker, 1);
+  VERIFY(pthread_join(thread, NULL) == 0);
+  inprocess_capture_destroy(&worker);
+  uint8_t late[TURBO_AGENT_SPEECH_CAPTURE_PCM_BYTES] = {0};
+  VERIFY(turbo_agent_speech_capture_bridge_offer(
+      capture, late, sizeof(late), 2000u) == TURBO_AGENT_SPEECH_ESTATE);
+  VERIFY(turbo_agent_speech_capture_bridge_finish(capture) ==
+         TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_agent_speech_capture_bridge_destroy(&capture) ==
+         TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_agent_speech_pump(input, 1u, &pumped) ==
+         TURBO_AGENT_SPEECH_OK && pumped == 0u);
+
+  turbo_agent_speech_transcript_kind_t kind = TURBO_AGENT_SPEECH_NONE;
+  size_t n = 0u;
+  VERIFY(turbo_agent_speech_take_final(input, transcript, capacity,
+                                        &n, &kind) == TURBO_AGENT_SPEECH_OK);
+  VERIFY(kind == TURBO_AGENT_SPEECH_TRANSCRIPT_FINAL &&
+         n == 10u && strcmp(transcript, " utterance") == 0);
+  VERIFY(turbo_agent_speech_take_final(input, transcript, capacity,
+                                        &n, &kind) == TURBO_AGENT_SPEECH_ESTATE);
+  VERIFY(speech_test_fake_total_decodes() == before_decodes + 1);
+  VERIFY(turbo_voice_asr_event(voice, 43u,
+                               TURBO_VOICE_ASR_CHECKED_FINAL) ==
+         TURBO_VOICE_ESTALE);
+  VERIFY(turbo_voice_asr_event(voice, 42u,
+                               TURBO_VOICE_ASR_CHECKED_FINAL) ==
+         TURBO_VOICE_OK);
+  VERIFY(turbo_voice_input_quiesced(voice, 42u) == TURBO_VOICE_OK);
+  VERIFY(turbo_voice_get_state(voice) == TURBO_VOICE_WAIT_APPROVAL);
+
+  VERIFY(turbo_agent_speech_destroy(&input) == TURBO_AGENT_SPEECH_OK);
+  VERIFY(turbo_agent_speech_whisper_destroy(&owner) ==
+         TURBO_AGENT_SPEECH_OK && owner == NULL);
+  VERIFY(speech_test_fake_total_frees() == before_frees + 1);
+  return 0;
+}
+#endif /* M42_REAL_TTS_DSO */
+
 #else /* M42_REAL_VENDOR_NEGATIVE: genuine Whisper/GGML CPU C API */
 
 /* Real upstream v1.9.5 CPU library is dynamically linked to the same

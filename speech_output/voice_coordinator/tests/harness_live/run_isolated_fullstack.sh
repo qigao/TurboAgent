@@ -82,8 +82,14 @@ for marker in \
   'PASS full published Capture+Playback + actual Harness + true TTS DSO: cancel/clear/late-reject/join/unload' \
   'PASS same-process actual M1/M2/M3 -> Harness -> loaded TTS worker -> BOTH published Salts audio DSOs'; do
   count="$(grep -Fc "$marker" "$isolated/fullstack-live.log" || true)"
-  if [[ "$count" != 8 ]]; then
-    echo "missing fullstack exact native lifecycle evidence: $marker ($count/8)" >&2
+  expected=8
+  # Exactly TWO complete Capture/M3 checked FINAL passages per CTest:
+  # normal-drain then cancellation. The other markers occur once per case.
+  if [[ "$marker" == 'PASS shipped Capture callback stop/join -> original M1/M2/M3 one-shot checked FINAL' ]]; then
+    expected=16
+  fi
+  if [[ "$count" != "$expected" ]]; then
+    echo "missing fullstack exact native lifecycle evidence: $marker ($count/$expected)" >&2
     exit 1
   fi
 done

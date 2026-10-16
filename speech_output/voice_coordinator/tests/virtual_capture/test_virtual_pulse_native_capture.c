@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <pthread.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -170,6 +172,126 @@ static int run_native_callback_and_join(const char *exact_device_id) {
   return 0;
 }
 
+
+/* Force an actual native callback to remain IN-FLIGHT during stop().
+ * This exercises the OS backend's stop/join contract instead of merely
+ * observing no callback after an already-fast callback returned. All control
+ * calls stay serialized; callback runs on the real miniaudio device thread. */
+typedef struct held_native_callback {
+  pthread_mutex_t mutex;
+  pthread_cond_t gate;
+  salts_capture_t *capture; /* borrowed until stop worker is joined */
+  int callback_entered;
+  int release_callback;
+  atomic_int stop_entered;
+  atomic_int stop_returned;
+  atomic_int callback_exited;
+  atomic_int callback_deadline_failed;
+  atomic_uint callbacks;
+} held_native_callback_t;
+static void held_native_pcm_callback(salts_capture_t *capture,
+                                     const uint8_t *borrowed,
+                                     size_t len, uint64_t timestamp,
+                                     void *userdata) {
+  (void)capture;
+  (void)timestamp;
+  held_native_callback_t *ctx = (held_native_callback_t *)userdata;
+  if (!ctx) return;
+  const unsigned index = atomic_fetch_add_explicit(
+      &ctx->callbacks, 1u, memory_order_acq_rel);
+  if (!borrowed || len != CALLBACK_PERIOD_BYTES)
+    atomic_store_explicit(&ctx->callback_deadline_failed, 1, memory_order_release);
+  if (index != 0u) return;
+  if (pthread_mutex_lock(&ctx->mutex) != 0) return;
+  ctx->callback_entered = 1;
+  (void)pthread_cond_broadcast(&ctx->gate);
+  struct timespec until;
+  if (timespec_get(&until, TIME_UTC) != TIME_UTC) {
+    atomic_store_explicit(&ctx->callback_deadline_failed, 1, memory_order_release);
+  } else {
+    until.tv_sec += 8;
+    while (!ctx->release_callback) {
+      if (pthread_cond_timedwait(&ctx->gate, &ctx->mutex, &until) != 0) {
+        atomic_store_explicit(
+            &ctx->callback_deadline_failed, 1, memory_order_release);
+        break; /* watchdog RELEASES callback: no forced device destruction */
+      }
+    }
+  }
+  (void)pthread_mutex_unlock(&ctx->mutex);
+  atomic_store_explicit(&ctx->callback_exited, 1, memory_order_release);
+}
+static void *native_stop_worker(void *userdata) {
+  held_native_callback_t *ctx = (held_native_callback_t *)userdata;
+  atomic_store_explicit(&ctx->stop_entered, 1, memory_order_release);
+  salts_capture_stop(ctx->capture);
+  atomic_store_explicit(&ctx->stop_returned, 1, memory_order_release);
+  return NULL;
+}
+static int run_blocked_native_callback_stop_join(const char *exact_device_id) {
+  salts_audio_capture_config_t config = {16000, 1, 16, 20};
+  salts_capture_t *capture = salts_audio_capture_create(exact_device_id, &config);
+  CHECK(capture != NULL);
+  held_native_callback_t ctx = {0};
+  ctx.capture = capture;
+  CHECK(pthread_mutex_init(&ctx.mutex, NULL) == 0);
+  CHECK(pthread_cond_init(&ctx.gate, NULL) == 0);
+  atomic_init(&ctx.stop_entered, 0);
+  atomic_init(&ctx.stop_returned, 0);
+  atomic_init(&ctx.callback_exited, 0);
+  atomic_init(&ctx.callback_deadline_failed, 0);
+  atomic_init(&ctx.callbacks, 0u);
+  salts_audio_capture_set_callback(capture, held_native_pcm_callback, &ctx);
+  CHECK(salts_capture_start(capture) == SALTS_CAPTURE_OK);
+
+  struct timespec limit;
+  CHECK(timespec_get(&limit, TIME_UTC) == TIME_UTC);
+  limit.tv_sec += 8;
+  CHECK(pthread_mutex_lock(&ctx.mutex) == 0);
+  while (!ctx.callback_entered) {
+    if (pthread_cond_timedwait(&ctx.gate, &ctx.mutex, &limit) != 0) {
+      (void)pthread_mutex_unlock(&ctx.mutex);
+      CHECK(0 && "no native callback reached hold barrier");
+    }
+  }
+  CHECK(pthread_mutex_unlock(&ctx.mutex) == 0);
+  CHECK(atomic_load_explicit(&ctx.callback_exited, memory_order_acquire) == 0);
+
+  pthread_t stopper;
+  CHECK(pthread_create(&stopper, NULL, native_stop_worker, &ctx) == 0);
+  const uint64_t started_limit = cmeta_monotonic_ms() + 1500u;
+  while (!atomic_load_explicit(&ctx.stop_entered, memory_order_acquire)) {
+    CHECK(cmeta_monotonic_ms() < started_limit);
+    cmeta_sleep_ms(1u);
+  }
+  /* Must remain blocked while callback remains borrowed. Measure before
+   * releasing, but always RELEASE before asserting, to avoid test deadlock. */
+  cmeta_sleep_ms(40u);
+  const int premature_stop = atomic_load_explicit(
+      &ctx.stop_returned, memory_order_acquire);
+  CHECK(pthread_mutex_lock(&ctx.mutex) == 0);
+  ctx.release_callback = 1;
+  CHECK(pthread_cond_broadcast(&ctx.gate) == 0);
+  CHECK(pthread_mutex_unlock(&ctx.mutex) == 0);
+  CHECK(pthread_join(stopper, NULL) == 0);
+  CHECK(premature_stop == 0);
+  CHECK(atomic_load_explicit(&ctx.callback_exited, memory_order_acquire) == 1);
+  CHECK(atomic_load_explicit(&ctx.stop_returned, memory_order_acquire) == 1);
+  CHECK(atomic_load_explicit(
+      &ctx.callback_deadline_failed, memory_order_acquire) == 0);
+  CHECK(salts_capture_get_state(capture) == SALTS_CAPTURE_STATE_STOPPED);
+  unsigned final_count = atomic_load_explicit(
+      &ctx.callbacks, memory_order_acquire);
+  cmeta_sleep_ms(50u);
+  CHECK(atomic_load_explicit(&ctx.callbacks, memory_order_acquire) ==
+        final_count);
+  CHECK(pthread_cond_destroy(&ctx.gate) == 0);
+  CHECK(pthread_mutex_destroy(&ctx.mutex) == 0);
+  salts_capture_destroy(capture); /* callback + stopper have BOTH joined */
+  puts("PASS actual Capture stop blocks on held native callback, then joins before destroy");
+  return 0;
+}
+
 static int run_original_m2_native_adapter(const char *exact_device_id,
                                           uint64_t generation) {
   test_asr_t asr = {.generation = generation};
@@ -288,6 +410,7 @@ int main(void) {
   char device_id[128] = {0};
   CHECK(require_virtual_only_source(device_id, sizeof(device_id)) == 0);
   CHECK(run_native_callback_and_join(device_id) == 0);
+  CHECK(run_blocked_native_callback_stop_join(device_id) == 0);
   CHECK(run_original_m2_native_adapter(device_id, 42u) == 0);
   CHECK(run_original_native_cancel(device_id) == 0);
   puts("PASS released Capture DSO + ORIGINAL M2 Salts adapter on isolated PulseAudio virtual-only source (NO physical microphone)");

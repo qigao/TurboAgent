@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* M4.2 test-only HOST COMPOSITION of EXACT unmodified pinned M1/M2 input
  * source and M4.0/M4.1/M4.2 output source. No capture hardware, Agent

@@ -109,6 +109,14 @@ find_package(Threads REQUIRED)
 add_subdirectory(tools)
 include(FindTools)
 add_subdirectory(runtime_core)
+
+# ASR is an optional input adapter, never a Runtime/Compiler dependency.
+# Default OFF preserves the existing SDK, toolchain and native dependencies.
+option(ENABLE_SPEECH_INPUT "Build optional C11 SpeechInput input modality" OFF)
+if(ENABLE_SPEECH_INPUT)
+  add_subdirectory(speech_input)
+endif()
+
 add_subdirectory(runtime_data)
 add_subdirectory(runtime_tools)
 add_subdirectory(agent_compiler)

@@ -48,6 +48,7 @@ target_include_directories(test_tts_m42_actual_harness PRIVATE
   "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness/include"
   "${VOICE_M42_M3_SOURCE_ROOT}/speech_input/whisper/include"
   "${VOICE_M42_WHISPER_HEADER_ROOT}/include"
+  "${VOICE_M42_WHISPER_HEADER_ROOT}/ggml/include"
   "$ENV{SALTS_UTILS_ROOT}/include"
   "$ENV{SALTS_ROOT}/include")
 target_compile_options(test_tts_m42_actual_harness PRIVATE

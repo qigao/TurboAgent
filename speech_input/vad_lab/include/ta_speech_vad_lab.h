@@ -18,6 +18,7 @@ extern "C" {
 #define TA_VAD_LAB_RATE 16000u
 #define TA_VAD_LAB_FRAME_SAMPLES 320u
 #define TA_VAD_LAB_MAX_FRAMES 3000u
+#define TA_VAD_LAB_SPARSE_BAND_COUNT 4u
 
 typedef struct ta_vad_lab_owner ta_vad_lab_owner_t;
 
@@ -48,6 +49,19 @@ typedef struct {
   uint64_t minimum_nonzero_frame_power;
   double mean_spectral_concentration;
   double mean_peak_autocorrelation;
+
+  /* Experimental four GROUPS of sparse spectral DFT probes, NOT a
+   * comprehensive filterbank. Shares are aggregated only for accepted
+   * frames above the diagnostic noise floor. All four shares sum to
+   * approximately one when such frames exist; no PCM is retained.
+   * Spectral flux measures L1/2 change between CONSECUTIVE eligible
+   * 20ms frames. The first frame after silence has no transition.
+   * These cues NEVER authorize NON_SPEECH_CONFIDENT. */
+  double mean_sparse_band_share[TA_VAD_LAB_SPARSE_BAND_COUNT];
+  double mean_sparse_band_entropy;
+  double mean_sparse_band_flux;
+  uint32_t sparse_band_observed_frames;
+  uint32_t sparse_band_flux_transitions;
   ta_vad_lab_decision_t decision;
   uint32_t diagnostic_only;
   uint32_t real_world_speech_or_noise_certified;

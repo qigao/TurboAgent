@@ -9,7 +9,11 @@ import struct
 import sys
 import time
 
-FRAME = struct.pack("<320h", *(1200 if (i & 1) == 0 else -1200 for i in range(320)))
+# 16kHz / 40 samples = 400Hz square wave: comfortably below Nyquist.
+# Unlike alternating +/- each sample (8kHz), this survives native
+# PulseAudio rate conversion to and from the null-monitor without filtering
+# the input to digital zero. It is NOT speech or a learned ASR example.
+FRAME = struct.pack("<320h", *(8000 if ((i // 20) & 1) == 0 else -8000 for i in range(320)))
 
 def main() -> int:
     try:

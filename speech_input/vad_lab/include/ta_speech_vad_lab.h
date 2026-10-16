@@ -60,6 +60,7 @@ typedef struct {
   double mean_sparse_band_share[TA_VAD_LAB_SPARSE_BAND_COUNT];
   double mean_sparse_band_entropy;
   double mean_sparse_band_flux;
+  uint32_t sparse_band_observed_frames;
   uint32_t sparse_band_flux_transitions;
   ta_vad_lab_decision_t decision;
   uint32_t diagnostic_only;

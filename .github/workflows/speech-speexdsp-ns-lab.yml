@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   speexdsp-native-c11:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-noise-level-sweep-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-paired-asr-offline-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-atomic-paired-wavs-167')
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-speexdsp-c11-ns-146' || github.event.pull_request.head.ref == 'test/speech-speexdsp-mixed-reference-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-noise-level-sweep-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-paired-asr-offline-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-atomic-paired-wavs-167' || github.event.pull_request.head.ref == 'test/speech-speexdsp-recorded-road-mix-167')
     name: SpeexDSP-1.2.1 C11 NS-only smoke, native source + licensed audio
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -292,4 +292,31 @@ jobs:
               "actual_acoustic_wer_cer_measured":False
           },sort_keys=True))
           PY
+          # Actual independently recorded vehicle warning waveform is
+          # overlaid IN SOFTWARE on previously licensed English whisper.
+          # It is NOT a genuine simultaneous voice+ambient mic capture.
+          # The recorded field-noise source is SHA-pinned above (#155).
+          for divisor in 8 16; do
+            mkdir -m 700 "$root/roadmix-$divisor"
+            python3 speech_input/noise_lab/tools/mix_recorded_field_noise.py prepare \
+              --clean-raw "$root/whisper.raw" \
+              --clean-sha256 "$(sha256sum "$root/whisper.raw" | awk '{print $1}')" \
+              --recorded-noise-raw "$root/road.raw" \
+              --recorded-noise-sha256 "$(sha256sum "$root/road.raw" | awk '{print $1}')" \
+              --scale-divisor "$divisor" \
+              --private-root "$root/roadmix-$divisor"
+            for db in -12 -18; do
+              "$probe" "$root/roadmix-$divisor/mixed-recorded-road.raw" \
+                "$root/roadmix-$divisor/processed-$db.raw" \
+                "$db" --align-one-frame
+              python3 speech_input/noise_lab/tools/mix_recorded_field_noise.py score \
+                --clean "$root/roadmix-$divisor/clean-reference.raw" \
+                --clean-sha256 "$(sha256sum "$root/roadmix-$divisor/clean-reference.raw" | awk '{print $1}')" \
+                --mixed "$root/roadmix-$divisor/mixed-recorded-road.raw" \
+                --mixed-sha256 "$(sha256sum "$root/roadmix-$divisor/mixed-recorded-road.raw" | awk '{print $1}')" \
+                --filtered "$root/roadmix-$divisor/processed-$db.raw" \
+                --filtered-sha256 "$(sha256sum "$root/roadmix-$divisor/processed-$db.raw" | awk '{print $1}')" \
+                --scale-divisor "$divisor"
+            done
+          done
           # No upload-artifact action. WAV/raw/provenance wiped on exit.

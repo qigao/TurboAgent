@@ -55,7 +55,8 @@ set_target_properties(m42_original_capture_source_tsan PROPERTIES
   C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO
   POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET default)
 target_compile_definitions(m42_original_capture_source_tsan PRIVATE
-  SALTS_CAPTURE_BUILD SALTS_CAPTURE_SHARED SALTS_HAS_PIPEWIRE SALTS_HAS_X11)
+  SALTS_CAPTURE_BUILD SALTS_CAPTURE_SHARED SALTS_HAS_PIPEWIRE SALTS_HAS_X11
+  _GNU_SOURCE=1)
 target_include_directories(m42_original_capture_source_tsan PRIVATE
   "${M42_CAPTURE_SOURCE_ROOT}/capture/include"
   "${M42_CAPTURE_SOURCE_ROOT}/capture/src"

@@ -1,6 +1,7 @@
 #include "turbo_agent_voice_coordinator.h"
 #include <salts_playback.h>
 #include <salts/clock.h>
+#include <salts/thread.h>
 
 #include <stddef.h>
 #include <stdint.h>

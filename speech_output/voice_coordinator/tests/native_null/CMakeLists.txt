@@ -54,6 +54,25 @@ target_link_libraries(m42_salts_playback_original_native_null
   PUBLIC Salts::Concurrency Salts::Platform
   PRIVATE Threads::Threads "${CMAKE_DL_LIBS}" m)
 
+# Source-level TSan requires the ORIGINAL SPSC cursor acquire/release
+# implementation to be instrumented too.  The default imported static
+# Salts::Concurrency SDK was compiled WITHOUT TSan; leaving these atomics
+# opaque creates a false-positive data race between memcpy/write and
+# memcpy/read despite the correctly ordered release/acquire handshake.
+# Compile the exact original published Salts release C11 implementation,
+# not a shim, stub, suppression or a different ring/owner.
+if(M42_ORIGINAL_AUDIO_TSAN)
+  if(NOT DEFINED M42_SALTS_ORIGINAL_SOURCE_ROOT OR
+     NOT EXISTS "${M42_SALTS_ORIGINAL_SOURCE_ROOT}/concurrency/src/spsc_ring.c" OR
+     NOT EXISTS "${M42_SALTS_ORIGINAL_SOURCE_ROOT}/concurrency/include/salts/spsc_ring.h")
+    message(FATAL_ERROR "Source TSan needs exact original Salts.Native v2.3.0-rc.16 SPSC source")
+  endif()
+  target_sources(m42_salts_playback_original_native_null PRIVATE
+    "${M42_SALTS_ORIGINAL_SOURCE_ROOT}/concurrency/src/spsc_ring.c")
+  target_include_directories(m42_salts_playback_original_native_null
+    BEFORE PRIVATE "${M42_SALTS_ORIGINAL_SOURCE_ROOT}/concurrency/include")
+endif()
+
 # Compile the SAME current-HEAD experimental M4.0, M4.1 and M4.2 C11
 # sources; the only audio symbols come from the ORIGINAL null-native code.
 add_library(m42_native_coordinator_original_source STATIC

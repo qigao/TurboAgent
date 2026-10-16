@@ -25,6 +25,27 @@ jobs:
           ref: 9e51d377bd84ee91ce5a47c94f24f73e4e01bba7
           path: build/pinned-harness-source
           persist-credentials: false
+      - name: Pin original Salts and SaltsUtils source for TSan native Playback shared DSO
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: v4.3.0-rc.11
+          path: build/pinned-saltsutils-native-source
+          persist-credentials: false
+      - name: Pin original Salts rc.17 SPSC release/acquire source for shared TSan Playback
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: v2.3.0-rc.17
+          path: build/pinned-salts-source
+          persist-credentials: false
+      - name: Pin original upstream miniaudio native implementation
+        uses: actions/checkout@v4
+        with:
+          repository: mackron/miniaudio
+          ref: 0.11.22
+          path: build/pinned-miniaudio-source
+          persist-credentials: false
       - name: Check out exact original M3 Whisper Provider implementation
         uses: actions/checkout@v4
         with:
@@ -45,6 +66,12 @@ jobs:
           set -euo pipefail
           test "$(git -C build/pinned-m3-source rev-parse HEAD)" = '4614360e6ee2e174d96cbdd9ce41c5388c81d064'
           test "$(git -C build/pinned-whisper-header rev-parse HEAD)" = 'd1be6fde11ac6e0407606b4e42fe72d34add8037'
+          test "$(git -C build/pinned-saltsutils-native-source describe --tags --exact-match)" = 'v4.3.0-rc.11'
+          test "$(git -C build/pinned-salts-source describe --tags --exact-match)" = 'v2.3.0-rc.17'
+          test "$(git -C build/pinned-miniaudio-source describe --tags --exact-match)" = '0.11.22'
+          test -f build/pinned-saltsutils-native-source/playback/src/salts_playback.c
+          test -f build/pinned-salts-source/concurrency/src/spsc_ring.c
+          test -f build/pinned-miniaudio-source/miniaudio.h
           test -f build/pinned-m3-source/speech_input/whisper/src/turbo_agent_speech_whisper.c
           test -f build/pinned-m3-source/speech_input/whisper/tests/whisper_fake_engine_image.c
           test -f build/pinned-m3-source/speech_input/whisper/include/turbo_agent_speech_whisper.h
@@ -101,6 +128,31 @@ jobs:
           test -n "$(find "$TURBO_WHISPER_SDK_ROOT/lib" -maxdepth 1 -name 'libwhisper.so*' -print -quit)"
           test ! -f build/pinned-whisper-header/models/ggml-tiny.bin
           echo "TURBO_WHISPER_SDK_ROOT=$TURBO_WHISPER_SDK_ROOT" >> "$GITHUB_ENV"
+      - name: Rebuild EXACT original real-native Playback DSO plus Salts SPSC source under TSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S speech_output/voice_coordinator/tests/native_null \
+            -B build/m42-real-playback-source-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_C_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g -O1 -Wall -Wextra -Wpedantic -Werror" \
+            -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
+            -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread \
+            "-DSALTSUTILS_RELEASE_SOURCE=$GITHUB_WORKSPACE/build/pinned-saltsutils-native-source" \
+            "-DMINIAUDIO_RELEASE_SOURCE=$GITHUB_WORKSPACE/build/pinned-miniaudio-source" \
+            "-DM42_SALTS_ORIGINAL_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-salts-source" \
+            "-DM42_CURRENT_SOURCE=$GITHUB_WORKSPACE" \
+            -DM42_ORIGINAL_AUDIO_TSAN=ON \
+            -DM42_ORIGINAL_SHARED_PLAYBACK_TSAN=ON
+          cmake --build build/m42-real-playback-source-tsan \
+            --target m42_original_playback_source_tsan_shared --parallel 2
+          built="build/m42-real-playback-source-tsan/libsalts_playback.so"
+          test -f "$built"
+          nm -D "$built" | grep -F __tsan_init
+          nm -D --defined-only "$built" | grep -F ' T salts_playback_drain'
+          nm -D --defined-only "$built" | grep -F ' T cmeta_spsc_ring_write_release'
+          nm -D --defined-only "$built" | grep -F ' T cmeta_spsc_ring_read_acquire'
+          echo "M42_SOURCE_TSAN_LIB_DIR=$GITHUB_WORKSPACE/build/m42-real-playback-source-tsan" >> "$GITHUB_ENV"
       - name: Compile current-head Voice/Harness admission archives
         shell: bash
         run: |

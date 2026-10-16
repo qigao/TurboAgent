@@ -28,6 +28,11 @@ struct salts_playback {
   unsigned drains;
 };
 
+/* Implemented by original-M3 + M1/M2 source conformance in the same
+ * executable. It supplies the ONLY checked 42 generation input gate. */
+int m42_real_m3_checked_final_for_tts_dso(
+    turbo_voice_coordinator_t *voice, char *transcript, size_t capacity);
+
 #define CHECK_DSO(x) do { if (!(x)) { \
   fprintf(stderr, "FAIL combined Harness/real TTS DSO line %d: %s\n", \
           __LINE__, #x); return 1; \
@@ -88,8 +93,9 @@ static turbo_agent_harness_t *new_real_harness(
 }
 
 static int start_and_complete(turbo_agent_harness_t *h,
+                              const char *checked_input,
                               turbo_agent_harness_execution_t **out) {
-  if (turbo_agent_harness_start_text(h, "checked user input", NULL, out) !=
+  if (turbo_agent_harness_start_text(h, checked_input, NULL, out) !=
       SALTS_OK || !*out)
     return -1;
   if (turbo_agent_harness_execution_wait(*out, 20000u) != SALTS_OK)
@@ -141,9 +147,11 @@ static int run_real_harness_tts_dso(int scenario) {
   CHECK_DSO(turbo_voice_create(source, &fake_native, &voice) ==
             TURBO_VOICE_OK);
   CHECK_DSO(turbo_voice_begin_input(voice, 42u) == TURBO_VOICE_OK);
-  CHECK_DSO(turbo_voice_asr_event(voice, 42u,
-      TURBO_VOICE_ASR_CHECKED_FINAL) == TURBO_VOICE_OK);
-  CHECK_DSO(turbo_voice_input_quiesced(voice, 42u) == TURBO_VOICE_OK);
+  char checked_input[128] = {0};
+  CHECK_DSO(m42_real_m3_checked_final_for_tts_dso(
+      voice, checked_input, sizeof(checked_input)) == 0);
+  CHECK_DSO(strcmp(checked_input, " utterance") == 0);
+  CHECK_DSO(turbo_voice_get_state(voice) == TURBO_VOICE_WAIT_APPROVAL);
 
   cmeta_threadpool_config_t pool_cfg = {
       .num_threads = 1u, .queue_capacity = 1u
@@ -163,7 +171,7 @@ static int run_real_harness_tts_dso(int scenario) {
     /* The inference run is REALLY active while TTS Provider is loaded.
      * Cancelling Harness can never synthesize an assistant FINAL. */
     CHECK_DSO(turbo_agent_harness_start_text(
-        h, "checked user input", NULL, &execution) == SALTS_OK);
+        h, checked_input, NULL, &execution) == SALTS_OK);
     const uint64_t deadline = cmeta_monotonic_ms() + 15000u;
     while (!atomic_load_explicit(&held.entered, memory_order_acquire) &&
            cmeta_monotonic_ms() < deadline)
@@ -192,7 +200,7 @@ static int run_real_harness_tts_dso(int scenario) {
   } else {
     /* Production Harness COMPLETED, then strict Host FINAL admission calls
      * the genuine function pointer returned by dlopened Provider image. */
-    CHECK_DSO(start_and_complete(h, &execution) == 0);
+    CHECK_DSO(start_and_complete(h, checked_input, &execution) == 0);
     const char *last_id =
         turbo_agent_app_last_run_id(turbo_agent_harness_app(h));
     CHECK_DSO(last_id && last_id[0]);

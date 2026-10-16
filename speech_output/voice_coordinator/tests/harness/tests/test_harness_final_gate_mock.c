@@ -1,4 +1,5 @@
 #include "turbo_agent_voice_harness_final_gate.h"
+#include <turbo_agent_state.h>
 #include <turbo_runtime_json.h>
 #include <json_parser.h>
 
@@ -28,6 +29,8 @@ struct turbo_agent_harness_execution_s {
   const char *summary_status;
   const char *summary_run_id;
   const char *final_text;
+  struct turbo_agent_harness_s *mutate_harness;
+  const char *new_app_run_id;
 };
 static unsigned final_reads = 0u;
 static unsigned result_destroys = 0u;
@@ -59,6 +62,7 @@ int turbo_agent_harness_execution_take_result(
   e->take_calls++;
   if (e->already_taken) return SALTS_EALREADY;
   e->already_taken = 1;
+  if (e->mutate_harness) e->mutate_harness->app.last_run_id = e->new_app_run_id;
   json_value_t *summary = json_create_object();
   json_value_t *state = json_create_object();
   if (!summary || !state) {
@@ -82,6 +86,9 @@ turbo_agent_app_t *turbo_agent_harness_app(
 }
 const char *turbo_agent_app_last_run_id(const turbo_agent_app_t *app) {
   return app ? ((const struct turbo_agent_app_s *)app)->last_run_id : NULL;
+}
+const char *turbo_agent_state_final_answer_text(const json_value_t *state) {
+  return state ? json_get_string(state, "final") : NULL;
 }
 char *turbo_agent_app_result_text(const json_value_t *state) {
   final_reads++;
@@ -217,6 +224,7 @@ static int run_case(int variant) {
   const char *expected_run_id = "run-42";
   unsigned previous_reads = final_reads;
   unsigned previous_destroys = result_destroys;
+  char oversized[TURBO_TTS_MAX_TEXT_BYTES + 2u];
 
   if (variant == 0) { /* raw FINAL is not enough: Capture must join */
     CHECK(turbo_voice_admit_harness_completed_final(voice, 42u,
@@ -245,6 +253,11 @@ static int run_case(int variant) {
     case 17: exec.get_code_error = 1; break;
     case 18: exec.result_error = 1; break;
     case 19: exec.already_taken = 1; break;
+    case 21: exec.mutate_harness = &harness;
+             exec.new_app_run_id = "run-new"; break;
+    case 22: memset(oversized, 'x', sizeof(oversized) - 1u);
+             oversized[sizeof(oversized) - 1u] = '\0';
+             exec.final_text = oversized; break;
     default: break;
   }
 
@@ -272,6 +285,8 @@ static int run_case(int variant) {
     CHECK(rc != TURBO_VOICE_OK && provider.began == 0u &&
           sink.writes == 0u);
     CHECK(turbo_voice_get_state(voice) == TURBO_VOICE_WAIT_APPROVAL);
+    if (variant == 10 || variant == 14 || variant == 21 || variant == 22)
+      CHECK(final_reads == previous_reads);
     CHECK(turbo_voice_interrupt(voice, 42u) == TURBO_VOICE_OK);
     CHECK(turbo_voice_get_state(voice) == TURBO_VOICE_INTERRUPTED);
   }
@@ -282,9 +297,9 @@ static int run_case(int variant) {
 
 int main(void) {
   CHECK(run_case(0) == 0);
-  for (int i = 1; i <= 20; ++i) CHECK(run_case(i) == 0);
+  for (int i = 1; i <= 22; ++i) CHECK(run_case(i) == 0);
   puts("PASS: original public Harness status/result/take/app interfaces");
-  puts("PASS: 20 negative/replay Host approval/run-id/summary/final gates");
+  puts("PASS: terminal, replay, mid-take run switch and oversized-final negative gates");
   puts("PASS: only Host-approved committed final may start bounded TTS/drain");
   return 0;
 }

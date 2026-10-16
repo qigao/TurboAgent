@@ -12,6 +12,11 @@ cli="$GITHUB_WORKSPACE/build/speech-cli-mock/mock_whisper_cli"
 probe="$GITHUB_WORKSPACE/build/three-arm-native-c11/ta_speex_ns_raw_probe"
 model="$MODEL_FIXTURES/fake-model.bin"
 model_sha="$(cat "$MODEL_FIXTURES/fake-model.sha256")"
+# Independent branch does not rely on any other Draft-only CI step.
+cmake -S speech_input/noise_lab -B build/three-arm-native-c11 \
+  -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build build/three-arm-native-c11 \
+  --target ta_speex_ns_raw_probe --parallel 2
 test -x "$cli" && test -x "$probe"
 test "$(cat "$model")" = MOCK_SIGNED_SPEECH_MODEL_ONLY
 test "$(sha256sum "$model" | awk '{print $1}')" = "$model_sha"

@@ -27,6 +27,7 @@ set(_host_public_paths
   "${_host_original}/harness/include"
   "${_host_original}/agent/include"
   "${_host_original}/runtime/include"
+  "${_host_original}/runtime_core/include"
   "${_host_original}/runtime_data/include"
   "${_host_original}/provider/include"
   "${_host_original}/agent_compiler/include"

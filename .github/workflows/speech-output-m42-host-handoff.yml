@@ -108,6 +108,24 @@ jobs:
           ! grep -E 'curl|wget|whisper_init|http_client|ma_device_init' \
             speech_output/playback/src/turbo_agent_tts_playback_bridge.c
 
+      - name: Install required official Salts Capture PipeWire runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The SHA-verified SaltsUtils rc.11 libsalts_capture.so is linked
+          # against system libpipewire-0.3.so.0, unlike Playback-only runs.
+          # Restore its real OS runtime dependency; never mask undefined
+          # symbols or substitute another Capture implementation.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpipewire-0.3-0
+          capture_lib="$SALTS_UTILS_ROOT/lib/libsalts_capture.so"
+          test -f "$capture_lib"
+          readelf -d "$capture_lib" | grep -F 'libpipewire-0.3.so.0'
+          ldd "$capture_lib" | tee "$RUNNER_TEMP/salts-capture-runtime-deps.txt"
+          if grep -F 'not found' "$RUNNER_TEMP/salts-capture-runtime-deps.txt"; then
+            echo 'published Salts Capture runtime dependencies unresolved' >&2
+            exit 1
+          fi
       - name: Link exact-head M4.2 coordinator + M4.1 bridge + released Salts Playback
         shell: bash
         run: |

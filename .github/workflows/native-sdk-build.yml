@@ -173,6 +173,23 @@ jobs:
         shell: cmd
         run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset ci-windows-release
 
+      - name: Verify Linux PraktorTools has no executable-bound CSTL hash dependency
+        if: success() && matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          lib=build/ci-linux-release/bin/libpraktor_tools.so
+          test -f "$lib"
+          # hash_bytes is intentionally image-local in the Salts CSTL
+          # static archive. This shared object MUST NOT dynamically
+          # import it from downstream executables or some unrelated DSO.
+          if nm -D --undefined-only "$lib" |
+             grep -Eq '[[:space:]]U[[:space:]]+hash_bytes(@|$)'; then
+            echo "PraktorTools has an unresolved private CSTL hash import" >&2
+            exit 1
+          fi
+          echo "PraktorTools CSTL hash symbol ownership: resolved in DSO"
+
       - name: Test on Unix
         if: runner.os != 'Windows' && matrix.tests
         shell: bash

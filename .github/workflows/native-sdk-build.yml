@@ -151,6 +151,13 @@ jobs:
           path: _candidate/salts
           persist-credentials: false
 
+      # Use the same exact-source composite host setup that passed
+      # upstream Salts #1230: installs Ninja/NASM and explicitly sets the
+      # canonical VCPKG_WINDOWS_TRIPLET (never infer an empty triplet).
+      - name: Prepare isolated Salts Windows build host
+        if: matrix.rid == 'windows-x64'
+        uses: ./_candidate/salts/.github/actions/setup-build-host
+
       - name: Verify exact upstream candidate source SHA
         if: matrix.rid == 'windows-x64'
         shell: pwsh

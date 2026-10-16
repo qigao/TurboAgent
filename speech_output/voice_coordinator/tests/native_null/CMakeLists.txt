@@ -119,3 +119,42 @@ add_test(NAME m42_published_capture_native_no_permission
   COMMAND test_m42_published_capture_device_rejection)
 set_tests_properties(m42_published_capture_native_no_permission
   PROPERTIES TIMEOUT 30)
+# This additional shared target uses the ORIGINAL, unchanged Playback
+# implementation and native PulseAudio/miniaudio backend, not the explicit
+# test-null source configuration. It is built only for the SOURCE TSan
+# integration with the original production Harness; never for SDK release.
+# The fullstack executable still imports the published Salts::Playback
+# SONAME/ABI, but in this strictly verified TSan environment the loader
+# selects the same source rebuilt WITH ThreadSanitizer. The shipped binary
+# remains independently tested on #205 without this source override.
+option(M42_ORIGINAL_SHARED_PLAYBACK_TSAN
+  "Build original Salts Playback real native backend as source-TSan shared DSO" OFF)
+if(M42_ORIGINAL_SHARED_PLAYBACK_TSAN)
+  if(NOT M42_ORIGINAL_AUDIO_TSAN)
+    message(FATAL_ERROR "TSan Playback DSO requires original SPSC source instrumentation")
+  endif()
+  add_library(m42_original_playback_source_tsan_shared SHARED
+    "${SALTSUTILS_RELEASE_SOURCE}/playback/src/miniaudio_impl.c"
+    "${SALTSUTILS_RELEASE_SOURCE}/playback/src/playback_buffer.c"
+    "${SALTSUTILS_RELEASE_SOURCE}/playback/src/salts_playback.c"
+    "${M42_SALTS_ORIGINAL_SOURCE_ROOT}/concurrency/src/spsc_ring.c")
+  set_target_properties(m42_original_playback_source_tsan_shared PROPERTIES
+    OUTPUT_NAME salts_playback
+    C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO
+    POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(m42_original_playback_source_tsan_shared
+    BEFORE PRIVATE
+    "${M42_SALTS_ORIGINAL_SOURCE_ROOT}/concurrency/include"
+    "${MINIAUDIO_RELEASE_SOURCE}"
+    "${SALTSUTILS_RELEASE_SOURCE}/playback/src"
+    "${SALTSUTILS_RELEASE_SOURCE}/playback/include")
+  set_source_files_properties(
+    "${SALTSUTILS_RELEASE_SOURCE}/playback/src/miniaudio_impl.c"
+    PROPERTIES COMPILE_OPTIONS "-w")
+  target_compile_definitions(m42_original_playback_source_tsan_shared PRIVATE
+    SALTS_PLAYBACK_SHARED=1 SALTS_PLAYBACK_BUILD=1)
+  target_link_libraries(m42_original_playback_source_tsan_shared
+    PRIVATE Salts::Concurrency Salts::Platform Threads::Threads
+    "${CMAKE_DL_LIBS}" m)
+endif()
+

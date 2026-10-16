@@ -2,6 +2,12 @@ name: Build and package TurboAgent native SDKs
 
 on:
   workflow_call:
+    inputs:
+      salts_release_tag:
+        description: Exact published Salts Release Tag (never a Git SHA)
+        required: false
+        type: string
+        default: v2.3.0-rc.17
     outputs:
       version:
         description: TurboAgent project version
@@ -13,6 +19,14 @@ permissions:
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 2
+  # Reproducible published package selection. Update tags in a reviewed PR;
+  # the manual CI entry may qualify a new Salts tag before promoting it.
+  SALTS_RELEASE_TAG: ${{ inputs.salts_release_tag || 'v2.3.0-rc.17' }}
+  SALTS_UTILS_RELEASE_TAG: v4.3.0-rc.11
+  CHTTP_RELEASE_TAG: v2.1.0-rc.6
+  TURBOSCRIPT_RELEASE_TAG: v3.0.10
+  PRAKTOR_RELEASE_TAG: v0.4.8
+  TURBOWASM_RELEASE_TAG: v0.2.1
 
 jobs:
   metadata:
@@ -215,6 +229,11 @@ jobs:
           printf 'version=%s\ncommit=%s\nrid=%s\npraktor_tools=%s\n' \
             "$SDK_VERSION" "$GITHUB_SHA" "$SDK_RID" "$praktor" \
             > "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
+          # Dependency selection uses Release Tags, never commit SHAs.
+          # The manifest records exactly which release assets and bytes were used.
+          release_manifest="build/release-provenance/$SDK_RID.txt"
+          test -s "$release_manifest"
+          cat "$release_manifest" >> "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
 
       - uses: actions/upload-artifact@v4
         with:

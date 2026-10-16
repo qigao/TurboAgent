@@ -10,7 +10,9 @@ New-Item -ItemType Directory -Force -Path $sdkRoot | Out-Null
 
 # The workflow supplies exact published tags. Do not query "latest" or use
 # a source checkout, Git SHA, or fallback package for a release-SDK consumer.
-$sdkManifest = Join-Path $sdkRoot "native-sdk-release-manifest.txt"
+if ([string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE)) { throw "GITHUB_WORKSPACE is required" }
+$sdkManifest = Join-Path $env:GITHUB_WORKSPACE "build/release-provenance/$Rid.txt"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $sdkManifest) | Out-Null
 [IO.File]::WriteAllText($sdkManifest, "", [Text.UTF8Encoding]::new($false))
 
 function Restore-Sdk(

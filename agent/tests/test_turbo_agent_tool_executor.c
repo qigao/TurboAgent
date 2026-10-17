@@ -209,13 +209,81 @@ fail:
 
 static turbo_agent_t *tool_executor_agent(turbo_tool_registry_t *registry) {
   turbo_agent_config_t config = {0};
+  turbo_agent_policy_t host_policy = turbo_agent_policy_default();
+  turbo_agent_t *agent;
   config.model = "gpt-5.4";
   config.transport_fn = tool_executor_transport;
   config.tool_registry = registry;
-  return turbo_agent_create(&config);
+  agent = turbo_agent_create(&config);
+  if (!agent) return NULL;
+  /* Existing positive executor tests explicitly grant the fixture registry.
+   * The global programmatic default no longer implicitly executes tools. */
+  host_policy.allow_custom_tools = 1;
+  host_policy.allow_runtime_tools = 1;
+  host_policy.allow_network = 1;
+  host_policy.allow_delegate = 1;
+  host_policy.allow_shell = 1;
+  host_policy.allow_patch = 1;
+  if (turbo_agent_set_tool_policy(agent, &host_policy) != 0) {
+    turbo_agent_destroy(agent);
+    return NULL;
+  }
+  return agent;
 }
 
 spec("turbo agent tool executor") {
+  it("should deny an ungranted legacy Tool both at creation and after policy reset") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {"ungranted", "Tool", "{\\"type\\":\\"object\\"}",
+                                          NULL, 1, tool_executor_probe_handler, NULL, &probe, NULL};
+    turbo_agent_config_t config = {0};
+    turbo_agent_policy_t grant = turbo_agent_policy_default();
+    turbo_agent_t *agent;
+    const char *ids[] = {"one"};
+    const char *names[] = {"ungranted"};
+    const char *args[] = {"{}"};
+    json_value_t *state;
+    turbo_graph_exec_ctx_t ctx = {0};
+
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(registry);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    config.model = "gpt-5.4";
+    config.transport_fn = tool_executor_transport;
+    config.tool_registry = registry;
+    agent = turbo_agent_create(&config);
+    check_not_null(agent);
+    state = tool_executor_state(ids, names, args, 1, 0);
+    check_not_null(state);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 0);
+    check_equal(turbo_agent_state_guardrail_rejection_reason(state), "custom_tools_disabled");
+    turbo_runtime_json_destroy(state);
+
+    grant.allow_custom_tools = 1;
+    check_equal(turbo_agent_set_tool_policy(agent, &grant), 0);
+    state = tool_executor_state(ids, names, args, 1, 0);
+    check_not_null(state);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 1);
+    turbo_runtime_json_destroy(state);
+
+    check_equal(turbo_agent_set_tool_policy(agent, NULL), 0);
+    state = tool_executor_state(ids, names, args, 1, 0);
+    check_not_null(state);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 1);
+    check_equal(turbo_agent_state_guardrail_rejection_reason(state), "custom_tools_disabled");
+    turbo_runtime_json_destroy(state);
+    turbo_agent_destroy(agent);
+    turbo_tool_registry_destroy(registry);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
 
   it("should validate a complete batch before the first side effect") {
     tool_executor_probe_t probe = {0};
@@ -365,6 +433,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add_v3(registry, &definition), TURBO_TOOL_OK);
     agent = tool_executor_agent(registry);
     check_not_null(agent);
+    policy.allow_runtime_tools = 1;
     policy.allow_network = 0;
     check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
     state = tool_executor_state(ids, names, args, 1, 0);

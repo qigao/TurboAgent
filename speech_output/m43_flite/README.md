@@ -140,6 +140,12 @@ reference PCM digest, configure additionally with:
 -DM43_REAL_EXPECTED_FNV64=<independently-reviewed-16-hex-byte-FNV64>
 ```
 
+A model-free C11 compile test `m43_process_oracle_definitions`
+exercises **the exact same CMake helper** for sample/hash definitions,
+using harmless synthetic numeric constants. This prevents a broken
+function-style compiler macro from silently leaving the manually
+authorized test unbuildable. It is not real PCM evidence.
+
 No CLI or GitHub workflow silently supplies those values. Failure to
 supply a pinned published Playback header, expected sample count,
 fingerprint, Flite release tag, reviewed COPYING or library digest

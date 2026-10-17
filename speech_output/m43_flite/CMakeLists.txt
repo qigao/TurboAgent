@@ -74,6 +74,23 @@ add_dependencies(test_m43_dso m43_process_fixture
 add_test(NAME m43_process_dlopen_provider COMMAND test_m43_dso)
 set_tests_properties(m43_process_dlopen_provider PROPERTIES TIMEOUT 30)
 
+function(m43_set_reviewed_pcm_oracle target sample_count fnv64_hex)
+  target_compile_definitions(${target} PRIVATE
+    M43_APPROVED_PCM_SAMPLES=${sample_count}u
+    M43_APPROVED_PCM_FNV64=0x${fnv64_hex}ULL)
+endfunction()
+
+# Compile the exact same oracle-definition helper even when Flite and its
+# licensed voice are completely disabled. Do not fake a real audio result.
+add_executable(test_m43_oracle_definitions
+  tests/test_m43_oracle_definitions.c)
+target_compile_features(test_m43_oracle_definitions PRIVATE c_std_11)
+m43_set_reviewed_pcm_oracle(test_m43_oracle_definitions
+  80 1122334455667788)
+target_compile_options(test_m43_oracle_definitions PRIVATE
+  -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME m43_process_oracle_definitions
+  COMMAND test_m43_oracle_definitions)
 # The normal build, default speech paths and CI NEVER download Flite, an
 # engine binary, a voice, a model or license-gated data. For an authorized
 # local real-CPU build, provide each EXACT released library + SHA-256.
@@ -192,9 +209,9 @@ if(M43_ENABLE_REAL_FLITE)
       turbo_tts_m43_source "${CMAKE_DL_LIBS}")
     target_compile_definitions(test_m43_manual_real_voice PRIVATE
       TEST_M43_REAL_HELPER_PATH="$<TARGET_FILE:turbo_m43_flite_real_helper>"
-      TEST_M43_DSO_PATH="$<TARGET_FILE:turbo_tts_m43_flite_provider_dso>"
-      M43_APPROVED_PCM_SAMPLES=${M43_REAL_EXPECTED_PCM_SAMPLES}u
-      M43_APPROVED_PCM_FNV64=UINT64_C(0x${M43_REAL_EXPECTED_FNV64}))
+      TEST_M43_DSO_PATH="$<TARGET_FILE:turbo_tts_m43_flite_provider_dso>")
+    m43_set_reviewed_pcm_oracle(test_m43_manual_real_voice
+      ${M43_REAL_EXPECTED_PCM_SAMPLES} ${M43_REAL_EXPECTED_FNV64})
     target_compile_options(test_m43_manual_real_voice PRIVATE
       -Wall -Wextra -Wpedantic -Werror)
     add_dependencies(test_m43_manual_real_voice

@@ -290,7 +290,11 @@ int turbo_m43_flite_create(const turbo_m43_flite_config_t *cfg,
 int turbo_m43_flite_bind(turbo_m43_flite_process_t *c,
                           turbo_tts_provider_t *p) {
   if (!c || !p || c->inflight) return TURBO_TTS_EINVAL;
-  turbo_tts_provider_init(p);
+  /* Self-contained DSO: do not require a host-exported SpeechOutput
+   * initializer or resolve an unversioned symbol across loader images. */
+  memset(p, 0, sizeof(*p));
+  p->struct_size = sizeof(*p);
+  p->abi_version = TURBO_TTS_ABI_VERSION;
   p->context=c;
   p->begin=provider_begin;
   p->poll_pcm=provider_poll;

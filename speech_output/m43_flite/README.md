@@ -69,7 +69,17 @@ Tests check 480+120 ordered PCM, strict generation and voice admission,
 missing helper refusal, cancel before first PCM, cancel after PCM,
 SIGTERM-ignoring worker SIGKILL/reap, malformed 481-sample reply, and
 nonzero/early-exit failure. GitHub CI repeats this with ASan/UBSan.
-Neither the fixture nor a CI PASS qualifies model-backed synthesis.
+
+A *separate, real* Linux ELF Provider image
+`libturbo_tts_m43_flite_provider_dso.so` compiles the exact same
+process adapter under hidden visibility and `-z,defs`. Its only exported
+entry is `turbo_m43_flite_dso_entry`. A standalone native `dlopen`
+test constructs the borrowed SpeechOutput Provider **from that image**,
+refuses destroy/unload while the helper child is alive, then verifies
+normal completion, SIGTERM-ignoring cancel escalation, malformed frame
+settlement, true child reaping and exactly one DSO unload destructor.
+`nm -D` rejects unresolved `turbo_tts_*` host symbol imports. All
+tests are still **model-free**; none is a real licensed Flite positive.
 
 ## Opt-in real vendor helper (manual, authorization required)
 
@@ -81,14 +91,26 @@ cmake -S speech_output/m43_flite -B build/m43-real -G Ninja \
   -DM43_ENABLE_REAL_FLITE=ON -DM43_VENDOR_LICENSE_APPROVED=ON \
   -DM43_FLITE_INCLUDE_DIR=/reviewed/flite/include \
   '-DM43_FLITE_LIBRARIES=/reviewed/lib/libflite_cmu_us_kal16.so;/reviewed/lib/libflite_usenglish.so;/reviewed/lib/libflite_cmulex.so;/reviewed/lib/libflite.so' \
-  '-DM43_FLITE_LIBRARY_SHA256=<voice-sha>;<lang-sha>;<lex-sha>;<core-sha>'
+  '-DM43_FLITE_LIBRARY_SHA256=<voice-sha>;<lang-sha>;<lex-sha>;<core-sha>' \
+  -DM43_FLITE_RELEASE_TAG=2.2 \
+  -DM43_FLITE_HEADER_SHA256=<installed-flite-h-sha> \
+  -DM43_FLITE_LICENSE_FILE=/reviewed/flite/COPYING \
+  -DM43_FLITE_LICENSE_SHA256=<reviewed-copying-sha>
 cmake --build build/m43-real --target turbo_m43_flite_real_helper
 ```
 
-The caller must also record the exact tagged source/headers and
-asset/voice licensing. This optional local build does **not** install the
-provider into TurboAgent.Native, authorize actual user audio, or claim
-cross-platform SDK delivery. Existing `Salts::Playback` device and
+The caller must also record the exact tagged source/headers, approved
+voice/attribution and binary origin. The above CMake verifies **local byte
+digests** of four libraries, the public `flite.h` and reviewed COPYING;
+those checks do *not* cryptographically prove the runtime was compiled
+from the declared release tag. Source-to-binary provenance and other
+included Flite headers still require an independent review.
+
+This optional local build does **not** install the provider into
+TurboAgent.Native, authorize actual user audio, or claim cross-platform
+SDK delivery. The real engine must be exercised through
+Provider → VoiceCoordinator → installed Salts::Playback using an explicit
+hardware-free test before claiming integrated positive acceptance. Existing `Salts::Playback` device and
 VoiceCoordinator retain all native device ownership.
 
 ## Gates before approval

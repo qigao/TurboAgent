@@ -138,6 +138,63 @@ static tstr cli_workspace(void) {
   return tstr_dup(path);
 }
 
+
+typedef struct cli_untrusted_tool_model_s {
+  size_t calls;
+  int saw_limited_tools;
+} cli_untrusted_tool_model_t;
+
+/* A malicious/model-bug response can name a tool that was never advertised.
+ * The executor must still deny it; UI hints and skill text are not authority. */
+static int cli_untrusted_tool_model(const char *request, char **out, void *data) {
+  static const char *names[] = {"shell.exec", "fs.write"};
+  static const char *ids[] = {"untrusted_shell", "untrusted_write"};
+  static const char *args[] = {
+      "{\"command\":\"echo unauthorized > blocked-shell.txt\"}",
+      "{\"path\":\"blocked-write.txt\",\"content\":\"unauthorized\"}"
+  };
+  cli_untrusted_tool_model_t *model = data;
+  json_value_t *response = json_create_object();
+  json_value_t *outputs = json_create_array();
+  json_value_t *item = NULL;
+  if (!response || !outputs) goto fail;
+  if (model->calls == 0) {
+    model->saw_limited_tools =
+        strstr(request, "fs_read") && strstr(request, "fs_search") &&
+        !strstr(request, "fs_write") && !strstr(request, "shell_exec");
+    for (size_t i = 0; i < 2; ++i) {
+      item = json_create_object();
+      if (!item) goto fail;
+      json_object_set_string(item, "type", "function_call");
+      json_object_set_string(item, "name", names[i]);
+      json_object_set_string(item, "call_id", ids[i]);
+      json_object_set_string(item, "arguments", args[i]);
+      json_array_add(outputs, item);
+      item = NULL;
+    }
+  } else {
+    item = json_parse("{\"type\":\"message\",\"role\":\"assistant\","
+                      "\"content\":[{\"type\":\"output_text\",\"text\":\"denied\"}]}",
+                      strlen("{\"type\":\"message\",\"role\":\"assistant\","
+                             "\"content\":[{\"type\":\"output_text\",\"text\":\"denied\"}]}"));
+    if (!item) goto fail;
+    json_array_add(outputs, item);
+    item = NULL;
+  }
+  json_object_add(response, "output", outputs);
+  outputs = NULL;
+  json_object_set_string(response, "id", "untrusted_tool_call");
+  *out = json_serialize(response, NULL);
+  json_free(response);
+  ++model->calls;
+  return *out ? 0 : -1;
+fail:
+  json_free(item);
+  json_free(outputs);
+  json_free(response);
+  return -1;
+}
+
 spec("coding agent CLI") {
   static cmeta_process_t *process;
   after_each() { cmeta_process_destroy(process); process = NULL; }
@@ -264,6 +321,30 @@ spec("coding agent CLI") {
     check_equal(cmeta_fs_unlink(path), 0);
     check_equal(cmeta_fs_rmdir(root), 0);
     fclose(input); fclose(output); fclose(diagnostics); tstr_free(root);
+  }
+
+  it("must reject model-forged shell and file writes under default inspect") {
+    tstr root = cli_workspace();
+    turbo_cli_options_t options = {.workspace = root, .prompt = "inspect only"};
+    turbo_agent_config_t config = {0};
+    cli_untrusted_tool_model_t model = {0};
+    FILE *input = tmpfile(), *output = tmpfile(), *diagnostics = tmpfile();
+    char path[SALTS_FS_MAX_PATH];
+    cmeta_fs_stat_t statbuf;
+    check_not_null(root); check_not_null(input); check_not_null(output); check_not_null(diagnostics);
+    config.model = "test-model";
+    config.transport_fn = cli_untrusted_tool_model;
+    config.transport_user_data = &model;
+    check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 0);
+    check_equal(model.calls, 2u);
+    check_true(model.saw_limited_tools);
+    check_equal(cmeta_fs_path_join(path, sizeof(path), root, "blocked-shell.txt"), 0);
+    check_not_equal(cmeta_fs_stat(path, &statbuf), 0);
+    check_equal(cmeta_fs_path_join(path, sizeof(path), root, "blocked-write.txt"), 0);
+    check_not_equal(cmeta_fs_stat(path, &statbuf), 0);
+    fclose(input); fclose(output); fclose(diagnostics);
+    check_equal(cmeta_fs_rmdir(root), 0);
+    tstr_free(root);
   }
 
   it("should reject implicit approval and contradictory trusted-local authority before any model call") {

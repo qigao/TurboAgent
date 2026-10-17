@@ -55,6 +55,7 @@ spec("turbo agent workspace") {
     char nested_agents[SALTS_FS_MAX_PATH];
     char skill_path[SALTS_FS_MAX_PATH];
     turbo_agent_workspace_config_t config;
+    turbo_agent_policy_t host_policy = turbo_agent_policy_default();
     turbo_agent_workspace_t *workspace = NULL;
     turbo_agent_workspace_selection_t *selection = NULL;
     turbo_agent_t *agent = NULL;
@@ -82,6 +83,8 @@ spec("turbo agent workspace") {
     turbo_agent_workspace_config_init(&config);
     config.workspace_root = root;
     config.working_directory = "src";
+    host_policy.allow_custom_tools = 1; /* Host approved this read-only legacy tool. */
+    config.policy = &host_policy;
     check_equal(turbo_agent_workspace_create(&config, &workspace), TURBO_AGENT_WORKSPACE_OK);
     check_not_null(workspace);
     check_equal(turbo_agent_workspace_skill_count(workspace), 1);

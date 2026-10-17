@@ -34,21 +34,17 @@ jobs:
           fi
           cmake -S speech_output/m43_flite -B build/m43-flite-${{ matrix.profile }}             -G Ninja -DCMAKE_BUILD_TYPE=Debug             -DM43_ENABLE_REAL_FLITE=OFF             "-DCMAKE_C_FLAGS=$flags"             "-DCMAKE_EXE_LINKER_FLAGS=$flags"
           cmake --build build/m43-flite-${{ matrix.profile }} --parallel 2
-      - name: Audit real Provider DSO symbol owner and NO undeclared host symbol
+      - name: Audit real Provider DSO symbol owner and no unresolved host symbol
         shell: bash
         run: |
           set -euo pipefail
           lib="build/m43-flite-${{ matrix.profile }}/libturbo_tts_m43_flite_provider_dso.so"
           test -f "$lib"
-          nm -D --defined-only "$lib" | grep -E '[[:space:]]T[[:space:]]+turbo_m43_flite_dso_entry      - name: No production default-path or vendor asset rewrite
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -z "$(git diff --name-only -- speech_output/src speech_output/include)"
-          test -f speech_output/m43_flite/src/flite_native_helper.c
-          test -f speech_output/m43_flite/src/turbo_agent_tts_flite_process.c
-
-          ! nm -D --undefined-only "$lib" | grep -E '[[:space:]]U[[:space:]]+turbo_tts_'
+          nm -D --defined-only "$lib" | grep -F ' T turbo_m43_flite_dso_entry'
+          if nm -D --undefined-only "$lib" | grep -E '[[:space:]]U[[:space:]]+turbo_tts_'; then
+            echo 'unresolved SpeechOutput C11 ABI imported by Provider image' >&2
+            exit 1
+          fi
       - name: Validate licensed vendor build remains explicit opt-in
         shell: bash
         run: |

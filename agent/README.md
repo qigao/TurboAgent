@@ -19,7 +19,13 @@ desktop, server, and embedded-friendly native builds:
 
 Workspace operations belong to the optional `TurboAgent::CodingTools` target,
 which provides bounded `fs.read`, `fs.list`, `fs.search`, `fs.write`, `fs.edit`
-and shell command tools. Hosts select the admitted tools and execution policy.
+and shell command tools. Hosts explicitly select the admitted tools **and**
+the per-Agent capability policy. `turbo_agent_policy_default()` is
+fail-closed: new programmatic Agents cannot invoke even registered legacy tools
+until the Host grants their required `custom_tools` or narrower declared
+capabilities through `turbo_agent_set_tool_policy()`. Passing a NULL policy
+resets to denied; model text/Skills never grant authority. Direct
+`turbo_tool_registry_execute*()` calls are a separate low-level Host API.
 
 ## Long-term aim
 

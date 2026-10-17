@@ -146,6 +146,7 @@ spec("turbo agent workspace") {
     check_equal(workspace_join(skill_path, sizeof(skill_path), skill_dir, "SKILL.md"), 0);
     check_equal(workspace_write_text(skill_path, skill_text), 0);
     policy.allow_custom_tools = 0;
+    policy.allow_shell = 1; /* Isolate missing-tool rejection from capability denial. */
     turbo_agent_workspace_config_init(&config);
     config.workspace_root = root;
     config.policy = &policy;

@@ -167,13 +167,11 @@ turbo_agent_policy_t turbo_agent_policy_default(void) {
   turbo_agent_policy_t policy;
 
   memset(&policy, 0, sizeof(policy));
+  /* A configured Host may grant capabilities on its own policy snapshot.
+   * Creating an Agent, omitting a policy, or resetting with NULL must never
+   * grant tool execution, shell, patch, delegation or network privileges.
+   * No capability metadata => custom_tools, which is denied by default. */
   policy.auto_approve_safe = 1;
-  policy.allow_shell = 1;
-  policy.allow_patch = 1;
-  policy.allow_custom_tools = 1;
-  policy.allow_runtime_tools = 1;
-  policy.allow_delegate = 1;
-  policy.allow_network = 1;
   policy.max_action_retries = 1;
   policy.max_steps = 32;
   policy.max_replans = 3;
@@ -427,7 +425,12 @@ turbo_agent_policy_check_action(const turbo_agent_policy_t *policy,
                                 const json_value_t *args, const char **out_reason) {
   const char *path;
   const char *command;
+  turbo_agent_policy_t safe_policy;
 
+  if (!policy) {
+    safe_policy = turbo_agent_policy_default();
+    policy = &safe_policy;
+  }
   if (out_reason) {
     *out_reason = NULL;
   }

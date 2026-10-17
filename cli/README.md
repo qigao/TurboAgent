@@ -79,8 +79,8 @@ instructions and select skills for the new task. This does not search parent
 directories or apply every nested directory's instructions globally.
 Missing `AGENTS.md` or the default `skills/` directory is allowed. Malformed
 skill metadata, oversized files, unavailable declared tools, and denied skill
-capabilities stop the turn before a model request. the default `inspect` profile also denies
-skills requiring patch or shell capabilities.
+capabilities stop the turn before a model request. The default `inspect` profile also
+denies skills requiring patch or shell capabilities.
 General mode has an empty tool registry and denies patch/shell capabilities;
 instruction-only skills work, while selected skills requiring coding tools fail
 before a model request. Skill selection never executes bundled scripts.
@@ -103,8 +103,9 @@ mode's available tools and policy, and do not grant new permissions.
 
 The CLI owns the workspace catalog on its input thread. Preparation validates
 skill tools against the same registry used for execution; it cannot expand
-or override the chosen `inspect` / `trusted-local` tool set. The selected text is copied into a project memory
-context layer on the fresh turn state, then the temporary selection is freed.
+or override the chosen `inspect` / `trusted-local` tool set. The selected
+text is copied into a project memory context layer on the fresh turn state,
+then the temporary selection is freed.
 Harness copies that state for its worker. After the worker drains, the next
 turn projects conversation history without carrying forward old instruction
 layers and refreshes the catalog. Workspace defaults bound composed text to

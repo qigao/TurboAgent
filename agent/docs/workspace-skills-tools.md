@@ -105,11 +105,15 @@ delegation does not broaden authority.
 
 Both CLI modes prepare the workspace catalog on the input thread for each new
 user turn. General mode uses an empty registry; it can select instruction-only
-skills but cannot satisfy a skill's coding-tool requirements. Coding mode keeps
-its existing tool registry and read-only policy. Catalog selection never grants
-additional authority. General-mode workspace instructions are an intentional
-behavior extension; callers wanting unrelated instructions should select a
-separate workspace with `-C`.
+skills but cannot satisfy a skill's coding-tool requirements. Coding mode
+selects its tool registry **only from host CLI arguments**: the default
+`--trust-profile inspect` registers `fs.read/list/search` and denies host
+shell/patch, while explicit `--trust-profile trusted-local` registers workspace
+writers and the host shell. `--read-only` is the inspect alias; interactive
+approval remains unavailable without a real Host callback. Catalog selection,
+AGENTS.md and Skills never grant additional authority. General-mode workspace
+instructions are an intentional behavior extension; callers wanting unrelated
+instructions should select a separate workspace with `-C`.
 
 The CLI's `--workflow loop|review|engineering` chooses an existing Session
 preset, with `loop` remaining the default. Rather than applying a planner JSON

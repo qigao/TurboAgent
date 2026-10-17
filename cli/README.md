@@ -5,9 +5,9 @@ Provider/CHttp transport and CodingTools pack. Model settings come from the
 existing `OPENAI_*` / `ANTHROPIC_*` environment configuration and optional `.env`.
 
 ```sh
-turboagent -C /absolute/workspace -p "Inspect the failing tests and fix the cause"
-turboagent -C /absolute/workspace
-turboagent --read-only -p "Explain this repository"
+turboagent -C /absolute/workspace -p "Explain why the tests fail" # inspect by default
+turboagent --trust-profile trusted-local -C /absolute/workspace -p "Fix the failing tests"
+turboagent --read-only -p "Explain this repository" # legacy inspect alias
 ```
 
 `-C` / `--workspace` defaults to the current directory and accepts relative paths.
@@ -52,12 +52,24 @@ empty prompt or invalid workspace) still exit with 2 and report to stderr.
 Parsing occurs before any Agent resources are created; the execution driver
 receives borrowed parsed options and does not call the terminating parser API.
 
-Default tools are `fs.read`, `fs.list`, `fs.search`, `fs.write`, `fs.edit`, and `shell.exec`.
-File operations use retained workspace root capabilities; `fs.list` and `fs.search` accept `.`.
+CLI coding mode defaults to **`--trust-profile inspect`**, which registers only
+`fs.read`, `fs.list` and `fs.search` and denies shell/patch authorization.
+`--read-only` is an alias for this limited tool profile. To enable `fs.write`,
+`fs.edit` and `shell.exec`, the host must explicitly pass
+**`--trust-profile trusted-local`** (and not combine it with `--read-only`).
+There is no interactive Host approval callback yet: `--trust-profile approval`
+is rejected, not treated as implicit approval or an execution fallback.
+File tools use retained workspace root capabilities; `fs.list` and `fs.search` accept `.`.
 Search takes a literal `pattern` and a file/directory `path`, returns matching
 lines, and reports limits/skips through `truncated` and metrics.
-Shell commands have host filesystem/network access and inherited environment.
-`--read-only` registers the three reading tools and denies patch/shell policy.
+**Trusted-local shell commands have full host privileges**, inherited environment
+and filesystem/network access. Changing `cwd` does not sandbox the process.
+The trust selection comes only from host CLI arguments, never AGENTS.md,
+Skills, retrieved content or the model output. Model-generated calls to tools
+missing from the selected registry cannot execute.
+The `inspect` guarantee concerns model-exposed *coding tools*. Explicit
+`--session-db`, `--knowledge-db`, `--vector-db` and `--index-dir` parameters
+still authorize their documented CLI-owned persistent storage/index I/O.
 See [tool ownership, limits and failure semantics](../coding_tools/README.md).
 
 In both coding and general mode, each user turn loads the selected workspace's root `AGENTS.md` and selects
@@ -67,7 +79,7 @@ instructions and select skills for the new task. This does not search parent
 directories or apply every nested directory's instructions globally.
 Missing `AGENTS.md` or the default `skills/` directory is allowed. Malformed
 skill metadata, oversized files, unavailable declared tools, and denied skill
-capabilities stop the turn before a model request. `--read-only` also denies
+capabilities stop the turn before a model request. the default `inspect` profile also denies
 skills requiring patch or shell capabilities.
 General mode has an empty tool registry and denies patch/shell capabilities;
 instruction-only skills work, while selected skills requiring coding tools fail
@@ -90,8 +102,8 @@ Skills may declare `tools` and `capabilities`; these are checked against the
 mode's available tools and policy, and do not grant new permissions.
 
 The CLI owns the workspace catalog on its input thread. Preparation validates
-skill tools against the same registry used for execution; it does not narrow
-the default coding tool set. The selected text is copied into a project memory
+skill tools against the same registry used for execution; it cannot expand
+or override the chosen `inspect` / `trusted-local` tool set. The selected text is copied into a project memory
 context layer on the fresh turn state, then the temporary selection is freed.
 Harness copies that state for its worker. After the worker drains, the next
 turn projects conversation history without carrying forward old instruction
@@ -133,7 +145,7 @@ not committed as a completed conversation turn.
 
 ```sh
 turboagent --mode general --workflow review -C /workspace -p "release-summary: summarize these notes"
-turboagent --mode coding --workflow engineering -C /repo -p "Fix the failing test and verify the result"
+turboagent --mode coding --workflow engineering --trust-profile trusted-local -C /repo -p "Fix the failing test and verify the result"
 turboagent --mode general --workflow engineering --knowledge-db knowledge.db -p "Summarize the Orion release policy"
 ```
 
@@ -164,7 +176,8 @@ conversation and persistence path with general assistant instructions, without
 registering coding tools. Both modes load workspace `AGENTS.md`/skills. `--instructions`
 accepts nonempty UTF-8 text (up to 64 KiB) to override the mode's instructions.
 It does not change tool permissions. Workspace instructions are still included;
-`--read-only` still removes editing and shell tools in coding mode.
+coding mode defaults to `inspect`; `--read-only` retains that restricted
+profile, and only explicit `trusted-local` enables editing and shell tools.
 
 ```powershell
 turboagent --mode general -p "Explain how a hash table works"

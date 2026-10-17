@@ -235,7 +235,7 @@ spec("turbo agent tool executor") {
   it("should deny an ungranted legacy Tool both at creation and after policy reset") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"ungranted", "Tool", "{\\"type\\":\\"object\\"}",
+    turbo_tool_definition_t definition = {"ungranted", "Tool", "{}",
                                           NULL, 1, tool_executor_probe_handler, NULL, &probe, NULL};
     turbo_agent_config_t config = {0};
     turbo_agent_policy_t grant = turbo_agent_policy_default();

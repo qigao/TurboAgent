@@ -1,4 +1,5 @@
-#define _GNU_SOURCE\n#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
 #include "turbo_agent_tts_flite_process.h"
 #include "protocol.h"
 
@@ -8,7 +9,8 @@
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>\n#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>

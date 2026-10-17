@@ -10,10 +10,55 @@ static int policy_tool_handler(const char *arguments_json, char **out_output, vo
   return 0;
 }
 
+/* Existing permissive-positive conformance is an *explicit Host grant*,
+ * never an unconfigured programmatic Agent default. */
+static turbo_agent_policy_t policy_test_explicit_host(void) {
+  turbo_agent_policy_t policy = turbo_agent_policy_default();
+  policy.allow_shell = 1;
+  policy.allow_patch = 1;
+  policy.allow_custom_tools = 1;
+  policy.allow_runtime_tools = 1;
+  policy.allow_delegate = 1;
+  policy.allow_network = 1;
+  return policy;
+}
+
 spec("turbo agent policy") {
+  it("should deny every implicit Tool Authority capability including NULL policy checks") {
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_action_tool_definition_t dangerous = {
+        .name = "unapproved.shell", .kind = TURBO_ACTION_DANGEROUS,
+        .handler = (turbo_action_tool_handler_fn)1,
+    };
+    turbo_action_tool_definition_t mutate = {
+        .name = "unapproved.write", .kind = TURBO_ACTION_MUTATE,
+        .handler = (turbo_action_tool_handler_fn)1,
+    };
+    const char *reason = NULL;
+    for (turbo_agent_policy_capability_t cap = TURBO_AGENT_POLICY_CAPABILITY_CUSTOM_TOOLS;
+         cap <= TURBO_AGENT_POLICY_CAPABILITY_OUTSIDE_WORKSPACE;
+         cap = (turbo_agent_policy_capability_t)(cap + 1)) {
+      check_false(turbo_agent_policy_allows_capability(&policy, cap, &reason));
+      check_not_null(reason);
+      reason = NULL;
+      check_false(turbo_agent_policy_allows_capability(NULL, cap, &reason));
+      check_not_null(reason);
+    }
+    check_equal(turbo_agent_policy_check_action(NULL, &dangerous, NULL, &reason),
+                TURBO_AGENT_POLICY_DENY);
+    check_equal(reason, "shell_disabled");
+    check_equal(turbo_agent_policy_check_action(NULL, &mutate, NULL, &reason),
+                TURBO_AGENT_POLICY_DENY);
+    check_equal(reason, "patch_disabled");
+    check_false(policy.allow_network);
+    check_false(policy.allow_delegate);
+    check_equal(policy.max_steps, 32u);
+  }
+
+
 
   it("should allow read action inside workspace") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "read_file",
         .description = "Read",
@@ -33,7 +78,7 @@ spec("turbo agent policy") {
   }
 
   it("should allow slash-normalized paths inside workspace") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "read_file",
         .description = "Read",
@@ -53,7 +98,7 @@ spec("turbo agent policy") {
   }
 
   it("should reject patch outside workspace") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "apply_patch",
         .description = "Patch",
@@ -75,7 +120,7 @@ spec("turbo agent policy") {
   }
 
   it("should reject paths that escape workspace through parent segments") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "apply_patch",
         .description = "Patch",
@@ -97,7 +142,7 @@ spec("turbo agent policy") {
   }
 
   it("should allow paths normalized inside workspace") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "read_file",
         .description = "Read",
@@ -117,7 +162,7 @@ spec("turbo agent policy") {
   }
 
   it("should reject directory roots outside workspace") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "agent.knowledge.index_directory",
         .description = "Index directory",
@@ -140,7 +185,7 @@ spec("turbo agent policy") {
 
 #ifndef _WIN32
   it("should treat workspace paths as case-sensitive on non-Windows hosts") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "read_file",
         .description = "Read",
@@ -163,7 +208,7 @@ spec("turbo agent policy") {
 #endif
 
   it("should require approval for dangerous shell command") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "run_command",
         .description = "Run",
@@ -185,7 +230,7 @@ spec("turbo agent policy") {
   }
 
   it("should match dangerous shell commands case-insensitively") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "run_command",
         .description = "Run",
@@ -206,7 +251,7 @@ spec("turbo agent policy") {
   }
 
   it("should deny shell actions when disabled") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_action_tool_definition_t definition = {
         .name = "run_command",
         .description = "Run",
@@ -221,7 +266,7 @@ spec("turbo agent policy") {
   }
 
   it("should expose explicit capability checks with stable denial reasons") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     const char *reason = NULL;
 
     check_true(turbo_agent_policy_allows_capability(
@@ -272,7 +317,7 @@ spec("turbo agent policy") {
   }
 
   it("should deny registered tool capabilities at the execution policy boundary") {
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_policy_t policy = policy_test_explicit_host();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     const char *required[] = {"runtime_tools", "network"};
     const char *unknown[] = {"untrusted_future_capability"};

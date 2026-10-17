@@ -43,6 +43,13 @@ typedef enum {
   TURBO_AGENT_POLICY_CAPABILITY_OUTSIDE_WORKSPACE = 6
 } turbo_agent_policy_capability_t;
 
+/**
+ * Fail-closed policy for new programmatic Agents, NULL checks and policy reset.
+ * It grants no custom/runtime/network/delegate/shell/patch capabilities.
+ * Hosts explicitly populate allowed capabilities on a policy snapshot and
+ * call turbo_agent_set_tool_policy() before any model-driven tool dispatch.
+ * Merely registering a Tool or selecting a Skill never grants execution.
+ */
 CXX_C_API turbo_agent_policy_t turbo_agent_policy_default(void);
 CXX_C_API int turbo_agent_policy_validate_path(const turbo_agent_policy_t *policy,
                                                const char *path);

@@ -232,12 +232,20 @@ It does not contain file contents, tool arguments, credentials, or model data.
 
 ## Compatibility and migration
 
-Existing agents that assign `turbo_agent_config_t.tool_registry` directly are
-unchanged under the default policy. Existing tools registered through
-`turbo_tool_registry_add()` retain their sequential execution policy and are
-classified as `custom_tools` by Agent execution. New registries can use
-`turbo_tool_registry_add_v3()` for explicit capability metadata; hosts can call
-`turbo_agent_set_tool_policy()` to restrict a directly-created agent.
+Agents that assign `turbo_agent_config_t.tool_registry` directly now
+**start with zero Tool Authority**. Registering a tool advertises its schema,
+but does not grant execution. `turbo_agent_policy_default()` denies
+`custom_tools`, `runtime_tools`, `delegate`, `network`, `shell`, and `patch`
+until a Host explicitly grants the required capabilities using
+`turbo_agent_set_tool_policy()`. Passing `NULL` resets to this fail-closed
+policy; it does not restore historical implicit Host privileges.
+
+Legacy tools added through `turbo_tool_registry_add()` retain their sequential
+execution policy and count as `custom_tools` (an intentionally broad Host
+grant). Prefer `turbo_tool_registry_add_v3()` with explicit, narrow capability
+metadata for new tools. Hosts must set the **admitted policy** on the Agent
+before invoking a model-driven tool; Agent instructions, Skills, model text and
+registry registration never create a Host grant.
 Applications adopt the workspace layer by:
 
 1. Creating and populating their source tool registry as before.
@@ -248,9 +256,12 @@ Applications adopt the workspace layer by:
    or calling `turbo_agent_workspace_prepare()` when the host manages the
    selection lifecycle itself.
 
-Rollback requires only returning to `turbo_agent_create()` with the original
-registry and instruction string. No persistent state or data format is
-migrated.
+Direct `turbo_agent_create()` with an original registry is allowed but
+cannot execute its tools until the Host sets an explicit policy. A Host may
+revoke privileges on a quiescent Agent with
+`turbo_agent_set_tool_policy(agent, NULL)`. No persistent state or data format
+is migrated. Low-level direct `turbo_tool_registry_execute*()` functions are
+separate Host APIs and are **not** implicitly protected by Agent admission.
 
 ## Verification scope
 

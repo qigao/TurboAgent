@@ -408,7 +408,12 @@ int turbo_cli_run(const turbo_cli_options_t *cli_options, FILE *input, FILE *out
   if (turbo_cli_storage_load(&storage, session, &previous) != SALTS_OK) {
     fputs("Cannot load the session's completed run.\n", diagnostics); goto done;
   }
-  policy.workspace_root = root; policy.allow_patch = !general && !read_only; policy.allow_shell = !general && !read_only;
+  /* CLI is a Host: its selected/registered tool set is explicit.
+   * Standalone programmatic Agents remain capability-denied by default. */
+  policy.workspace_root = root;
+  policy.allow_custom_tools = !general;
+  policy.allow_patch = !general && !read_only;
+  policy.allow_shell = !general && !read_only;
   if (turbo_agent_set_tool_policy(turbo_agent_session_agent(session), &policy) != 0) goto done;
   if (!prompt) fputs(general ? "TurboAgent (general). /quit exits.\n" :
                     read_only ? "TurboAgent (read-only). /quit exits.\n" :

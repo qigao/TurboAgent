@@ -3,6 +3,7 @@
 
 #include "turbo_agent_app.h"
 #include "turbo_agent.h"
+#include "turbo_agent_policy.h"
 #include "turbo_agent_graph.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_agent_session.h"
@@ -3271,6 +3272,7 @@ spec("turbo agent app api") {
     turbo_agent_config_t parent_agent_config = {0};
     turbo_agent_session_config_t parent_session_config = {0};
     turbo_agent_app_config_t app_config = {0};
+    turbo_agent_policy_t host_policy = turbo_agent_policy_default();
     turbo_agent_app_t *app;
     app_tool_transport_state_t transport_state = {0};
     json_value_t *result_state = NULL;
@@ -3315,6 +3317,10 @@ spec("turbo agent app api") {
 
     app = turbo_agent_app_create(&app_config);
     check_not_null(app);
+    host_policy.allow_custom_tools = 1; /* Host-approved delegate Tool. */
+    host_policy.allow_delegate = 1;
+    check_equal(turbo_agent_set_tool_policy(
+        turbo_agent_session_agent(turbo_agent_app_session(app)), &host_policy), 0);
     check_equal(turbo_agent_app_start_text(app, "delegate this", NULL, &summary, &result_state),
                  0);
     check_equal(transport_state.call_count, 2);

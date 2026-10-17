@@ -1,5 +1,6 @@
 #include "../src/turbo_agent_tool_executor_internal.h"
 #include "tinytest.h"
+#include "turbo_agent_policy.h"
 #include "turbo_runtime_store_sqlite.h"
 #include "turbo_agent_evidence_diagram.h"
 #include <fmt.h>
@@ -89,8 +90,12 @@ static turbo_agent_tool_execution_t journal_call(const char *id) {
 static int journal_execute(turbo_agent_tool_executor_t *executor, turbo_agent_runtime_t *runtime,
                            turbo_tool_registry_t *registry, turbo_agent_tool_execution_t *calls,
                            size_t count) {
+  turbo_agent_policy_t host_policy = turbo_agent_policy_default();
+  /* The journal suite tests recovery under an explicitly authorized Host Tool.
+   * It must not rely on newly created Agents granting legacy tools. */
+  host_policy.allow_custom_tools = 1;
   return turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run", NULL, NULL,
-                                           registry, NULL, calls, count);
+                                           registry, &host_policy, calls, count);
 }
 
 spec("durable tool journal across SQLite reopen") {

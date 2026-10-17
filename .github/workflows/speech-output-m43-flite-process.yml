@@ -58,6 +58,19 @@ jobs:
           fi
           grep -F 'Real Flite requires explicit vendor/voice license approval' \
             "$RUNNER_TEMP/m43-refuse.log"
+      - name: Reject unapproved real-voice end-to-end tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cmake -S speech_output/m43_flite \
+               -B build/m43-refuse-real-e2e-${{ matrix.profile }} -G Ninja \
+               -DM43_ENABLE_REAL_FLITE=OFF -DM43_REAL_VOICE_ACCEPTANCE=ON \
+               > "$RUNNER_TEMP/m43-refuse-e2e.log" 2>&1; then
+            echo 'Real voice E2E unexpectedly enabled with vendor OFF' >&2
+            exit 1
+          fi
+          grep -F 'Real voice acceptance requires explicitly approved Flite' \
+            "$RUNNER_TEMP/m43-refuse-e2e.log"
       - name: One-child PCM, DSO dlopen/join/dlclose and SIGKILL x5
         shell: bash
         env:

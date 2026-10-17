@@ -86,6 +86,15 @@ set(M43_FLITE_RELEASE_TAG "" CACHE STRING "Manually reviewed Flite release tag")
 set(M43_FLITE_HEADER_SHA256 "" CACHE STRING "SHA-256 of exact installed flite.h")
 set(M43_FLITE_LICENSE_FILE "" CACHE FILEPATH "Absolute reviewed Flite COPYING")
 set(M43_FLITE_LICENSE_SHA256 "" CACHE STRING "SHA-256 of reviewed COPYING")
+# Manual real-voice acceptance is separate from the model-free CI tests.
+# In addition to license and exact vendor digests, it requires a real
+# reviewed PCM oracle and the exact installed published Playback header.
+option(M43_REAL_VOICE_ACCEPTANCE "Run authorized real Flite → VoiceCoordinator C11 acceptance" OFF)
+set(M43_REAL_EXPECTED_PCM_SAMPLES "" CACHE STRING "Reviewed real voice sample count")
+set(M43_REAL_EXPECTED_FNV64 "" CACHE STRING "Reviewed 16-digit real PCM FNV64")
+if(M43_REAL_VOICE_ACCEPTANCE AND NOT M43_ENABLE_REAL_FLITE)
+  message(FATAL_ERROR "Real voice acceptance requires explicitly approved Flite")
+endif()
 if(M43_ENABLE_REAL_FLITE)
   if(NOT M43_VENDOR_LICENSE_APPROVED)
     message(FATAL_ERROR "Real Flite requires explicit vendor/voice license approval")
@@ -151,4 +160,48 @@ if(M43_ENABLE_REAL_FLITE)
     ${M43_FLITE_LIBRARIES} m)
   target_compile_options(turbo_m43_flite_real_helper PRIVATE
     -Wall -Wextra -Wpedantic -Werror)
+
+  if(M43_REAL_VOICE_ACCEPTANCE)
+    if(NOT IS_ABSOLUTE "${SALTS_PLAYBACK_INCLUDE_DIR}" OR
+       NOT EXISTS "${SALTS_PLAYBACK_INCLUDE_DIR}/salts_playback.h" OR
+       NOT EXISTS "${SALTS_PLAYBACK_INCLUDE_DIR}/salts_playback_export.h")
+      message(FATAL_ERROR "Manual voice acceptance requires exact installed Salts Playback headers")
+    endif()
+    if(NOT M43_REAL_EXPECTED_PCM_SAMPLES MATCHES "^[1-9][0-9]*$")
+      message(FATAL_ERROR "Missing reviewed real PCM sample count")
+    endif()
+    if(M43_REAL_EXPECTED_PCM_SAMPLES GREATER 720000)
+      message(FATAL_ERROR "Reviewed PCM sample count exceeds bounded duration")
+    endif()
+    string(LENGTH "${M43_REAL_EXPECTED_FNV64}" fnv_digits)
+    if(NOT fnv_digits EQUAL 16 OR
+       NOT M43_REAL_EXPECTED_FNV64 MATCHES "^[0-9a-fA-F]+$")
+      message(FATAL_ERROR "Missing reviewed 16-digit real PCM hash")
+    endif()
+
+    add_executable(test_m43_manual_real_voice
+      tests/test_m43_real_voice.c
+      ../playback/src/turbo_agent_tts_playback_bridge.c
+      ../voice_coordinator/src/turbo_agent_voice_coordinator.c)
+    set_target_properties(test_m43_manual_real_voice PROPERTIES
+      C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+    target_include_directories(test_m43_manual_real_voice PRIVATE
+      include ../include ../playback/include ../voice_coordinator/include
+      "${SALTS_PLAYBACK_INCLUDE_DIR}")
+    target_link_libraries(test_m43_manual_real_voice PRIVATE
+      turbo_tts_m43_source "${CMAKE_DL_LIBS}")
+    target_compile_definitions(test_m43_manual_real_voice PRIVATE
+      TEST_M43_REAL_HELPER_PATH="$<TARGET_FILE:turbo_m43_flite_real_helper>"
+      TEST_M43_DSO_PATH="$<TARGET_FILE:turbo_tts_m43_flite_provider_dso>"
+      M43_APPROVED_PCM_SAMPLES=${M43_REAL_EXPECTED_PCM_SAMPLES}u
+      M43_APPROVED_PCM_FNV64=UINT64_C(0x${M43_REAL_EXPECTED_FNV64}))
+    target_compile_options(test_m43_manual_real_voice PRIVATE
+      -Wall -Wextra -Wpedantic -Werror)
+    add_dependencies(test_m43_manual_real_voice
+      turbo_m43_flite_real_helper turbo_tts_m43_flite_provider_dso)
+    add_test(NAME m43_manual_approved_flite_voice
+      COMMAND test_m43_manual_real_voice)
+    set_tests_properties(m43_manual_approved_flite_voice
+      PROPERTIES TIMEOUT 40)
+  endif()
 endif()

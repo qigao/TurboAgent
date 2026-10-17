@@ -113,6 +113,46 @@ Provider → VoiceCoordinator → installed Salts::Playback using an explicit
 hardware-free test before claiming integrated positive acceptance. Existing `Salts::Playback` device and
 VoiceCoordinator retain all native device ownership.
 
+## M4.3.2 explicit real-voice E2E — manual only
+
+A separately authorized reviewer can test **real Flite helper → actual
+`dlopen` Provider image → unchanged M4.2 VoiceCoordinator/Playback Bridge →
+bounded simulated output callback**. This does NOT open a speaker/mic, and
+it is not an Agent or Whisper recognition test. The Host asserts an
+artificial checked ASR FINAL and approved `Hello world.` text, then the
+standalone real voice must synthesize 24k mono S16 frames. The test proves
+source termination, drain, release of the Provider process, worker reap
+and exactly one DSO unload. It checks the **independently reviewed**
+PCM sample count and FNV64 digest; it may not auto-learn a passing value
+from an untrusted candidate. No plaintext/audio is written to disk.
+
+Only after authorizing exact Flite core + CMU voice licenses, obtaining
+the installed pinned headers, SHA-256-matched libraries and approved
+reference PCM digest, configure additionally with:
+
+```sh
+# In addition to ALL explicit M43_ENABLE_REAL_FLITE,
+# M43_VENDOR_LICENSE_APPROVED, source-tag, library/header/license pins
+# shown above:
+-DM43_REAL_VOICE_ACCEPTANCE=ON
+-DSALTS_PLAYBACK_INCLUDE_DIR=/reviewed/SaltsUtils.Native/sdk/linux-x64/include
+-DM43_REAL_EXPECTED_PCM_SAMPLES=<independently-reviewed-positive-integer>
+-DM43_REAL_EXPECTED_FNV64=<independently-reviewed-16-hex-byte-FNV64>
+```
+
+No CLI or GitHub workflow silently supplies those values. Failure to
+supply a pinned published Playback header, expected sample count,
+fingerprint, Flite release tag, reviewed COPYING or library digest
+must abort CMake configuration. The real E2E test must explicitly
+be run under an approved local/native toolchain and recorded against
+the exact binary+voice provenance. The **normal model-free CI never
+enables this target**.
+
+The Playback callback is still a **test-owned, bounded software sink**;
+separate real native Salts::Playback DSO virtual-device tests on #208
+remain required. Never equate successful buffer consumption with
+physical hearing, AEC performance, or user audio permission.
+
 ## Gates before approval
 
 1. Independently licensed and digest-pinned real Flite 2.2/voice with

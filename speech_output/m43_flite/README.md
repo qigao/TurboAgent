@@ -92,7 +92,7 @@ cmake -S speech_output/m43_flite -B build/m43-real -G Ninja \
   -DM43_FLITE_INCLUDE_DIR=/reviewed/flite/include \
   '-DM43_FLITE_LIBRARIES=/reviewed/lib/libflite_cmu_us_kal16.so;/reviewed/lib/libflite_usenglish.so;/reviewed/lib/libflite_cmulex.so;/reviewed/lib/libflite.so' \
   '-DM43_FLITE_LIBRARY_SHA256=<voice-sha>;<lang-sha>;<lex-sha>;<core-sha>' \
-  -DM43_FLITE_RELEASE_TAG=2.2 \
+  -DM43_FLITE_RELEASE_TAG=v2.2 \
   -DM43_FLITE_HEADER_SHA256=<installed-flite-h-sha> \
   -DM43_FLITE_LICENSE_FILE=/reviewed/flite/COPYING \
   -DM43_FLITE_LICENSE_SHA256=<reviewed-copying-sha>
@@ -166,3 +166,17 @@ physical hearing, AEC performance, or user audio permission.
 
 **Do not merge/release or flip the default voice path based on synthetic
 CI or one local vendor trial.**
+
+
+## Upstream source-tag audit — 2026-10-17
+
+The canonical [festvox/flite](https://github.com/festvox/flite)
+repository has an actual Git reference **`refs/tags/v2.2`**.
+The literal `2.2` is not an upstream Git tag and is rejected by the
+manual real vendor configure gate. The exact tagged source's `COPYING`,
+`include/flite.h` and `include/cst_wave.h` were independently read
+through GitHub and match the reviewed public Flite licensing/API
+materials. This documents **tag identity only**: an installed binary's
+origin remains a separate, user-supplied reproducibility/attestation
+task. All four binary digests, `flite.h` digest and `COPYING` digest
+must be provided before real helper compilation.

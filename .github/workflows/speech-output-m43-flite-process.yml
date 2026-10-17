@@ -1,0 +1,51 @@
+name: SpeechOutput M4.3 isolated C11 Flite process transport (model-free)
+'on':
+  pull_request:
+    paths:
+      - 'speech_output/m43_flite/**'
+      - '.github/workflows/speech-output-m43-flite-process.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  m43-process-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [release, asan-ubsan]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify model and engine sources are not fetched by CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R -E '(curl |wget |FetchContent_|ExternalProject_Add|git clone)' speech_output/m43_flite/CMakeLists.txt speech_output/m43_flite/src
+      - name: Configure standalone Linux C11 process transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=''
+          if [[ '${{ matrix.profile }}' == asan-ubsan ]]; then
+            flags='-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1'
+          fi
+          cmake -S speech_output/m43_flite -B build/m43-flite-${{ matrix.profile }}             -G Ninja -DCMAKE_BUILD_TYPE=Debug             -DM43_ENABLE_REAL_FLITE=OFF             "-DCMAKE_C_FLAGS=$flags"             "-DCMAKE_EXE_LINKER_FLAGS=$flags"
+          cmake --build build/m43-flite-${{ matrix.profile }} --parallel 2
+      - name: Exact one-child PCM, failure, SIGTERM and SIGKILL 5x
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          set -euo pipefail
+          ctest --test-dir build/m43-flite-${{ matrix.profile }}             -R '^m43_process_source_provider$'             --repeat until-fail:5 --output-on-failure --timeout 30             --no-tests=error
+      - name: No production default-path or vendor asset rewrite
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git diff --name-only -- speech_output/src speech_output/include)"
+          test -f speech_output/m43_flite/src/flite_native_helper.c
+          test -f speech_output/m43_flite/src/turbo_agent_tts_flite_process.c

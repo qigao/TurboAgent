@@ -231,6 +231,12 @@ static turbo_agent_t *tool_executor_agent(turbo_tool_registry_t *registry) {
   return agent;
 }
 
+static turbo_agent_policy_t tool_executor_legacy_grant(void) {
+  turbo_agent_policy_t policy = turbo_agent_policy_default();
+  policy.allow_custom_tools = 1; /* Host-owned untyped test Tool Registry. */
+  return policy;
+}
+
 spec("turbo agent tool executor") {
   it("should deny an ungranted legacy Tool both at creation and after policy reset") {
     tool_executor_probe_t probe = {0};
@@ -496,6 +502,7 @@ spec("turbo agent tool executor") {
   }
 
   it("should propagate execution context into a context-aware callback") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     tool_executor_context_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_v4_t definition = {0};
@@ -535,7 +542,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_cancel_source_create(&cancel_config, &source), SALTS_OK);
     check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, token, "thread-7", "run-8",
-                                                   NULL, NULL, registry, NULL, &call, 1),
+                                                   NULL, NULL, registry, &host_policy, &call, 1),
                 SALTS_OK);
     check_equal(call.status, TURBO_TOOL_OK);
     check_equal(probe.calls, 1);
@@ -557,6 +564,7 @@ spec("turbo agent tool executor") {
   }
 
   it("should forward backend events and replay journaled full detail") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_v4_t definition = {0};
     turbo_agent_tool_executor_t *executor = NULL;
@@ -594,7 +602,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_agent_tool_executor_execute(
                     executor, runtime, NULL, "thread-observe", "run-observe",
                     tool_executor_event_capture, &capture,
-                    registry, NULL, &first, 1),
+                    registry, &host_policy, &first, 1),
                 SALTS_OK);
     check_equal(first.status, TURBO_TOOL_OK);
     check_equal(first.output, "{\"ok\":true}");
@@ -606,7 +614,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_agent_tool_executor_execute(
                     executor, runtime, NULL, "thread-observe", "run-observe",
                     tool_executor_event_capture, &capture,
-                    registry, NULL, &replay, 1),
+                    registry, &host_policy, &replay, 1),
                 SALTS_OK);
     check_true(replay.replayed != 0);
     check_equal(capture.events, 1);
@@ -624,6 +632,7 @@ spec("turbo agent tool executor") {
   }
 
   it("should observe cancellation before invoking a synchronous callback") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
@@ -645,8 +654,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
     check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
-    check_equal(turbo_agent_tool_executor_execute(executor, NULL, token, NULL, NULL, NULL, NULL, registry,
-                                                   NULL, &call, 1),
+    check_equal(turbo_agent_tool_executor_execute(executor, NULL, token, NULL, NULL, NULL, NULL, registry, &host_policy, &call, 1),
                  SALTS_OK);
     check_equal(call.status, TURBO_TOOL_CANCELLED);
     check_equal(probe.calls, 0);
@@ -660,6 +668,7 @@ spec("turbo agent tool executor") {
   }
 
   it("should not retry a callback after a started journal loses its commit") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
@@ -696,14 +705,14 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &first, 1),
+                                                   NULL, NULL, registry, &host_policy, &first, 1),
                  SALTS_OK);
     check_equal(fault->puts, 3);
     check_equal(fault->committed_seen, 1);
     check_equal(first.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_equal(probe.calls, 1);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &recovered, 1),
+                                                   NULL, NULL, registry, &host_policy, &recovered, 1),
                  SALTS_OK);
     check_equal(recovered.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_equal(probe.calls, 1);
@@ -717,6 +726,7 @@ spec("turbo agent tool executor") {
   }
 
   it("should replay committed output and reject a changed call identity") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
@@ -755,21 +765,21 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &first, 1),
+                                                   NULL, NULL, registry, &host_policy, &first, 1),
                  SALTS_OK);
     check_equal(probe.calls, 1);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &replay, 1),
+                                                   NULL, NULL, registry, &host_policy, &replay, 1),
                  SALTS_OK);
     check_equal(probe.calls, 1);
     check_true(replay.replayed != 0);
     check_equal(replay.output, "{\"value\":1}");
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &next_turn, 1),
+                                                   NULL, NULL, registry, &host_policy, &next_turn, 1),
                  SALTS_OK);
     check_equal(probe.calls, 2);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &changed, 1),
+                                                   NULL, NULL, registry, &host_policy, &changed, 1),
                  SALTS_EPROTO);
     check_equal(probe.calls, 2);
 
@@ -784,6 +794,7 @@ spec("turbo agent tool executor") {
   }
 
   it("preserves legacy persisted journal SHA-256 framing") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     static const char expected_journal_id[] =
         "5725bca02643d34e59e4b5a8a7084ba9098130ffd4a81be0e2dbb157c01cc12a";
     static const char expected_arguments_hash[] =
@@ -816,7 +827,7 @@ spec("turbo agent tool executor") {
         turbo_agent_tool_executor_execute(
             executor, runtime, NULL,
             "thread-golden", "run-golden",
-            NULL, NULL, registry, NULL, &call, 1),
+            NULL, NULL, registry, &host_policy, &call, 1),
         SALTS_OK);
     check_equal(call.status, TURBO_TOOL_OK);
     check_equal(probe.calls, 1);

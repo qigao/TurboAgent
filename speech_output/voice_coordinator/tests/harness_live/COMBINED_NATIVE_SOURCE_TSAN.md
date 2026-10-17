@@ -54,3 +54,21 @@ or speakers, permissions, real acoustic echo/AEC or cross-platform
 physical audio. No fallback, second PCM queue or raw data persistence.
 
 **DRAFT / DO NOT MERGE / DO NOT RELEASE; M4 issue #164 remains OPEN.**
+
+## Revalidation against main's private PraktorTools CSTL owner fix
+
+The combined original-source Harness/Capture/Playback TSan gate remains
+independent of the full native-SDK build. For this Draft integration branch,
+bring in **only** the exact producer-local fix already merged to TurboAgent
+`main` through [#196](https://github.com/qigao/TurboAgent/pull/196):
+`praktor_tools/CMakeLists.txt` privately links `Salts::CSTL`, using Linux
+`WHOLE_ARCHIVE` and `-z,defs`; the native-SDK workflow rejects any
+unresolved dynamic `hash_bytes` import from `libpraktor_tools.so`.
+No visibility widening, disabled PraktorTools tests, fallback, release pin
+changes or merge of other `main` history is authorized by this check.
+
+The exact-HEAD full native CI and combined full-source TSan must both pass
+independently. Prior published audio SDK/virtual device success is not
+physical microphone/speaker, real Whisper/TTS model or acoustic AEC
+qualification. All voice paths stay DRAFT / DO NOT MERGE / DO NOT RELEASE /
+DEFAULT OFF.

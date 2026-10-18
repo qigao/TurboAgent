@@ -2,6 +2,7 @@
 #define TURBO_AGENT_SESSION_DIAGNOSTICS_INTERNAL_H
 
 #include "turbo_agent_session.h"
+#include "turbo_agent_policy.h"
 
 /* Borrowed only for the synchronous diagnostic call. The caller must keep the
  * Session and its registry alive and exclude concurrent mutation/destruction.

@@ -11,6 +11,7 @@ typedef struct turbo_agent_session_diagnostic_view_s {
   int has_runtime;
   int has_memory_store;
   const turbo_tool_registry_t *registry;
+  turbo_agent_policy_t tool_policy;
   size_t tool_count;
   turbo_agent_session_workflow_kind_t workflow_kind;
   const char *memory_namespace;

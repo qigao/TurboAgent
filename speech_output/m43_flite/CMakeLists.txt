@@ -101,8 +101,10 @@ set(M43_FLITE_LIBRARIES "" CACHE STRING "Four absolute Flite libraries, voice fi
 set(M43_FLITE_LIBRARY_SHA256 "" CACHE STRING "Four exact 64-char SHA-256 digests")
 set(M43_FLITE_RELEASE_TAG "" CACHE STRING "Manually reviewed Flite release tag")
 set(M43_FLITE_HEADER_SHA256 "" CACHE STRING "SHA-256 of exact installed flite.h")
-set(M43_FLITE_LICENSE_FILE "" CACHE FILEPATH "Absolute reviewed Flite COPYING")
-set(M43_FLITE_LICENSE_SHA256 "" CACHE STRING "SHA-256 of reviewed COPYING")
+set(M43_FLITE_LICENSE_FILE "" CACHE FILEPATH "Absolute reviewed Flite core COPYING")
+set(M43_FLITE_LICENSE_SHA256 "" CACHE STRING "SHA-256 of reviewed Flite core COPYING")
+set(M43_FLITE_VOICE_LICENSE_FILE "" CACHE FILEPATH "Absolute reviewed CMU Kal16 voice license/notice")
+set(M43_FLITE_VOICE_LICENSE_SHA256 "" CACHE STRING "SHA-256 of reviewed CMU Kal16 voice license/notice")
 # Manual real-voice acceptance is separate from the model-free CI tests.
 # In addition to license and exact vendor digests, it requires a real
 # reviewed PCM oracle and the exact installed published Playback header.
@@ -125,17 +127,24 @@ if(M43_ENABLE_REAL_FLITE)
   endif()
   if(NOT IS_ABSOLUTE "${M43_FLITE_LICENSE_FILE}" OR
      NOT EXISTS "${M43_FLITE_LICENSE_FILE}")
-    message(FATAL_ERROR "Exact installed Flite and voice license evidence required")
+    message(FATAL_ERROR "Exact installed Flite core license evidence required")
+  endif()
+  if(NOT IS_ABSOLUTE "${M43_FLITE_VOICE_LICENSE_FILE}" OR
+     NOT EXISTS "${M43_FLITE_VOICE_LICENSE_FILE}")
+    message(FATAL_ERROR "Exact installed CMU Kal16 voice license evidence required")
   endif()
   # These digests are independently supplied by the reviewer. They prove
   # local bytes, NOT by themselves that a binary came from the declared tag.
-  foreach(label IN ITEMS HEADER LICENSE)
+  foreach(label IN ITEMS HEADER LICENSE VOICE_LICENSE)
     if(label STREQUAL "HEADER")
       set(file "${M43_FLITE_INCLUDE_DIR}/flite.h")
       set(want "${M43_FLITE_HEADER_SHA256}")
-    else()
+    elseif(label STREQUAL "LICENSE")
       set(file "${M43_FLITE_LICENSE_FILE}")
       set(want "${M43_FLITE_LICENSE_SHA256}")
+    else()
+      set(file "${M43_FLITE_VOICE_LICENSE_FILE}")
+      set(want "${M43_FLITE_VOICE_LICENSE_SHA256}")
     endif()
     string(LENGTH "${want}" digest_len)
     if(NOT digest_len EQUAL 64 OR NOT want MATCHES "^[0-9a-fA-F]+$")

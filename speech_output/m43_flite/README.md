@@ -34,8 +34,9 @@ no SSML/URL evaluation, and no physical audio devices.
   `begin/poll_pcm/request_cancel`. No public Salts/CHttp/CMeta ABI change.
   `VoiceCoordinator` continues to be the only Playback producer.
 - Helper executable is an explicit **absolute path**. It is launched with
-  `posix_spawn` (no shell or PATH search); approved text passes only over
-  one child stdin pipe. One child per generation, 128 text bytes max.
+  `posix_spawn` (no shell or PATH search); approved text is written to a sealed anonymous Linux memfd and passed as
+  child stdin; stdout carries bounded framed PCM over a pipe. One child per
+  generation, 128 text bytes max.
   Only the exact English `cmu_us_kal16` voice and `en` label are accepted.
 - A native-endian-independent length-checked request and reply framing
   carries S16 little-endian PCM. Parent keeps at most one 960-byte frame

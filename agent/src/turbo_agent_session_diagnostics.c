@@ -155,6 +155,7 @@ turbo_agent_session_get_tool_schema_status(const turbo_agent_session_diagnostic_
   selected_format = turbo_agent_session_selected_tool_schema_format(view);
   status = json_create_object();
   if (!status) {
+    turbo_tool_registry_destroy(visible_registry);
     return -1;
   }
 

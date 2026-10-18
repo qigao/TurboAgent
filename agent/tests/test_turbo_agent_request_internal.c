@@ -720,8 +720,11 @@ spec("turbo agent request internals") {
       check_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
       request = parse_request_json_or_fail(request_json);
       tools = json_object_get(request, "tools");
-      check_not_null(tools);
-      check_equal(json_array_size(tools), 0);
+      /* Providers may omit an empty tools field entirely. Both encodings
+       * mean that no ungranted tool was exposed to the model. */
+      if (tools) {
+        check_equal(json_array_size(tools), 0);
+      }
       json_free(request);
       request = NULL;
       free(request_json);

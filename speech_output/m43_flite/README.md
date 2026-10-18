@@ -102,7 +102,8 @@ cmake --build build/m43-real --target turbo_m43_flite_real_helper
 
 The caller must also record the exact tagged source/headers, approved
 voice/attribution and binary origin. The above CMake verifies **local byte
-digests** of four libraries, the public `flite.h` and reviewed COPYING;
+digests** of four libraries, the public `flite.h`, the Flite core COPYING,
+and the separate CMU Kal16 voice license/notice;
 those checks do *not* cryptographically prove the runtime was compiled
 from the declared release tag. Source-to-binary provenance and other
 included Flite headers still require an independent review.
@@ -149,7 +150,8 @@ authorized test unbuildable. It is not real PCM evidence.
 
 No CLI or GitHub workflow silently supplies those values. Failure to
 supply a pinned published Playback header, expected sample count,
-fingerprint, Flite release tag, reviewed COPYING or library digest
+fingerprint, Flite release tag, separate reviewed core and voice license
+files/digests, or any library digest
 must abort CMake configuration. The real E2E test must explicitly
 be run under an approved local/native toolchain and recorded against
 the exact binary+voice provenance. The **normal model-free CI never
@@ -185,5 +187,6 @@ manual real vendor configure gate. The exact tagged source's `COPYING`,
 through GitHub and match the reviewed public Flite licensing/API
 materials. This documents **tag identity only**: an installed binary's
 origin remains a separate, user-supplied reproducibility/attestation
-task. All four binary digests, `flite.h` digest and `COPYING` digest
-must be provided before real helper compilation.
+task. All four binary digests, `flite.h` digest, Flite core `COPYING` digest,
+and separate CMU Kal16 voice license/notice digest must be provided before
+real helper compilation.

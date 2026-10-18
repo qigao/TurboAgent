@@ -72,10 +72,14 @@ semantics. Legacy tools without metadata require `custom_tools`; unknown
 metadata fails closed. This avoids guessing authority from a tool name.
 
 The workspace layer first decides whether a tool may be exposed to the model.
-Before any callback or `started` journal record, the Agent tool executor checks
-the same registry metadata against its copied policy. Middleware, review,
-guardrails, cancellation, backpressure, output limits, result trace, and
-journal commit remain in the normal Agent workflow. Direct
+The general Agent request builders also project the registry through the copied
+Host capability policy before serializing model-visible schemas for Responses,
+Chat, OpenAI-compatible Chat, or Anthropic. Session schema diagnostics use the
+same projection, so registered-but-ungranted tools are not advertised as
+available. Before any callback or `started` journal record, the Agent tool
+executor checks the same registry metadata against its copied policy.
+Middleware, review, guardrails, cancellation, backpressure, output limits,
+result trace, and journal commit remain in the normal Agent workflow. Direct
 `turbo_tool_registry_execute*()` calls are intentionally low-level host APIs
 and do not represent Agent execution.
 

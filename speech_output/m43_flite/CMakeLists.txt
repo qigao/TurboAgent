@@ -141,6 +141,10 @@ if(M43_ENABLE_REAL_FLITE)
     if(NOT digest_len EQUAL 64 OR NOT want MATCHES "^[0-9a-fA-F]+$")
       message(FATAL_ERROR "Missing valid independent Flite ${label} SHA-256")
     endif()
+    # CMake's SHA256 output is lowercase; normalize accepted uppercase input
+    # before comparing so the documented hexadecimal case-insensitive form
+    # behaves as advertised.
+    string(TOLOWER "${want}" want)
     file(SHA256 "${file}" actual)
     if(NOT actual STREQUAL want)
       message(FATAL_ERROR "Flite ${label} provenance digest mismatch")
@@ -162,6 +166,9 @@ if(M43_ENABLE_REAL_FLITE)
        NOT sha_length EQUAL 64 OR NOT sha MATCHES "^[0-9a-fA-F]+$")
       message(FATAL_ERROR "Flite library/digest ${i} invalid")
     endif()
+    # Accept uppercase or lowercase hex consistently with the validation
+    # above and the documented SHA-256 input format.
+    string(TOLOWER "${sha}" sha)
     file(SHA256 "${lib}" actual)
     if(NOT actual STREQUAL sha)
       message(FATAL_ERROR "Flite exact library SHA-256 mismatch for ${lib}")

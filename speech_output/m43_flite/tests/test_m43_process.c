@@ -35,7 +35,7 @@ static int start(turbo_tts_output_t *t,uint64_t gen,const char *text) {
 }
 static int settle(turbo_tts_output_t *t,
                   turbo_tts_state_t expected,size_t *pcm_frames) {
-  for(unsigned i=0;i<1200u;i++) {
+  for(unsigned i=0;i<2200u;i++) {
     int16_t pcm[480]={0};
     size_t n=0;
     turbo_tts_poll_t kind=TURBO_TTS_WOULD_BLOCK;
@@ -157,6 +157,7 @@ int main(void) {
   MUST(run_cancel("cancel",1)==0);
   MUST(run_fault("bad")==0);
   MUST(run_fault("die")==0);
+  MUST(run_fault("hang")==0);
   puts("PASS M4.3 all process Provider ownership gates");
   return 0;
 }

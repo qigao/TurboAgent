@@ -147,11 +147,13 @@ turbo_agent_session_get_tool_schema_status(const turbo_agent_session_diagnostic_
   *out_selected_ok = 0;
 
   registry = view->registry;
-  if (!registry || turbo_agent_tool_authority_project(&view->tool_policy, registry,
-                                                       &visible_registry) != TURBO_TOOL_OK) {
-    return -1;
+  if (registry) {
+    if (turbo_agent_tool_authority_project(&view->tool_policy, registry,
+                                           &visible_registry) != TURBO_TOOL_OK) {
+      return -1;
+    }
+    registry = visible_registry;
   }
-  registry = visible_registry;
   selected_format = turbo_agent_session_selected_tool_schema_format(view);
   status = json_create_object();
   if (!status) {

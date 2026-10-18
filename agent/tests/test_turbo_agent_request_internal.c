@@ -694,7 +694,7 @@ spec("turbo agent request internals") {
     check_not_null(registry);
     definition.name = "private.legacy";
     definition.description = "Host-controlled test tool.";
-    definition.parameters_json = "{\\"type\\":\\"object\\",\\"properties\\":{}}";
+    definition.parameters_json = "{\"type\":\"object\",\"properties\":{}}";
     definition.handler = request_schema_tool;
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
 

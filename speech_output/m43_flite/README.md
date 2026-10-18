@@ -96,7 +96,9 @@ cmake -S speech_output/m43_flite -B build/m43-real -G Ninja \
   -DM43_FLITE_RELEASE_TAG=v2.2 \
   -DM43_FLITE_HEADER_SHA256=<installed-flite-h-sha> \
   -DM43_FLITE_LICENSE_FILE=/reviewed/flite/COPYING \
-  -DM43_FLITE_LICENSE_SHA256=<reviewed-copying-sha>
+  -DM43_FLITE_LICENSE_SHA256=<reviewed-core-copying-sha> \
+  -DM43_FLITE_VOICE_LICENSE_FILE=/reviewed/kal16/VOICE-LICENSE.txt \
+  -DM43_FLITE_VOICE_LICENSE_SHA256=<reviewed-kal16-license-sha>
 cmake --build build/m43-real --target turbo_m43_flite_real_helper
 ```
 

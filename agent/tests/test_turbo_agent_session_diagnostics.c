@@ -1,5 +1,6 @@
 #include "tinytest.h"
 #include "turbo_agent_session.h"
+#include "turbo_agent_policy.h"
 #include "turbo_model_provider.h"
 #include "turbo_tool_registry.h"
 
@@ -18,6 +19,12 @@ static int diagnostic_tool(const char *arguments, char **out, void *data) {
   (void)out;
   (void)data;
   return -1;
+}
+
+static int grant_custom_tools(turbo_agent_session_t *session) {
+  turbo_agent_policy_t policy = turbo_agent_policy_default();
+  policy.allow_custom_tools = 1;
+  return turbo_agent_set_tool_policy(turbo_agent_session_agent(session), &policy);
 }
 
 static int add_tool(turbo_tool_registry_t *registry, const char *name) {
@@ -64,6 +71,7 @@ spec("session diagnostic snapshots") {
     config.thread_id = "diagnostic-thread";
     session = turbo_agent_session_create(&config);
     check_not_null(session);
+    check_equal(grant_custom_tools(session), 0);
 
     check_equal(turbo_agent_session_get_capabilities(session, &capabilities), 0);
     check_equal(turbo_agent_session_get_tool_schemas(session, &schemas), 0);
@@ -103,6 +111,37 @@ spec("session diagnostic snapshots") {
     check_true(json_get_bool(entry, "configured", false));
     check_true(json_get_bool(entry, "strict", false));
     check_equal(json_get_string(entry, "name"), "answer");
+  }
+
+
+  it("should hide legacy tools from diagnostics until the Host grants custom_tools") {
+    turbo_agent_session_config_t config = {0};
+    json_value_t *registry_json;
+    registry = turbo_tool_registry_create();
+    check_not_null(registry);
+    check_equal(add_tool(registry, "tools.private"), TURBO_TOOL_OK);
+    config.agent_config.model = "diagnostic-model";
+    config.agent_config.transport_fn = diagnostic_transport;
+    config.agent_config.tool_registry = registry;
+    session = turbo_agent_session_create(&config);
+    check_not_null(session);
+
+    check_equal(turbo_agent_session_get_tool_schemas(session, &schemas), 0);
+    registry_json = json_object_get(schemas, "registry");
+    check_equal(json_array_size(registry_json), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_responses")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_chat")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_compatible_chat")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "anthropic")), 0);
+    json_free(schemas);
+    schemas = NULL;
+
+    check_equal(grant_custom_tools(session), 0);
+    check_equal(turbo_agent_session_get_tool_schemas(session, &schemas), 0);
+    check_equal(json_array_size(json_object_get(schemas, "registry")), 1);
+    check_equal(json_get_string(json_array_get(json_object_get(schemas, "registry"), 0), "name"),
+                "tools.private");
+    check_equal(transport_calls, 0);
   }
 
   it("should preserve provider aliases and the existing custom-provider default") {

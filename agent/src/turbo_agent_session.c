@@ -742,6 +742,7 @@ int turbo_agent_session_diagnostic_view_internal(
       .has_runtime = session->runtime != NULL,
       .has_memory_store = turbo_agent_session_memory_store(session) != NULL,
       .registry = turbo_agent_session_tool_registry(session),
+      .tool_policy = session->agent ? session->agent->tool_policy : turbo_agent_policy_default(),
       .tool_count = turbo_agent_session_tool_count(session),
       .workflow_kind = session->workflow_kind,
       .memory_namespace = session->memory_namespace,

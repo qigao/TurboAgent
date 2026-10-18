@@ -406,12 +406,14 @@ static int turbo_agent_session_build_tool_schemas(const turbo_agent_session_diag
   json_value_t *openai_compatible_chat = NULL;
   json_value_t *anthropic = NULL;
   int rc = -1;
+  int has_registry;
 
   if (!view || !out_tool_schemas_json) {
     return -1;
   }
   *out_tool_schemas_json = NULL;
   registry = view->registry;
+  has_registry = registry != NULL;
   if (turbo_agent_tool_authority_project(&view->tool_policy, registry,
                                          &visible_registry) != TURBO_TOOL_OK) {
     return -1;
@@ -431,7 +433,7 @@ static int turbo_agent_session_build_tool_schemas(const turbo_agent_session_diag
     goto cleanup;
   }
 
-  if (diagnostic_set(schemas, "has_tool_registry", json_create_bool(registry ? 1 : 0)) != 0)
+  if (diagnostic_set(schemas, "has_tool_registry", json_create_bool(has_registry ? 1 : 0)) != 0)
     goto cleanup;
   if (diagnostic_set(schemas, "tool_count", json_create_number((double)view->tool_count)) != 0)
     goto cleanup;

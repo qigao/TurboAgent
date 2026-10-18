@@ -22,7 +22,10 @@ static turbo_tool_status_t turbo_agent_tool_authority_project(
 
   if (!out_projection) return TURBO_TOOL_INVALID_ARGUMENT;
   *out_projection = NULL;
-  if (!source) return TURBO_TOOL_INVALID_ARGUMENT;
+  if (!source) {
+    *out_projection = turbo_tool_registry_create();
+    return *out_projection ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
+  }
 
   count = turbo_tool_registry_count(source);
   if (count) {

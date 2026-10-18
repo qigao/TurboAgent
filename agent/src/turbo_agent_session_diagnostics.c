@@ -133,7 +133,6 @@ turbo_agent_session_get_tool_schema_status(const turbo_agent_session_diagnostic_
   static const char *formats[] = {"openai_responses", "openai_chat", "openai_compatible_chat",
                                   "anthropic"};
   const turbo_tool_registry_t *registry;
-  turbo_tool_registry_t *visible_registry = NULL;
   const char *selected_format;
   json_value_t *status = NULL;
   size_t i;
@@ -146,18 +145,15 @@ turbo_agent_session_get_tool_schema_status(const turbo_agent_session_diagnostic_
   *out_status_json = NULL;
   *out_selected_ok = 0;
 
+  /*
+   * Startup readiness validates the registered tool definitions, not only
+   * the subset exposed to the model. The serialized schema lists below are
+   * still projected through Host policy; this status path emits no schemas.
+   */
   registry = view->registry;
-  if (registry) {
-    if (turbo_agent_tool_authority_project(&view->tool_policy, registry,
-                                           &visible_registry) != TURBO_TOOL_OK) {
-      return -1;
-    }
-    registry = visible_registry;
-  }
   selected_format = turbo_agent_session_selected_tool_schema_format(view);
   status = json_create_object();
   if (!status) {
-    turbo_tool_registry_destroy(visible_registry);
     return -1;
   }
 
@@ -187,7 +183,6 @@ turbo_agent_session_get_tool_schema_status(const turbo_agent_session_diagnostic_
 cleanup:
   json_free(status);
   status = NULL;
-  turbo_tool_registry_destroy(visible_registry);
   return rc;
 }
 

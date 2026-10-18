@@ -200,8 +200,11 @@ spec("session diagnostic snapshots") {
     config.workflow_kind = (turbo_agent_session_workflow_kind_t)999;
     session = turbo_agent_session_create(&config);
     check_not_null(session);
-    check_equal(turbo_agent_session_get_tool_schemas(session, &schemas), -1);
-    check_null(schemas);
+    check_equal(turbo_agent_session_get_tool_schemas(session, &schemas), 0);
+    check_not_null(schemas);
+    check_equal(json_array_size(json_object_get(schemas, "registry")), 0);
+    json_free(schemas);
+    schemas = NULL;
     check_equal(turbo_agent_session_get_startup_diagnostics(session, &report), 0);
     check_false(json_get_bool(report, "ok", true));
     errors = json_object_get(report, "errors");

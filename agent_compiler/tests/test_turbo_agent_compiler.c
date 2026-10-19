@@ -458,7 +458,7 @@ spec("agent compiler Phase 1 boundary") {
     turbo_tool_registry_destroy(registry);
   }
 
-  it("normalizes legacy zero-capability tools to custom_tools and fails closed") {
+  it("rejects legacy UNKNOWN-effect tools from Inspect before any callback") {
     compiler_probe_t read_probe = {0};
     compiler_probe_t mutation_probe = {0};
     turbo_tool_registry_t *registry = make_registry(&read_probe, &mutation_probe);

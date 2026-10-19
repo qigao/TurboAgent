@@ -177,6 +177,43 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(probe.calls, 2);
     json_free(result);
     json_free(certificate);
+    result = NULL;
+    certificate = NULL;
+    {
+      turbo_agent_app_t *app = turbo_agent_harness_app(harness);
+      const char *run_id = turbo_agent_app_last_run_id(app);
+      const char *checkpoint_id = turbo_agent_app_last_checkpoint_id(app);
+      json_value_t *run_record = NULL;
+      json_value_t *checkpoint_state = NULL;
+      const json_value_t *run_state;
+      const json_value_t *run_execution;
+      const json_value_t *checkpoint_execution;
+      const char *checkpoint_phase;
+      check_not_null(run_id);
+      check_not_null(checkpoint_id);
+      check_equal(turbo_agent_app_get_run(app, run_id, &run_record), SALTS_OK);
+      check_not_null(run_record);
+      run_state = json_object_get(run_record, "state_snapshot");
+      run_execution = json_object_get(run_state, "compiled_execution");
+      check_not_null(run_execution);
+      check_equal(json_get_string(run_execution, "phase"), "committed");
+      check_equal(json_get_string(run_execution, "backend"), "runtime_tools");
+      check_equal(json_get_string(run_execution, "tool_name"), "repo.inspect");
+      check_not_null(json_get_string(run_execution, "execution_id"));
+      check_not_null(json_get_string(run_execution, "plan_hash"));
+      check_not_null(json_object_get(run_execution, "authority_generation"));
+      check_not_null(json_object_get(run_execution, "certificate"));
+      check_true(json_get_bool(json_object_get(run_execution, "result"), "ok", false));
+      check_equal(turbo_agent_app_get_checkpoint_state_json_value(
+          app, checkpoint_id, &checkpoint_state), SALTS_OK);
+      check_not_null(checkpoint_state);
+      checkpoint_execution = json_object_get(checkpoint_state, "compiled_execution");
+      check_not_null(checkpoint_execution);
+      checkpoint_phase = json_get_string(checkpoint_execution, "phase");
+      check_true(checkpoint_phase && strcmp(checkpoint_phase, "started") == 0);
+      turbo_runtime_json_destroy(checkpoint_state);
+      turbo_runtime_json_destroy(run_record);
+    }
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);
@@ -282,6 +319,34 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_null(result);
     check_not_null(certificate);
     check_equal(probe.calls, 1);
+    {
+      turbo_agent_app_t *app = turbo_agent_harness_app(harness);
+      const char *run_id = turbo_agent_app_last_run_id(app);
+      const char *checkpoint_id = turbo_agent_app_last_checkpoint_id(app);
+      json_value_t *run_record = NULL;
+      json_value_t *checkpoint_state = NULL;
+      const json_value_t *run_state;
+      const json_value_t *run_execution;
+      const json_value_t *checkpoint_execution;
+      const char *run_phase;
+      check_not_null(run_id);
+      check_not_null(checkpoint_id);
+      check_equal(turbo_agent_app_get_run(app, run_id, &run_record), SALTS_OK);
+      check_not_null(run_record);
+      run_state = json_object_get(run_record, "state_snapshot");
+      run_execution = json_object_get(run_state, "compiled_execution");
+      check_not_null(run_execution);
+      run_phase = json_get_string(run_execution, "phase");
+      check_true(run_phase && (strcmp(run_phase, "outcome_unknown") == 0 ||
+                               strcmp(run_phase, "started") == 0));
+      check_equal(turbo_agent_app_get_checkpoint_state_json_value(
+          app, checkpoint_id, &checkpoint_state), SALTS_OK);
+      checkpoint_execution = json_object_get(checkpoint_state, "compiled_execution");
+      check_not_null(checkpoint_execution);
+      check_equal(json_get_string(checkpoint_execution, "phase"), "started");
+      turbo_runtime_json_destroy(checkpoint_state);
+      turbo_runtime_json_destroy(run_record);
+    }
 
     json_free(certificate);
     turbo_agent_harness_release(harness);

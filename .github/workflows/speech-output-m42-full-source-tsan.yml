@@ -1,0 +1,433 @@
+name: SpeechOutput M4.2 full-source TSan Harness Agent and original Salts Playback
+'on':
+  pull_request:
+    paths:
+      - 'speech_output/**'
+      - '.github/workflows/speech-output-m42-full-source-tsan.yml'
+permissions:
+  contents: read
+  packages: read
+jobs:
+  full-harness-source-tsan:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'feature/speech-m42-original-source-tsan'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66:history_size=7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out actual immutable original Harness/Agent sources
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/TurboAgent
+          ref: 9e51d377bd84ee91ce5a47c94f24f73e4e01bba7
+          path: build/pinned-harness-source
+          persist-credentials: false
+      - name: Pin original Salts and SaltsUtils source for TSan native Playback shared DSO
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: v4.3.0-rc.11
+          path: build/pinned-saltsutils-native-source
+          persist-credentials: false
+      - name: Pin original Salts rc.17 SPSC release/acquire source for shared TSan Playback
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: v2.3.0-rc.17
+          path: build/pinned-salts-source
+          persist-credentials: false
+      - name: Pin original upstream miniaudio native implementation
+        uses: actions/checkout@v4
+        with:
+          repository: mackron/miniaudio
+          ref: 0.11.22
+          path: build/pinned-miniaudio-source
+          persist-credentials: false
+      - name: Check out exact original M3 Whisper Provider implementation
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/TurboAgent
+          ref: 4614360e6ee2e174d96cbdd9ce41c5388c81d064
+          path: build/pinned-m3-source
+          persist-credentials: false
+      - name: Check out exact upstream Whisper.cpp v1.9.5 public C ABI
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: d1be6fde11ac6e0407606b4e42fe72d34add8037
+          path: build/pinned-whisper-header
+          persist-credentials: false
+      - name: Verify both original source SHA pins without model files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C build/pinned-m3-source rev-parse HEAD)" = '4614360e6ee2e174d96cbdd9ce41c5388c81d064'
+          test "$(git -C build/pinned-whisper-header rev-parse HEAD)" = 'd1be6fde11ac6e0407606b4e42fe72d34add8037'
+          test "$(git -C build/pinned-saltsutils-native-source describe --tags --exact-match)" = 'v4.3.0-rc.11'
+          test "$(git -C build/pinned-salts-source describe --tags --exact-match)" = 'v2.3.0-rc.17'
+          test "$(git -C build/pinned-miniaudio-source describe --tags --exact-match)" = '0.11.22'
+          test -f build/pinned-saltsutils-native-source/playback/src/salts_playback.c
+          test -f build/pinned-salts-source/concurrency/src/spsc_ring.c
+          test -f build/pinned-miniaudio-source/miniaudio.h
+          test -f build/pinned-m3-source/speech_input/whisper/src/turbo_agent_speech_whisper.c
+          test -f build/pinned-m3-source/speech_input/whisper/tests/whisper_fake_engine_image.c
+          test -f build/pinned-m3-source/speech_input/whisper/include/turbo_agent_speech_whisper.h
+          test -f build/pinned-whisper-header/include/whisper.h
+          test -f build/pinned-whisper-header/ggml/include/ggml.h
+          test -f build/pinned-whisper-header/ggml/include/ggml-cpu.h
+          # Model bytes MUST be generated only inside the no-weights test.
+          test ! -e build/pinned-whisper-header/models/ggml-tiny.bin
+      - name: Assert original Harness SHA and no test replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C build/pinned-harness-source rev-parse HEAD)" = '9e51d377bd84ee91ce5a47c94f24f73e4e01bba7'
+          test -f build/pinned-harness-source/harness/src/turbo_agent_harness.c
+          test -f build/pinned-harness-source/agent/src/turbo_agent_session_result.c
+          test -f build/pinned-harness-source/harness/include/turbo_agent_harness.h
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+      - name: Prepare original Harness build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build nasm libpipewire-0.3-0 pulseaudio pulseaudio-utils libpulse0
+      - name: Resolve official native SDK inputs using pinned original CI resolver
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          bash build/pinned-harness-source/cmake/ci/restore-native-sdk.sh linux-x64 0 0
+          echo 'PraktorTools=OFF; WasmTools=OFF (isolated Harness only)'
+      - name: Build actual immutable Whisper v1.9.5 CPU shared SDK without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TURBO_WHISPER_SDK_ROOT="$GITHUB_WORKSPACE/build/whisper-m42-real-cpu-sdk"
+          cmake -S build/pinned-whisper-header -B build/whisper-m42-cpu-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_INSTALL_PREFIX=$TURBO_WHISPER_SDK_ROOT" \
+            -DWHISPER_BUILD_IS_DEV=OFF -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_SERVER=OFF \
+            -DWHISPER_CURL=OFF -DWHISPER_SDL2=OFF \
+            -DWHISPER_COREML=OFF -DWHISPER_OPENVINO=OFF \
+            -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF \
+            -DGGML_METAL=OFF -DGGML_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=ON
+          cmake --build build/whisper-m42-cpu-build --parallel 2
+          cmake --install build/whisper-m42-cpu-build
+          test -f "$TURBO_WHISPER_SDK_ROOT/lib/cmake/whisper/whisper-config.cmake"
+          test -f "$TURBO_WHISPER_SDK_ROOT/include/whisper.h"
+          test -n "$(find "$TURBO_WHISPER_SDK_ROOT/lib" -maxdepth 1 -name 'libwhisper.so*' -print -quit)"
+          test ! -f build/pinned-whisper-header/models/ggml-tiny.bin
+          echo "TURBO_WHISPER_SDK_ROOT=$TURBO_WHISPER_SDK_ROOT" >> "$GITHUB_ENV"
+      - name: Rebuild EXACT original real-native Playback DSO plus Salts SPSC source under TSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S speech_output/voice_coordinator/tests/native_null \
+            -B build/m42-real-playback-source-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_C_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g -O1 -Wall -Wextra -Wpedantic -Werror" \
+            -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
+            -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread \
+            "-DSALTSUTILS_RELEASE_SOURCE=$GITHUB_WORKSPACE/build/pinned-saltsutils-native-source" \
+            "-DMINIAUDIO_RELEASE_SOURCE=$GITHUB_WORKSPACE/build/pinned-miniaudio-source" \
+            "-DM42_SALTS_ORIGINAL_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-salts-source" \
+            "-DM42_CURRENT_SOURCE=$GITHUB_WORKSPACE" \
+            -DM42_ORIGINAL_AUDIO_TSAN=ON \
+            -DM42_ORIGINAL_SHARED_PLAYBACK_TSAN=ON
+          cmake --build build/m42-real-playback-source-tsan \
+            --target m42_original_playback_source_tsan_shared --parallel 2
+          built="build/m42-real-playback-source-tsan/libsalts_playback.so"
+          test -f "$built"
+          nm -D "$built" | grep -F __tsan_init
+          nm -D --defined-only "$built" | grep -F ' T salts_playback_drain'
+          nm -D --defined-only "$built" | grep -F ' T cmeta_spsc_ring_write_release'
+          nm -D --defined-only "$built" | grep -F ' T cmeta_spsc_ring_read_acquire'
+          echo "M42_SOURCE_TSAN_LIB_DIR=$GITHUB_WORKSPACE/build/m42-real-playback-source-tsan" >> "$GITHUB_ENV"
+      - name: Compile current-head Voice/Harness admission archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S speech_output -B build/voice-m42-local -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_C_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g -O1" \
+            "-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g -O1" \
+            -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
+            -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread \
+            -DBUILD_TESTING=ON \
+            -DENABLE_TTS_PLAYBACK_BRIDGE_TEST=ON \
+            -DENABLE_TTS_VOICE_COORDINATOR_TEST=ON \
+            -DENABLE_TTS_HARNESS_FINAL_GATE_TEST=ON \
+            "-DSPEECH_M2_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-harness-source" \
+            "-DSALTS_PLAYBACK_INCLUDE_DIR=$SALTS_UTILS_ROOT/include"
+          cmake --build build/voice-m42-local --target turbo_voice_harness_final_gate --parallel 2
+          nm build/voice-m42-local/voice_coordinator/libturbo_tts_voice_coordinator.a | grep -F __tsan_init
+          nm build/voice-m42-local/voice_coordinator/tests/harness/libturbo_voice_harness_final_gate.a | grep -F __tsan_init
+      - name: Configure original full-source Harness with out-of-tree live test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd build/pinned-harness-source
+          cmake --preset ci-linux-release \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_SANITIZER_THREAD=ON \
+            -DENABLE_SANITIZER_ADDRESS=OFF \
+            -DENABLE_SANITIZER_UNDEFINED=OFF \
+            -DENABLE_PRAKTOR_TOOLS=OFF \
+            -DENABLE_SPEECH_INPUT=ON \
+            -DENABLE_SPEECH_CAPTURE_BRIDGE=ON \
+            -DENABLE_SPEECH_CAPTURE_NATIVE=OFF \
+            -DENABLE_WASM_TOOLS=OFF \
+            -DENABLE_MCP_TOOLS=OFF \
+            -DENABLE_CODING_TOOLS=OFF \
+            -DENABLE_CODEX_BRIDGE=OFF \
+            -DBUILD_TESTS=OFF \
+            -DENABLE_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            "-DCMAKE_PROJECT_TurboAgent_INCLUDE=$GITHUB_WORKSPACE/speech_output/voice_coordinator/tests/harness_live/inject.cmake" \
+            "-DVOICE_M42_WORKSPACE=$GITHUB_WORKSPACE" \
+            "-DVOICE_M42_PREBUILT_ROOT=$GITHUB_WORKSPACE/build/voice-m42-local" \
+            "-DVOICE_M42_M3_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-m3-source" \
+            "-DVOICE_M42_WHISPER_HEADER_ROOT=$GITHUB_WORKSPACE/build/pinned-whisper-header" \
+            -DVOICE_M42_M3_PINNED_SHA=4614360e6ee2e174d96cbdd9ce41c5388c81d064 \
+            -DVOICE_M42_WHISPER_PINNED_SHA=d1be6fde11ac6e0407606b4e42fe72d34add8037 \
+            -DVOICE_M42_REAL_VIRTUAL_FULLSTACK=ON \
+            -DVOICE_M42_PINNED_HARNESS_SHA=9e51d377bd84ee91ce5a47c94f24f73e4e01bba7
+      - name: Link actual Harness/Agent/Session and run bounded live-terminal integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd build/pinned-harness-source
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          cmake --build --preset ci-linux-release --target test_tts_m42_actual_harness test_tts_m42_real_whisper_cpu_no_weights test_tts_m42_real_virtual_fullstack --parallel 2
+          ctest --preset ci-linux-release -R '^tts_m42_actual_harness$' --repeat until-fail:4 --verbose --timeout 90 \
+            | tee "$RUNNER_TEMP/m42-real-harness-tts-dso-repetitions.log"
+          # Every original real-Harness turn must also exercise the genuine
+          # loadable TTS image and its worker join + single real dlclose.
+          for marker in \
+            'PASS combined real Harness+TTS DSO: finish/PCM/drain/settle/join/dlclose' \
+            'PASS combined real Harness+TTS DSO: cancel-after-PCM/late-reject/join/dlclose' \
+            'PASS combined real Harness+TTS DSO: cancel-before-PCM/join/dlclose' \
+            'PASS combined real Harness+TTS DSO: Harness-cancel/no-TTS/dlclose'; do
+            observed="$(grep -Fc "$marker" "$RUNNER_TEMP/m42-real-harness-tts-dso-repetitions.log" || true)"
+            test "$observed" = 4 || { echo "missing real TTS DSO lifecycle evidence: $marker ($observed)" >&2; exit 1; }
+          done
+          # All four live TTS Provider DSO scenarios must now consume an
+          # ORIGINAL M1/M2/M3 checked FINAL for their SAME generation.
+          accepted="$(grep -Fc 'PASS same-generation original M1/M2/M3 checked FINAL before loaded TTS DSO' \
+            "$RUNNER_TEMP/m42-real-harness-tts-dso-repetitions.log" || true)"
+          test "$accepted" = 16 || { echo "missing original M3-to-TTS same-generation witness: $accepted / 16" >&2; exit 1; }
+          ctest --preset ci-linux-release -R '^tts_m42_real_whisper_cpu_no_weights$' --repeat until-fail:2 --verbose --timeout 30
+      - name: Execute TRUE virtual Capture M1 M2 M3 to production Harness loaded TTS and released Playback
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          M42_FULLSTACK_REPEATS=2 bash speech_output/voice_coordinator/tests/harness_live/run_isolated_fullstack.sh \
+            build/pinned-harness-source
+      - name: Prove ORIGINAL Harness Agent Session and TTS worker DSO compiled under source TSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          libdir="build/pinned-harness-source/build/ci-linux-release/bin"
+          for dso in libturbo_agent_harness.so libturbo_agent.so libtts_m42_combined_provider_dso.so; do
+            test -f "$libdir/$dso"
+            nm -D "$libdir/$dso" | grep -F '__tsan_init'
+          done
+          exe="$libdir/test_tts_m42_real_virtual_fullstack"
+          nm -D "$exe" | grep -F '__tsan_init'
+          readelf -d "$exe" | grep -F libtsan.so
+          echo 'PASS TSAN instrumentation in original Harness/Agent/TTS DSO and current M4 C11'
+      - name: Verify isolation and original source SHA after build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C build/pinned-harness-source rev-parse HEAD)" = '9e51d377bd84ee91ce5a47c94f24f73e4e01bba7'
+          test -z "$(git -C build/pinned-harness-source diff --name-only -- ':!build/**')"
+          test -f build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness
+          exe="build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_actual_harness"
+          # This executable MUST import the actual production Harness DSO.
+          readelf -d "$exe" | grep -F 'libturbo_agent_harness.so'
+          nm -D "$exe" | grep -E ' U turbo_agent_harness_start_text($|@)'
+          # Original pinned M1/M2 source is compiled into this same process.
+          # --defined-only excludes references to a missing external shim.
+          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_begin'
+          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_capture_bridge_offer'
+          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_take_final'
+          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_create'
+          nm --defined-only "$exe" | grep -F ' turbo_agent_speech_whisper_provider'
+          vendor_exe="build/pinned-harness-source/build/ci-linux-release/bin/test_tts_m42_real_whisper_cpu_no_weights"
+          test -x "$vendor_exe"
+          # Verify actual upstream CPU Whisper and original production Harness.
+          readelf -d "$vendor_exe" | grep -F 'libwhisper.so'
+          readelf -d "$vendor_exe" | grep -F 'libturbo_agent_harness.so'
+          nm -D "$vendor_exe" | grep -F ' U whisper_init_from_buffer_with_params'
+          nm --defined-only "$vendor_exe" | grep -F ' turbo_agent_speech_whisper_create'
+          dso_image="build/pinned-harness-source/build/ci-linux-release/bin/libtts_m42_combined_provider_dso.so"
+          test -f "$dso_image"
+          nm -D --defined-only "$dso_image" | grep -F ' T turbo_tts_test_dso_entry'
+          # Explicit dlopen, not link-owned image (no accidental reference).
+          if readelf -d "$exe" | grep -F 'libtts_m42_combined_provider_dso.so'; then
+            echo 'TTS DSO was linked instead of loaded and unload tested' >&2
+            exit 1
+          fi
+          LD_LIBRARY_PATH="$TURBO_WHISPER_SDK_ROOT/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:${LD_LIBRARY_PATH:-}" \
+            ldd "$vendor_exe" | tee "$RUNNER_TEMP/m42-whisper-real-no-weights-needed.txt"
+          if grep -F 'not found' "$RUNNER_TEMP/m42-whisper-real-no-weights-needed.txt"; then
+            echo 'real v1.9.5 vendor or Harness runtime unresolved' >&2
+            exit 1
+          fi
+
+
+  original-playback-source-tsan:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'feature/speech-m42-original-source-tsan'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66:history_size=7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pin original SaltsUtils 4.3.0-rc.11 Playback source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: v4.3.0-rc.11
+          path: build/pinned-saltsutils-source
+          persist-credentials: false
+      - name: Pin actual original Salts 2.3.0-rc.16 SPSC ring source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: v2.3.0-rc.16
+          path: build/pinned-salts-source
+          persist-credentials: false
+      - name: Pin original miniaudio 0.11.22 from official vcpkg baseline
+        uses: actions/checkout@v4
+        with:
+          repository: mackron/miniaudio
+          ref: 0.11.22
+          path: build/pinned-miniaudio-source
+          persist-credentials: false
+      - name: Assert original native Playback test-only backend and immutable source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C build/pinned-saltsutils-source describe --tags --exact-match)" = 'v4.3.0-rc.11'
+          test "$(git -C build/pinned-salts-source describe --tags --exact-match)" = 'v2.3.0-rc.16'
+          test -f build/pinned-salts-source/concurrency/src/spsc_ring.c
+          test -f build/pinned-salts-source/concurrency/include/salts/spsc_ring.h
+          test "$(git -C build/pinned-miniaudio-source describe --tags --exact-match)" = '0.11.22'
+          test -f build/pinned-miniaudio-source/miniaudio.h
+          test -f build/pinned-saltsutils-source/playback/src/salts_playback.c
+          test -f build/pinned-saltsutils-source/playback/src/playback_buffer.c
+          test -f build/pinned-saltsutils-source/playback/src/miniaudio_impl.c
+          test -f build/pinned-saltsutils-source/playback/tests/test_playback_lifecycle.c
+          grep -Fq 'SALTS_PLAYBACK_TEST_NULL_BACKEND' \
+            build/pinned-saltsutils-source/playback/src/salts_playback.c
+          grep -Fq 'SALTS_PLAYBACK_TEST_NULL_BACKEND=1' \
+            build/pinned-saltsutils-source/playback/tests/CMakeLists.txt
+          grep -Fq '"miniaudio"' build/pinned-saltsutils-source/vcpkg.json
+      - name: Restore SHA-verified published Salts and SaltsUtils SDK archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/m42-null-pinned"
+          curl --fail --location --silent --show-error --retry 3 \
+            --connect-timeout 25 --max-time 240 \
+            --proto '=https' --proto-redir '=https' \
+            https://github.com/qigao/salts-utils/releases/download/v4.3.0-rc.11/SaltsUtils.Native.4.3.0-rc.11.nupkg \
+            --output "$RUNNER_TEMP/m42-null-pinned/SaltsUtils.Native.4.3.0-rc.11.nupkg"
+          curl --fail --location --silent --show-error --retry 3 \
+            --connect-timeout 25 --max-time 240 \
+            --proto '=https' --proto-redir '=https' \
+            https://github.com/qigao/salts/releases/download/v2.3.0-rc.16/Salts.Native.2.3.0-rc.16.nupkg \
+            --output "$RUNNER_TEMP/m42-null-pinned/Salts.Native.2.3.0-rc.16.nupkg"
+          python3 speech_output/playback/ci/verify_published_playback.py \
+            --package-dir "$RUNNER_TEMP/m42-null-pinned"
+          mkdir -p "$RUNNER_TEMP/m42-null-salts" "$RUNNER_TEMP/m42-null-utils"
+          unzip -q "$RUNNER_TEMP/m42-null-pinned/Salts.Native.2.3.0-rc.16.nupkg" \
+            -d "$RUNNER_TEMP/m42-null-salts"
+          unzip -q "$RUNNER_TEMP/m42-null-pinned/SaltsUtils.Native.4.3.0-rc.11.nupkg" \
+            -d "$RUNNER_TEMP/m42-null-utils"
+          echo "SALTS_ROOT=$RUNNER_TEMP/m42-null-salts/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/m42-null-utils/sdk/linux-x64" >> "$GITHUB_ENV"
+          test -f "$RUNNER_TEMP/m42-null-utils/sdk/linux-x64/lib/libsalts_capture.so"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpipewire-0.3-0
+      - name: Build original null-native miniaudio callback plus current M4.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S speech_output/voice_coordinator/tests/native_null \
+            -B build/m42-original-native-null -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_C_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g -O1 -Wall -Wextra -Wpedantic -Werror" \
+            -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
+            "-DSALTSUTILS_RELEASE_SOURCE=$GITHUB_WORKSPACE/build/pinned-saltsutils-source" \
+            "-DMINIAUDIO_RELEASE_SOURCE=$GITHUB_WORKSPACE/build/pinned-miniaudio-source" \
+            "-DM42_SALTS_ORIGINAL_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-salts-source" \
+            "-DM42_CURRENT_SOURCE=$GITHUB_WORKSPACE" \
+            -DM42_ORIGINAL_AUDIO_TSAN=ON
+          cmake --build build/m42-original-native-null --parallel 2
+          test -x build/m42-original-native-null/test_m42_original_salts_null_native
+          nm build/m42-original-native-null/libm42_salts_playback_original_native_null.a | grep -F __tsan_init
+          nm --defined-only build/m42-original-native-null/libm42_salts_playback_original_native_null.a | grep -F ' T cmeta_spsc_ring_write_release'
+          nm --defined-only build/m42-original-native-null/libm42_salts_playback_original_native_null.a | grep -F ' T cmeta_spsc_ring_read_acquire'
+          nm build/m42-original-native-null/libm42_native_coordinator_original_source.a | grep -F __tsan_init
+          test -x build/m42-original-native-null/test_m42_published_capture_device_rejection
+      - name: Repeat actual callback and real released Capture no-device rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib"
+          ctest --test-dir build/m42-original-native-null \
+            -R '^m42_original_salts_native_null_callback_lifecycle$' \
+            --repeat until-fail:4 --verbose --output-on-failure --timeout 45 \
+            | tee "$RUNNER_TEMP/m42-null-native-20x.log"
+          for marker in \
+            'PASS original Salts Playback 24kHz null-native callback + drain + state transitions' \
+            'PASS M4.2 -> original Salts miniaudio native 10ms ring short-write + callback drain' \
+            'PASS M4.2 interrupted on running real null miniaudio callback: clear/stop/join' \
+            'PASS original Salts Playback native unexpected-stop and start-race fail closed' \
+            'PASS pinned original SaltsUtils Playback NULL native backend + M4.2 lifecycle'; do
+            count="$(grep -Fc "$marker" "$RUNNER_TEMP/m42-null-native-20x.log" || true)"
+            test "$count" = 4 || { echo "missing native callback witness: $marker ($count)" >&2; exit 1; }
+          done
+          # This SOURCE-TSan job intentionally runs only the original
+          # instrumented Playback callback target; the released Capture DSO
+          # is uninstrumented, so do not claim its source has been TSan tested.
+      - name: Audit defined original Playback and imported released Capture DSO
+        shell: bash
+        run: |
+          set -euo pipefail
+          playback="build/m42-original-native-null/test_m42_original_salts_null_native"
+          capture="build/m42-original-native-null/test_m42_published_capture_device_rejection"
+          for symbol in salts_playback_create salts_playback_start salts_playback_clear \
+                        salts_playback_drain salts_playback_destroy \
+                        salts_playback_test_simulate_unexpected_stop \
+                        turbo_voice_create turbo_voice_drain; do
+            nm --defined-only "$playback" | grep -F " T $symbol"
+          done
+          if readelf -d "$playback" | grep -F 'libsalts_playback.so'; then
+            echo 'null Playback was unexpectedly linked from the released DSO' >&2
+            exit 1
+          fi
+          readelf -d "$capture" | grep -F 'libsalts_capture.so'
+          nm -D "$capture" | grep -F ' U salts_audio_capture_create'
+          ldd "$capture" | tee "$RUNNER_TEMP/m42-original-capture-dso-deps.txt"
+          if grep -F 'not found' "$RUNNER_TEMP/m42-original-capture-dso-deps.txt"; then
+            echo 'Published Capture DSO or PipeWire dependencies unresolved' >&2
+            exit 1
+          fi
+

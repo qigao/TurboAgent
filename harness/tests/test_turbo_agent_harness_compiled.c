@@ -5,6 +5,7 @@
 #include "turbo_agent_session.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
+#include "turbo_runtime_store.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -18,6 +19,9 @@ static const char compiled_inspect_unknown_tool[] = "{\"template_id\":\"inspect\
 typedef struct compiled_inspect_probe_s {
   int calls;
   int produce_invalid_result;
+  int saw_started_journal;
+  turbo_agent_runtime_t *runtime;
+  const char *thread_id;
 } compiled_inspect_probe_t;
 
 static int compiled_harness_transport(const char *request, char **response, void *user) {
@@ -27,6 +31,40 @@ static int compiled_harness_transport(const char *request, char **response, void
   return -1;
 }
 
+static int compiled_journal_has_phase(turbo_agent_runtime_t *runtime,
+                                      const char *thread_id, const char *phase) {
+  json_value_t *records = NULL;
+  size_t i;
+  int found = 0;
+  if (!runtime || !thread_id || !phase ||
+      turbo_agent_runtime_store_list_json(runtime, COMPILED_INSPECT_JOURNAL_COLLECTION,
+                                          "thread_id", thread_id, &records) != SALTS_OK ||
+      !records || json_type(records) != JSON_ARRAY) goto done;
+  for (i = 0; i < json_array_size(records); ++i) {
+    const json_value_t *record = json_array_get(records, i);
+    const char *record_phase;
+    const char *tool_name;
+    if (!record || json_type(record) != JSON_OBJECT) continue;
+    record_phase = json_get_string(record, "phase");
+    tool_name = json_get_string(record, "tool_name");
+    if (record_phase && strcmp(record_phase, phase) == 0 && tool_name &&
+        strcmp(tool_name, "repo.inspect") == 0) {
+      found = 1;
+      break;
+    }
+  }
+done:
+  turbo_runtime_json_destroy(records);
+  return found;
+}
+
+static void attach_compiled_probe_runtime(turbo_agent_harness_t *harness,
+                                          compiled_inspect_probe_t *probe) {
+  turbo_agent_app_t *app = turbo_agent_harness_app(harness);
+  probe->runtime = turbo_agent_session_runtime(turbo_agent_app_session(app));
+  probe->thread_id = turbo_agent_app_thread_id(app);
+}
+
 static int compiled_inspect_handler(const json_value_t *arguments,
                                     json_value_t **out_result, void *user) {
   compiled_inspect_probe_t *probe = (compiled_inspect_probe_t *)user;
@@ -34,6 +72,10 @@ static int compiled_inspect_handler(const json_value_t *arguments,
   if (!probe || !out_result || !arguments ||
       !json_get_string(arguments, "value")) return -1;
   ++probe->calls;
+  if (probe->runtime && probe->thread_id) {
+    if (!compiled_journal_has_phase(probe->runtime, probe->thread_id, "started")) return -1;
+    ++probe->saw_started_journal;
+  }
   if (probe->produce_invalid_result) {
     *out_result = json_create_string("unexpected type");
     return *out_result ? 0 : -1;
@@ -140,6 +182,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     harness = make_compiled_harness(pool, registry);
     check_not_null(harness);
     check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
     {
       turbo_agent_t *agent = turbo_agent_session_agent(
           turbo_agent_app_session(turbo_agent_harness_app(harness)));
@@ -179,18 +222,18 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     json_free(certificate);
     result = NULL;
     certificate = NULL;
+    check_equal(probe.saw_started_journal, 2);
     {
       turbo_agent_app_t *app = turbo_agent_harness_app(harness);
       const char *run_id = turbo_agent_app_last_run_id(app);
-      const char *checkpoint_id = turbo_agent_app_last_checkpoint_id(app);
       json_value_t *run_record = NULL;
-      json_value_t *checkpoint_state = NULL;
+      json_value_t *journal_records = NULL;
       const json_value_t *run_state;
       const json_value_t *run_execution;
-      const json_value_t *checkpoint_execution;
-      const char *checkpoint_phase;
+      turbo_agent_runtime_t *runtime = turbo_agent_session_runtime(
+          turbo_agent_app_session(app));
+      size_t i;
       check_not_null(run_id);
-      check_not_null(checkpoint_id);
       check_equal(turbo_agent_app_get_run(app, run_id, &run_record), SALTS_OK);
       check_not_null(run_record);
       run_state = json_object_get(run_record, "state_snapshot");
@@ -204,14 +247,28 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       check_not_null(json_object_get(run_execution, "authority_generation"));
       check_not_null(json_object_get(run_execution, "certificate"));
       check_true(json_get_bool(json_object_get(run_execution, "result"), "ok", false));
-      check_equal(turbo_agent_app_get_checkpoint_state_json_value(
-          app, checkpoint_id, &checkpoint_state), SALTS_OK);
-      check_not_null(checkpoint_state);
-      checkpoint_execution = json_object_get(checkpoint_state, "compiled_execution");
-      check_not_null(checkpoint_execution);
-      checkpoint_phase = json_get_string(checkpoint_execution, "phase");
-      check_true(checkpoint_phase && strcmp(checkpoint_phase, "started") == 0);
-      turbo_runtime_json_destroy(checkpoint_state);
+
+      check_equal(turbo_agent_runtime_store_list_json(
+          runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
+          probe.thread_id, &journal_records), SALTS_OK);
+      check_not_null(journal_records);
+      check_equal(json_array_size(journal_records), 2u);
+      for (i = 0; i < json_array_size(journal_records); ++i) {
+        const json_value_t *journal = json_array_get(journal_records, i);
+        check_not_null(journal);
+        check_equal(json_get_int(journal, "schema_version", 0), 1);
+        check_equal(json_get_string(journal, "phase"), "committed");
+        check_equal(json_get_string(journal, "thread_id"), probe.thread_id);
+        check_equal(json_get_string(journal, "tool_name"), "repo.inspect");
+        check_equal(json_get_string(journal, "backend"), "runtime_tools");
+        check_equal(json_get_int(journal, "tool_status", -1), TURBO_TOOL_OK);
+        check_not_null(json_get_string(journal, "execution_id"));
+        check_not_null(json_get_string(journal, "plan_hash"));
+        check_not_null(json_object_get(journal, "authority_generation"));
+        check_not_null(json_object_get(journal, "certificate"));
+        check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
+      }
+      turbo_runtime_json_destroy(journal_records);
       turbo_runtime_json_destroy(run_record);
     }
     turbo_agent_harness_release(harness);
@@ -313,39 +370,35 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     harness = make_compiled_harness(pool, registry);
     check_not_null(harness);
     check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
     check_equal(run_compiled_inspect(harness, compiled_inspect_source,
         allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_EPROTO);
     check_equal(tool_status, TURBO_TOOL_ERROR);
     check_null(result);
     check_not_null(certificate);
     check_equal(probe.calls, 1);
+    check_equal(probe.saw_started_journal, 1);
     {
-      turbo_agent_app_t *app = turbo_agent_harness_app(harness);
-      const char *run_id = turbo_agent_app_last_run_id(app);
-      const char *checkpoint_id = turbo_agent_app_last_checkpoint_id(app);
-      json_value_t *run_record = NULL;
-      json_value_t *checkpoint_state = NULL;
-      const json_value_t *run_state;
-      const json_value_t *run_execution;
-      const json_value_t *checkpoint_execution;
-      const char *run_phase;
-      check_not_null(run_id);
-      check_not_null(checkpoint_id);
-      check_equal(turbo_agent_app_get_run(app, run_id, &run_record), SALTS_OK);
-      check_not_null(run_record);
-      run_state = json_object_get(run_record, "state_snapshot");
-      run_execution = json_object_get(run_state, "compiled_execution");
-      check_not_null(run_execution);
-      run_phase = json_get_string(run_execution, "phase");
-      check_true(run_phase && (strcmp(run_phase, "outcome_unknown") == 0 ||
-                               strcmp(run_phase, "started") == 0));
-      check_equal(turbo_agent_app_get_checkpoint_state_json_value(
-          app, checkpoint_id, &checkpoint_state), SALTS_OK);
-      checkpoint_execution = json_object_get(checkpoint_state, "compiled_execution");
-      check_not_null(checkpoint_execution);
-      check_equal(json_get_string(checkpoint_execution, "phase"), "started");
-      turbo_runtime_json_destroy(checkpoint_state);
-      turbo_runtime_json_destroy(run_record);
+      json_value_t *journal_records = NULL;
+      const json_value_t *journal;
+      check_equal(turbo_agent_runtime_store_list_json(
+          probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
+          probe.thread_id, &journal_records), SALTS_OK);
+      check_not_null(journal_records);
+      check_equal(json_array_size(journal_records), 1u);
+      journal = json_array_get(journal_records, 0);
+      check_not_null(journal);
+      check_equal(json_get_string(journal, "phase"), "outcome_unknown");
+      check_equal(json_get_int(journal, "tool_status", -1), TURBO_TOOL_ERROR);
+      check_equal(json_get_string(journal, "tool_name"), "repo.inspect");
+      check_not_null(json_get_string(journal, "execution_id"));
+      check_not_null(json_get_string(journal, "plan_hash"));
+      check_not_null(json_object_get(journal, "certificate"));
+      check_true(strstr(json_get_string(journal, "diagnostic") ?
+                        json_get_string(journal, "diagnostic") : "",
+                        "violating its admitted schema") != NULL);
+      check_null(json_object_get(journal, "result"));
+      turbo_runtime_json_destroy(journal_records);
     }
 
     json_free(certificate);

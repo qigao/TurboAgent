@@ -93,16 +93,21 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
  * granted capabilities intersected with the caller's compiler restrictions
  * are admitted. Side-effecting or UNKNOWN-effect tools are not admitted.
  *
- * The persisted JSON-native Run state contains a versioned `compiled_execution`
- * record with execution id, plan hash/certificate, capability generation,
- * canonical tool identity, backend and approval decision. Separate admit/start
- * graph nodes force a checkpoint carrying phase `started` to be persisted before
- * the tool callback node can run. If that checkpoint cannot be persisted, the
- * callback is not entered. Callback/result-contract failures are never retried;
- * the returned failed Run is marked `outcome_unknown` when a callback started,
- * while the persisted pre-callback checkpoint remains `started`. This slice does
- * not expose compiled-plan resume; future recovery must reject/reconcile a started
- * checkpoint without a committed Run result rather than blindly invoking again.
+ * The JSON-native Run state for a successful invocation contains a versioned
+ * `compiled_execution` record with execution id, plan hash/certificate,
+ * capability generation, canonical tool identity, backend and approval decision.
+ * Before calling the tool, Harness persists an `agent_compiled_execution_journal`
+ * record in the attached Runtime Store at phase `started`; the callback is not
+ * entered if that write fails. A valid result is delivered only after the journal
+ * transitions to `committed`. Callback failures or invalid results transition to
+ * `outcome_unknown` when that update succeeds; if it fails, the prior `started`
+ * record remains the fail-closed signal. No callback is automatically retried.
+ *
+ * This uses individual Runtime Store writes, not a transaction; crash guarantees
+ * depend on the selected store backend. Runtime's generic graph checkpoint hook
+ * is not a per-edge durable commit on ordinary completion/error. This slice does
+ * not expose compiled-plan resume/recovery; future recovery must reconcile a
+ * `started` / `outcome_unknown` journal instead of blindly invoking again.
  *
  * On successful execution, out_result and out_certificate are caller-owned JSON
  * values. After compile admission the certificate is still returned on callback

@@ -86,6 +86,19 @@ if [[ -n "${M42_SOURCE_TSAN_LIB_DIR:-}" ]]; then
 else
   test_command=(ctest --preset ci-linux-release)
 fi
+# In the COMBINED source-TSan gate, Capture is likewise the unchanged full
+# SaltsUtils native Linux source with ONLY #653 private-atomic fix, not an
+# uninstrumented published Capture DSO. Do not silently resolve the wrong ABI.
+if [[ -n "${M42_SOURCE_CAPTURE_TSAN_LIB_DIR:-}" ]]; then
+  test -f "$M42_SOURCE_CAPTURE_TSAN_LIB_DIR/libsalts_capture.so"
+  export LD_LIBRARY_PATH="$M42_SOURCE_CAPTURE_TSAN_LIB_DIR:${LD_LIBRARY_PATH:-}"
+  ldd "$harness_root/build/ci-linux-release/bin/test_tts_m42_real_virtual_fullstack" |
+    tee "$isolated/source-capture-loaded.txt"
+  grep -F "libsalts_capture.so => $M42_SOURCE_CAPTURE_TSAN_LIB_DIR/libsalts_capture.so" \
+    "$isolated/source-capture-loaded.txt"
+  echo "PASS original source-TSan real Capture native library selected"
+  test_command=(ctest --test-dir "$harness_root/build/ci-linux-release")
+fi
 cd "$harness_root"
 # Keep the original 8x Release acceptance default; a separate source
 # TSan job can explicitly request 2x bounded race-detection repetitions.

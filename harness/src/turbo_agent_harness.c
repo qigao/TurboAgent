@@ -290,7 +290,7 @@ static int turbo_agent_harness_compiler_authority_configure(
   const char **allowed = NULL;
   size_t count = 0;
   size_t i;
-  if (!requested || !authority || !effective || !out_capabilities || !out_count ||
+  if (!requested || !authority || !effective || !out_capabilities ||
       (requested->allowed_capability_count && !requested->allowed_capabilities) ||
       !requested->deny_unlisted_capabilities) return SALTS_EINVAL;
   *out_capabilities = NULL;

@@ -286,8 +286,7 @@ static int turbo_agent_harness_compiler_authority_configure(
     const turbo_agent_compiler_config_t *requested,
     const turbo_agent_tool_authority_snapshot_t *authority,
     turbo_agent_compiler_config_t *effective,
-    const char ***out_capabilities,
-    size_t *out_count) {
+    const char ***out_capabilities) {
   const char **allowed = NULL;
   size_t count = 0;
   size_t i;
@@ -295,7 +294,6 @@ static int turbo_agent_harness_compiler_authority_configure(
       (requested->allowed_capability_count && !requested->allowed_capabilities) ||
       !requested->deny_unlisted_capabilities) return SALTS_EINVAL;
   *out_capabilities = NULL;
-  *out_count = 0;
   allowed = (const char **)calloc(requested->allowed_capability_count ?
                                       requested->allowed_capability_count : 1,
                                   sizeof(*allowed));
@@ -321,7 +319,6 @@ static int turbo_agent_harness_compiler_authority_configure(
   effective->allowed_capability_count = count;
   effective->deny_unlisted_capabilities = 1;
   *out_capabilities = allowed;
-  *out_count = count;
   return SALTS_OK;
 }
 
@@ -344,7 +341,6 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   turbo_agent_tool_authority_snapshot_t authority = {0};
   turbo_agent_compiler_config_t effective_config;
   const char **effective_capabilities = NULL;
-  size_t effective_capability_count = 0;
   const char *name;
   const char *result_schema_json = NULL;
   const json_value_t *result_schema = NULL;
@@ -382,7 +378,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   }
   rc = turbo_agent_harness_compiler_authority_configure(
       compiler_config, &authority, &effective_config,
-      &effective_capabilities, &effective_capability_count);
+      &effective_capabilities);
   if (rc != SALTS_OK) goto done;
 
   registry = turbo_agent_app_tool_registry(harness->app);

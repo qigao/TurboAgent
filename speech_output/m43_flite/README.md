@@ -1,6 +1,6 @@
-# M4.3: isolated optional CMU Flite 2.2 SpeechOutput Provider (DRAFT)
+# M4.3: optional CMU Flite 2.2 SpeechOutput Provider
 
-**DRAFT / DO NOT MERGE / DO NOT RELEASE / DEFAULT OFF.**
+**Optional candidate / DEFAULT OFF / DO NOT RELEASE.**
 Stacked on TurboAgent #208. Tracks [voice M4 #164](https://github.com/qigao/TurboAgent/issues/164).
 
 This is the first *real-engine-capable* provider implementation, not an
@@ -192,3 +192,74 @@ origin remains a separate, user-supplied reproducibility/attestation
 task. All four binary digests, `flite.h` digest, Flite core `COPYING` digest,
 and separate CMU Kal16 voice license/notice digest must be provided before
 real helper compilation.
+
+
+## TTS engines and voice/model acquisition (Flite is one option, not the architecture)
+
+The SpeechOutput Provider ABI is engine-neutral. **Flite/Kal16 is one small, English-only candidate** used to validate a standalone ANSI-C engine path; it is not the required engine, the only supported model, or the default. Each engine/voice is explicitly selected and independently accepted. Never silently substitute another voice, model, language, local runtime, or cloud service when the requested one is unavailable.
+
+### Candidate comparison
+
+| Candidate | What to download / where | Strengths and trade-offs | Integration status here |
+|---|---|---|---|
+| **Flite 2.2 + CMU Kal16** | Source tag [`v2.2`](https://github.com/festvox/flite/tree/v2.2); build/install locally from reviewed source and preserve core + voice notices. | Small C engine, relatively simple CPU path; this Kal16 voice is English diphone speech, not a modern neural voice. | Optional M4.3 process-isolated candidate only; real positive E2E still not executed. |
+| **Piper voices (ONNX)** | [Voice catalog and download instructions](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/VOICES.md); each voice normally needs `.onnx` + `.onnx.json` and its model card. | Local, CPU-friendly neural voices across many languages. The current `OHF-Voice/piper1-gpl` engine repository is GPL-3.0-or-later; review each voice's separate license. Do not assume the older `rhasspy/piper` fork and current code have identical licensing. | Alternative provider candidate; not integrated or approved by this PR. |
+| **Kokoro-82M** | [Upstream model and weights](https://huggingface.co/hexgrad/Kokoro-82M) or the [Kokoro runtime project](https://github.com/hexgrad/kokoro). For a packaged ONNX option, see [sherpa-onnx Kokoro model release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models). | Neural TTS with a relatively compact model; model repo states Apache-2.0. Runtime/dependencies and the exact selected artifact still need pinning and verification. | Alternative provider candidate; not integrated or approved by this PR. |
+| **sherpa-onnx TTS model catalog** | [Official TTS model releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) and [model index](https://k2-fsa.github.io/sherpa/onnx/tts/all/). Download one specific archive and inspect its included license/model card. | A catalog/runtime route covering multiple model families, languages and sizes (including VITS/Piper-derived, Kokoro and others). It is a runtime layer, not a single model; do not bundle the whole catalog. | Candidate for a separately reviewed adapter; its runtime/ABI, binary size, licenses and target-platform support must be evaluated independently. |
+| **Coqui XTTS-v2** | [Official Hugging Face model repository](https://huggingface.co/coqui/XTTS-v2) or [Coqui model docs](https://docs.coqui.ai/en/latest/models/xtts.html). Download the exact revision and all required files from the model repository; record hashes. | Multilingual neural TTS including Japanese and Chinese, with voice-cloning features; large model and Python/PyTorch-oriented runtime. The model uses the Coqui Public Model License, not a blanket permissive license. Voice cloning requires separate rights/consent review. | Research candidate only; not integrated or approved by this PR. |
+| **eSpeak NG** | [Upstream source and build instructions](https://github.com/espeak-ng/espeak-ng); alternatively use the package from the target OS distribution and pin the package version. | Small rule-based/formant synthesis, many languages, tiny footprint; noticeably less natural than neural models. No neural weight file is needed. | Separate selectable engine candidate; not a fallback and not integrated by this PR. |
+| **Hosted TTS APIs** | Obtain SDK/API access from the chosen provider's official documentation; no model weights are downloaded locally. | Can offer high-quality voices with network, credentials, recurring cost and provider data-retention/terms constraints. | Separate explicitly configured remote provider only; never an implicit fallback for a local provider. |
+
+These are options to evaluate, **not a claim that all models have passed quality, security, license, latency, offline, or cross-platform acceptance**. For Japanese/Chinese, shortlist a model that explicitly supports the language and inspect real samples before selecting it. The Kal16 Flite test cannot stand in for that evaluation.
+
+### Download and pin workflow
+
+Downloads are an explicit maintainer/reviewer action; CI and ordinary builds must not fetch voice assets or model weights. Select one exact engine, voice/model, runtime release and target architecture first.
+
+**Flite source (source checkout only; does not fetch or authorize a voice separately):**
+
+```sh
+git clone --branch v2.2 --depth 1 https://github.com/festvox/flite.git third_party/flite-src
+git -C third_party/flite-src rev-parse HEAD
+sha256sum third_party/flite-src/COPYING third_party/flite-src/include/flite.h
+```
+
+Then follow the upstream build instructions for the target OS, install the four required Flite libraries and headers into a reviewed local prefix, and independently identify the CMU Kal16 voice license/notice. Do not run this as part of the default CMake build. The local real-voice gate requires separate SHA-256 pins for each library, `flite.h`, core COPYING and voice license/notice; tag identity alone does not attest installed binary provenance.
+
+**Piper voice example (downloads the selected model and its configuration via the upstream tool):**
+
+```sh
+python3 -m venv .venv-piper
+. .venv-piper/bin/activate
+python -m pip install 'piper-tts==1.8.0'
+python -m piper.download_voices en_US-lessac-medium --download-dir ./models/piper
+```
+
+Use the documented command from the exact pinned Piper release; verify that the voice model card permits the intended distribution/use. The command above is an example of a manual acquisition path, not an approved runtime dependency for TurboAgent.
+
+**sherpa-onnx packaged model example (Kokoro multilingual):**
+
+```sh
+mkdir -p models/sherpa-onnx && cd models/sherpa-onnx
+curl -fL --retry 3 -o kokoro-multi-lang-v1_0.tar.bz2 \\
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2
+sha256sum kokoro-multi-lang-v1_0.tar.bz2
+tar -xjf kokoro-multi-lang-v1_0.tar.bz2
+```
+
+Before accepting the archive, check the release page, record the exact release asset URL and SHA-256, inspect the extracted model card/license, and pin every runtime dependency separately. A hash recorded after download is an audit record; compare it with a trusted independently published digest or reviewed provenance before treating it as authenticity evidence.
+
+**Coqui XTTS-v2 model example (large Hugging Face artifact):**
+
+```sh
+python -m pip install -U huggingface_hub
+hf download coqui/XTTS-v2 --revision <reviewed-commit-sha> --local-dir ./models/xtts-v2
+```
+
+Replace `<reviewed-commit-sha>` with an explicitly reviewed immutable commit. Review the Coqui Public Model License and all downloaded files before use; do not use a mutable `main` revision for a reproducible acceptance run.
+
+For every candidate, retain a manifest with engine/runtime version, immutable source or model revision, exact voice/model ID and language, source URL, file sizes and SHA-256 digests, licenses/notices, provenance, expected PCM format, latency/resource limits, and an independently reviewed positive PCM oracle. Do not commit large model/voice files to this repository. Download into a user-controlled local model directory or a separately managed artifact store only after approval.
+
+### Provider acceptance rule
+
+A model becomes a supported option only after a **separate explicit Provider/voice selection** and its own license/provenance review, bounded execution/cancellation/unload tests, language and audio-format validation, and real positive PCM acceptance. The shared output contract remains bounded host-owned PCM and the existing `VoiceCoordinator → Salts::Playback` ownership chain. Neural models may emit a sample rate other than 24 kHz; resampling must be an explicit, tested part of that adapter, never an invisible global fallback. No model in this table changes the production default.

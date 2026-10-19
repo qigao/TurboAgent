@@ -205,8 +205,14 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       check_equal(turbo_agent_tool_authority_snapshot_is_current(agent, &second), 1);
     }
 
-    check_equal(run_compiled_inspect(harness, compiled_inspect_source,
-        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
+    {
+      int run_rc = run_compiled_inspect(harness, compiled_inspect_source,
+          allowed, 1, &diagnostic, &tool_status, &result, &certificate);
+      /* Check callback reachability before the aggregate Runtime return code.
+       * This distinguishes graph-node failure from post-graph finalization. */
+      check_equal(probe.calls, 1);
+      check_equal(run_rc, SALTS_OK);
+    }
     check_equal(tool_status, TURBO_TOOL_OK);
     check_equal(diagnostic.status, TURBO_AGENT_COMPILE_OK);
     check_true(json_get_bool(result, "ok", false));
@@ -376,8 +382,14 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_not_null(harness);
     check_equal(set_compiled_host_policy(harness, 1), 0);
     attach_compiled_probe_runtime(harness, &probe);
-    check_equal(run_compiled_inspect(harness, compiled_inspect_source,
-        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_EPROTO);
+    {
+      int run_rc = run_compiled_inspect(harness, compiled_inspect_source,
+          allowed, 1, &diagnostic, &tool_status, &result, &certificate);
+      /* The invalid-result callback must have run exactly once even if
+       * Runtime later reports a separate finalization failure. */
+      check_equal(probe.calls, 1);
+      check_equal(run_rc, SALTS_EPROTO);
+    }
     check_equal(tool_status, TURBO_TOOL_ERROR);
     check_null(result);
     check_not_null(certificate);

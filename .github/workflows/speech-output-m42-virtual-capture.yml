@@ -577,7 +577,7 @@ jobs:
             "-DM42_CURRENT_SOURCE=$GITHUB_WORKSPACE" \
             "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror"
           cmake --build build/m42-real-virtual-capture \
-            --target test_m42_published_pulse_virtual_capture --parallel 2
+            --target test_m42_published_pulse_virtual_capture test_m42_published_pulse_native_duplex --parallel 2
       - name: True Salts Capture DSO -> original M2 Native Adapter -> M1 under isolated virtual monitor
         shell: bash
         run: |

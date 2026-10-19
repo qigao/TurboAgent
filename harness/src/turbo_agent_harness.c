@@ -249,29 +249,18 @@ static void turbo_agent_harness_terminal(void *user_data,
 
 static int turbo_agent_harness_begin_submit(turbo_agent_harness_t *harness) {
   int rc = SALTS_OK;
-  int active_status_rc = SALTS_OK;
-  int active_present = 0;
-  int submitting;
   turbo_agent_execution_t *terminal = NULL;
   turbo_agent_execution_status_t status = TURBO_AGENT_EXECUTION_QUEUED;
 
   cmeta_mutex_lock(&harness->mutex);
-  if (harness->active_execution) {
-    active_present = 1;
-    active_status_rc = turbo_agent_execution_get_status(harness->active_execution, &status);
-    if (active_status_rc == SALTS_OK && status >= TURBO_AGENT_EXECUTION_COMPLETED) {
-      terminal = harness->active_execution;
-      harness->active_execution = NULL;
-      active_present = 0;
-    }
+  if (harness->active_execution &&
+      turbo_agent_execution_get_status(harness->active_execution, &status) == SALTS_OK &&
+      status >= TURBO_AGENT_EXECUTION_COMPLETED) {
+    terminal = harness->active_execution;
+    harness->active_execution = NULL;
   }
-  submitting = harness->submitting;
   if (harness->submitting || harness->active_execution) {
     rc = SALTS_EBUSY;
-    fprintf(stderr,
-            "[turbo-agent-harness] submit rejected busy: submitting=%d active=%d "
-            "active_status_rc=%d active_status=%d\\n",
-            submitting, active_present, active_status_rc, (int)status);
   } else {
     harness->submitting = 1;
   }

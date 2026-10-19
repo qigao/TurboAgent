@@ -462,8 +462,8 @@ static int turbo_agent_compiled_inspect_execute_node(
   int cancel_status;
   if (!ctx || !ctx->json_value_state || !run) return -1;
   record = turbo_agent_compiled_execution_record_state(ctx->json_value_state);
-  if (!record || !json_get_string(json_object_get(record, "phase")) ||
-      strcmp(json_get_string(json_object_get(record, "phase")), "started") != 0) {
+  if (!record || !json_get_string(record, "phase") ||
+      strcmp(json_get_string(record, "phase"), "started") != 0) {
     turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_SOURCE_INVALID,
         TURBO_TOOL_ERROR, SALTS_EPROTO, "compiled execution did not reach its persisted started checkpoint");
     return -1;

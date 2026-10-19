@@ -574,6 +574,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_TESTING=ON \
             "-DM42_PINNED_M2_SOURCE=$GITHUB_WORKSPACE/build/pinned-capture-speech-source" \
+            "-DM42_CURRENT_SOURCE=$GITHUB_WORKSPACE" \
             "-DCMAKE_C_FLAGS=-Wall -Wextra -Wpedantic -Werror"
           cmake --build build/m42-real-virtual-capture \
             --target test_m42_published_pulse_virtual_capture --parallel 2

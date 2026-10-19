@@ -1,6 +1,8 @@
 #include "tinytest.h"
 
 #include "turbo_agent_harness.h"
+#include "turbo_agent_policy.h"
+#include "turbo_agent_session.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
 
@@ -88,6 +90,20 @@ static turbo_agent_harness_t *make_compiled_harness(
   return turbo_agent_harness_create(&config);
 }
 
+static int set_compiled_host_policy(turbo_agent_harness_t *harness, int allow_runtime_tools) {
+  turbo_agent_policy_t policy = turbo_agent_policy_default();
+  turbo_agent_t *agent = turbo_agent_session_agent(
+      turbo_agent_app_session(turbo_agent_harness_app(harness)));
+  policy.allow_custom_tools = 0;
+  policy.allow_runtime_tools = allow_runtime_tools;
+  policy.allow_delegate = 0;
+  policy.allow_network = 0;
+  policy.allow_shell = 0;
+  policy.allow_patch = 0;
+  policy.allow_outside_workspace = 0;
+  return agent ? turbo_agent_set_tool_policy(agent, &policy) : -1;
+}
+
 static int run_compiled_inspect(turbo_agent_harness_t *harness,
                                 const char *source, const char *const *allowed,
                                 size_t allowed_count,
@@ -122,6 +138,23 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
     harness = make_compiled_harness(pool, registry);
     check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    {
+      turbo_agent_t *agent = turbo_agent_session_agent(
+          turbo_agent_app_session(turbo_agent_harness_app(harness)));
+      turbo_agent_tool_authority_snapshot_t first = {0};
+      turbo_agent_tool_authority_snapshot_t second = {0};
+      turbo_agent_policy_t denied = turbo_agent_policy_default();
+      denied.allow_runtime_tools = 0;
+      check_equal(turbo_agent_tool_authority_snapshot_get(agent, &first), 0);
+      check_equal(turbo_agent_tool_authority_snapshot_is_current(agent, &first), 1);
+      check_equal(turbo_agent_set_tool_policy(agent, &denied), 0);
+      check_equal(turbo_agent_tool_authority_snapshot_is_current(agent, &first), 0);
+      check_equal(set_compiled_host_policy(harness, 1), 0);
+      check_equal(turbo_agent_tool_authority_snapshot_get(agent, &second), 0);
+      check_not_equal(first.generation, second.generation);
+      check_equal(turbo_agent_tool_authority_snapshot_is_current(agent, &second), 1);
+    }
 
     check_equal(run_compiled_inspect(harness, compiled_inspect_source,
         allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
@@ -155,6 +188,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
     harness = make_compiled_harness(pool, registry);
     check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
 
     check_equal(run_compiled_inspect(harness, compiled_inspect_bad_args,
         allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_EPROTO);
@@ -200,6 +234,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
           !missing_strict), TURBO_TOOL_OK);
       harness = make_compiled_harness(pool, registry);
       check_not_null(harness);
+      check_equal(set_compiled_host_policy(harness, 1), 0);
 
       check_equal(run_compiled_inspect(harness, compiled_inspect_source,
           allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_EPROTO);
@@ -229,6 +264,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
     harness = make_compiled_harness(pool, registry);
     check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
     check_equal(run_compiled_inspect(harness, compiled_inspect_source,
         allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_EPROTO);
     check_equal(tool_status, TURBO_TOOL_ERROR);
@@ -237,6 +273,37 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(probe.calls, 1);
 
     json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("does not let compiler allowlists widen Agent Host Tool Authority") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness(pool, registry);
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 0), 0);
+
+    check_equal(run_compiled_inspect(harness, compiled_inspect_source,
+        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_EPROTO);
+    check_equal(diagnostic.status, TURBO_AGENT_COMPILE_CAPABILITY_DENIED);
+    check_null(result);
+    check_null(certificate);
+    check_equal(probe.calls, 0);
+
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);

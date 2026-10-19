@@ -132,7 +132,7 @@ static int compiled_inspect_fault_store_put(void *user_data, const char *collect
   char phase_token[64];
   int length;
   if (!fault || !record_json) return -1;
-  length = snprintf(phase_token, sizeof(phase_token), "\\"phase\\":\\"%s\\"",
+  length = snprintf(phase_token, sizeof(phase_token), "\"phase\":\"%s\"",
                     fault->failed_phase ? fault->failed_phase : "");
   if (length > 0 && (size_t)length < sizeof(phase_token) &&
       strstr(record_json, phase_token)) return -1;

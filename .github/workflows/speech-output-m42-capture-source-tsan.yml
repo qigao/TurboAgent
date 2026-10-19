@@ -1,0 +1,145 @@
+name: SpeechOutput M4.2 original Salts Capture Linux source TSan and real virtual callback
+'on':
+  pull_request:
+    paths:
+      - 'speech_output/**'
+      - '.github/workflows/speech-output-m42-capture-source-tsan.yml'
+permissions:
+  contents: read
+  packages: read
+jobs:
+  original-capture-source-tsan:
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'feature/speech-m42-capture-source-tsan'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66:history_size=7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out original immutable M1/M2 and native Salts adapter C11 source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/TurboAgent
+          ref: 9e51d377bd84ee91ce5a47c94f24f73e4e01bba7
+          path: build/pinned-capture-speech-source
+          persist-credentials: false
+      - name: Pin original full SaltsUtils rc11 Linux Capture/miniaudio production source
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: v4.3.0-rc.11
+          path: build/pinned-saltsutils-capture-source
+          persist-credentials: false
+      - name: Pin exact upstream miniaudio 0.11.22 production native backend
+        uses: actions/checkout@v4
+        with:
+          repository: mackron/miniaudio
+          ref: 0.11.22
+          path: build/pinned-capture-miniaudio
+          persist-credentials: false
+      - name: Check out exact one-file private C11 callback admission fix candidate
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 4e1c77f8f9992c666c9ac0a77e9f0454a0b8b53a
+          path: build/pinned-saltsutils-capture-atomic-candidate
+          persist-credentials: false
+      - name: Verify native Capture adapter original immutable source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C build/pinned-capture-speech-source rev-parse HEAD)" = '9e51d377bd84ee91ce5a47c94f24f73e4e01bba7'
+          test -f build/pinned-capture-speech-source/speech_input/capture/src/turbo_agent_speech_capture_salts.c
+          test -f build/pinned-capture-speech-source/speech_input/capture/src/turbo_agent_speech_capture_bridge.c
+          test -f build/pinned-capture-speech-source/speech_input/src/turbo_agent_speech_input.c
+          test "$(git -C build/pinned-saltsutils-capture-source describe --tags --exact-match)" = 'v4.3.0-rc.11'
+          test "$(git -C build/pinned-capture-miniaudio describe --tags --exact-match)" = '0.11.22'
+          test -f build/pinned-saltsutils-capture-source/capture/src/capture_audio_miniaudio.c
+          test -f build/pinned-saltsutils-capture-source/capture/src/capture_linux.c
+          test -f build/pinned-saltsutils-capture-source/capture/src/capture_video_linux.c
+          test -f build/pinned-saltsutils-capture-source/capture/src/capture_screen_linux.c
+          test "$(git -C build/pinned-saltsutils-capture-atomic-candidate rev-parse HEAD)" = '4e1c77f8f9992c666c9ac0a77e9f0454a0b8b53a'
+          test -f build/pinned-saltsutils-capture-atomic-candidate/capture/src/capture_audio_miniaudio.c
+          grep -Fq 'callback_admitted' build/pinned-saltsutils-capture-atomic-candidate/capture/src/capture_audio_miniaudio.c
+          ! grep -F 'ctx->capture->state != SALTS_CAPTURE_STATE_RUNNING' build/pinned-saltsutils-capture-atomic-candidate/capture/src/capture_audio_miniaudio.c
+          test -f build/pinned-capture-miniaudio/miniaudio.h
+
+      - name: Restore original SHA-pinned published Salts and SaltsUtils SDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/m42-virtual-pinned"
+          curl --fail --location --silent --show-error --retry 3 \
+            --connect-timeout 25 --max-time 240 \
+            --proto '=https' --proto-redir '=https' \
+            https://github.com/qigao/salts-utils/releases/download/v4.3.0-rc.11/SaltsUtils.Native.4.3.0-rc.11.nupkg \
+            --output "$RUNNER_TEMP/m42-virtual-pinned/SaltsUtils.Native.4.3.0-rc.11.nupkg"
+          curl --fail --location --silent --show-error --retry 3 \
+            --connect-timeout 25 --max-time 240 \
+            --proto '=https' --proto-redir '=https' \
+            https://github.com/qigao/salts/releases/download/v2.3.0-rc.16/Salts.Native.2.3.0-rc.16.nupkg \
+            --output "$RUNNER_TEMP/m42-virtual-pinned/Salts.Native.2.3.0-rc.16.nupkg"
+          python3 speech_output/playback/ci/verify_published_playback.py \
+            --package-dir "$RUNNER_TEMP/m42-virtual-pinned"
+          mkdir -p "$RUNNER_TEMP/m42-virtual-salts" "$RUNNER_TEMP/m42-virtual-utils"
+          unzip -q "$RUNNER_TEMP/m42-virtual-pinned/Salts.Native.2.3.0-rc.16.nupkg" \
+            -d "$RUNNER_TEMP/m42-virtual-salts"
+          unzip -q "$RUNNER_TEMP/m42-virtual-pinned/SaltsUtils.Native.4.3.0-rc.11.nupkg" \
+            -d "$RUNNER_TEMP/m42-virtual-utils"
+          echo "SALTS_ROOT=$RUNNER_TEMP/m42-virtual-salts/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/m42-virtual-utils/sdk/linux-x64" >> "$GITHUB_ENV"
+          test -f "$RUNNER_TEMP/m42-virtual-utils/sdk/linux-x64/lib/libsalts_capture.so"
+      - name: Install Linux audio runtime and isolated PulseAudio virtual-only server utilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pulseaudio pulseaudio-utils libpulse0 libpipewire-0.3-dev libx11-dev libxext-dev pkg-config
+          command -v pulseaudio
+          command -v pactl
+          command -v pacat
+      - name: Compile FULL original Capture/miniaudio Linux source and M1/M2 with TSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S speech_output/voice_coordinator/tests/capture_source_tsan \
+            -B build/m42-capture-source-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            "-DCMAKE_C_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g -O1" \
+            "-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g -O1" \
+            -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
+            -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread \
+            "-DM42_CAPTURE_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-saltsutils-capture-source" \
+            "-DM42_CAPTURE_AUDIO_PATCH_SOURCE=$GITHUB_WORKSPACE/build/pinned-saltsutils-capture-atomic-candidate/capture/src/capture_audio_miniaudio.c" \
+            "-DM42_MINIAUDIO_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-capture-miniaudio" \
+            "-DM42_M2_SOURCE_ROOT=$GITHUB_WORKSPACE/build/pinned-capture-speech-source" \
+            "-DM42_CURRENT_SOURCE=$GITHUB_WORKSPACE"
+          cmake --build build/m42-capture-source-tsan \
+            --target test_m42_original_capture_source_tsan --parallel 2
+          lib=build/m42-capture-source-tsan/libsalts_capture.so
+          test -f "$lib"
+          nm -D "$lib" | grep -F '__tsan_init'
+          nm -D --defined-only "$lib" | grep -F ' T salts_capture_start'
+          test -x build/m42-capture-source-tsan/test_m42_original_capture_source_tsan
+      - name: Source-instrumented Salts Capture native callback blocked stop/join and M1/M2 6x
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/build/m42-capture-source-tsan:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          bash speech_output/voice_coordinator/tests/capture_source_tsan/run_isolated_capture_source_tsan.sh \
+            build/m42-capture-source-tsan
+      - name: Verify no physical audio/device and unchanged immutable input sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C build/pinned-capture-speech-source rev-parse HEAD)" = '9e51d377bd84ee91ce5a47c94f24f73e4e01bba7'
+          test -z "$(git -C build/pinned-capture-speech-source diff --name-only)"
+          ! grep -E 'ma_device_init|fallback_audio_device|cloud_asr' \
+            speech_output/voice_coordinator/tests/virtual_capture/test_virtual_pulse_native_capture.c
+          test -f build/m42-capture-source-tsan/test_m42_original_capture_source_tsan
+          test -z "$(git -C build/pinned-saltsutils-capture-source diff --name-only)"
+          test -z "$(git -C build/pinned-saltsutils-capture-atomic-candidate diff --name-only)"
+          echo 'PASS original rc.11 Capture modules plus exact Draft #653 atomic audio candidate, no source modifications'

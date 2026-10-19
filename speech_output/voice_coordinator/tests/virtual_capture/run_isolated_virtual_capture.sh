@@ -64,7 +64,7 @@ feed_pid="$!"
 sleep 1
 
 ctest --test-dir "$build_dir" \
-  -R '^m42_published_pulse_virtual_capture_start_stop_join$' \
+  -R '^m42_published_pulse_virtual_(capture_start_stop_join|capture_playback_duplex)$' \
   --repeat until-fail:20 --verbose --output-on-failure --timeout 35 |
   tee "$isolated/native-pulse-acceptance.log"
 
@@ -73,7 +73,10 @@ for marker in \
     'PASS actual Capture stop blocks on held native callback, then joins before destroy' \
     'PASS original M1/M2 native Capture Salts adapter:' \
     'PASS native published Capture cancellation stop/join' \
-    'PASS released Capture DSO + ORIGINAL M2 Salts adapter on isolated PulseAudio'; do
+    'PASS released Capture DSO + ORIGINAL M2 Salts adapter on isolated PulseAudio' \
+    'PASS original M1/M2 virtual Capture callback -> checked FINAL -> M4.2 on RELEASED Salts Playback DSO drain' \
+    'PASS RELEASED Salts Playback DSO active native callback clear/restart on M4.2 interrupt' \
+    'PASS fully published Salts Capture+Playback DSOs on isolated virtual PulseAudio only'; do
   actual="$(grep -Fc "$marker" "$isolated/native-pulse-acceptance.log" || true)"
   if [[ "$actual" != 20 ]]; then
     echo "missing real virtual Capture lifecycle evidence: $marker ($actual/20)" >&2
@@ -97,3 +100,23 @@ if grep -F 'not found' "$isolated/capture-elf-closure.txt"; then
   exit 1
 fi
 echo "PASS actual released Capture DSO plus original M1/M2 native adapter dynamic linkage"
+
+duplex="$build_dir/test_m42_published_pulse_native_duplex"
+test -x "$duplex"
+readelf -d "$duplex" | grep -F 'libsalts_capture.so'
+readelf -d "$duplex" | grep -F 'libsalts_playback.so'
+nm -D "$duplex" | grep -F ' U salts_capture_start'
+nm -D "$duplex" | grep -F ' U salts_playback_create'
+nm -D "$duplex" | grep -F ' U salts_playback_start'
+nm -D "$duplex" | grep -F ' U salts_playback_drain'
+nm -D "$duplex" | grep -F ' U salts_playback_clear'
+nm --defined-only "$duplex" | grep -F ' T turbo_agent_speech_salts_capture_create'
+nm --defined-only "$duplex" | grep -F ' T turbo_agent_speech_offer_frame'
+nm --defined-only "$duplex" | grep -F ' T turbo_voice_approved_final'
+ldd "$duplex" | tee "$isolated/duplex-elf-closure.txt"
+if grep -F 'not found' "$isolated/duplex-elf-closure.txt"; then
+  echo "published Capture/Playback duplex DSO dependency unresolved" >&2
+  exit 1
+fi
+echo "PASS genuine published Salts Capture+Playback BOTH imported; original M1/M2 and current M4 code defined"
+

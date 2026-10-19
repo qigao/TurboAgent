@@ -164,6 +164,7 @@ CXX_C_API turbo_agent_t *turbo_agent_create(const turbo_agent_config_t *config) 
     return NULL;
   }
 
+  atomic_init(&agent->tool_policy_generation, UINT64_C(1));
   agent->tool_policy = turbo_agent_policy_default();
 
   provider = turbo_agent_resolve_provider(config->provider, config->api_mode, &agent->api_mode);
@@ -201,7 +202,45 @@ CXX_C_API int turbo_agent_set_tool_policy(turbo_agent_t *agent,
   agent->tool_policy_workspace_root = workspace_root;
   replacement.workspace_root = workspace_root;
   agent->tool_policy = replacement;
+  atomic_fetch_add_explicit(&agent->tool_policy_generation, UINT64_C(1),
+                            memory_order_release);
   return 0;
+}
+
+CXX_C_API int turbo_agent_tool_authority_snapshot_get(
+    const turbo_agent_t *agent, turbo_agent_tool_authority_snapshot_t *out_snapshot) {
+  uint32_t mask = 0;
+  if (!agent || !out_snapshot) return -1;
+  if (agent->tool_policy.allow_custom_tools)
+    mask |= TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(TURBO_AGENT_POLICY_CAPABILITY_CUSTOM_TOOLS);
+  if (agent->tool_policy.allow_runtime_tools)
+    mask |= TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(TURBO_AGENT_POLICY_CAPABILITY_RUNTIME_TOOLS);
+  if (agent->tool_policy.allow_delegate)
+    mask |= TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(TURBO_AGENT_POLICY_CAPABILITY_DELEGATE);
+  if (agent->tool_policy.allow_network)
+    mask |= TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(TURBO_AGENT_POLICY_CAPABILITY_NETWORK);
+  if (agent->tool_policy.allow_shell)
+    mask |= TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(TURBO_AGENT_POLICY_CAPABILITY_SHELL);
+  if (agent->tool_policy.allow_patch)
+    mask |= TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(TURBO_AGENT_POLICY_CAPABILITY_PATCH);
+  if (agent->tool_policy.allow_outside_workspace)
+    mask |= TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(TURBO_AGENT_POLICY_CAPABILITY_OUTSIDE_WORKSPACE);
+  memset(out_snapshot, 0, sizeof(*out_snapshot));
+  out_snapshot->struct_size = (uint32_t)sizeof(*out_snapshot);
+  out_snapshot->abi_version = TURBO_AGENT_TOOL_AUTHORITY_SNAPSHOT_ABI_VERSION;
+  out_snapshot->generation = atomic_load_explicit(&agent->tool_policy_generation,
+                                                  memory_order_acquire);
+  out_snapshot->capability_mask = mask;
+  return 0;
+}
+
+CXX_C_API int turbo_agent_tool_authority_snapshot_is_current(
+    const turbo_agent_t *agent, const turbo_agent_tool_authority_snapshot_t *snapshot) {
+  if (!agent || !snapshot || snapshot->struct_size < sizeof(*snapshot) ||
+      snapshot->abi_version != TURBO_AGENT_TOOL_AUTHORITY_SNAPSHOT_ABI_VERSION ||
+      snapshot->generation == 0) return -1;
+  return atomic_load_explicit(&agent->tool_policy_generation, memory_order_acquire) ==
+         snapshot->generation ? 1 : 0;
 }
 
 CXX_C_API const turbo_tool_registry_t *turbo_agent_tool_registry(const turbo_agent_t *agent) {

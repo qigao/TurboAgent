@@ -122,6 +122,7 @@ static turbo_agent_harness_t *make_compiled_harness(
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t config;
+  session_config.thread_id = "compiled-inspect-test-thread";
   session_config.runtime_store = turbo_agent_runtime_store_memory_create();
   session_config.agent_config.model = "gpt-5.4";
   session_config.agent_config.transport_fn = compiled_harness_transport;

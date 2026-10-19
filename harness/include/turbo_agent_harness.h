@@ -99,8 +99,10 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
  * graph nodes force a checkpoint carrying phase `started` to be persisted before
  * the tool callback node can run. If that checkpoint cannot be persisted, the
  * callback is not entered. Callback/result-contract failures are never retried;
- * a started execution without a committed result is interpreted conservatively
- * as outcome-unknown on recovery.
+ * the returned failed Run is marked `outcome_unknown` when a callback started,
+ * while the persisted pre-callback checkpoint remains `started`. This slice does
+ * not expose compiled-plan resume; future recovery must reject/reconcile a started
+ * checkpoint without a committed Run result rather than blindly invoking again.
  *
  * On successful execution, out_result and out_certificate are caller-owned JSON
  * values. After compile admission the certificate is still returned on callback

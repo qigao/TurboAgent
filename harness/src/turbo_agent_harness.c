@@ -924,8 +924,17 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     goto done;
   }
 
+  fprintf(stderr,
+          "[compiled-inspect] before session_start_graph failure_rc=%d\\n",
+          compiled_run.failure_rc);
   rc = turbo_agent_session_start_graph(
       session, graph, initial_state, NULL, NULL, NULL, &summary, &result_state);
+  fprintf(stderr,
+          "[compiled-inspect] after session_start_graph rc=%d failure_rc=%d "
+          "callback_started=%d journal_started=%d committed=%d message=%s\\n",
+          rc, compiled_run.failure_rc, compiled_run.callback_started,
+          compiled_run.journal_started, compiled_run.committed,
+          compiled_run.failure_message);
   if (rc != SALTS_OK) {
     if (compiled_run.failure_rc != SALTS_OK) rc = compiled_run.failure_rc;
     goto done;

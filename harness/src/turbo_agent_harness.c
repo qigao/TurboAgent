@@ -782,7 +782,8 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   rc = SALTS_OK;
 
 done:
-  if (out_tool_status && plan && compiled_run.tool_status != TURBO_TOOL_INVALID_ARGUMENT)
+  if (out_tool_status && compiled_run.plan &&
+      compiled_run.tool_status != TURBO_TOOL_INVALID_ARGUMENT)
     *out_tool_status = compiled_run.tool_status;
   turbo_runtime_json_destroy(compiled_run.result);
   turbo_runtime_json_destroy(result_state);

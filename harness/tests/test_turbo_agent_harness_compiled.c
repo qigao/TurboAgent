@@ -123,6 +123,7 @@ static int run_compiled_inspect(turbo_agent_harness_t *harness,
 spec("Harness Phase-1 compiled Inspect boundary") {
   it("compiles a DataBind source, freezes authority and verifies the result") {
     const char *allowed[] = {"runtime_tools"};
+    const char *alias_allowed[] = {"wasm"};
     compiled_inspect_probe_t probe = {0};
     cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
     cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
@@ -164,6 +165,16 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_not_null(certificate);
     check_equal(probe.calls, 1);
 
+    json_free(result);
+    json_free(certificate);
+    result = NULL;
+    certificate = NULL;
+    check_equal(run_compiled_inspect(harness, compiled_inspect_source,
+        alias_allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
+    check_equal(diagnostic.status, TURBO_AGENT_COMPILE_OK);
+    check_equal(tool_status, TURBO_TOOL_OK);
+    check_true(json_get_bool(result, "ok", false));
+    check_equal(probe.calls, 2);
     json_free(result);
     json_free(certificate);
     turbo_agent_harness_release(harness);

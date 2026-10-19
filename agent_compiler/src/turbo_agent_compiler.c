@@ -467,13 +467,20 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   }
 
   /*
-   * Inspect is read-only by contract. Phase 1 deliberately uses the existing
-   * RuntimeTools idempotency fact rather than inventing a second effect system.
+   * Inspect requires both the independent READ_ONLY idempotency policy and
+   * explicit canonical effect metadata. Legacy registrations normalize to
+   * UNKNOWN and therefore fail closed; capabilities remain a separate gate.
    */
-  if ((template_descriptor->properties & TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY) != 0u &&
-      policy.idempotency != TURBO_TOOL_IDEMPOTENCY_READ_ONLY) {
-    return compile_fail(diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
-                        "read-only template requires a READ_ONLY tool");
+  if ((template_descriptor->properties & TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY) != 0u) {
+    turbo_tool_effect_flags_t effects = TURBO_TOOL_EFFECT_UNKNOWN;
+    if (policy.idempotency != TURBO_TOOL_IDEMPOTENCY_READ_ONLY ||
+        turbo_tool_registry_get_effects(
+            source_registry, canonical_tool_name, &effects) != TURBO_TOOL_OK ||
+        (effects != TURBO_TOOL_EFFECT_PURE &&
+         effects != TURBO_TOOL_EFFECT_READ)) {
+      return compile_fail(diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
+                          "read-only template requires READ_ONLY policy and explicit PURE or READ effects");
+    }
   }
 
   if (turbo_tool_registry_get_required_capabilities(

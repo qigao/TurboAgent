@@ -1479,7 +1479,7 @@ spec("turbo agent session api") {
     turbo_agent_session_destroy(session);
   }
 
-  it("should report startup diagnostics for invalid tool schemas") {
+  it("should keep ungranted invalid tool schemas out of startup diagnostics") {
     turbo_agent_session_config_t config = {0};
     turbo_agent_session_t *session;
     turbo_agent_config_t agent_config = {0};
@@ -1515,12 +1515,12 @@ spec("turbo agent session api") {
     check_equal(turbo_agent_session_get_startup_diagnostics(session, &diagnostics), 0);
     check_not_null(diagnostics);
     check_equal(json_get_int(diagnostics, "schema_version", -1), 1);
-    check_false(json_get_bool(diagnostics, "ok", true));
+    check_true(json_get_bool(diagnostics, "ok", false));
     errors = json_object_get(diagnostics, "errors");
-    check_equal(json_array_size(errors), 1);
-    check_equal(json_string(json_array_get(errors, 0)),
-                 "invalid_tool_schemas");
-    check_true(json_is_null(json_object_get(diagnostics, "tool_schemas")));
+    check_equal(json_array_size(errors), 0);
+    check_not_null(json_object_get(diagnostics, "tool_schemas"));
+    check_equal(json_array_size(json_object_get(
+                      json_object_get(diagnostics, "tool_schemas"), "registry")), 0);
     capabilities = json_object_get(diagnostics, "capabilities");
     check_not_null(capabilities);
     check_equal(json_get_int(capabilities, "tool_count", -1), 2);

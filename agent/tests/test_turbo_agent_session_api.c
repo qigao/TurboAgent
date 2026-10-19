@@ -1484,7 +1484,6 @@ spec("turbo agent session api") {
     turbo_agent_session_config_t config = {0};
     turbo_agent_session_t *session;
     turbo_agent_config_t agent_config = {0};
-    turbo_agent_policy_t policy = turbo_agent_policy_default();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t dotted = {0};
     turbo_tool_definition_t slashed = {0};
@@ -1536,6 +1535,7 @@ spec("turbo agent session api") {
     turbo_agent_session_config_t config = {0};
     turbo_agent_session_t *session;
     turbo_agent_config_t agent_config = {0};
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t dotted = {0};
     turbo_tool_definition_t slashed = {0};

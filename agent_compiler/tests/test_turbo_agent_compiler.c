@@ -2,6 +2,7 @@
 
 #include "turbo_agent_compiler.h"
 #include "turbo_runtime_json.h"
+#include "turbo_tool.h"
 
 #include <string.h>
 
@@ -46,19 +47,19 @@ static turbo_tool_registry_t *make_registry(compiler_probe_t *read_probe,
   const char *read_caps[] = {"runtime_tools"};
   const char *network_caps[] = {"runtime_tools", "network"};
   const char *unknown_caps[] = {"mystery_capability"};
-  turbo_tool_definition_v4_t read = {0};
-  turbo_tool_definition_v4_t mutate = {0};
-  turbo_tool_definition_v4_t network = {0};
-  turbo_tool_definition_v4_t compatible = {0};
-  turbo_tool_definition_v4_t typed = {0};
-  turbo_tool_definition_v4_t unsupported_schema = {0};
-  turbo_tool_definition_v4_t unknown = {0};
+  turbo_tool_definition_v6_t read = {0};
+  turbo_tool_definition_v6_t mutate = {0};
+  turbo_tool_definition_v6_t network = {0};
+  turbo_tool_definition_v6_t compatible = {0};
+  turbo_tool_definition_v6_t typed = {0};
+  turbo_tool_definition_v6_t unsupported_schema = {0};
+  turbo_tool_definition_v6_t unknown = {0};
   turbo_tool_definition_v4_t legacy = {0};
 
   if (!registry) return NULL;
 
   read.struct_size = sizeof(read);
-  read.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+  read.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
   read.definition.name = "repo.inspect";
   read.definition.description = "Read-only repository inspection.";
   read.definition.parameters_json =
@@ -70,6 +71,8 @@ static turbo_tool_registry_t *make_registry(compiler_probe_t *read_probe,
   read.required_capabilities = read_caps;
   read.required_capability_count = 1;
   read.json_value_context_handler = probe_json_handler;
+  read.result_schema_json = "{\"type\":\"object\"}";
+  read.effect_flags = TURBO_TOOL_EFFECT_PURE;
 
   mutate = read;
   mutate.definition.name = "repo.patch";
@@ -77,11 +80,13 @@ static turbo_tool_registry_t *make_registry(compiler_probe_t *read_probe,
   mutate.definition.user_data = mutation_probe;
   mutate.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
   mutate.json_value_context_handler = mutating_json_handler;
+  mutate.effect_flags = TURBO_TOOL_EFFECT_WRITE;
 
   network = read;
   network.definition.name = "repo.inspect_network";
   network.required_capabilities = network_caps;
   network.required_capability_count = 2;
+  network.effect_flags = TURBO_TOOL_EFFECT_READ;
 
   compatible = read;
   compatible.definition.name = "repo.inspect.meta";
@@ -104,18 +109,22 @@ static turbo_tool_registry_t *make_registry(compiler_probe_t *read_probe,
   unknown.required_capabilities = unknown_caps;
   unknown.required_capability_count = 1;
 
-  legacy = read;
+  legacy.struct_size = sizeof(legacy);
+  legacy.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+  legacy.definition = read.definition;
   legacy.definition.name = "repo.inspect_legacy";
+  legacy.execution_policy = read.execution_policy;
+  legacy.json_value_context_handler = probe_json_handler;
   legacy.required_capabilities = NULL;
   legacy.required_capability_count = 0;
 
-  if (turbo_tool_registry_add_v4(registry, &read) != TURBO_TOOL_OK ||
-      turbo_tool_registry_add_v4(registry, &mutate) != TURBO_TOOL_OK ||
-      turbo_tool_registry_add_v4(registry, &network) != TURBO_TOOL_OK ||
-      turbo_tool_registry_add_v4(registry, &compatible) != TURBO_TOOL_OK ||
-      turbo_tool_registry_add_v4(registry, &typed) != TURBO_TOOL_OK ||
-      turbo_tool_registry_add_v4(registry, &unsupported_schema) != TURBO_TOOL_OK ||
-      turbo_tool_registry_add_v4(registry, &unknown) != TURBO_TOOL_OK ||
+  if (turbo_tool_registry_add_v6(registry, &read) != TURBO_TOOL_OK ||
+      turbo_tool_registry_add_v6(registry, &mutate) != TURBO_TOOL_OK ||
+      turbo_tool_registry_add_v6(registry, &network) != TURBO_TOOL_OK ||
+      turbo_tool_registry_add_v6(registry, &compatible) != TURBO_TOOL_OK ||
+      turbo_tool_registry_add_v6(registry, &typed) != TURBO_TOOL_OK ||
+      turbo_tool_registry_add_v6(registry, &unsupported_schema) != TURBO_TOOL_OK ||
+      turbo_tool_registry_add_v6(registry, &unknown) != TURBO_TOOL_OK ||
       turbo_tool_registry_add_v4(registry, &legacy) != TURBO_TOOL_OK) {
     turbo_tool_registry_destroy(registry);
     return NULL;
@@ -465,7 +474,7 @@ spec("agent compiler Phase 1 boundary") {
     init_source(&source, "inspect", "repo.inspect_legacy", arguments);
 
     check_equal(turbo_agent_compile_plan(&config, registry, &source, &plan, NULL),
-                TURBO_AGENT_COMPILE_CAPABILITY_DENIED);
+                TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION);
     check_null(plan);
     check_equal(read_probe.calls, 0);
 
@@ -492,6 +501,73 @@ spec("agent compiler Phase 1 boundary") {
                 TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION);
     check_null(plan);
     check_equal(mutation_probe.calls, 0);
+
+    turbo_runtime_json_destroy(arguments);
+    turbo_tool_registry_destroy(registry);
+  }
+
+  it("requires explicit PURE or READ effects for Inspect before any callback") {
+    static const struct {
+      const char *name;
+      turbo_tool_effect_flags_t effects;
+      int accepted;
+    } cases[] = {
+        {"inspect_effect_pure", TURBO_TOOL_EFFECT_PURE, 1},
+        {"inspect_effect_read", TURBO_TOOL_EFFECT_READ, 1},
+        {"inspect_effect_unknown", 0, 0},
+        {"inspect_effect_write", TURBO_TOOL_EFFECT_WRITE, 0},
+        {"inspect_effect_process", TURBO_TOOL_EFFECT_PROCESS, 0},
+        {"inspect_effect_network", TURBO_TOOL_EFFECT_NETWORK, 0},
+        {"inspect_effect_external_mutation", TURBO_TOOL_EFFECT_EXTERNAL_MUTATION, 0},
+    };
+    compiler_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_compiler_config_t config;
+    turbo_agent_typed_plan_t source;
+    json_value_t *arguments = json_create_object();
+    const char *caps[] = {"runtime_tools"};
+    size_t i;
+
+    check_not_null(registry);
+    check_not_null(arguments);
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = caps;
+    config.allowed_capability_count = 1;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+      turbo_tool_definition_v6_t definition = {0};
+      turbo_agent_executable_plan_t *plan = NULL;
+      turbo_agent_compile_status_t status;
+      definition.struct_size = sizeof(definition);
+      definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+      definition.definition.name = cases[i].name;
+      definition.definition.description = "Inspect effect admission probe.";
+      definition.definition.parameters_json =
+          "{\"type\":\"object\",\"additionalProperties\":true}";
+      definition.definition.strict = 1;
+      definition.definition.user_data = &probe;
+      definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
+      definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+      definition.required_capabilities = caps;
+      definition.required_capability_count = 1;
+      definition.json_value_context_handler = probe_json_handler;
+      definition.result_schema_json = "{\"type\":\"object\"}";
+      definition.effect_flags = cases[i].effects;
+      check_equal(turbo_tool_registry_add_v6(registry, &definition),
+                  TURBO_TOOL_OK);
+
+      init_source(&source, "inspect-effect", cases[i].name, arguments);
+      status = turbo_agent_compile_plan(&config, registry, &source, &plan, NULL);
+      if (cases[i].accepted) {
+        check_equal(status, TURBO_AGENT_COMPILE_OK);
+        check_not_null(plan);
+        turbo_agent_executable_plan_destroy(plan);
+      } else {
+        check_equal(status, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION);
+        check_null(plan);
+      }
+      check_equal(probe.calls, 0);
+    }
 
     turbo_runtime_json_destroy(arguments);
     turbo_tool_registry_destroy(registry);

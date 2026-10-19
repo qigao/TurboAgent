@@ -140,6 +140,14 @@ add_subdirectory(runtime)
 add_subdirectory(provider)
 add_subdirectory(agent)
 add_subdirectory(harness)
+
+# M4 is an output-only, independent C11 TTS Provider. It never builds,
+# downloads or selects a real model or Playback device by default.
+option(ENABLE_SPEECH_OUTPUT
+  "Build opt-in C11 SpeechOutput Provider contract (no TTS model)" OFF)
+if(ENABLE_SPEECH_OUTPUT)
+  add_subdirectory(speech_output)
+endif()
 add_subdirectory(cli)
 if(ENABLE_WASM_TOOLS)
   add_subdirectory(llm_sandbox)

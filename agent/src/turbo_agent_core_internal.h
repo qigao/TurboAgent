@@ -2,6 +2,8 @@
 #define TURBO_AGENT_CORE_INTERNAL_H
 
 #include <stddef.h>
+#include <stdatomic.h>
+#include <stdint.h>
 
 #include "turbo_agent.h"
 #include "turbo_agent_policy.h"
@@ -39,6 +41,7 @@ struct turbo_agent_s {
   turbo_tool_registry_t *tool_registry;
   turbo_agent_tool_executor_t *tool_executor;
   turbo_agent_policy_t tool_policy;
+  atomic_uint_fast64_t tool_policy_generation;
   char *tool_policy_workspace_root;
   turbo_agent_transport_fn transport_fn;
   void *transport_user_data;

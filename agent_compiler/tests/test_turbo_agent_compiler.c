@@ -510,17 +510,26 @@ spec("agent compiler Phase 1 boundary") {
     static const struct {
       const char *name;
       turbo_tool_effect_flags_t effects;
-      int accepted;
+      int declares_network;
+      int allows_network;
+      turbo_agent_compile_status_t expected_status;
     } cases[] = {
-        {"inspect_effect_pure", TURBO_TOOL_EFFECT_PURE, 1},
-        {"inspect_effect_read", TURBO_TOOL_EFFECT_READ, 1},
-        {"inspect_effect_unknown", 0, 0},
-        {"inspect_effect_write", TURBO_TOOL_EFFECT_WRITE, 0},
-        {"inspect_effect_process", TURBO_TOOL_EFFECT_PROCESS, 0},
-        {"inspect_effect_network", TURBO_TOOL_EFFECT_NETWORK, 0},
-        {"inspect_effect_read_network",
-         TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK, 0},
-        {"inspect_effect_external_mutation", TURBO_TOOL_EFFECT_EXTERNAL_MUTATION, 0},
+        {"inspect_effect_pure", TURBO_TOOL_EFFECT_PURE, 0, 0, TURBO_AGENT_COMPILE_OK},
+        {"inspect_effect_read", TURBO_TOOL_EFFECT_READ, 0, 0, TURBO_AGENT_COMPILE_OK},
+        {"inspect_effect_unknown", 0, 0, 0, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION},
+        {"inspect_effect_write", TURBO_TOOL_EFFECT_WRITE, 0, 0, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION},
+        {"inspect_effect_process", TURBO_TOOL_EFFECT_PROCESS, 0, 0, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION},
+        {"inspect_effect_network", TURBO_TOOL_EFFECT_NETWORK, 1, 1, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION},
+        {"inspect_effect_read_network", TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK,
+         1, 1, TURBO_AGENT_COMPILE_OK},
+        {"inspect_effect_read_network_undeclared",
+         TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK, 0, 1,
+         TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION},
+        {"inspect_effect_read_network_denied",
+         TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK, 1, 0,
+         TURBO_AGENT_COMPILE_CAPABILITY_DENIED},
+        {"inspect_effect_external_mutation", TURBO_TOOL_EFFECT_EXTERNAL_MUTATION, 0, 0,
+         TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION},
     };
     compiler_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
@@ -528,6 +537,7 @@ spec("agent compiler Phase 1 boundary") {
     turbo_agent_typed_plan_t source;
     json_value_t *arguments = json_create_object();
     const char *caps[] = {"runtime_tools"};
+    const char *network_caps[] = {"runtime_tools", "network"};
     size_t i;
 
     check_not_null(registry);
@@ -550,22 +560,26 @@ spec("agent compiler Phase 1 boundary") {
       definition.definition.user_data = &probe;
       definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
       definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
-      definition.required_capabilities = caps;
-      definition.required_capability_count = 1;
+      definition.required_capabilities =
+          cases[i].declares_network ? network_caps : caps;
+      definition.required_capability_count =
+          cases[i].declares_network ? 2u : 1u;
       definition.json_value_context_handler = probe_json_handler;
       definition.result_schema_json = "{\"type\":\"object\"}";
       definition.effect_flags = cases[i].effects;
       check_equal(turbo_tool_registry_add_v6(registry, &definition),
                   TURBO_TOOL_OK);
 
+      config.allowed_capabilities =
+          cases[i].allows_network ? network_caps : caps;
+      config.allowed_capability_count = cases[i].allows_network ? 2u : 1u;
       init_source(&source, "inspect-effect", cases[i].name, arguments);
       status = turbo_agent_compile_plan(&config, registry, &source, &plan, NULL);
-      if (cases[i].accepted) {
-        check_equal(status, TURBO_AGENT_COMPILE_OK);
+      check_equal(status, cases[i].expected_status);
+      if (cases[i].expected_status == TURBO_AGENT_COMPILE_OK) {
         check_not_null(plan);
         turbo_agent_executable_plan_destroy(plan);
       } else {
-        check_equal(status, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION);
         check_null(plan);
       }
       check_equal(probe.calls, 0);

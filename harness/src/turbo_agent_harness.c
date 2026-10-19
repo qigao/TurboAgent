@@ -300,6 +300,7 @@ static int turbo_agent_harness_compiler_authority_configure(
   if (!allowed) return SALTS_ENOMEM;
   for (i = 0; i < requested->allowed_capability_count; ++i) {
     turbo_agent_policy_capability_t capability;
+    const char *canonical_name;
     size_t prior;
     const char *name = requested->allowed_capabilities[i];
     if (!name || !name[0]) {
@@ -309,10 +310,12 @@ static int turbo_agent_harness_compiler_authority_configure(
     if (turbo_agent_policy_capability_from_name(name, &capability) != 0 ||
         !(authority->capability_mask &
           TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(capability))) continue;
+    canonical_name = turbo_agent_policy_capability_name(capability);
+    if (!canonical_name) continue;
     for (prior = 0; prior < count; ++prior) {
-      if (strcmp(allowed[prior], name) == 0) break;
+      if (strcmp(allowed[prior], canonical_name) == 0) break;
     }
-    if (prior == count) allowed[count++] = name;
+    if (prior == count) allowed[count++] = canonical_name;
   }
   *effective = *requested;
   effective->allowed_capabilities = allowed;

@@ -457,7 +457,9 @@ spec("Harness Phase-1 compiled Inspect boundary") {
         allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
     check_equal(probe.calls, 0);
     check_null(result);
-    check_null(certificate);
+    /* Compilation succeeded, so the API intentionally still returns its certificate
+     * on execution failure; only the tool result must remain withheld. */
+    check_not_null(certificate);
 
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);

@@ -3,6 +3,7 @@
 #include "turbo_agent_graph.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_agent_session.h"
+#include "turbo_agent_policy.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_workflow.h"
 #include "turbo_model_provider.h"
@@ -1483,6 +1484,7 @@ spec("turbo agent session api") {
     turbo_agent_session_config_t config = {0};
     turbo_agent_session_t *session;
     turbo_agent_config_t agent_config = {0};
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t dotted = {0};
     turbo_tool_definition_t slashed = {0};
@@ -1564,12 +1566,19 @@ spec("turbo agent session api") {
     session = turbo_agent_session_create(&config);
     check_not_null(session);
 
+    /*
+     * This regression targets provider-format validation for tools the Host
+     * has selected. Default-deny must be tested separately: without this
+     * explicit grant, both fixtures are correctly hidden from schema checks.
+     */
+    policy.allow_custom_tools = 1;
+    check_equal(turbo_agent_set_tool_policy(turbo_agent_session_agent(session), &policy), 0);
     check_equal(turbo_agent_session_get_startup_diagnostics(session, &diagnostics), 0);
     check_not_null(diagnostics);
     check_true(json_get_bool(diagnostics, "ok", false));
     errors = json_object_get(diagnostics, "errors");
     check_equal(json_array_size(errors), 0);
-    check_true(json_is_null(json_object_get(diagnostics, "tool_schemas")));
+    check_not_null(json_object_get(diagnostics, "tool_schemas"));
     status = json_object_get(diagnostics, "tool_schema_status");
     check_equal(json_get_string(status, "selected_format"), "anthropic");
     compatible_status = json_object_get(status, "openai_compatible_chat");

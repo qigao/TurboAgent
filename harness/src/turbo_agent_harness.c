@@ -462,7 +462,8 @@ static int turbo_agent_compiled_inspect_execute_node(
   int cancel_status;
   if (!ctx || !ctx->json_value_state || !run) return -1;
   record = turbo_agent_compiled_execution_record_state(ctx->json_value_state);
-  if (!record || !json_string_equal(json_object_get(record, "phase"), "started")) {
+  if (!record || !json_get_string(json_object_get(record, "phase")) ||
+      strcmp(json_get_string(json_object_get(record, "phase")), "started") != 0) {
     turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_SOURCE_INVALID,
         TURBO_TOOL_ERROR, SALTS_EPROTO, "compiled execution did not reach its persisted started checkpoint");
     return -1;
@@ -593,6 +594,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   const turbo_tool_registry_t *approved;
   turbo_agent_session_t *session = NULL;
   turbo_agent_t *agent = NULL;
+  turbo_agent_runtime_t *runtime = NULL;
   turbo_agent_tool_authority_snapshot_t authority = {0};
   turbo_agent_compiler_config_t effective_config;
   const char **effective_capabilities = NULL;
@@ -600,12 +602,18 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   const char *result_schema_json = NULL;
   const json_value_t *result_schema = NULL;
   turbo_tool_effect_flags_t effects = TURBO_TOOL_EFFECT_UNKNOWN;
-  turbo_tool_status_t tool_status;
   turbo_agent_compile_status_t compiled;
-  json_value_t *result = NULL;
+  turbo_agent_compiled_inspect_run_t compiled_run = {0};
+  turbo_graph_t *graph = NULL;
+  json_value_t *initial_state = NULL;
+  json_value_t *summary = NULL;
+  json_value_t *result_state = NULL;
   json_value_t *certificate = NULL;
+  char *execution_id = NULL;
+  char plan_hash[32];
+  const char *thread_id;
   int strict_result = 0;
-  int rc;
+  int rc = SALTS_EIO;
 
   if (out_result) *out_result = NULL;
   if (out_certificate) *out_certificate = NULL;
@@ -628,10 +636,12 @@ int turbo_agent_harness_execute_compiled_inspect_json(
 
   session = turbo_agent_app_session(harness->app);
   agent = turbo_agent_session_agent(session);
-  if (!agent || turbo_agent_tool_authority_snapshot_get(agent, &authority) != 0) {
+  runtime = turbo_agent_session_runtime(session);
+  if (!agent || !runtime ||
+      turbo_agent_tool_authority_snapshot_get(agent, &authority) != 0) {
     rc = turbo_agent_harness_compiled_reject(
         out_diagnostic, TURBO_AGENT_COMPILE_CAPABILITY_DENIED,
-        "Harness has no readable Host Tool Authority snapshot");
+        "Harness has no readable Host Tool Authority or Runtime snapshot");
     goto done;
   }
   rc = turbo_agent_harness_compiler_authority_configure(
@@ -680,47 +690,107 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     rc = SALTS_ENOMEM;
     goto done;
   }
-  *out_certificate = certificate;
-  certificate = NULL;
+  *out_certificate = json_clone(certificate);
+  if (!*out_certificate) {
+    rc = SALTS_ENOMEM;
+    goto done;
+  }
 
   if (context && context->cancel_token) {
     rc = turbo_cancel_token_check(context->cancel_token);
     if (rc != SALTS_OK) {
-      *out_tool_status = rc == SALTS_ETIMEDOUT ?
-          TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
+      *out_tool_status = rc == SALTS_ETIMEDOUT
+          ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
       goto done;
     }
   }
-
   if (turbo_agent_tool_authority_snapshot_is_current(agent, &authority) != 1) {
     *out_tool_status = TURBO_TOOL_ERROR;
     rc = turbo_agent_harness_compiled_reject(
         out_diagnostic, TURBO_AGENT_COMPILE_CAPABILITY_DENIED,
-        "Host Tool Authority changed after admission; stale plan rejected before dispatch");
+        "Host Tool Authority changed after admission; stale plan rejected before Run creation");
     goto done;
   }
-  tool_status = turbo_agent_execute_compiled_plan(plan, context, &result);
-  *out_tool_status = tool_status;
-  if (tool_status != TURBO_TOOL_OK) {
-    rc = SALTS_EIO;
+
+  thread_id = turbo_agent_app_thread_id(harness->app);
+  execution_id = turbo_runtime_record_uuid("compiled");
+  if (!thread_id || !thread_id[0] || !execution_id ||
+      snprintf(plan_hash, sizeof(plan_hash), "%" PRIu64,
+               (uint64_t)turbo_agent_executable_plan_hash(plan)) < 0) {
+    rc = SALTS_ENOMEM;
     goto done;
   }
-  if (!result ||
-      turbo_tool_schema_validate_result_json_value(
-          approved, name, result, NULL, 0) != TURBO_TOOL_SCHEMA_VALID) {
-    *out_tool_status = TURBO_TOOL_ERROR;
-    rc = turbo_agent_harness_compiled_reject(
-        out_diagnostic, TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID,
-        "compiled Inspect returned a result violating its admitted schema");
+  initial_state = turbo_agent_compiled_inspect_initial_state(
+      execution_id, thread_id, name, plan_hash, authority.generation, certificate);
+  if (!initial_state) {
+    rc = SALTS_ENOMEM;
     goto done;
   }
-  *out_result = result;
-  result = NULL;
+
+  compiled_run.agent = agent;
+  compiled_run.runtime = runtime;
+  compiled_run.plan = plan;
+  compiled_run.approved = approved;
+  compiled_run.tool_context = context;
+  compiled_run.authority = authority;
+  compiled_run.certificate = certificate;
+  compiled_run.execution_id = execution_id;
+  compiled_run.thread_id = thread_id;
+  compiled_run.tool_name = name;
+  compiled_run.diagnostic = out_diagnostic;
+  compiled_run.tool_status = TURBO_TOOL_ERROR;
+  compiled_run.failure_rc = SALTS_EIO;
+
+  graph = turbo_graph_create("turbo-agent-compiled-inspect-v1");
+  if (!graph ||
+      turbo_graph_add_json_value_node_ex(
+          graph, "admit", "turbo-agent.compiled-inspect.admit.v1",
+          turbo_agent_compiled_inspect_admit_node, &compiled_run) != TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_add_json_value_node_ex(
+          graph, "start", "turbo-agent.compiled-inspect.start.v1",
+          turbo_agent_compiled_inspect_start_node, &compiled_run) != TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_add_json_value_node_ex(
+          graph, "execute", "turbo-agent.compiled-inspect.execute.v1",
+          turbo_agent_compiled_inspect_execute_node, &compiled_run) != TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_add_json_value_edge(graph, "admit", "start", NULL, NULL) !=
+          TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_add_json_value_edge(graph, "start", "execute", NULL, NULL) !=
+          TURBO_GRAPH_EXEC_OK ||
+      turbo_graph_set_entry(graph, "admit") != TURBO_GRAPH_EXEC_OK) {
+    rc = SALTS_ENOMEM;
+    goto done;
+  }
+
+  rc = turbo_agent_session_start_graph(
+      session, graph, initial_state, NULL, NULL, NULL, &summary, &result_state);
+  if (rc != SALTS_OK) {
+    if (compiled_run.failure_rc != SALTS_OK) rc = compiled_run.failure_rc;
+    goto done;
+  }
+  if (!compiled_run.committed || !compiled_run.result) {
+    rc = compiled_run.failure_rc != SALTS_OK ? compiled_run.failure_rc : SALTS_EIO;
+    if (out_diagnostic && !out_diagnostic->message[0]) {
+      snprintf(out_diagnostic->message, sizeof(out_diagnostic->message), "%s",
+               "compiled Inspect Run did not reach a committed result; no retry was attempted");
+    }
+    goto done;
+  }
+
+  *out_result = compiled_run.result;
+  compiled_run.result = NULL;
+  *out_tool_status = compiled_run.tool_status;
   rc = SALTS_OK;
 
 done:
-  turbo_runtime_json_destroy(result);
+  if (out_tool_status && plan && compiled_run.tool_status != TURBO_TOOL_INVALID_ARGUMENT)
+    *out_tool_status = compiled_run.tool_status;
+  turbo_runtime_json_destroy(compiled_run.result);
+  turbo_runtime_json_destroy(result_state);
+  turbo_runtime_json_destroy(summary);
+  turbo_runtime_json_destroy(initial_state);
   turbo_runtime_json_destroy(certificate);
+  turbo_graph_destroy(graph);
+  free(execution_id);
   turbo_agent_executable_plan_destroy(plan);
   free((void *)effective_capabilities);
   turbo_agent_harness_end_failed_submit(harness);

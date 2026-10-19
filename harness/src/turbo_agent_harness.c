@@ -4,6 +4,7 @@
 
 #include "turbo_agent_session_execution.h"
 #include "turbo_agent_session.h"
+#include "turbo_agent_state.h"
 #include "turbo_agent_policy.h"
 #include "turbo_tool_schema.h"
 #include "turbo_runtime_json.h"
@@ -541,7 +542,7 @@ static json_value_t *turbo_agent_compiled_inspect_initial_state(
     const char *execution_id, const char *thread_id, const char *tool_name,
     const char *plan_hash, uint64_t authority_generation,
     const json_value_t *certificate) {
-  json_value_t *state = json_create_object();
+  json_value_t *state = turbo_agent_state_create();
   json_value_t *record = json_create_object();
   if (!state || !record ||
       turbo_runtime_json_object_set_int64(record, "schema_version",

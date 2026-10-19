@@ -241,7 +241,7 @@ Use the documented command from the exact pinned Piper release; verify that the 
 
 ```sh
 mkdir -p models/sherpa-onnx && cd models/sherpa-onnx
-curl -fL --retry 3 -o kokoro-multi-lang-v1_0.tar.bz2 \\
+curl -fL --retry 3 -o kokoro-multi-lang-v1_0.tar.bz2 \
   https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2
 sha256sum kokoro-multi-lang-v1_0.tar.bz2
 tar -xjf kokoro-multi-lang-v1_0.tar.bz2

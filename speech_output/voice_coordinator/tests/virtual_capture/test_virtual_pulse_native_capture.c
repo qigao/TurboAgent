@@ -167,8 +167,13 @@ static int run_native_callback_and_join(const char *exact_device_id) {
         last_count);
   CHECK(atomic_load_explicit(&obs.malformed, memory_order_acquire) == 0u);
   salts_capture_destroy(capture);
+#ifdef M42_CAPTURE_SOURCE_TSAN
+  printf("PASS original source-TSan Salts Capture callback start/stop/join: native_callbacks=%u no late callbacks\n",
+         last_count);
+#else
   printf("PASS actual published Salts Capture callback start/stop/join: native_callbacks=%u no late callbacks\n",
          last_count);
+#endif
   return 0;
 }
 
@@ -402,7 +407,11 @@ static int run_original_native_cancel(const char *exact_device_id) {
         TURBO_AGENT_SPEECH_OK && native == NULL);
   CHECK(turbo_agent_speech_destroy(&input) == TURBO_AGENT_SPEECH_OK);
   CHECK(asr.began == 1u && asr.completed == 0u && asr.aborted == 1u);
+#ifdef M42_CAPTURE_SOURCE_TSAN
+  puts("PASS original source-TSan Capture cancellation stop/join before original M1 Provider abort");
+#else
   puts("PASS native published Capture cancellation stop/join before original M1 Provider abort");
+#endif
   return 0;
 }
 
@@ -413,6 +422,10 @@ int main(void) {
   CHECK(run_blocked_native_callback_stop_join(device_id) == 0);
   CHECK(run_original_m2_native_adapter(device_id, 42u) == 0);
   CHECK(run_original_native_cancel(device_id) == 0);
+#ifdef M42_CAPTURE_SOURCE_TSAN
+  puts("PASS original source-TSan Capture DSO + ORIGINAL M2 Salts adapter on isolated PulseAudio virtual-only source (NO physical microphone)");
+#else
   puts("PASS released Capture DSO + ORIGINAL M2 Salts adapter on isolated PulseAudio virtual-only source (NO physical microphone)");
+#endif
   return 0;
 }

@@ -518,6 +518,8 @@ spec("agent compiler Phase 1 boundary") {
         {"inspect_effect_write", TURBO_TOOL_EFFECT_WRITE, 0},
         {"inspect_effect_process", TURBO_TOOL_EFFECT_PROCESS, 0},
         {"inspect_effect_network", TURBO_TOOL_EFFECT_NETWORK, 0},
+        {"inspect_effect_read_network",
+         TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK, 0},
         {"inspect_effect_external_mutation", TURBO_TOOL_EFFECT_EXTERNAL_MUTATION, 0},
     };
     compiler_probe_t probe = {0};

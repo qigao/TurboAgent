@@ -359,7 +359,10 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   if (out_certificate) *out_certificate = NULL;
   if (out_tool_status) *out_tool_status = TURBO_TOOL_INVALID_ARGUMENT;
   if (out_diagnostic) memset(out_diagnostic, 0, sizeof(*out_diagnostic));
-  if (!harness || !compiler_config || !compiler_config->deny_unlisted_capabilities ||
+  if (!harness || !compiler_config ||
+      compiler_config->struct_size < sizeof(*compiler_config) ||
+      compiler_config->abi_version != TURBO_AGENT_COMPILER_CONFIG_ABI_VERSION ||
+      !compiler_config->deny_unlisted_capabilities ||
       (compiler_config->allowed_capability_count && !compiler_config->allowed_capabilities) ||
       !source_json || !source_json_size || !out_result || !out_certificate ||
       !out_tool_status ||

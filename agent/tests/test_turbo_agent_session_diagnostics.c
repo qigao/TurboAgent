@@ -185,7 +185,7 @@ spec("session diagnostic snapshots") {
     check_equal(transport_calls, 0);
   }
 
-  it("should preserve error order and distinguish a valid report from startup readiness") {
+  it("should preserve error order while hiding ungranted tool schemas") {
     turbo_agent_session_config_t config = {0};
     json_value_t *errors;
     registry = turbo_tool_registry_create();
@@ -208,13 +208,14 @@ spec("session diagnostic snapshots") {
     check_equal(turbo_agent_session_get_startup_diagnostics(session, &report), 0);
     check_false(json_get_bool(report, "ok", true));
     errors = json_object_get(report, "errors");
-    check_equal(json_array_size(errors), 3);
+    check_equal(json_array_size(errors), 2);
     check_equal(json_string(json_array_get(errors, 0)), "invalid_workflow_kind");
     check_equal(json_string(json_array_get(errors, 1)), "invalid_structured_output_schema");
-    check_equal(json_string(json_array_get(errors, 2)), "invalid_tool_schemas");
     check_equal(json_get_string(json_object_get(report, "capabilities"), "workflow_kind"),
                 "unknown");
-    check_true(json_is_null(json_object_get(report, "tool_schemas")));
+    check_not_null(json_object_get(report, "tool_schemas"));
+    check_equal(json_array_size(json_object_get(
+                      json_object_get(report, "tool_schemas"), "registry")), 0);
     check_equal(transport_calls, 0);
   }
 }

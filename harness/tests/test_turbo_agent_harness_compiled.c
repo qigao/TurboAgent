@@ -16,6 +16,7 @@ static const char compiled_inspect_source[] = "{\"template_id\":\"inspect\",\"st
 static const char compiled_inspect_bad_args[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"extra\\\":1}\"}";
 static const char compiled_inspect_unknown_tool[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"nonexistent_tool\",\"arguments_json\":\"{}\"}";
 #define COMPILED_INSPECT_JOURNAL_COLLECTION "agent_compiled_execution_journal"
+#define COMPILED_INSPECT_TEST_THREAD_ID "compiled-inspect-test-thread"
 
 typedef struct compiled_inspect_probe_s {
   int calls;
@@ -63,7 +64,9 @@ static void attach_compiled_probe_runtime(turbo_agent_harness_t *harness,
                                           compiled_inspect_probe_t *probe) {
   turbo_agent_app_t *app = turbo_agent_harness_app(harness);
   probe->runtime = turbo_agent_session_runtime(turbo_agent_app_session(app));
-  probe->thread_id = turbo_agent_app_thread_id(app);
+  /* Session summary capture replaces its owned thread_id string after each
+   * Run. The probe must not retain that borrowed pointer across executions. */
+  probe->thread_id = COMPILED_INSPECT_TEST_THREAD_ID;
 }
 
 static int compiled_inspect_handler(const json_value_t *arguments,
@@ -122,7 +125,7 @@ static turbo_agent_harness_t *make_compiled_harness(
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t config;
-  session_config.thread_id = "compiled-inspect-test-thread";
+  session_config.thread_id = COMPILED_INSPECT_TEST_THREAD_ID;
   session_config.runtime_store = turbo_agent_runtime_store_memory_create();
   session_config.agent_config.model = "gpt-5.4";
   session_config.agent_config.transport_fn = compiled_harness_transport;

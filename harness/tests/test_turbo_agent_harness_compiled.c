@@ -8,6 +8,7 @@
 #include "turbo_runtime_store.h"
 
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <salts/thread_pool.h>
@@ -120,13 +121,74 @@ static turbo_tool_status_t register_compiled_inspect(
   return turbo_tool_registry_add_v6(registry, &definition);
 }
 
-static turbo_agent_harness_t *make_compiled_harness(
-    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry) {
+typedef struct compiled_inspect_store_fault_s {
+  turbo_agent_runtime_store_t inner;
+  const char *failed_phase;
+} compiled_inspect_store_fault_t;
+
+static int compiled_inspect_fault_store_put(void *user_data, const char *collection,
+                                            const char *id, const char *record_json) {
+  compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
+  char phase_token[64];
+  int length;
+  if (!fault || !record_json) return -1;
+  length = snprintf(phase_token, sizeof(phase_token), "\\"phase\\":\\"%s\\"",
+                    fault->failed_phase ? fault->failed_phase : "");
+  if (length > 0 && (size_t)length < sizeof(phase_token) &&
+      strstr(record_json, phase_token)) return -1;
+  return fault->inner.put(fault->inner.user_data, collection, id, record_json);
+}
+
+static int compiled_inspect_fault_store_get(void *user_data, const char *collection,
+                                            const char *id, char **out_record_json) {
+  compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
+  return fault ? fault->inner.get(fault->inner.user_data, collection, id, out_record_json) : -1;
+}
+
+static int compiled_inspect_fault_store_list(void *user_data, const char *collection,
+                                             const char *filter_key, const char *filter_value,
+                                             char **out_records_json) {
+  compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
+  return fault ? fault->inner.list(fault->inner.user_data, collection, filter_key,
+                                   filter_value, out_records_json) : -1;
+}
+
+static void compiled_inspect_fault_store_free(void *user_data) {
+  compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
+  if (!fault) return;
+  if (fault->inner.user_data_free)
+    fault->inner.user_data_free(fault->inner.user_data);
+  free(fault);
+}
+
+static turbo_agent_runtime_store_t compiled_inspect_store_fail_phase(const char *phase) {
+  turbo_agent_runtime_store_t store = {0};
+  turbo_agent_runtime_store_t inner = turbo_agent_runtime_store_memory_create();
+  compiled_inspect_store_fault_t *fault;
+  if (!inner.put || !inner.get || !inner.list || !inner.user_data) return store;
+  fault = (compiled_inspect_store_fault_t *)calloc(1, sizeof(*fault));
+  if (!fault) {
+    if (inner.user_data_free) inner.user_data_free(inner.user_data);
+    return store;
+  }
+  fault->inner = inner;
+  fault->failed_phase = phase;
+  store.put = compiled_inspect_fault_store_put;
+  store.get = compiled_inspect_fault_store_get;
+  store.list = compiled_inspect_fault_store_list;
+  store.user_data = fault;
+  store.user_data_free = compiled_inspect_fault_store_free;
+  return store;
+}
+
+static turbo_agent_harness_t *make_compiled_harness_with_store(
+    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry,
+    turbo_agent_runtime_store_t runtime_store) {
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t config;
   session_config.thread_id = COMPILED_INSPECT_TEST_THREAD_ID;
-  session_config.runtime_store = turbo_agent_runtime_store_memory_create();
+  session_config.runtime_store = runtime_store;
   session_config.agent_config.model = "gpt-5.4";
   session_config.agent_config.transport_fn = compiled_harness_transport;
   session_config.agent_config.tool_registry = registry;
@@ -135,6 +197,12 @@ static turbo_agent_harness_t *make_compiled_harness(
   config.app_config = &app_config;
   config.executor = pool;
   return turbo_agent_harness_create(&config);
+}
+
+static turbo_agent_harness_t *make_compiled_harness(
+    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry) {
+  return make_compiled_harness_with_store(
+      pool, registry, turbo_agent_runtime_store_memory_create());
 }
 
 static int set_compiled_host_policy(turbo_agent_harness_t *harness, int allow_runtime_tools) {
@@ -361,6 +429,39 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       turbo_tool_registry_destroy(registry);
       cmeta_threadpool_destroy(pool);
     }
+  }
+
+  it("does not invoke the callback when the started journal write fails") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("started");
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(store.user_data);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1),
+                TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+
+    check_not_equal(run_compiled_inspect(harness, compiled_inspect_source,
+        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
+    check_equal(probe.calls, 0);
+    check_null(result);
+    check_null(certificate);
+
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
   }
 
   it("does not retry a read-only tool after a result schema mismatch") {

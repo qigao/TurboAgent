@@ -148,3 +148,58 @@ add_test(NAME tts_m42_real_whisper_cpu_no_weights
   COMMAND test_tts_m42_real_whisper_cpu_no_weights)
 set_tests_properties(tts_m42_real_whisper_cpu_no_weights
   PROPERTIES TIMEOUT 30)
+
+# FULL six-way single-process original M1/M2/M3 -> true production Harness
+# -> actual dlopened TTS pthread DSO -> BOTH published Capture/Playback DSOs.
+# No physical hardware: protected by explicit private PulseAudio null source.
+# Keep the original independent fake-device/v1.9.5 negative tests unchanged.
+option(VOICE_M42_REAL_VIRTUAL_FULLSTACK
+  "Test real published native audio + actual Harness + loaded TTS DSO" OFF)
+if(VOICE_M42_REAL_VIRTUAL_FULLSTACK)
+  if(NOT TARGET Salts::Capture OR NOT TARGET Salts::Playback)
+    message(FATAL_ERROR "Full virtual voice requires both genuine official published audio targets")
+  endif()
+  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/speech_input/capture/src/turbo_agent_speech_capture_salts.c")
+    message(FATAL_ERROR "Full voice needs immutable original M2 Salts native owner source")
+  endif()
+  add_executable(test_tts_m42_real_virtual_fullstack
+    "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness_live/test_virtual_fullstack_audio.c"
+    "${CMAKE_SOURCE_DIR}/speech_input/capture/src/turbo_agent_speech_capture_salts.c"
+    "${VOICE_M42_M3_SOURCE_ROOT}/speech_input/whisper/src/turbo_agent_speech_whisper.c"
+    "${VOICE_M42_M3_SOURCE_ROOT}/speech_input/whisper/tests/whisper_fake_engine_image.c")
+  target_compile_features(test_tts_m42_real_virtual_fullstack PRIVATE c_std_11)
+  set_target_properties(test_tts_m42_real_virtual_fullstack PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  target_include_directories(test_tts_m42_real_virtual_fullstack PRIVATE
+    "${VOICE_M42_WORKSPACE}/speech_output/include"
+    "${VOICE_M42_WORKSPACE}/speech_output/playback/include"
+    "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/include"
+    "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/harness/include"
+    "${VOICE_M42_WORKSPACE}/speech_output/voice_coordinator/tests/dso"
+    "${VOICE_M42_M3_SOURCE_ROOT}/speech_input/whisper/include"
+    "${VOICE_M42_WHISPER_HEADER_ROOT}/include"
+    "${VOICE_M42_WHISPER_HEADER_ROOT}/ggml/include")
+  target_link_libraries(test_tts_m42_real_virtual_fullstack PRIVATE
+    "${VOICE_M42_PREBUILT_ROOT}/voice_coordinator/tests/harness/libturbo_voice_harness_final_gate.a"
+    "${VOICE_M42_PREBUILT_ROOT}/voice_coordinator/libturbo_tts_voice_coordinator.a"
+    "${VOICE_M42_PREBUILT_ROOT}/playback/libturbo_tts_playback_bridge.a"
+    "${VOICE_M42_PREBUILT_ROOT}/libturbo_agent_speech_output.a"
+    turbo_agent_speech_capture_bridge
+    TurboAgent::Harness
+    Salts::Capture
+    Salts::Playback
+    Salts::JsonParser
+    Salts::Core
+    Threads::Threads
+    "${CMAKE_DL_LIBS}")
+  target_compile_options(test_tts_m42_real_virtual_fullstack PRIVATE
+    -Wall -Wextra -Wpedantic -Werror)
+  target_compile_definitions(test_tts_m42_real_virtual_fullstack PRIVATE
+    TEST_TTS_DSO_PATH="$<TARGET_FILE:tts_m42_combined_provider_dso>")
+  add_dependencies(test_tts_m42_real_virtual_fullstack
+    tts_m42_combined_provider_dso)
+  add_test(NAME tts_m42_real_virtual_fullstack
+    COMMAND test_tts_m42_real_virtual_fullstack)
+  set_tests_properties(tts_m42_real_virtual_fullstack
+    PROPERTIES TIMEOUT 60)
+endif()

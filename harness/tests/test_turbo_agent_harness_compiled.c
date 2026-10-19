@@ -466,6 +466,62 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     cmeta_threadpool_destroy(pool);
   }
 
+  it("withholds the result when the committed journal write fails") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("committed");
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(store.user_data);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1),
+                TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+
+    check_not_equal(run_compiled_inspect(harness, compiled_inspect_source,
+        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_null(result);
+    /* Admission/compilation succeeded; execution failure withholds only result. */
+    check_not_null(certificate);
+    check_equal(probe.saw_started_journal, 1);
+    {
+      json_value_t *journal_records = NULL;
+      const json_value_t *journal;
+      check_equal(turbo_agent_runtime_store_list_json(
+          probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
+          probe.thread_id, &journal_records), SALTS_OK);
+      check_not_null(journal_records);
+      check_equal(json_array_size(journal_records), 1u);
+      journal = json_array_get(journal_records, 0);
+      check_not_null(journal);
+      /* The commit failed; the best-effort conservative terminal write must win. */
+      check_equal(json_get_string(journal, "phase"), "outcome_unknown");
+      check_equal(json_get_string(journal, "tool_name"), "repo.inspect");
+      check_equal(json_get_int(journal, "tool_status", -1), TURBO_TOOL_ERROR);
+      check_not_null(json_get_string(journal, "execution_id"));
+      check_not_null(json_get_string(journal, "plan_hash"));
+      check_null(json_object_get(journal, "result"));
+      turbo_runtime_json_destroy(journal_records);
+    }
+
+    json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
   it("does not retry a read-only tool after a result schema mismatch") {
     const char *allowed[] = {"runtime_tools"};
     compiled_inspect_probe_t probe = {.produce_invalid_result = 1};

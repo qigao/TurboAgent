@@ -87,26 +87,30 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
 /**
  * Synchronous, explicit compiled Inspect admission and execution.
  *
- * This is deliberately a narrow Phase-1 bridge, NOT the Session's durable
- * async Graph / Run / Checkpoint API. Only a frozen read-only Inspect plan with
- * declared PURE or READ(+NETWORK) semantic effects and a strict typed result
- * contract is admitted. Tool callbacks remain trusted registry implementations.
- * The host explicitly supplies capability allowlists through compiler_config;
- * deny_unlisted_capabilities must be enabled.
+ * This narrow Phase-1 API compiles and executes exactly one typed, read-only
+ * Inspect step in the attached Session's existing Run/Checkpoint runtime.
+ * Only PURE or READ(+NETWORK) effects, a strict result contract, and Host-
+ * granted capabilities intersected with the caller's compiler restrictions
+ * are admitted. Side-effecting or UNKNOWN-effect tools are not admitted.
  *
- * Harness serializes this call against all start/resume/fork operations.
- * Compilation and capability/effect/result-contract admission invoke no tools.
- * After admission, the plan-owned projection is the sole execution authority:
- * there is no raw loop fallback or automatic retry. Result validation happens
- * AFTER a callback may have run; invalid results are rejected without re-exec.
+ * The persisted JSON-native Run state contains a versioned `compiled_execution`
+ * record with execution id, plan hash/certificate, capability generation,
+ * canonical tool identity, backend and approval decision. Separate admit/start
+ * graph nodes force a checkpoint carrying phase `started` to be persisted before
+ * the tool callback node can run. If that checkpoint cannot be persisted, the
+ * callback is not entered. Callback/result-contract failures are never retried;
+ * a started execution without a committed result is interpreted conservatively
+ * as outcome-unknown on recovery.
  *
- * On admitted execution a caller-owned plan certificate is returned, including
- * when the callback/result verification fails. Return SALTS_OK only on
- * completed, validated result. out_tool_status describes backend outcome.
+ * On successful execution, out_result and out_certificate are caller-owned JSON
+ * values. After compile admission the certificate is still returned on callback
+ * or result-validation failure. The Session caches the completed Run and latest
+ * Checkpoint ids on its App. Return SALTS_OK only when the Run commits a valid
+ * typed result; inspect out_tool_status and out_diagnostic for failure details.
  *
- * The source registry and provider callbacks must remain quiescent/alive for
- * the entire call; calling this does NOT persist run state, journal effects,
- * manage external Plugin leases, or provide hard process sandboxing.
+ * This does not expose async compiled DAG execution, approval transitions,
+ * dynamic Plugin lease management or hard process sandboxing. The source registry
+ * and callback implementations must remain alive and quiescent for the call.
  */
 CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
     turbo_agent_harness_t *harness,

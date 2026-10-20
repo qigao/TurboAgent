@@ -22,4 +22,6 @@ int turbo_agent_session_complete_execution_internal(turbo_agent_session_t *sessi
                                                     turbo_cancel_token_t *cancel_token,
                                                     json_value_t **summary, json_value_t **state);
 
+int turbo_agent_session_retry_bound_claim_commit_internal(turbo_agent_session_t *session);
+
 #endif

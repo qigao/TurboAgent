@@ -1270,6 +1270,15 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
     }
     goto done;
   }
+  /* Fence delivery after Session finalization too. This covers committed-result
+   * replay as well as a fresh callback if Host Authority changed during the Run. */
+  if (turbo_agent_tool_authority_snapshot_is_current(agent, &authority) != 1) {
+    turbo_agent_compiled_inspect_fail(&compiled_run,
+        TURBO_AGENT_COMPILE_CAPABILITY_DENIED, TURBO_TOOL_ERROR, SALTS_EPROTO,
+        "Host Tool Authority changed before result delivery; durable result was withheld");
+    rc = SALTS_EPROTO;
+    goto done;
+  }
 
   *out_result = compiled_run.result;
   compiled_run.result = NULL;

@@ -926,7 +926,15 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   rc = turbo_agent_session_start_graph(
       session, graph, initial_state, NULL, NULL, NULL, &summary, &result_state);
   if (rc != SALTS_OK) {
-    if (compiled_run.failure_rc != SALTS_OK) rc = compiled_run.failure_rc;
+    if (compiled_run.failure_rc != SALTS_OK) {
+      rc = compiled_run.failure_rc;
+    } else if (compiled_run.committed) {
+      /* The compiled tool result is durably committed, but Session-level
+       * finalization (for example, inbox applied-state persistence) failed.
+       * Keep the journal as the source of truth and return the API's stable
+       * I/O failure instead of leaking a backend-specific Session error. */
+      rc = SALTS_EIO;
+    }
     goto done;
   }
   if (!compiled_run.committed || !compiled_run.result) {

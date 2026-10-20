@@ -229,18 +229,23 @@ static turbo_agent_harness_t *make_compiled_harness(
       pool, registry, turbo_agent_runtime_store_memory_create());
 }
 
-static int set_compiled_host_policy(turbo_agent_harness_t *harness, int allow_runtime_tools) {
+static int set_compiled_host_policy_with_network(
+    turbo_agent_harness_t *harness, int allow_runtime_tools, int allow_network) {
   turbo_agent_policy_t policy = turbo_agent_policy_default();
   turbo_agent_t *agent = turbo_agent_session_agent(
       turbo_agent_app_session(turbo_agent_harness_app(harness)));
   policy.allow_custom_tools = 0;
   policy.allow_runtime_tools = allow_runtime_tools;
   policy.allow_delegate = 0;
-  policy.allow_network = 0;
+  policy.allow_network = allow_network;
   policy.allow_shell = 0;
   policy.allow_patch = 0;
   policy.allow_outside_workspace = 0;
   return agent ? turbo_agent_set_tool_policy(agent, &policy) : -1;
+}
+
+static int set_compiled_host_policy(turbo_agent_harness_t *harness, int allow_runtime_tools) {
+  return set_compiled_host_policy_with_network(harness, allow_runtime_tools, 0);
 }
 
 static int run_compiled_inspect(turbo_agent_harness_t *harness,
@@ -366,6 +371,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       check_not_null(json_get_string(run_execution, "execution_id"));
       check_not_null(json_get_string(run_execution, "plan_hash"));
       check_not_null(json_object_get(run_execution, "authority_generation"));
+      check_not_null(json_object_get(run_execution, "authority_capability_mask"));
       check_not_null(json_object_get(run_execution, "certificate"));
       /* Durable typed results live only in compiled_inspect_attempts. */
       check_null(json_object_get(run_execution, "result"));
@@ -387,6 +393,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
         check_not_null(json_get_string(journal, "execution_id"));
         check_not_null(json_get_string(journal, "plan_hash"));
         check_not_null(json_object_get(journal, "authority_generation"));
+        check_not_null(json_object_get(journal, "authority_capability_mask"));
         check_not_null(json_object_get(journal, "certificate"));
         check_null(json_object_get(journal, "result"));
         check_not_null(json_get_string(journal, "attempt_id"));
@@ -409,6 +416,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
                 strcmp(json_get_string(attempt_record, "attempt_key"),
                        json_get_string(journal, "attempt_key")) == 0) {
               check_equal(json_get_string(attempt_record, "phase"), "committed");
+              check_not_null(json_object_get(attempt_record, "authority_capability_mask"));
               check_true(json_get_bool(json_object_get(attempt_record, "result"), "ok", false));
               found_matching_attempt = 1;
             }
@@ -798,6 +806,41 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(replayed, 1);
     check_equal(probe.calls, 1);
     check_true(json_get_bool(result, "ok", false));
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        "thread_id", probe.thread_id, &records), SALTS_OK);
+    check_not_null(records);
+    check_equal(json_array_size(records), 1u);
+    attempt = json_array_get(records, 0);
+    check_not_null(attempt);
+    check_equal(json_get_string(attempt, "phase"), "committed");
+    check_true(json_get_bool(json_object_get(attempt, "result"), "ok", false));
+    turbo_runtime_json_destroy(records);
+    records = NULL;
+
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+    turbo_agent_harness_release(harness);
+    harness = NULL;
+
+    /* A fresh Agent starts its generation counter at the same value after the
+     * same number of policy changes. Changing another grant must still reject
+     * replay: generation alone is not a durable Host Authority identity. */
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    store = (turbo_agent_runtime_store_t){0};
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy_with_network(harness, 1, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+    run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+        allowed, 1, "sqlite_restart_replay", &replayed,
+        &diagnostic, &tool_status, &result, &certificate);
+    check_not_equal(run_rc, SALTS_OK);
+    check_equal(replayed, 0);
+    check_equal(probe.calls, 1);
+    check_null(result);
+    check_not_null(certificate);
+    check_true(strstr(diagnostic.message, "identity or schema mismatch") != NULL);
     check_equal(turbo_agent_runtime_store_list_json(
         probe.runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
         "thread_id", probe.thread_id, &records), SALTS_OK);

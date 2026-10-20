@@ -90,7 +90,8 @@ turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_conf
     return NULL;
   }
   {
-    const char *thread_id = turbo_agent_app_thread_id(harness->app);
+    turbo_agent_session_t *session = turbo_agent_app_session(harness->app);
+    const char *thread_id = turbo_agent_session_thread_id(session);
     size_t thread_id_size;
     if (!thread_id || !thread_id[0]) {
       turbo_agent_app_destroy(harness->app);

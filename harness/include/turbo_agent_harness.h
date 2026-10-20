@@ -119,6 +119,38 @@ CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
     json_value_t **out_certificate);
 
 /**
+ * Explicit durable single-step compiled Inspect attempt (SQLite-backed use).
+ *
+ * The caller supplies a stable 1-64 character attempt_id [A-Za-z0-9_-]
+ * scoped by the Session thread. The existing Session Runtime Store is the
+ * only durable authority; no separate store or hidden replay backend.
+ *
+ * After compiler/host admission and prior to calling a tool, an identity-bound
+ * STARTED record is committed. COMMITTED records replay their saved result
+ * without invoking a tool; a STARTED record returns UNKNOWN_SIDE_EFFECT and
+ * never retries automatically, even if the tool is read-only. Corrupt or
+ * mismatched existing records fail closed.
+ *
+ * This requires an exclusive durable Runtime Store (such as bounded SQLite)
+ * for cross-process usage; memory/file stores cannot claim crash guarantees.
+ * The caller must drain the Harness and registry before destroying providers.
+ * This is not yet a Graph Checkpoint / multi-step transaction.
+ *
+ * out_replayed is true only for a valid, previously committed result/outcome.
+ */
+CXX_C_API int turbo_agent_harness_execute_compiled_inspect_durable_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    const char *attempt_id, int *out_replayed,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate);
+
+
+/**
  * Resume the harness default workflow.
  * `options->session_options` is required and selects checkpoint/thread scope
  * and override/patch/command input semantics.

@@ -9,7 +9,8 @@ add_library(turbo_agent_harness SHARED
 target_compile_definitions(turbo_agent_harness PRIVATE SHARED_CXX)
 target_include_directories(turbo_agent_harness PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
+  $<INSTALL_INTERFACE:include>
+  PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../agent/src>)
 target_link_libraries(turbo_agent_harness
   PUBLIC TurboAgent::Agent TurboAgent::AgentCompiler
   PRIVATE Salts::CSTL)
@@ -21,5 +22,7 @@ cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
 if(BUILD_TESTS)
   cmake_add_test(SOURCES tests/test_turbo_agent_harness.c tests/test_turbo_agent_harness_server.c tests/test_turbo_agent_harness_compiled.c
     tests/test_turbo_agent_public_api.c
-    LIBS TurboAgent::Harness Salts::TinyTest FOLDER "Harness/tests")
+    LIBS TurboAgent::Harness Salts::TinyTest
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/../agent/src
+    FOLDER "Harness/tests")
 endif()

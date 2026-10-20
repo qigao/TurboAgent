@@ -96,18 +96,19 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
  * The JSON-native Run state for a successful invocation contains a versioned
  * `compiled_execution` record with execution id, plan hash/certificate,
  * capability generation, canonical tool identity, backend and approval decision.
- * Before calling the tool, Harness persists an `agent_compiled_execution_journal`
- * record in the attached Runtime Store at phase `started`; the callback is not
- * entered if that write fails. A valid result is delivered only after the journal
- * transitions to `committed`. Callback failures or invalid results transition to
- * `outcome_unknown` when that update succeeds; if it fails, the prior `started`
- * record remains the fail-closed signal. No callback is automatically retried.
+ * Before calling the tool, Harness persists a per-Run reference in
+ * `agent_compiled_execution_journal` and an identity-bound `started` record in
+ * `compiled_inspect_attempts`. The callback is not entered unless both writes
+ * succeed. The attempt record alone stores the canonical typed result; the Run
+ * journal records only phase and attempt reference. A committed attempt can be
+ * replayed into a new Session Run without re-invoking the callback. STARTED or
+ * unknown attempts never automatically retry.
  *
- * This uses individual Runtime Store writes, not a transaction; crash guarantees
- * depend on the selected store backend. Runtime's generic graph checkpoint hook
- * is not a per-edge durable commit on ordinary completion/error. This slice does
- * not expose compiled-plan resume/recovery; future recovery must reconcile a
- * `started` / `outcome_unknown` journal instead of blindly invoking again.
+ * The attempt and per-Run journal are separate Runtime Store writes, not one
+ * multi-record transaction. Only a valid `committed` attempt can be replayed;
+ * `started` and `outcome_unknown` are fail-closed and require explicit external
+ * reconciliation rather than automatic callback retry. Crash guarantees depend
+ * on the selected Runtime Store backend.
  *
  * On successful execution, out_result and out_certificate are caller-owned JSON
  * values. After compile admission the certificate is still returned on callback
@@ -124,6 +125,34 @@ CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
     const turbo_agent_compiler_config_t *compiler_config,
     const char *source_json, size_t source_json_size,
     const turbo_tool_execution_context_t *context,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate);
+
+/**
+ * Execute a compiled Inspect using a caller-stable durable attempt identity.
+ *
+ * attempt_id must be 1-64 ASCII characters from [A-Za-z0-9_-], scoped by the
+ * Harness's captured Session thread identity. Reusing this identity with a
+ * different plan, tool, result contract, or Host authority generation fails
+ * closed. A committed result is loaded from compiled_inspect_attempts and the
+ * tool callback is not invoked again. STARTED/unknown attempts are never
+ * automatically retried.
+ *
+ * The durable attempt record is the sole persisted typed-result authority.
+ * agent_compiled_execution_journal stores only per-Run lifecycle and a
+ * reference to that attempt. The Session Run/finalization path still executes
+ * on replay, allowing a post-commit finalization failure to be retried with the
+ * same key. Crash guarantees depend on the configured Runtime Store and a
+ * single-writer discipline.
+ */
+CXX_C_API int turbo_agent_harness_execute_compiled_inspect_durable_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    const char *attempt_id, int *out_replayed,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,

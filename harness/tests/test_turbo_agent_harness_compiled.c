@@ -4,9 +4,11 @@
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_inbox.h"
+#include "turbo_agent_session_internal.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
 #include "turbo_runtime_store.h"
+#include "turbo_runtime_store_sqlite.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -15,9 +17,11 @@
 #include <salts/thread_pool.h>
 
 static const char compiled_inspect_source[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"value\\\":\\\"hello\\\"}\"}";
+static const char compiled_inspect_other_valid[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"value\\\":\\\"different\\\"}\"}";
 static const char compiled_inspect_bad_args[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"extra\\\":1}\"}";
 static const char compiled_inspect_unknown_tool[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"nonexistent_tool\",\"arguments_json\":\"{}\"}";
 #define COMPILED_INSPECT_JOURNAL_COLLECTION "agent_compiled_execution_journal"
+#define COMPILED_INSPECT_ATTEMPT_COLLECTION "compiled_inspect_attempts"
 #define COMPILED_INSPECT_TEST_THREAD_ID "compiled-inspect-test-thread"
 
 typedef struct compiled_inspect_probe_s {
@@ -132,6 +136,7 @@ static turbo_tool_status_t register_compiled_inspect(
 typedef struct compiled_inspect_store_fault_s {
   turbo_agent_runtime_store_t inner;
   const char *failed_phase;
+  int failed_once;
 } compiled_inspect_store_fault_t;
 
 static int compiled_inspect_fault_store_put(void *user_data, const char *collection,
@@ -142,11 +147,19 @@ static int compiled_inspect_fault_store_put(void *user_data, const char *collect
   if (!fault || !record_json) return -1;
   length = snprintf(phase_token, sizeof(phase_token), "\"phase\":\"%s\"",
                     fault->failed_phase ? fault->failed_phase : "");
-  if (fault->failed_phase && strcmp(fault->failed_phase, "inbox_applied") == 0 &&
+  if (!fault->failed_once && fault->failed_phase &&
+      strcmp(fault->failed_phase, "inbox_applied") == 0 &&
       strcmp(collection, "agent_inbox_transitions") == 0 &&
-      strstr(record_json, "\"status\":\"applied\"")) return -1;
-  if (length > 0 && (size_t)length < sizeof(phase_token) &&
-      strstr(record_json, phase_token)) return -1;
+      strstr(record_json, "\"status\":\"applied\"")) {
+    fault->failed_once = 1;
+    return -1;
+  }
+  if (!fault->failed_once && length > 0 && (size_t)length < sizeof(phase_token) &&
+      strcmp(collection, COMPILED_INSPECT_JOURNAL_COLLECTION) == 0 &&
+      strstr(record_json, phase_token)) {
+    fault->failed_once = 1;
+    return -1;
+  }
   return fault->inner.put(fault->inner.user_data, collection, id, record_json);
 }
 
@@ -246,6 +259,23 @@ static int run_compiled_inspect(turbo_agent_harness_t *harness,
       tool_status, result, certificate);
 }
 
+static int run_compiled_inspect_attempt(turbo_agent_harness_t *harness,
+                                        const char *source, const char *const *allowed,
+                                        size_t allowed_count, const char *attempt_id,
+                                        int *replayed,
+                                        turbo_agent_compile_diagnostic_t *diagnostic,
+                                        turbo_tool_status_t *tool_status,
+                                        json_value_t **result,
+                                        json_value_t **certificate) {
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = allowed;
+  config.allowed_capability_count = allowed_count;
+  return turbo_agent_harness_execute_compiled_inspect_durable_json(
+      harness, &config, source, strlen(source), NULL, attempt_id, replayed,
+      diagnostic, tool_status, result, certificate);
+}
+
 spec("Harness Phase-1 compiled Inspect boundary") {
   it("compiles a DataBind source, freezes authority and verifies the result") {
     const char *allowed[] = {"runtime_tools"};
@@ -329,6 +359,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       run_state = json_object_get(run_record, "state_snapshot");
       run_execution = json_object_get(run_state, "compiled_execution");
       check_not_null(run_execution);
+      check_equal(json_get_int(run_execution, "schema_version", 0), 2);
       check_equal(json_get_string(run_execution, "phase"), "committed");
       check_equal(json_get_string(run_execution, "backend"), "runtime_tools");
       check_equal(json_get_string(run_execution, "tool_name"), "repo.inspect");
@@ -336,7 +367,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       check_not_null(json_get_string(run_execution, "plan_hash"));
       check_not_null(json_object_get(run_execution, "authority_generation"));
       check_not_null(json_object_get(run_execution, "certificate"));
-      check_true(json_get_bool(json_object_get(run_execution, "result"), "ok", false));
+      /* Durable typed results live only in compiled_inspect_attempts. */
+      check_null(json_object_get(run_execution, "result"));
 
       check_equal(turbo_agent_runtime_store_list_json(
           runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
@@ -346,7 +378,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       for (i = 0; i < json_array_size(journal_records); ++i) {
         const json_value_t *journal = json_array_get(journal_records, i);
         check_not_null(journal);
-        check_equal(json_get_int(journal, "schema_version", 0), 1);
+        check_equal(json_get_int(journal, "schema_version", 0), 2);
         check_equal(json_get_string(journal, "phase"), "committed");
         check_equal(json_get_string(journal, "thread_id"), probe.thread_id);
         check_equal(json_get_string(journal, "tool_name"), "repo.inspect");
@@ -356,7 +388,34 @@ spec("Harness Phase-1 compiled Inspect boundary") {
         check_not_null(json_get_string(journal, "plan_hash"));
         check_not_null(json_object_get(journal, "authority_generation"));
         check_not_null(json_object_get(journal, "certificate"));
-        check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
+        check_null(json_object_get(journal, "result"));
+        check_not_null(json_get_string(journal, "attempt_id"));
+        check_not_null(json_get_string(journal, "attempt_key"));
+        {
+          json_value_t *attempt_records = NULL;
+          const json_value_t *attempt_record;
+          check_equal(turbo_agent_runtime_store_list_json(
+              runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
+              "thread_id", probe.thread_id, &attempt_records), SALTS_OK);
+          check_not_null(attempt_records);
+          size_t attempt_index;
+          int found_matching_attempt = 0;
+          check_equal(json_array_size(attempt_records), 2u);
+          for (attempt_index = 0; attempt_index < json_array_size(attempt_records);
+               ++attempt_index) {
+            attempt_record = json_array_get(attempt_records, attempt_index);
+            if (attempt_record &&
+                json_get_string(attempt_record, "attempt_key") &&
+                strcmp(json_get_string(attempt_record, "attempt_key"),
+                       json_get_string(journal, "attempt_key")) == 0) {
+              check_equal(json_get_string(attempt_record, "phase"), "committed");
+              check_true(json_get_bool(json_object_get(attempt_record, "result"), "ok", false));
+              found_matching_attempt = 1;
+            }
+          }
+          check_equal(found_matching_attempt, 1);
+          turbo_runtime_json_destroy(attempt_records);
+        }
       }
       turbo_runtime_json_destroy(journal_records);
       turbo_runtime_json_destroy(run_record);
@@ -553,6 +612,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     json_value_t *journal_records = NULL;
     const json_value_t *journal;
     char *inbox_id = NULL;
+    int replayed = -1;
     int run_rc;
 
     check_not_null(pool);
@@ -576,10 +636,17 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(turbo_agent_session_inbox_claim(
         session, TURBO_AGENT_INBOX_STEER, "compiled-inspect-finalization-test", &claim), SALTS_OK);
     check_not_null(claim);
+    check_not_null(json_get_string(claim, "inbox_id"));
+    check_equal(turbo_agent_session_bind_claim_event_internal(
+        session, json_get_string(claim, "inbox_id"),
+        "compiled-inspect-finalization-event"), SALTS_OK);
 
-    run_rc = run_compiled_inspect(harness, compiled_inspect_source,
-        allowed, 1, &diagnostic, &tool_status, &result, &certificate);
+    run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+        allowed, 1, "session_finalize_retry", &replayed,
+        &diagnostic, &tool_status, &result, &certificate);
     check_equal(run_rc, SALTS_EIO);
+    check_equal(((compiled_inspect_store_fault_t *)store.user_data)->failed_once, 1);
+    check_equal(replayed, 0);
     check_equal(probe.calls, 1);
     check_null(result);
     check_not_null(certificate);
@@ -591,11 +658,71 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(json_array_size(journal_records), 1u);
     journal = json_array_get(journal_records, 0);
     check_not_null(journal);
-    /* Tool result commit succeeded before Session's applied-inbox transition failed. */
+    /* The Run journal references a committed attempt but never owns its result. */
+    check_equal(json_get_string(journal, "phase"), "committed");
+    check_null(json_object_get(journal, "result"));
+    check_equal(json_get_string(journal, "attempt_id"), "session_finalize_retry");
+    turbo_runtime_json_destroy(journal_records);
+    journal_records = NULL;
+
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        "thread_id", probe.thread_id, &journal_records), SALTS_OK);
+    check_not_null(journal_records);
+    check_equal(json_array_size(journal_records), 1u);
+    journal = json_array_get(journal_records, 0);
+    check_not_null(journal);
     check_equal(json_get_string(journal, "phase"), "committed");
     check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
-
     turbo_runtime_json_destroy(journal_records);
+    journal_records = NULL;
+    json_free(certificate); certificate = NULL;
+
+    /* Retry the same durable identity. The committed result is replayed,
+     * finalization gets another chance, and the tool callback is not repeated. */
+    run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+        allowed, 1, "session_finalize_retry", &replayed,
+        &diagnostic, &tool_status, &result, &certificate);
+    check_equal(run_rc, SALTS_OK);
+    check_equal(replayed, 1);
+    check_equal(probe.calls, 1);
+    check_not_null(result);
+    check_true(json_get_bool(result, "ok", false));
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+
+    /* An attempt ID is not permission to replay a result for a different plan.
+     * The conflicting plan must fail closed without changing the canonical row
+     * or entering the tool callback again. */
+    run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_other_valid,
+        allowed, 1, "session_finalize_retry", &replayed,
+        &diagnostic, &tool_status, &result, &certificate);
+    check_not_equal(run_rc, SALTS_OK);
+    check_equal(replayed, 0);
+    check_equal(probe.calls, 1);
+    check_null(result);
+    check_not_null(certificate);
+    json_free(certificate); certificate = NULL;
+
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
+        probe.thread_id, &journal_records), SALTS_OK);
+    check_not_null(journal_records);
+    check_equal(json_array_size(journal_records), 3u);
+    turbo_runtime_json_destroy(journal_records);
+    journal_records = NULL;
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        "thread_id", probe.thread_id, &journal_records), SALTS_OK);
+    check_not_null(journal_records);
+    check_equal(json_array_size(journal_records), 1u);
+    journal = json_array_get(journal_records, 0);
+    check_not_null(journal);
+    check_equal(json_get_string(journal, "phase"), "committed");
+    check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
+    turbo_runtime_json_destroy(journal_records);
+    journal_records = NULL;
+
     turbo_runtime_json_destroy(claim);
     json_free(message);
     free(inbox_id);
@@ -603,6 +730,93 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);
+  }
+
+  it("replays a committed Inspect attempt after SQLite and Harness reopen") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness = NULL;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_ERROR;
+    turbo_runtime_sqlite_config_t sqlite_config;
+    turbo_agent_runtime_store_t store = {0};
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    json_value_t *records = NULL;
+    const json_value_t *attempt;
+    char *directory = tt_make_temp_dir("compiled-inspect-replay");
+    char path[1024];
+    int replayed = -1;
+    int run_rc;
+    int path_len;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(directory);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    path_len = snprintf(path, sizeof(path), "%s/compiled-inspect.db", directory);
+    check_true(path_len > 0 && (size_t)path_len < sizeof(path));
+    turbo_runtime_sqlite_config_init(&sqlite_config);
+    sqlite_config.path = path;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    store = (turbo_agent_runtime_store_t){0}; /* Runtime owns SQLite after creation. */
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+
+    run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+        allowed, 1, "sqlite_restart_replay", &replayed,
+        &diagnostic, &tool_status, &result, &certificate);
+    check_equal(run_rc, SALTS_OK);
+    check_equal(replayed, 0);
+    check_equal(probe.calls, 1);
+    check_true(json_get_bool(result, "ok", false));
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+
+    turbo_agent_harness_release(harness);
+    harness = NULL;
+
+    /* Reopen the same committed store under a new Runtime/Session owner. */
+    sqlite_config.create_if_missing = 0;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    store = (turbo_agent_runtime_store_t){0};
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+
+    run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+        allowed, 1, "sqlite_restart_replay", &replayed,
+        &diagnostic, &tool_status, &result, &certificate);
+    check_equal(run_rc, SALTS_OK);
+    check_equal(replayed, 1);
+    check_equal(probe.calls, 1);
+    check_true(json_get_bool(result, "ok", false));
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        "thread_id", probe.thread_id, &records), SALTS_OK);
+    check_not_null(records);
+    check_equal(json_array_size(records), 1u);
+    attempt = json_array_get(records, 0);
+    check_not_null(attempt);
+    check_equal(json_get_string(attempt, "phase"), "committed");
+    check_true(json_get_bool(json_object_get(attempt, "result"), "ok", false));
+    turbo_runtime_json_destroy(records);
+    records = NULL;
+
+    json_free(result);
+    json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+    tt_remove_tree(directory);
+    free(directory);
   }
 
   it("does not retry a read-only tool after a result schema mismatch") {
@@ -616,6 +830,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_tool_status_t tool_status = TURBO_TOOL_OK;
     json_value_t *result = NULL;
     json_value_t *certificate = NULL;
+    int replayed = -1;
 
     check_not_null(pool);
     check_not_null(registry);
@@ -625,11 +840,13 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(set_compiled_host_policy(harness, 1), 0);
     attach_compiled_probe_runtime(harness, &probe);
     {
-      int run_rc = run_compiled_inspect(harness, compiled_inspect_source,
-          allowed, 1, &diagnostic, &tool_status, &result, &certificate);
+      int run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+          allowed, 1, "invalid_result_no_retry", &replayed,
+          &diagnostic, &tool_status, &result, &certificate);
       /* This assertion isolates schema-mismatch fail-closed behavior;
        * Session finalization failure is covered by the dedicated test above. */
       check_equal(probe.calls, 1);
+      check_equal(replayed, 0);
       check_equal(run_rc, SALTS_EPROTO);
     }
     check_equal(tool_status, TURBO_TOOL_ERROR);
@@ -658,6 +875,36 @@ spec("Harness Phase-1 compiled Inspect boundary") {
                         "violating its admitted schema") != NULL);
       check_null(json_object_get(journal, "result"));
       turbo_runtime_json_destroy(journal_records);
+    }
+
+    /* The same durable identity is fail-closed after an invalid callback result.
+     * Retrying must not call the ostensibly read-only tool. */
+    json_free(certificate); certificate = NULL;
+    {
+      int retry_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+          allowed, 1, "invalid_result_no_retry", &replayed,
+          &diagnostic, &tool_status, &result, &certificate);
+      check_not_equal(retry_rc, SALTS_OK);
+      check_equal(replayed, 0);
+      check_equal(probe.calls, 1);
+      check_null(result);
+      check_not_null(certificate);
+      check_equal(tool_status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      check_true(strstr(diagnostic.message, "automatic callback replay is forbidden") != NULL);
+    }
+    {
+      json_value_t *attempt_records = NULL;
+      const json_value_t *attempt;
+      check_equal(turbo_agent_runtime_store_list_json(
+          probe.runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
+          "thread_id", probe.thread_id, &attempt_records), SALTS_OK);
+      check_not_null(attempt_records);
+      check_equal(json_array_size(attempt_records), 1u);
+      attempt = json_array_get(attempt_records, 0);
+      check_not_null(attempt);
+      check_equal(json_get_string(attempt, "phase"), "outcome_unknown");
+      check_null(json_object_get(attempt, "result"));
+      turbo_runtime_json_destroy(attempt_records);
     }
 
     json_free(certificate);

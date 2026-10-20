@@ -12,6 +12,8 @@ static int turbo_agent_session_prepare_sync_resume(
     const turbo_agent_session_t *session, const turbo_agent_session_exec_options_t *options,
     turbo_event_sink_json_value_fn event_sink, void *event_sink_user_data,
     turbo_agent_runtime_exec_options_t *out_options) {
+  if (turbo_agent_session_has_pending_bound_claim_commit_internal(session))
+    return SALTS_EBUSY;
   out_options->scope = (turbo_agent_runtime_scope_t)options->scope;
   out_options->input_kind = (turbo_agent_runtime_input_kind_t)options->input_kind;
   if (out_options->scope == TURBO_RUNTIME_SCOPE_THREAD) {

@@ -9,7 +9,8 @@ add_library(turbo_agent_harness SHARED
 target_compile_definitions(turbo_agent_harness PRIVATE SHARED_CXX)
 target_include_directories(turbo_agent_harness PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
+  $<INSTALL_INTERFACE:include>
+  PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../agent/src>)
 target_link_libraries(turbo_agent_harness
   PUBLIC TurboAgent::Agent TurboAgent::AgentCompiler
   PRIVATE Salts::CSTL)

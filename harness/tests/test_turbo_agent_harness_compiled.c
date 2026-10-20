@@ -627,8 +627,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     {
       int run_rc = run_compiled_inspect(harness, compiled_inspect_source,
           allowed, 1, &diagnostic, &tool_status, &result, &certificate);
-      /* The invalid-result callback must have run exactly once even if
-       * Runtime later reports a separate finalization failure. */
+      /* This assertion isolates schema-mismatch fail-closed behavior;
+       * Session finalization failure is covered by the dedicated test above. */
       check_equal(probe.calls, 1);
       check_equal(run_rc, SALTS_EPROTO);
     }

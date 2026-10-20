@@ -144,7 +144,7 @@ static int compiled_inspect_fault_store_put(void *user_data, const char *collect
                     fault->failed_phase ? fault->failed_phase : "");
   if (fault->failed_phase && strcmp(fault->failed_phase, "inbox_applied") == 0 &&
       strcmp(collection, "agent_inbox_transitions") == 0 &&
-      strstr(record_json, "\\"status\\":\\"applied\\"")) return -1;
+      strstr(record_json, "\"status\":\"applied\"")) return -1;
   if (length > 0 && (size_t)length < sizeof(phase_token) &&
       strstr(record_json, phase_token)) return -1;
   return fault->inner.put(fault->inner.user_data, collection, id, record_json);

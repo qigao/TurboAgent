@@ -24,6 +24,8 @@ struct turbo_agent_harness_s {
   turbo_agent_app_t *app;
   cmeta_threadpool_t *executor;
   turbo_agent_execution_t *active_execution;
+  /* Stable attempt scope: Session summary capture may replace its thread_id string. */
+  char *compiled_attempt_thread_id;
   int submitting;
 };
 
@@ -87,6 +89,21 @@ turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_conf
     free(harness);
     return NULL;
   }
+  {
+    turbo_agent_session_t *session = turbo_agent_app_session(harness->app);
+    const char *thread_id = turbo_agent_session_thread_id(session);
+    if (thread_id && thread_id[0]) {
+      size_t thread_id_size = strlen(thread_id) + 1;
+      harness->compiled_attempt_thread_id = (char *)malloc(thread_id_size);
+      if (!harness->compiled_attempt_thread_id) {
+        turbo_agent_app_destroy(harness->app);
+        cmeta_mutex_destroy(&harness->mutex);
+        free(harness);
+        return NULL;
+      }
+      memcpy(harness->compiled_attempt_thread_id, thread_id, thread_id_size);
+    }
+  }
   harness->executor = config->executor;
   return harness;
 }
@@ -119,6 +136,7 @@ void turbo_agent_harness_release(turbo_agent_harness_t *harness) {
   atomic_thread_fence(memory_order_acquire);
   turbo_agent_execution_release(harness->active_execution);
   turbo_agent_app_destroy(harness->app);
+  free(harness->compiled_attempt_thread_id);
   cmeta_mutex_destroy(&harness->mutex);
   free(harness);
 }
@@ -333,8 +351,11 @@ static int turbo_agent_harness_compiler_authority_configure(
 
 #define TURBO_AGENT_COMPILED_EXECUTION_SCHEMA_VERSION 1
 #define TURBO_AGENT_COMPILED_EXECUTION_KEY "compiled_execution"
-#define TURBO_AGENT_COMPILED_EXECUTION_JOURNAL_SCHEMA_VERSION 1
+#define TURBO_AGENT_COMPILED_EXECUTION_JOURNAL_SCHEMA_VERSION 2
 #define TURBO_AGENT_COMPILED_EXECUTION_JOURNAL_COLLECTION "agent_compiled_execution_journal"
+#define TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_SCHEMA_VERSION 2
+#define TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION "compiled_inspect_attempts"
+#define TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_MAX_BYTES (1024u * 1024u)
 
 typedef struct turbo_agent_compiled_inspect_run_s {
   turbo_agent_t *agent;
@@ -347,12 +368,17 @@ typedef struct turbo_agent_compiled_inspect_run_s {
   const char *execution_id;
   const char *thread_id;
   const char *tool_name;
+  const char *attempt_id;
+  const char *result_schema_json;
+  turbo_tool_effect_flags_t effects;
+  char attempt_key[192];
   char plan_hash[32];
   char created_at[32];
   turbo_tool_status_t tool_status;
   int callback_started;
   int journal_started;
   int committed;
+  int replayed;
   int failure_rc;
   char failure_message[256];
   turbo_agent_compile_diagnostic_t *diagnostic;
@@ -398,10 +424,149 @@ static int turbo_agent_compiled_inspect_set_phase(
   return 0;
 }
 
-/* Persist one compiled-execution journal transition. The transition is
- * fail-closed: "started" may only create a new record; the terminal transitions
- * may only replace the same execution's existing "started" record. This is an
- * individual Runtime Store write, not a transaction across the store or Run. */
+
+static int turbo_agent_compiled_inspect_component(
+    const char *value, size_t max_len, int allow_dot) {
+  size_t n;
+  if (!value || !value[0]) return 0;
+  for (n = 0; value[n]; ++n) {
+    const char c = value[n];
+    if (n >= max_len ||
+        !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+          (allow_dot && c == '.'))) return 0;
+  }
+  return n > 0;
+}
+
+static int turbo_agent_compiled_inspect_attempt_id_valid(const char *value) {
+  return turbo_agent_compiled_inspect_component(value, 64, 0);
+}
+
+static int turbo_agent_compiled_inspect_attempt_key(
+    const char *thread_id, const char *attempt_id, char *out_key, size_t out_size) {
+  int width;
+  if (!out_key || out_size == 0 ||
+      !turbo_agent_compiled_inspect_component(thread_id, 80, 1) ||
+      !turbo_agent_compiled_inspect_attempt_id_valid(attempt_id)) return -1;
+  width = snprintf(out_key, out_size, "%03u_%s_%s",
+                   (unsigned)strlen(thread_id), thread_id, attempt_id);
+  return width < 0 || (size_t)width >= out_size ? -1 : 0;
+}
+
+static int turbo_agent_compiled_inspect_attempt_identity_matches(
+    const turbo_agent_compiled_inspect_run_t *run, const json_value_t *record) {
+  const char *run_execution_id;
+  return run && record && json_type(record) == JSON_OBJECT &&
+      json_get_int(record, "schema_version", -1) ==
+          TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_SCHEMA_VERSION &&
+      json_get_string(record, "id") &&
+      strcmp(json_get_string(record, "id"), run->attempt_key) == 0 &&
+      json_get_string(record, "attempt_key") &&
+      strcmp(json_get_string(record, "attempt_key"), run->attempt_key) == 0 &&
+      json_get_string(record, "thread_id") &&
+      strcmp(json_get_string(record, "thread_id"), run->thread_id) == 0 &&
+      json_get_string(record, "attempt_id") &&
+      strcmp(json_get_string(record, "attempt_id"), run->attempt_id) == 0 &&
+      json_get_string(record, "plan_hash") &&
+      strcmp(json_get_string(record, "plan_hash"), run->plan_hash) == 0 &&
+      json_get_string(record, "tool_name") &&
+      strcmp(json_get_string(record, "tool_name"), run->tool_name) == 0 &&
+      json_get_string(record, "result_schema") &&
+      strcmp(json_get_string(record, "result_schema"), run->result_schema_json) == 0 &&
+      json_get_int(record, "effects", -1) == (int)run->effects &&
+      json_get_double(record, "authority_generation", -1.0) ==
+          (double)run->authority.generation &&
+      (run_execution_id = json_get_string(record, "run_execution_id")) != NULL &&
+      run_execution_id[0] != '\0';
+}
+
+/* This is the only record allowed to persist a typed Inspect result. */
+static int turbo_agent_compiled_inspect_attempt_write(
+    turbo_agent_compiled_inspect_run_t *run, const char *phase,
+    turbo_tool_status_t status, const char *message, const json_value_t *result) {
+  json_value_t *existing = NULL;
+  json_value_t *record = NULL;
+  char updated_at[32];
+  char *serialized = NULL;
+  const char *existing_phase;
+  int read_status;
+  int is_start;
+  int rc = -1;
+  if (!run || !run->runtime || !run->attempt_key[0] || !run->attempt_id ||
+      !run->thread_id || !run->execution_id || !run->tool_name ||
+      !run->result_schema_json || !run->plan_hash[0] || !phase ||
+      turbo_runtime_record_timestamp(updated_at, sizeof(updated_at)) != 0) return -1;
+
+  is_start = strcmp(phase, "started") == 0;
+  read_status = turbo_agent_runtime_store_get_json_status(
+      run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+      run->attempt_key, &existing);
+  if (is_start) {
+    if (read_status != SALTS_ENOENT) goto cleanup;
+  } else {
+    if (read_status != SALTS_OK ||
+        !turbo_agent_compiled_inspect_attempt_identity_matches(run, existing)) goto cleanup;
+    existing_phase = json_get_string(existing, "phase");
+    if (!existing_phase || strcmp(existing_phase, "started") != 0 ||
+        strcmp(json_get_string(existing, "run_execution_id") ?
+                   json_get_string(existing, "run_execution_id") : "",
+               run->execution_id) != 0) goto cleanup;
+  }
+
+  record = json_create_object();
+  if (!record ||
+      turbo_runtime_json_object_set_int64(record, "schema_version",
+          TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_SCHEMA_VERSION) != TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "id", run->attempt_key) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "attempt_key", run->attempt_key) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "thread_id", run->thread_id) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "attempt_id", run->attempt_id) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "run_execution_id", run->execution_id) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "plan_hash", run->plan_hash) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "tool_name", run->tool_name) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "result_schema", run->result_schema_json) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "effects", (int64_t)run->effects) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "authority_generation",
+          (int64_t)run->authority.generation) != TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "phase", phase) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "tool_status", (int64_t)status) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "created_at", run->created_at) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "updated_at", updated_at) !=
+          TURBO_RUNTIME_JSON_OK ||
+      (message && turbo_runtime_json_object_set_string(record, "error", message) !=
+          TURBO_RUNTIME_JSON_OK) ||
+      (result && turbo_runtime_json_object_set_clone(record, "result", result) !=
+          TURBO_RUNTIME_JSON_OK)) goto cleanup;
+
+  serialized = json_serialize(record, NULL);
+  if (!serialized || strlen(serialized) > TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_MAX_BYTES)
+    goto cleanup;
+  rc = turbo_agent_runtime_store_put_json(
+      run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+      run->attempt_key, record) == SALTS_OK ? 0 : -1;
+
+cleanup:
+  json_serialize_free(serialized);
+  turbo_runtime_json_destroy(record);
+  turbo_runtime_json_destroy(existing);
+  return rc;
+}
+
+/* Persist one per-Run lifecycle transition. Typed results stay in the durable
+ * attempt record above; this journal stores only the reference and Run phase. */
 static int turbo_agent_compiled_inspect_journal_write(
     turbo_agent_compiled_inspect_run_t *run, const char *phase,
     turbo_tool_status_t tool_status, const char *message, const json_value_t *result) {
@@ -412,9 +577,11 @@ static int turbo_agent_compiled_inspect_journal_write(
   int read_status;
   int rc = -1;
   int is_start;
+  (void)result; /* The Run journal intentionally never stores the typed result. */
 
   if (!run || !run->runtime || !run->execution_id || !run->thread_id ||
-      !run->tool_name || !run->plan_hash[0] || !run->created_at[0] ||
+      !run->tool_name || !run->attempt_id || !run->attempt_key[0] ||
+      !run->result_schema_json || !run->plan_hash[0] || !run->created_at[0] ||
       !run->certificate || !phase ||
       turbo_runtime_record_timestamp(updated_at, sizeof(updated_at)) != 0) return -1;
 
@@ -435,10 +602,17 @@ static int turbo_agent_compiled_inspect_journal_write(
                    json_get_string(existing, "execution_id") : "", run->execution_id) != 0 ||
         strcmp(json_get_string(existing, "thread_id") ?
                    json_get_string(existing, "thread_id") : "", run->thread_id) != 0 ||
+        strcmp(json_get_string(existing, "attempt_id") ?
+                   json_get_string(existing, "attempt_id") : "", run->attempt_id) != 0 ||
+        strcmp(json_get_string(existing, "attempt_key") ?
+                   json_get_string(existing, "attempt_key") : "", run->attempt_key) != 0 ||
         strcmp(json_get_string(existing, "tool_name") ?
                    json_get_string(existing, "tool_name") : "", run->tool_name) != 0 ||
         strcmp(json_get_string(existing, "plan_hash") ?
                    json_get_string(existing, "plan_hash") : "", run->plan_hash) != 0 ||
+        strcmp(json_get_string(existing, "result_schema") ?
+                   json_get_string(existing, "result_schema") : "", run->result_schema_json) != 0 ||
+        json_get_int(existing, "effects", -1) != (int)run->effects ||
         json_get_double(existing, "authority_generation", -1.0) !=
             (double)run->authority.generation) goto cleanup;
   }
@@ -451,9 +625,17 @@ static int turbo_agent_compiled_inspect_journal_write(
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "thread_id", run->thread_id) !=
           TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "attempt_id", run->attempt_id) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "attempt_key", run->attempt_key) !=
+          TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "tool_name", run->tool_name) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "plan_hash", run->plan_hash) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "result_schema", run->result_schema_json) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "effects", (int64_t)run->effects) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_int64(record, "authority_generation",
           (int64_t)run->authority.generation) != TURBO_RUNTIME_JSON_OK ||
@@ -474,8 +656,6 @@ static int turbo_agent_compiled_inspect_journal_write(
       turbo_runtime_json_object_set_clone(record, "certificate", run->certificate) !=
           TURBO_RUNTIME_JSON_OK ||
       (message && turbo_runtime_json_object_set_string(record, "diagnostic", message) !=
-          TURBO_RUNTIME_JSON_OK) ||
-      (result && turbo_runtime_json_object_set_clone(record, "result", result) !=
           TURBO_RUNTIME_JSON_OK)) goto cleanup;
 
   rc = turbo_agent_runtime_store_put_json(
@@ -570,15 +750,23 @@ static int turbo_agent_compiled_inspect_execute_node(
     turbo_graph_exec_ctx_t *ctx, void *user_data) {
   turbo_agent_compiled_inspect_run_t *run = (turbo_agent_compiled_inspect_run_t *)user_data;
   json_value_t *result = NULL;
+  json_value_t *stored = NULL;
+  json_value_t *run_result = NULL;
   json_value_t *record;
+  const json_value_t *stored_result;
+  const char *phase;
   turbo_tool_status_t status;
   int cancel_status;
+  int read_status;
+  int is_replay = 0;
+
   if (!ctx || !ctx->json_value_state || !run) return -1;
   record = turbo_agent_compiled_execution_record_state(ctx->json_value_state);
   if (!record || !json_get_string(record, "phase") ||
       strcmp(json_get_string(record, "phase"), "started") != 0) {
     turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_SOURCE_INVALID,
-        TURBO_TOOL_ERROR, SALTS_EPROTO, "compiled execution did not reach its in-memory started phase");
+        TURBO_TOOL_ERROR, SALTS_EPROTO,
+        "compiled execution did not reach its in-memory started phase");
     return -1;
   }
   if (turbo_agent_tool_authority_snapshot_is_current(run->agent, &run->authority) != 1) {
@@ -606,90 +794,209 @@ static int turbo_agent_compiled_inspect_execute_node(
     return -1;
   }
 
-  /* The Runtime Segment's graph checkpoint callback is not a durable per-edge
-   * commit. This Runtime Store record is the explicit pre-callback gate. */
+  /* Each Run has its own reference-only journal row. The stable attempt record
+   * below is the only durable authority for a typed result. */
   if (turbo_agent_compiled_inspect_journal_write(
           run, "started", TURBO_TOOL_OK, NULL, NULL) != 0) {
     turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
         TURBO_TOOL_ERROR, SALTS_EIO,
-        "could not persist compiled execution start journal; tool callback was not invoked");
+        "could not persist compiled Run journal before attempt lookup; callback was not invoked");
     (void)turbo_agent_compiled_inspect_set_phase(
         ctx->json_value_state, "journal_failed", run->tool_status, run->failure_message);
     return -1;
   }
   run->journal_started = 1;
-  run->callback_started = 1;
-  status = turbo_agent_execute_compiled_plan(run->plan, run->tool_context, &result);
-  run->tool_status = status;
-  if (status != TURBO_TOOL_OK) {
-    turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
-        status, SALTS_EIO, "compiled tool callback failed; no automatic retry was attempted");
-    (void)turbo_agent_compiled_inspect_set_phase(
-        ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
-    turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
-    turbo_runtime_json_destroy(result);
-    return -1;
-  }
-  if (!result || turbo_tool_schema_validate_result_json_value(
-          run->approved, run->tool_name, result, NULL, 0) != TURBO_TOOL_SCHEMA_VALID) {
-    turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID,
-        TURBO_TOOL_ERROR, SALTS_EPROTO,
-        "compiled tool returned a result violating its admitted schema; no retry was attempted");
-    (void)turbo_agent_compiled_inspect_set_phase(
-        ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
-    turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
-    turbo_runtime_json_destroy(result);
-    return -1;
-  }
-  if (turbo_agent_tool_authority_snapshot_is_current(run->agent, &run->authority) != 1) {
-    turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_CAPABILITY_DENIED,
-        TURBO_TOOL_ERROR, SALTS_EPROTO,
-        "Host Tool Authority changed during callback; result was not committed");
-    (void)turbo_agent_compiled_inspect_set_phase(
-        ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
-    turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
-    turbo_runtime_json_destroy(result);
-    return -1;
-  }
 
-  /* Prepare the full successful Run state first. The journal commit is the
-   * durable result boundary; if it fails, return an ambiguous outcome and do
-   * not execute the tool again. */
-  if (turbo_runtime_json_object_set_clone(record, "result", result) != TURBO_RUNTIME_JSON_OK ||
-      turbo_agent_compiled_inspect_set_phase(
-          ctx->json_value_state, "committed", TURBO_TOOL_OK, NULL) != 0) {
-    turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
-        TURBO_TOOL_ERROR, SALTS_ENOMEM,
-        "could not construct the committed compiled Run state after callback");
-    (void)turbo_agent_compiled_inspect_set_phase(
-        ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
-    turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
-    turbo_runtime_json_destroy(result);
-    return -1;
-  }
-  if (turbo_agent_compiled_inspect_journal_write(
-          run, "committed", TURBO_TOOL_OK, NULL, result) != 0) {
+  read_status = turbo_agent_runtime_store_get_json_status(
+      run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+      run->attempt_key, &stored);
+  if (read_status == SALTS_OK) {
+    phase = stored ? json_get_string(stored, "phase") : NULL;
+    if (!turbo_agent_compiled_inspect_attempt_identity_matches(run, stored) || !phase) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_SOURCE_INVALID,
+          TURBO_TOOL_ERROR, SALTS_EPROTO,
+          "durable Inspect attempt identity or schema mismatch; callback was not invoked");
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+    if (strcmp(phase, "committed") != 0) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
+          TURBO_TOOL_UNKNOWN_SIDE_EFFECT, SALTS_EBUSY,
+          "durable Inspect attempt is not committed; automatic callback replay is forbidden");
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+    if (json_get_int(stored, "tool_status", -1) != TURBO_TOOL_OK ||
+        !(stored_result = json_object_get(stored, "result")) ||
+        turbo_tool_schema_validate_result_json_value(
+            run->approved, run->tool_name, stored_result, NULL, 0) !=
+            TURBO_TOOL_SCHEMA_VALID) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID,
+          TURBO_TOOL_ERROR, SALTS_EPROTO,
+          "committed durable Inspect attempt has an invalid typed result; callback was not invoked");
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+    is_replay = 1;
+    run->replayed = 1;
+    run_result = json_clone(stored_result);
+    if (!run_result ||
+        turbo_runtime_json_object_set_clone(record, "result", stored_result) !=
+            TURBO_RUNTIME_JSON_OK ||
+        turbo_agent_compiled_inspect_set_phase(
+            ctx->json_value_state, "committed", TURBO_TOOL_OK, NULL) != 0) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
+          TURBO_TOOL_ERROR, SALTS_ENOMEM,
+          "could not publish the already committed Inspect result into the current Run state");
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+  } else if (read_status == SALTS_ENOENT) {
+    if (turbo_agent_compiled_inspect_attempt_write(
+            run, "started", TURBO_TOOL_OK, NULL, NULL) != 0) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
+          TURBO_TOOL_ERROR, SALTS_EIO,
+          "could not persist durable Inspect STARTED record; callback was not invoked");
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+
+    run->callback_started = 1;
+    status = turbo_agent_execute_compiled_plan(run->plan, run->tool_context, &result);
+    run->tool_status = status;
+    if (status != TURBO_TOOL_OK) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
+          status, SALTS_EIO, "compiled tool callback failed; no automatic retry was attempted");
+      (void)turbo_agent_compiled_inspect_attempt_write(
+          run, "outcome_unknown", run->tool_status, run->failure_message, NULL);
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+    if (!result || turbo_tool_schema_validate_result_json_value(
+            run->approved, run->tool_name, result, NULL, 0) != TURBO_TOOL_SCHEMA_VALID) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_TOOL_SCHEMA_INVALID,
+          TURBO_TOOL_ERROR, SALTS_EPROTO,
+          "compiled tool returned a result violating its admitted schema; no retry was attempted");
+      (void)turbo_agent_compiled_inspect_attempt_write(
+          run, "outcome_unknown", run->tool_status, run->failure_message, NULL);
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+    if (turbo_agent_tool_authority_snapshot_is_current(run->agent, &run->authority) != 1) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_CAPABILITY_DENIED,
+          TURBO_TOOL_ERROR, SALTS_EPROTO,
+          "Host Tool Authority changed during callback; result delivery was withheld");
+      (void)turbo_agent_compiled_inspect_attempt_write(
+          run, "outcome_unknown", run->tool_status, run->failure_message, NULL);
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+    if (turbo_agent_compiled_inspect_attempt_write(
+            run, "committed", TURBO_TOOL_OK, NULL, result) != 0) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
+          TURBO_TOOL_ERROR, SALTS_EIO,
+          "tool returned a valid result but durable attempt commit failed; delivery was withheld");
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+    /* Read the canonical outcome back from the durable attempt record before
+     * exposing it in the current Run result or transient JSON-native state. */
+    turbo_runtime_json_destroy(stored);
+    stored = NULL;
+    read_status = turbo_agent_runtime_store_get_json_status(
+        run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        run->attempt_key, &stored);
+    stored_result = stored ? json_object_get(stored, "result") : NULL;
+    if (read_status != SALTS_OK ||
+        !turbo_agent_compiled_inspect_attempt_identity_matches(run, stored) ||
+        !stored || !json_get_string(stored, "phase") ||
+        strcmp(json_get_string(stored, "phase"), "committed") != 0 ||
+        json_get_int(stored, "tool_status", -1) != TURBO_TOOL_OK ||
+        !stored_result ||
+        turbo_tool_schema_validate_result_json_value(
+            run->approved, run->tool_name, stored_result, NULL, 0) !=
+            TURBO_TOOL_SCHEMA_VALID) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_SOURCE_INVALID,
+          TURBO_TOOL_ERROR, SALTS_EIO,
+          "durable Inspect commit could not be read back and verified; result delivery was withheld");
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+    run_result = json_clone(stored_result);
+    if (!run_result ||
+        turbo_runtime_json_object_set_clone(record, "result", stored_result) !=
+            TURBO_RUNTIME_JSON_OK ||
+        turbo_agent_compiled_inspect_set_phase(
+            ctx->json_value_state, "committed", TURBO_TOOL_OK, NULL) != 0) {
+      turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
+          TURBO_TOOL_ERROR, SALTS_ENOMEM,
+          "could not publish the durable Inspect result into the current Run state");
+      (void)turbo_agent_compiled_inspect_set_phase(
+          ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+      turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+      goto cleanup;
+    }
+  } else {
     turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
         TURBO_TOOL_ERROR, SALTS_EIO,
-        "tool returned a valid result but its journal commit failed; result delivery was withheld and no retry was attempted");
+        "durable Inspect attempt lookup failed; callback was not invoked");
     (void)turbo_agent_compiled_inspect_set_phase(
         ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
     turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
-    turbo_runtime_json_destroy(result);
-    return -1;
+    goto cleanup;
   }
 
-  run->result = result;
+  if (turbo_agent_compiled_inspect_journal_write(
+          run, "committed", TURBO_TOOL_OK, NULL, NULL) != 0) {
+    turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
+        TURBO_TOOL_ERROR, SALTS_EIO,
+        is_replay
+          ? "committed attempt was read, but the current Run journal commit failed"
+          : "durable attempt committed, but the current Run journal commit failed");
+    (void)turbo_agent_compiled_inspect_set_phase(
+        ctx->json_value_state, "outcome_unknown", run->tool_status, run->failure_message);
+    turbo_agent_compiled_inspect_mark_unknown(run, run->failure_message);
+    goto cleanup;
+  }
+
+  run->result = run_result;
+  run_result = NULL;
+  run->tool_status = TURBO_TOOL_OK;
   run->committed = 1;
   run->failure_rc = SALTS_OK;
   run->failure_message[0] = '\0';
-  return 0;
+
+cleanup:
+  turbo_runtime_json_destroy(stored);
+  turbo_runtime_json_destroy(run_result);
+  turbo_runtime_json_destroy(result);
+  return run->committed ? 0 : -1;
 }
 
 static json_value_t *turbo_agent_compiled_inspect_initial_state(
     const char *execution_id, const char *thread_id, const char *tool_name,
-    const char *plan_hash, uint64_t authority_generation,
-    const json_value_t *certificate) {
+    const char *attempt_id, const char *attempt_key, const char *plan_hash,
+    uint64_t authority_generation, const json_value_t *certificate) {
   json_value_t *state = turbo_agent_state_create();
   json_value_t *record = json_create_object();
   if (!state || !record ||
@@ -700,6 +1007,10 @@ static json_value_t *turbo_agent_compiled_inspect_initial_state(
       turbo_runtime_json_object_set_string(record, "thread_id", thread_id) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "tool_name", tool_name) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "attempt_id", attempt_id) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_string(record, "attempt_key", attempt_key) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "plan_hash", plan_hash) !=
           TURBO_RUNTIME_JSON_OK ||
@@ -729,11 +1040,12 @@ static json_value_t *turbo_agent_compiled_inspect_initial_state(
 /* A synchronous compiled Inspect is executed inside the existing Session/Runtime
  * Run. Three graph nodes force Runtime to persist an admitted checkpoint and
  * then a started checkpoint BEFORE the tool callback node is entered. */
-int turbo_agent_harness_execute_compiled_inspect_json(
+static int turbo_agent_harness_execute_compiled_inspect_impl(
     turbo_agent_harness_t *harness,
     const turbo_agent_compiler_config_t *compiler_config,
     const char *source_json, size_t source_json_size,
     const turbo_tool_execution_context_t *context,
+    const char *requested_attempt_id, int *out_replayed,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,
@@ -761,10 +1073,13 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   char *execution_id = NULL;
   char *owned_thread_id = NULL;
   char plan_hash[32];
+  char attempt_key[192] = {0};
   const char *thread_id;
+  const char *attempt_id;
   int strict_result = 0;
   int rc = SALTS_EIO;
 
+  if (out_replayed) *out_replayed = 0;
   if (out_result) *out_result = NULL;
   if (out_certificate) *out_certificate = NULL;
   if (out_tool_status) *out_tool_status = TURBO_TOOL_INVALID_ARGUMENT;
@@ -776,6 +1091,9 @@ int turbo_agent_harness_execute_compiled_inspect_json(
       (compiler_config->allowed_capability_count && !compiler_config->allowed_capabilities) ||
       !source_json || !source_json_size || !out_result || !out_certificate ||
       !out_tool_status ||
+      (requested_attempt_id &&
+       (!out_replayed ||
+        !turbo_agent_compiled_inspect_attempt_id_valid(requested_attempt_id))) ||
       (context && (context->abi_version != TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION ||
                    context->struct_size < sizeof(*context)))) {
     return SALTS_EINVAL;
@@ -862,7 +1180,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     goto done;
   }
 
-  thread_id = turbo_agent_app_thread_id(harness->app);
+  thread_id = harness->compiled_attempt_thread_id;
   execution_id = turbo_runtime_record_uuid("compiled");
   if (!thread_id || !thread_id[0] || !execution_id ||
       snprintf(plan_hash, sizeof(plan_hash), "%016" PRIx64,
@@ -872,8 +1190,14 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     rc = SALTS_EIO;
     goto done;
   }
+  attempt_id = requested_attempt_id ? requested_attempt_id : execution_id;
+  if (turbo_agent_compiled_inspect_attempt_key(
+          thread_id, attempt_id, attempt_key, sizeof(attempt_key)) != 0) {
+    rc = SALTS_EINVAL;
+    goto done;
+  }
   /* Session finalization may replace its owned thread ID. Keep the Run
-   * journal identity independent of that mutable Session-owned storage. */
+   * and attempt identity tied to the immutable Harness snapshot. */
   owned_thread_id = (char *)malloc(strlen(thread_id) + 1);
   if (!owned_thread_id) {
     rc = SALTS_ENOMEM;
@@ -882,7 +1206,8 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   memcpy(owned_thread_id, thread_id, strlen(thread_id) + 1);
   thread_id = owned_thread_id;
   initial_state = turbo_agent_compiled_inspect_initial_state(
-      execution_id, thread_id, name, plan_hash, authority.generation, certificate);
+      execution_id, thread_id, name, attempt_id, attempt_key, plan_hash,
+      authority.generation, certificate);
   if (!initial_state) {
     rc = SALTS_ENOMEM;
     goto done;
@@ -898,6 +1223,10 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   compiled_run.execution_id = execution_id;
   compiled_run.thread_id = thread_id;
   compiled_run.tool_name = name;
+  compiled_run.attempt_id = attempt_id;
+  compiled_run.result_schema_json = result_schema_json;
+  compiled_run.effects = effects;
+  snprintf(compiled_run.attempt_key, sizeof(compiled_run.attempt_key), "%s", attempt_key);
   snprintf(compiled_run.plan_hash, sizeof(compiled_run.plan_hash), "%s", plan_hash);
   compiled_run.diagnostic = out_diagnostic;
   compiled_run.tool_status = TURBO_TOOL_ERROR;
@@ -952,6 +1281,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   rc = SALTS_OK;
 
 done:
+  if (out_replayed) *out_replayed = compiled_run.replayed;
   if (out_tool_status && compiled_run.plan &&
       compiled_run.tool_status != TURBO_TOOL_INVALID_ARGUMENT)
     *out_tool_status = compiled_run.tool_status;
@@ -967,6 +1297,36 @@ done:
   free((void *)effective_capabilities);
   turbo_agent_harness_end_failed_submit(harness);
   return rc;
+}
+
+int turbo_agent_harness_execute_compiled_inspect_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate) {
+  return turbo_agent_harness_execute_compiled_inspect_impl(
+      harness, compiler_config, source_json, source_json_size, context, NULL, NULL,
+      out_diagnostic, out_tool_status, out_result, out_certificate);
+}
+
+int turbo_agent_harness_execute_compiled_inspect_durable_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    const char *attempt_id, int *out_replayed,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate) {
+  if (!out_replayed || !attempt_id) return SALTS_EINVAL;
+  return turbo_agent_harness_execute_compiled_inspect_impl(
+      harness, compiler_config, source_json, source_json_size, context, attempt_id, out_replayed,
+      out_diagnostic, out_tool_status, out_result, out_certificate);
 }
 
 static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,

@@ -759,6 +759,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   json_value_t *result_state = NULL;
   json_value_t *certificate = NULL;
   char *execution_id = NULL;
+  char *owned_thread_id = NULL;
   char plan_hash[32];
   const char *thread_id;
   int strict_result = 0;
@@ -871,6 +872,15 @@ int turbo_agent_harness_execute_compiled_inspect_json(
     rc = SALTS_EIO;
     goto done;
   }
+  /* Session finalization may replace its owned thread ID. Keep the Run
+   * journal identity independent of that mutable Session-owned storage. */
+  owned_thread_id = (char *)malloc(strlen(thread_id) + 1);
+  if (!owned_thread_id) {
+    rc = SALTS_ENOMEM;
+    goto done;
+  }
+  memcpy(owned_thread_id, thread_id, strlen(thread_id) + 1);
+  thread_id = owned_thread_id;
   initial_state = turbo_agent_compiled_inspect_initial_state(
       execution_id, thread_id, name, plan_hash, authority.generation, certificate);
   if (!initial_state) {
@@ -943,6 +953,7 @@ done:
   turbo_runtime_json_destroy(initial_state);
   turbo_runtime_json_destroy(certificate);
   turbo_graph_destroy(graph);
+  free(owned_thread_id);
   free(execution_id);
   turbo_agent_executable_plan_destroy(plan);
   free((void *)effective_capabilities);

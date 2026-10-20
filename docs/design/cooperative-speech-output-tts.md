@@ -1,7 +1,7 @@
 # RFC M4 — Cooperative SpeechOutput / TTS Provider (C11)
 
-**DESIGN ONLY — DRAFT / DO NOT MERGE / DO NOT RELEASE.** See [Issue #164](https://github.com/qigao/TurboAgent/issues/164).
-No TTS implementation, model download, voice/audio upload, playback activation or release is authorized by this RFC.
+**Accepted design note — M4.0 API/fake-provider slice is merged; later stages remain unimplemented.** See [Issue #164](https://github.com/qigao/TurboAgent/issues/164).
+This document specifies the architecture and acceptance gates; it does not authorize model downloads, voice/audio uploads, automatic playback activation or a release.
 
 ## Decision
 
@@ -11,7 +11,7 @@ Cooperation means caller-driven turn-taking and cancellation, not shared ownersh
 
 ### Concrete existing contracts
 
-The unmerged SpeechInput M1 header (speech_input/include/turbo_agent_speech_input.h) defines checked ASR FINAL, a borrowed Provider context, caller-driven pump, 320 samples of 16kHz S16 mono per 20ms and a bounded capture queue. Its PARTIAL cannot authorize Agent/tool invocation. The existing Harness exposes start_text, cancellation, execution and borrowed event sinks; the host explicitly controls whether ASR FINAL is submitted and which *approved visible* assistant FINAL is spoken.
+The merged SpeechInput M1 header (speech_input/include/turbo_agent_speech_input.h) defines checked ASR FINAL, a borrowed Provider context, caller-driven pump, 320 samples of 16kHz S16 mono per 20ms and a bounded capture queue. Its PARTIAL cannot authorize Agent/tool invocation. The existing Harness exposes start_text, cancellation, execution and borrowed event sinks; the host explicitly controls whether ASR FINAL is submitted and which *approved visible* assistant FINAL is spoken.
 
 SaltsUtils already defines **Salts::Playback** (playback/include/salts_playback.h; docs/architecture/media-playback-ownership.md). It owns the output device and bounded SPSC ring. Rates 8/16/24/48kHz, mono/stereo, S16/S32/F32 and an explicit 10–2000ms ring are supported by its source contract. There is **one producer** for playback_write; short successful writes are explicit backpressure. Producer must be quiescent before clear or destroy. Drain means buffered PCM was consumed, not guaranteed physically heard. **Independently verify that the target installed SaltsUtils.Native SDK exports Playback** before integrating: master-source availability does not prove the release pin.
 
@@ -40,7 +40,7 @@ Do **not** implement another native speaker/audio-device backend in TurboAgent.
 
 No audio device callback may execute ASR/TTS/CHttp/Agent/Session code. Voice Coordinator may observe user controls and terminal session events, but it does not copy model/tool internals to the speech synthesizer. The TTS Provider must not initiate any tool call or submit another session run.
 
-## Proposed C11 v1 ABI sketch — for review, NOT an installed header
+## C11 v1 ABI contract — the installed header is authoritative
 
 ~~~c
 #define TURBO_AGENT_SPEECH_OUTPUT_ABI_VERSION 1u

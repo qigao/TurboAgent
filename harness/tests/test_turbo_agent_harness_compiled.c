@@ -638,6 +638,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
 
     turbo_runtime_json_destroy(journal_records);
     journal_records = NULL;
+    json_free(certificate);
+    certificate = NULL;
 
     /* Remove only the injected finalization fault. Retrying this same attempt
      * must settle the Session Run from the committed attempt without a 2nd call. */

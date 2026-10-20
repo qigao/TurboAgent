@@ -95,7 +95,8 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
  *
  * The JSON-native Run state for a successful invocation contains a versioned
  * `compiled_execution` record with execution id, plan hash/certificate,
- * capability generation, canonical tool identity, backend and approval decision.
+ * Host authority generation and capability mask, canonical tool identity,
+ * backend and approval decision.
  * Before calling the tool, Harness persists a per-Run reference in
  * `agent_compiled_execution_journal` and an identity-bound `started` record in
  * `compiled_inspect_attempts`. The callback is not entered unless both writes
@@ -135,8 +136,8 @@ CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
  *
  * attempt_id must be 1-64 ASCII characters from [A-Za-z0-9_-], scoped by the
  * Harness's captured Session thread identity. Reusing this identity with a
- * different plan, tool, result contract, or Host authority generation fails
- * closed. A committed result is loaded from compiled_inspect_attempts and the
+ * different plan, tool, result contract, Host authority generation, or granted
+ * capability mask fails closed. A committed result is loaded from compiled_inspect_attempts and the
  * tool callback is not invoked again. STARTED/unknown attempts are never
  * automatically retried.
  *

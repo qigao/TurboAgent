@@ -353,7 +353,7 @@ static int turbo_agent_harness_compiler_authority_configure(
 #define TURBO_AGENT_COMPILED_EXECUTION_KEY "compiled_execution"
 #define TURBO_AGENT_COMPILED_EXECUTION_JOURNAL_SCHEMA_VERSION 2
 #define TURBO_AGENT_COMPILED_EXECUTION_JOURNAL_COLLECTION "agent_compiled_execution_journal"
-#define TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_SCHEMA_VERSION 2
+#define TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_SCHEMA_VERSION 3
 #define TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION "compiled_inspect_attempts"
 #define TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_MAX_BYTES (1024u * 1024u)
 
@@ -859,7 +859,7 @@ static int turbo_agent_compiled_inspect_execute_node(
     }
   } else if (read_status == SALTS_ENOENT) {
     if (turbo_agent_compiled_inspect_attempt_write(
-            run, "started", TURBO_TOOL_OK, NULL, NULL) != 0) {
+            run, "started", TURBO_TOOL_UNKNOWN_SIDE_EFFECT, NULL, NULL) != 0) {
       turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
           TURBO_TOOL_ERROR, SALTS_EIO,
           "could not persist durable Inspect STARTED record; callback was not invoked");

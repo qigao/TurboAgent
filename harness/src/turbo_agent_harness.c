@@ -476,6 +476,8 @@ static int turbo_agent_compiled_inspect_attempt_identity_matches(
       json_get_string(record, "result_schema") &&
       strcmp(json_get_string(record, "result_schema"), run->result_schema_json) == 0 &&
       json_get_int(record, "effects", -1) == (int)run->effects &&
+      json_get_int(record, "authority_capability_mask", -1) ==
+          (int)run->authority.capability_mask &&
       json_get_double(record, "authority_generation", -1.0) ==
           (double)run->authority.generation &&
       (run_execution_id = json_get_string(record, "run_execution_id")) != NULL &&
@@ -539,6 +541,8 @@ static int turbo_agent_compiled_inspect_attempt_write(
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_int64(record, "authority_generation",
           (int64_t)run->authority.generation) != TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "authority_capability_mask",
+          (int64_t)run->authority.capability_mask) != TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "phase", phase) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_int64(record, "tool_status", (int64_t)status) !=
@@ -614,6 +618,8 @@ static int turbo_agent_compiled_inspect_journal_write(
         strcmp(json_get_string(existing, "result_schema") ?
                    json_get_string(existing, "result_schema") : "", run->result_schema_json) != 0 ||
         json_get_int(existing, "effects", -1) != (int)run->effects ||
+        json_get_int(existing, "authority_capability_mask", -1) !=
+            (int)run->authority.capability_mask ||
         json_get_double(existing, "authority_generation", -1.0) !=
             (double)run->authority.generation) goto cleanup;
   }
@@ -640,6 +646,8 @@ static int turbo_agent_compiled_inspect_journal_write(
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_int64(record, "authority_generation",
           (int64_t)run->authority.generation) != TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "authority_capability_mask",
+          (int64_t)run->authority.capability_mask) != TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "backend", "runtime_tools") !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "execution_mode", "compiled_inspect") !=
@@ -993,7 +1001,8 @@ cleanup:
 static json_value_t *turbo_agent_compiled_inspect_initial_state(
     const char *execution_id, const char *thread_id, const char *tool_name,
     const char *attempt_id, const char *attempt_key, const char *plan_hash,
-    uint64_t authority_generation, const json_value_t *certificate) {
+    uint64_t authority_generation, uint32_t authority_capability_mask,
+    const json_value_t *certificate) {
   json_value_t *state = turbo_agent_state_create();
   json_value_t *record = json_create_object();
   if (!state || !record ||
@@ -1013,6 +1022,8 @@ static json_value_t *turbo_agent_compiled_inspect_initial_state(
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_int64(record, "authority_generation",
           (int64_t)authority_generation) != TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "authority_capability_mask",
+          (int64_t)authority_capability_mask) != TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "backend", "runtime_tools") !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "execution_mode", "compiled_inspect") !=
@@ -1204,7 +1215,7 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
   thread_id = owned_thread_id;
   initial_state = turbo_agent_compiled_inspect_initial_state(
       execution_id, thread_id, name, attempt_id, attempt_key, plan_hash,
-      authority.generation, certificate);
+      authority.generation, authority.capability_mask, certificate);
   if (!initial_state) {
     rc = SALTS_ENOMEM;
     goto done;

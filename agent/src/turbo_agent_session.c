@@ -596,6 +596,15 @@ int turbo_agent_session_has_pending_bound_claim_commit_internal(
   return session ? session->pending_bound_claim_commit : 0;
 }
 
+/* Narrow internal seam for exercising a real bound-claim finalization through
+ * the Harness's failure-injection tests. Normal Session turns bind this event
+ * automatically when they append the inbox_message event to Run state. */
+int turbo_agent_session_bind_claim_event_internal(
+    turbo_agent_session_t *session, const char *inbox_id, const char *event_id) {
+  if (!session || !session->inbox) return SALTS_EINVAL;
+  return turbo_agent_inbox_bind_applied_event(session->inbox, inbox_id, event_id);
+}
+
 CXX_C_API int turbo_agent_session_context_configure(
     turbo_agent_session_t *session, const turbo_agent_context_policy_t *policy) {
   turbo_agent_context_t *context;

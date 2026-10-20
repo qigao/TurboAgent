@@ -19,6 +19,9 @@ struct turbo_agent_harness_s {
   turbo_agent_app_t *app;
   cmeta_threadpool_t *executor;
   turbo_agent_execution_t *active_execution;
+  /* Immutable identity scope for durable compiled attempts. Session summary
+   * capture may replace its current thread_id string after a Run. */
+  char *compiled_attempt_thread_id;
   int submitting;
 };
 
@@ -82,6 +85,21 @@ turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_conf
     free(harness);
     return NULL;
   }
+  {
+    turbo_agent_session_t *session = turbo_agent_app_session(harness->app);
+    const char *thread_id = turbo_agent_session_thread_id(session);
+    if (thread_id && thread_id[0]) {
+      size_t thread_id_size = strlen(thread_id) + 1;
+      harness->compiled_attempt_thread_id = (char *)malloc(thread_id_size);
+      if (!harness->compiled_attempt_thread_id) {
+        turbo_agent_app_destroy(harness->app);
+        cmeta_mutex_destroy(&harness->mutex);
+        free(harness);
+        return NULL;
+      }
+      memcpy(harness->compiled_attempt_thread_id, thread_id, thread_id_size);
+    }
+  }
   harness->executor = config->executor;
   return harness;
 }
@@ -114,6 +132,7 @@ void turbo_agent_harness_release(turbo_agent_harness_t *harness) {
   atomic_thread_fence(memory_order_acquire);
   turbo_agent_execution_release(harness->active_execution);
   turbo_agent_app_destroy(harness->app);
+  free(harness->compiled_attempt_thread_id);
   cmeta_mutex_destroy(&harness->mutex);
   free(harness);
 }
@@ -682,7 +701,7 @@ static int turbo_agent_harness_execute_compiled_inspect_durable_impl(
     int64_t saved_status;
 
     if (!session || !(runtime = turbo_agent_session_runtime(session)) ||
-        !(thread_id = turbo_agent_session_thread_id(session)) ||
+        !(thread_id = harness->compiled_attempt_thread_id) ||
         !turbo_harness_inspect_key_component(thread_id, 80)) {
       rc = SALTS_EINVAL;
       goto done;

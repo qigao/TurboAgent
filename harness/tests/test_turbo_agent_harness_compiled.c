@@ -377,6 +377,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_agent_harness_t *harness;
     turbo_agent_runtime_t *runtime;
     json_value_t *result = NULL, *certificate = NULL, *record = NULL;
+    char record_id[128];
     int replayed = -1;
     turbo_tool_status_t status = TURBO_TOOL_ERROR;
 
@@ -396,6 +397,9 @@ spec("Harness Phase-1 compiled Inspect boundary") {
 
     runtime = turbo_agent_session_runtime(
         turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    snprintf(record_id, sizeof(record_id), "%03u_%s_%s",
+             (unsigned)strlen("authority-replay-thread"),
+             "authority-replay-thread", "revoked_attempt");
     check_equal(set_compiled_host_policy(harness, 0), 0);
     check_equal(run_durable_inspect(harness, compiled_inspect_source, "revoked_attempt",
         &replayed, &status, &result, &certificate) != SALTS_OK, 1);
@@ -403,7 +407,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_null(result);
     check_equal(turbo_agent_runtime_store_get_json_status(
         runtime, "compiled_inspect_attempts",
-        "023_authority-replay-thread_revoked_attempt", &record), SALTS_OK);
+        record_id, &record), SALTS_OK);
     check_equal(json_get_string(record, "phase"), "committed");
     json_free(record); record = NULL;
     json_free(certificate);
@@ -681,6 +685,7 @@ spec("Harness durable compiled Inspect attempt") {
     turbo_agent_harness_t *harness;
     turbo_agent_runtime_t *runtime;
     json_value_t *result = NULL, *certificate = NULL, *record = NULL;
+    char record_id[128];
     int replayed = -1;
     turbo_tool_status_t status = TURBO_TOOL_ERROR;
 
@@ -705,9 +710,11 @@ spec("Harness durable compiled Inspect attempt") {
 
     runtime = turbo_agent_session_runtime(
         turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    snprintf(record_id, sizeof(record_id), "%03u_%s_%s",
+             (unsigned)strlen("authority-callback-thread"),
+             "authority-callback-thread", "callback_revokes");
     check_equal(turbo_agent_runtime_store_get_json_status(
-        runtime, "compiled_inspect_attempts",
-        "025_authority-callback-thread_callback_revokes", &record), SALTS_OK);
+        runtime, "compiled_inspect_attempts", record_id, &record), SALTS_OK);
     check_equal(json_get_string(record, "phase"), "committed");
     check_not_null(json_object_get(record, "result"));
     json_free(record); record = NULL;

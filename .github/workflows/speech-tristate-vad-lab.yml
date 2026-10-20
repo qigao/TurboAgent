@@ -1,5 +1,8 @@
 name: Speech tri-state C11 VAD isolated diagnostic (#184)
 
+# Multiband-branch contract: sparse-band schema assertions below are valid only
+# on this feature branch; the parent #187 intentionally omits those fields.
+
 'on':
   pull_request:
     paths:

@@ -658,4 +658,59 @@ spec("Harness durable compiled Inspect attempt") {
     cmeta_threadpool_destroy(pool);
   }
 
+  it("retains a committed result but fences delivery when authority changes in the callback") {
+    compiled_inspect_probe_t probe = {0};
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_agent_harness_t *harness;
+    turbo_agent_runtime_t *runtime;
+    json_value_t *result = NULL, *certificate = NULL, *record = NULL;
+    int replayed = -1;
+    turbo_tool_status_t status = TURBO_TOOL_ERROR;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_durable_compiled_harness_with_store(
+        pool, registry, store, "authority-callback-thread");
+    check_not_null(harness);
+    probe.agent = turbo_agent_session_agent(
+        turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    probe.revoke_authority_during_callback = 1;
+
+    check_equal(run_durable_inspect(harness, compiled_inspect_source, "callback_revokes",
+        &replayed, &status, &result, &certificate) != SALTS_OK, 1);
+    check_equal(probe.calls, 1);
+    check_equal(replayed, 0);
+    check_null(result);
+    check_not_null(certificate);
+    json_free(certificate); certificate = NULL;
+
+    runtime = turbo_agent_session_runtime(
+        turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "compiled_inspect_attempts",
+        "025_authority-callback-thread_callback_revokes", &record), SALTS_OK);
+    check_equal(json_get_string(record, "phase"), "committed");
+    check_not_null(json_object_get(record, "result"));
+    json_free(record); record = NULL;
+
+    probe.revoke_authority_during_callback = 0;
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    check_equal(run_durable_inspect(harness, compiled_inspect_source, "callback_revokes",
+        &replayed, &status, &result, &certificate), SALTS_OK);
+    check_equal(replayed, 1);
+    check_equal(probe.calls, 1);
+    check_true(json_get_bool(result, "ok", false));
+    json_free(result); result = NULL;
+    json_free(certificate);
+
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
 }

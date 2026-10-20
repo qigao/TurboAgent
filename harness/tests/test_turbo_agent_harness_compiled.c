@@ -364,7 +364,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       run_state = json_object_get(run_record, "state_snapshot");
       run_execution = json_object_get(run_state, "compiled_execution");
       check_not_null(run_execution);
-      check_equal(json_get_int(run_execution, "schema_version", 0), 2);
+      check_equal(json_get_int(run_execution, "schema_version", 0), 3);
       check_equal(json_get_string(run_execution, "phase"), "committed");
       check_equal(json_get_string(run_execution, "backend"), "runtime_tools");
       check_equal(json_get_string(run_execution, "tool_name"), "repo.inspect");
@@ -384,7 +384,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       for (i = 0; i < json_array_size(journal_records); ++i) {
         const json_value_t *journal = json_array_get(journal_records, i);
         check_not_null(journal);
-        check_equal(json_get_int(journal, "schema_version", 0), 2);
+        check_equal(json_get_int(journal, "schema_version", 0), 3);
         check_equal(json_get_string(journal, "phase"), "committed");
         check_equal(json_get_string(journal, "thread_id"), probe.thread_id);
         check_equal(json_get_string(journal, "tool_name"), "repo.inspect");
@@ -415,6 +415,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
                 json_get_string(attempt_record, "attempt_key") &&
                 strcmp(json_get_string(attempt_record, "attempt_key"),
                        json_get_string(journal, "attempt_key")) == 0) {
+              check_equal(json_get_int(attempt_record, "schema_version", 0), 4);
               check_equal(json_get_string(attempt_record, "phase"), "committed");
               check_not_null(json_object_get(attempt_record, "authority_capability_mask"));
               check_true(json_get_bool(json_object_get(attempt_record, "result"), "ok", false));
@@ -813,6 +814,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(json_array_size(records), 1u);
     attempt = json_array_get(records, 0);
     check_not_null(attempt);
+    check_equal(json_get_int(attempt, "schema_version", 0), 4);
     check_equal(json_get_string(attempt, "phase"), "committed");
     check_true(json_get_bool(json_object_get(attempt, "result"), "ok", false));
     turbo_runtime_json_destroy(records);
@@ -848,6 +850,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(json_array_size(records), 1u);
     attempt = json_array_get(records, 0);
     check_not_null(attempt);
+    check_equal(json_get_int(attempt, "schema_version", 0), 4);
     check_equal(json_get_string(attempt, "phase"), "committed");
     check_true(json_get_bool(json_object_get(attempt, "result"), "ok", false));
     turbo_runtime_json_destroy(records);

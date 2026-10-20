@@ -394,11 +394,22 @@ spec("Harness Phase-1 compiled Inspect boundary") {
               runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
               "thread_id", probe.thread_id, &attempt_records), SALTS_OK);
           check_not_null(attempt_records);
-          check_equal(json_array_size(attempt_records), 1u);
-          attempt_record = json_array_get(attempt_records, 0);
-          check_not_null(attempt_record);
-          check_equal(json_get_string(attempt_record, "phase"), "committed");
-          check_true(json_get_bool(json_object_get(attempt_record, "result"), "ok", false));
+          size_t attempt_index;
+          int found_matching_attempt = 0;
+          check_equal(json_array_size(attempt_records), 2u);
+          for (attempt_index = 0; attempt_index < json_array_size(attempt_records);
+               ++attempt_index) {
+            attempt_record = json_array_get(attempt_records, attempt_index);
+            if (attempt_record &&
+                json_get_string(attempt_record, "attempt_key") &&
+                strcmp(json_get_string(attempt_record, "attempt_key"),
+                       json_get_string(journal, "attempt_key")) == 0) {
+              check_equal(json_get_string(attempt_record, "phase"), "committed");
+              check_true(json_get_bool(json_object_get(attempt_record, "result"), "ok", false));
+              found_matching_attempt = 1;
+            }
+          }
+          check_equal(found_matching_attempt, 1);
           turbo_runtime_json_destroy(attempt_records);
         }
       }

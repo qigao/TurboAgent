@@ -501,13 +501,14 @@ static int turbo_harness_inspect_record_write(
     turbo_agent_runtime_t *runtime, const char *key, const char *thread_id,
     const char *attempt_id, const char *hash_hex, const char *tool,
     const char *result_schema, turbo_tool_effect_flags_t effects,
+    uint64_t authority_generation,
     const char *phase, turbo_tool_status_t status, const char *error,
     const json_value_t *result) {
   json_value_t *record = json_create_object();
   char *serialized = NULL;
   int rc = SALTS_ENOMEM;
   if (!runtime || !record) goto cleanup;
-  if (turbo_runtime_json_object_set_int64(record, "schema_version", 1) !=
+  if (turbo_runtime_json_object_set_int64(record, "schema_version", 2) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "id", key) !=
           TURBO_RUNTIME_JSON_OK ||
@@ -522,6 +523,9 @@ static int turbo_harness_inspect_record_write(
       turbo_runtime_json_object_set_string(record, "result_schema", result_schema) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_int64(record, "effects", (int64_t)effects) !=
+          TURBO_RUNTIME_JSON_OK ||
+      turbo_runtime_json_object_set_int64(record, "authority_generation",
+                                          (int64_t)authority_generation) !=
           TURBO_RUNTIME_JSON_OK ||
       turbo_runtime_json_object_set_string(record, "phase", phase) !=
           TURBO_RUNTIME_JSON_OK ||
@@ -701,7 +705,9 @@ static int turbo_agent_harness_execute_compiled_inspect_durable_impl(
       }
       if (!stored || json_type(stored) != JSON_OBJECT ||
           turbo_runtime_json_value_as_int64(
-              json_object_get(stored, "schema_version"), INT64_MIN) != 1 ||
+              json_object_get(stored, "schema_version"), INT64_MIN) != 2 ||
+          turbo_runtime_json_value_as_int64(
+              json_object_get(stored, "authority_generation"), INT64_MIN) < 0 ||
           !turbo_harness_inspect_record_string_equals(stored, "id", record_id) ||
           !turbo_harness_inspect_record_string_equals(stored, "thread_id", thread_id) ||
           !turbo_harness_inspect_record_string_equals(stored, "attempt_id", attempt_id) ||
@@ -774,7 +780,8 @@ static int turbo_agent_harness_execute_compiled_inspect_durable_impl(
   if (durable) {
     rc = turbo_harness_inspect_record_write(
         runtime, record_id, thread_id, attempt_id, plan_hash_hex, name,
-        result_schema_json, effects, "started", TURBO_TOOL_UNKNOWN_SIDE_EFFECT,
+        result_schema_json, effects, authority.generation,
+        "started", TURBO_TOOL_UNKNOWN_SIDE_EFFECT,
         NULL, NULL);
     if (rc != SALTS_OK) goto done; /* Never invoke after failed durable STARTED. */
   }
@@ -804,7 +811,8 @@ static int turbo_agent_harness_execute_compiled_inspect_durable_impl(
   if (durable) {
     int write_rc = turbo_harness_inspect_record_write(
         runtime, record_id, thread_id, attempt_id, plan_hash_hex, name,
-        result_schema_json, effects, "committed", *out_tool_status,
+        result_schema_json, effects, authority.generation,
+        "committed", *out_tool_status,
         rc == SALTS_EPROTO ? "result_schema" : NULL,
         rc == SALTS_OK ? result : NULL);
     if (write_rc != SALTS_OK) {

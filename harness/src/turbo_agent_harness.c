@@ -3,6 +3,7 @@
 #include <json_parser.h>
 
 #include "turbo_agent_session_execution.h"
+#include "turbo_agent_session_internal.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_policy.h"
@@ -1227,6 +1228,16 @@ static int turbo_agent_harness_execute_compiled_inspect_impl(
   compiled_run.diagnostic = out_diagnostic;
   compiled_run.tool_status = TURBO_TOOL_ERROR;
   compiled_run.failure_rc = SALTS_EIO;
+
+  /* A prior Run can have committed its typed result before Session failed to
+   * persist the claimed inbox transition as applied. Retry that exact finalization
+   * write before asking Session to admit another Run; never replay its callback. */
+  rc = turbo_agent_session_retry_bound_claim_commit_internal(session);
+  if (rc != SALTS_OK && rc != SALTS_ENOENT) {
+    turbo_agent_compiled_inspect_fail(&compiled_run, TURBO_AGENT_COMPILE_OK,
+        TURBO_TOOL_ERROR, rc, "pending Session inbox finalization retry failed");
+    goto done;
+  }
 
   graph = turbo_graph_create("turbo-agent-compiled-inspect-v1");
   if (!graph ||

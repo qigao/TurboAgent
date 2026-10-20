@@ -22,5 +22,7 @@ cmake_install_headers(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
 if(BUILD_TESTS)
   cmake_add_test(SOURCES tests/test_turbo_agent_harness.c tests/test_turbo_agent_harness_server.c tests/test_turbo_agent_harness_compiled.c
     tests/test_turbo_agent_public_api.c
-    LIBS TurboAgent::Harness Salts::TinyTest FOLDER "Harness/tests")
+    LIBS TurboAgent::Harness Salts::TinyTest
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/../agent/src
+    FOLDER "Harness/tests")
 endif()

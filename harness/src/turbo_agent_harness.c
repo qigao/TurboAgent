@@ -12,6 +12,7 @@
 #include "turbo_runtime_store.h"
 
 #include <inttypes.h>
+#include <limits.h>
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -804,7 +805,8 @@ static int turbo_agent_compiled_inspect_execute_node(
       return -1;
     }
     saved_phase = json_get_string(stored_attempt, "phase");
-    saved_status = json_get_int(stored_attempt, "tool_status", INT64_MIN);
+    saved_status = turbo_runtime_json_value_as_int64(
+        json_object_get(stored_attempt, "tool_status"), INT64_MIN);
     saved_result = json_object_get(stored_attempt, "result");
     if (strcmp(saved_phase, "committed") == 0) {
       if (saved_status != TURBO_TOOL_OK || !saved_result ||

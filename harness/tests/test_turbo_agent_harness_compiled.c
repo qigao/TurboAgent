@@ -4,6 +4,7 @@
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_inbox.h"
+#include "turbo_agent_session_internal.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
 #include "turbo_runtime_store.h"
@@ -632,11 +633,16 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(turbo_agent_session_inbox_claim(
         session, TURBO_AGENT_INBOX_STEER, "compiled-inspect-finalization-test", &claim), SALTS_OK);
     check_not_null(claim);
+    check_not_null(json_get_string(claim, "inbox_id"));
+    check_equal(turbo_agent_session_bind_claim_event_internal(
+        session, json_get_string(claim, "inbox_id"),
+        "compiled-inspect-finalization-event"), SALTS_OK);
 
     run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
         allowed, 1, "session_finalize_retry", &replayed,
         &diagnostic, &tool_status, &result, &certificate);
     check_equal(run_rc, SALTS_EIO);
+    check_equal(((compiled_inspect_store_fault_t *)store.user_data)->failed_once, 1);
     check_equal(replayed, 0);
     check_equal(probe.calls, 1);
     check_null(result);

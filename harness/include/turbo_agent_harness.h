@@ -93,16 +93,16 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
  * granted capabilities intersected with the caller's compiler restrictions
  * are admitted. Side-effecting or UNKNOWN-effect tools are not admitted.
  *
- * The Harness persists a \`compiled_inspect_attempts\` record in the attached
+ * The Harness persists a `compiled_inspect_attempts` record in the attached
  * Runtime Store before callback dispatch. This attempt record is the sole durable
- * authority for the typed result. Each \`agent_compiled_execution_journal\` row
+ * authority for the typed result. Each `agent_compiled_execution_journal` row
  * contains only Run/authority metadata and a reference to the attempt, never a
  * second durable result payload. The callback is not entered if the STARTED
  * attempt or its Run-journal reference cannot be persisted.
  *
  * This convenience API creates a new attempt ID for each call. Callers that need
  * retry/recovery across a Session-finalization failure must use
- * \`turbo_agent_harness_execute_compiled_inspect_attempt_json\` with the same
+ * `turbo_agent_harness_execute_compiled_inspect_attempt_json` with the same
  * caller-stable attempt ID. A committed attempt is replayed through the Session
  * Run; STARTED or unknown attempts fail closed and are never automatically
  * redispatched.

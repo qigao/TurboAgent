@@ -653,8 +653,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_true(json_get_bool(result, "ok", false));
     check_not_null(certificate);
 
-    /* Reusing an attempt ID with different arguments/plan identity must fail
-     * closed without replacing the saved result or invoking the callback. */
+    /* Same identity with a different frozen plan must not reuse the old result. */
     json_free(result);
     result = NULL;
     json_free(certificate);
@@ -668,8 +667,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     json_free(certificate);
     certificate = NULL;
 
-    /* Revoked Host authority prevents delivery during replay; the committed
-     * attempt remains available for audit and the callback remains at one call. */
+    /* Revoked Host authority blocks delivery during replay without changing
+     * the committed attempt or dispatching the callback again. */
     check_equal(set_compiled_host_policy(harness, 0), 0);
     run_rc = run_compiled_inspect_attempt(harness, "finalization-replay",
         compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
@@ -679,20 +678,9 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(probe.calls, 1);
     json_free(certificate);
     certificate = NULL;
-    check_equal(turbo_agent_runtime_store_list_json(
-        probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
-        probe.thread_id, &journal_records), SALTS_OK);
-    check_not_null(journal_records);
-    check_equal(json_array_size(journal_records), 1u);
-    journal = json_array_get(journal_records, 0);
-    check_not_null(journal);
-    check_equal(json_get_string(journal, "phase"), "committed");
-    check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
-    turbo_runtime_json_destroy(journal_records);
-    journal_records = NULL;
 
     check_equal(turbo_agent_runtime_store_list_json(
-        probe.runtime, COMPILED_INSPECT_RUN_JOURNAL_COLLECTION, "thread_id",
+        probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
         probe.thread_id, &journal_records), SALTS_OK);
     check_not_null(journal_records);
     check_equal(json_array_size(journal_records), 1u);
@@ -716,10 +704,13 @@ spec("Harness Phase-1 compiled Inspect boundary") {
         check_not_null(run_journal);
         check_equal(json_get_string(run_journal, "phase"), "committed");
         check_equal(json_get_string(run_journal, "attempt_id"), "finalization-replay");
+        check_not_null(json_get_string(run_journal, "attempt_record_id"));
         check_null(json_object_get(run_journal, "result"));
       }
     }
     turbo_runtime_json_destroy(journal_records);
+    journal_records = NULL;
+
     turbo_runtime_json_destroy(claim);
     json_free(message);
     free(inbox_id);

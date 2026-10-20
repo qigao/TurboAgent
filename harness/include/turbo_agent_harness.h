@@ -119,6 +119,27 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
  * dynamic Plugin lease management or hard process sandboxing. The source registry
  * and callback implementations must remain alive and quiescent for the call.
  */
+/**
+ * Execute compiled Inspect under a caller-stable durable attempt identity.
+ *
+ * attempt_id is 1-64 ASCII letters/digits/underscores/hyphens and is scoped to
+ * the Harness's creation-time Session thread identity. A committed attempt is
+ * replayed through the Session Run so that Session finalization can be retried
+ * without re-invoking the tool callback. Existing STARTED/unknown attempts fail
+ * closed. The compiled_inspect_attempts record is the sole durable typed-result
+ * authority; the per-Run journal stores only a reference to that attempt.
+ */
+CXX_C_API int turbo_agent_harness_execute_compiled_inspect_attempt_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    const char *attempt_id,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate);
+
 CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
     turbo_agent_harness_t *harness,
     const turbo_agent_compiler_config_t *compiler_config,

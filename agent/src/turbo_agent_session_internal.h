@@ -25,5 +25,7 @@ int turbo_agent_session_complete_execution_internal(turbo_agent_session_t *sessi
 int turbo_agent_session_retry_bound_claim_commit_internal(turbo_agent_session_t *session);
 int turbo_agent_session_has_pending_bound_claim_commit_internal(
     const turbo_agent_session_t *session);
+int turbo_agent_session_bind_claim_event_internal(
+    turbo_agent_session_t *session, const char *inbox_id, const char *event_id);
 
 #endif

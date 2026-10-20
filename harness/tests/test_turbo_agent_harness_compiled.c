@@ -22,7 +22,7 @@ static const char compiled_inspect_bad_args[] = "{\"template_id\":\"inspect\",\"
 static const char compiled_inspect_unknown_tool[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"nonexistent_tool\",\"arguments_json\":\"{}\"}";
 #define COMPILED_INSPECT_JOURNAL_COLLECTION "agent_compiled_execution_journal"
 #define COMPILED_INSPECT_ATTEMPT_COLLECTION "compiled_inspect_attempts"
-#define COMPILED_INSPECT_TEST_THREAD_ID "compiled-inspect-test-thread"
+#define COMPILED_INSPECT_TEST_THREAD_ID "compiled:inspect/test-thread"
 
 typedef struct compiled_inspect_probe_s {
   int calls;

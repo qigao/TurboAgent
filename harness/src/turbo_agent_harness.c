@@ -1266,6 +1266,16 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
     goto done;
   }
 
+  /* Authority must still be current at the actual delivery boundary. A
+   * committed attempt remains auditable if delivery is denied. */
+  if (turbo_agent_tool_authority_snapshot_is_current(agent, &compiled_run.authority) != 1) {
+    turbo_agent_compiled_inspect_fail(&compiled_run,
+        TURBO_AGENT_COMPILE_CAPABILITY_DENIED, TURBO_TOOL_ERROR, SALTS_EPROTO,
+        "Host Tool Authority changed before committed Inspect result delivery");
+    *out_tool_status = TURBO_TOOL_ERROR;
+    rc = SALTS_EPROTO;
+    goto done;
+  }
   *out_result = compiled_run.result;
   compiled_run.result = NULL;
   *out_tool_status = compiled_run.tool_status;

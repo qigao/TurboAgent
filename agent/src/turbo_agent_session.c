@@ -591,6 +591,11 @@ int turbo_agent_session_retry_bound_claim_commit_internal(
   return rc;
 }
 
+int turbo_agent_session_has_pending_bound_claim_commit_internal(
+    const turbo_agent_session_t *session) {
+  return session ? session->pending_bound_claim_commit : 0;
+}
+
 CXX_C_API int turbo_agent_session_context_configure(
     turbo_agent_session_t *session, const turbo_agent_context_policy_t *policy) {
   turbo_agent_context_t *context;

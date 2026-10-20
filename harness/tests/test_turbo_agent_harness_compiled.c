@@ -15,6 +15,7 @@
 #include <salts/thread_pool.h>
 
 static const char compiled_inspect_source[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"value\\\":\\\"hello\\\"}\"}";
+static const char compiled_inspect_source_alternate[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"value\\\":\\\"different\\\"}\"}";
 static const char compiled_inspect_bad_args[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"repo_inspect\",\"arguments_json\":\"{\\\"extra\\\":1}\"}";
 static const char compiled_inspect_unknown_tool[] = "{\"template_id\":\"inspect\",\"step_id\":\"read-1\",\"tool\":\"nonexistent_tool\",\"arguments_json\":\"{}\"}";
 #define COMPILED_INSPECT_JOURNAL_COLLECTION "compiled_inspect_attempts"
@@ -650,8 +651,46 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_true(json_get_bool(result, "ok", false));
     check_not_null(certificate);
 
+    /* Reusing an attempt ID with different arguments/plan identity must fail
+     * closed without replacing the saved result or invoking the callback. */
+    json_free(result);
+    result = NULL;
+    json_free(certificate);
+    certificate = NULL;
+    run_rc = run_compiled_inspect_attempt(harness, "finalization-replay",
+        compiled_inspect_source_alternate, allowed, 1, &diagnostic, &tool_status,
+        &result, &certificate);
+    check_not_equal(run_rc, SALTS_OK);
+    check_null(result);
+    check_equal(probe.calls, 1);
+    json_free(certificate);
+    certificate = NULL;
+
+    /* Revoked Host authority prevents delivery during replay; the committed
+     * attempt remains available for audit and the callback remains at one call. */
+    check_equal(set_compiled_host_policy(harness, 0), 0);
+    run_rc = run_compiled_inspect_attempt(harness, "finalization-replay",
+        compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
+        &result, &certificate);
+    check_not_equal(run_rc, SALTS_OK);
+    check_null(result);
+    check_equal(probe.calls, 1);
+    json_free(certificate);
+    certificate = NULL;
     check_equal(turbo_agent_runtime_store_list_json(
         probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
+        probe.thread_id, &journal_records), SALTS_OK);
+    check_not_null(journal_records);
+    check_equal(json_array_size(journal_records), 1u);
+    journal = json_array_get(journal_records, 0);
+    check_not_null(journal);
+    check_equal(json_get_string(journal, "phase"), "committed");
+    check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
+    turbo_runtime_json_destroy(journal_records);
+    journal_records = NULL;
+
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_RUN_JOURNAL_COLLECTION, "thread_id",
         probe.thread_id, &journal_records), SALTS_OK);
     check_not_null(journal_records);
     check_equal(json_array_size(journal_records), 1u);

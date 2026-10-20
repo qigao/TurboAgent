@@ -350,7 +350,7 @@ static int turbo_agent_harness_compiler_authority_configure(
   return SALTS_OK;
 }
 
-#define TURBO_AGENT_COMPILED_EXECUTION_SCHEMA_VERSION 1
+#define TURBO_AGENT_COMPILED_EXECUTION_SCHEMA_VERSION 2
 #define TURBO_AGENT_COMPILED_EXECUTION_KEY "compiled_execution"
 #define TURBO_AGENT_COMPILED_EXECUTION_JOURNAL_SCHEMA_VERSION 2
 #define TURBO_AGENT_COMPILED_EXECUTION_JOURNAL_COLLECTION "agent_compiled_execution_journal"

@@ -427,16 +427,21 @@ static int turbo_agent_compiled_inspect_set_phase(
   return 0;
 }
 
-static int turbo_agent_compiled_inspect_attempt_id_valid(const char *attempt_id) {
+static int turbo_agent_compiled_inspect_key_component_valid(
+    const char *value, size_t max_len) {
   size_t i;
-  if (!attempt_id || !attempt_id[0]) return 0;
-  for (i = 0; attempt_id[i]; ++i) {
-    const char ch = attempt_id[i];
-    if (i >= 64 ||
+  if (!value || !value[0]) return 0;
+  for (i = 0; value[i]; ++i) {
+    const char ch = value[i];
+    if (i >= max_len ||
         !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
           (ch >= '0' && ch <= '9') || ch == '_' || ch == '-')) return 0;
   }
   return i > 0;
+}
+
+static int turbo_agent_compiled_inspect_attempt_id_valid(const char *attempt_id) {
+  return turbo_agent_compiled_inspect_key_component_valid(attempt_id, 64);
 }
 
 /* The attempt record is the sole durable authority for the typed result.
@@ -1180,6 +1185,10 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
   }
   memcpy(owned_thread_id, thread_id, strlen(thread_id) + 1);
   thread_id = owned_thread_id;
+  if (!turbo_agent_compiled_inspect_key_component_valid(thread_id, 80)) {
+    rc = SALTS_EINVAL;
+    goto done;
+  }
   attempt_key_width = snprintf(compiled_run.attempt_record_id,
       sizeof(compiled_run.attempt_record_id), "%03u_%s_%s",
       (unsigned)strlen(thread_id), thread_id, attempt_id);

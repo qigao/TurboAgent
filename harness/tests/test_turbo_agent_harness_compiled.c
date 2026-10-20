@@ -363,7 +363,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       check_not_null(json_get_string(run_execution, "plan_hash"));
       check_not_null(json_object_get(run_execution, "authority_generation"));
       check_not_null(json_object_get(run_execution, "certificate"));
-      check_true(json_get_bool(json_object_get(run_execution, "result"), "ok", false));
+      /* Durable typed results live only in compiled_inspect_attempts. */
+      check_null(json_object_get(run_execution, "result"));
 
       check_equal(turbo_agent_runtime_store_list_json(
           runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",

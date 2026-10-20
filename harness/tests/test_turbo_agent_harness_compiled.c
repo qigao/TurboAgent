@@ -5,8 +5,11 @@
 #include "turbo_agent_session.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
+#include "turbo_runtime_store.h"
+#include "turbo_runtime_store_sqlite.h"
 
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <salts/thread_pool.h>

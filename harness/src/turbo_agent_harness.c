@@ -847,8 +847,6 @@ static int turbo_agent_compiled_inspect_execute_node(
     run->replayed = 1;
     run_result = json_clone(stored_result);
     if (!run_result ||
-        turbo_runtime_json_object_set_clone(record, "result", stored_result) !=
-            TURBO_RUNTIME_JSON_OK ||
         turbo_agent_compiled_inspect_set_phase(
             ctx->json_value_state, "committed", TURBO_TOOL_OK, NULL) != 0) {
       turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,
@@ -944,8 +942,6 @@ static int turbo_agent_compiled_inspect_execute_node(
     }
     run_result = json_clone(stored_result);
     if (!run_result ||
-        turbo_runtime_json_object_set_clone(record, "result", stored_result) !=
-            TURBO_RUNTIME_JSON_OK ||
         turbo_agent_compiled_inspect_set_phase(
             ctx->json_value_state, "committed", TURBO_TOOL_OK, NULL) != 0) {
       turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OUT_OF_MEMORY,

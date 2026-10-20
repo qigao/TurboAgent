@@ -446,12 +446,24 @@ static int turbo_agent_compiled_inspect_attempt_id_valid(const char *value) {
 
 static int turbo_agent_compiled_inspect_attempt_key(
     const char *thread_id, const char *attempt_id, char *out_key, size_t out_size) {
+  uint64_t scope_hash = UINT64_C(14695981039346656037);
+  size_t thread_id_size = 0;
   int width;
-  if (!out_key || out_size == 0 ||
-      !turbo_agent_compiled_inspect_component(thread_id, 80, 1) ||
+  if (!thread_id || !thread_id[0] || !out_key || out_size == 0 ||
       !turbo_agent_compiled_inspect_attempt_id_valid(attempt_id)) return -1;
-  width = snprintf(out_key, out_size, "%03u_%s_%s",
-                   (unsigned)strlen(thread_id), thread_id, attempt_id);
+
+  /* Thread IDs are logical identifiers, not filenames. Hash the complete
+   * UTF-8 byte sequence so colons, slashes and other valid identifier bytes
+   * don't make an otherwise valid Session ineligible for durable Inspect.
+   * The stored record still compares the original thread_id byte-for-byte;
+   * a hash collision therefore fails closed instead of cross-reading a result. */
+  while (thread_id[thread_id_size] != '\0') {
+    if (thread_id_size >= 1024) return -1;
+    scope_hash ^= (unsigned char)thread_id[thread_id_size++];
+    scope_hash *= UINT64_C(1099511628211);
+  }
+  width = snprintf(out_key, out_size, "t%016" PRIx64 "_%03u_%s",
+                   scope_hash, (unsigned)thread_id_size, attempt_id);
   return width < 0 || (size_t)width >= out_size ? -1 : 0;
 }
 

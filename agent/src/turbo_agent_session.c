@@ -27,6 +27,7 @@ struct turbo_agent_session_s {
   turbo_agent_t *agent;
   turbo_agent_context_t *context;
   int rc;
+  int pending_bound_claim_commit;
   turbo_agent_inbox_t *inbox;
   size_t max_follow_ups_per_execution;
   turbo_agent_memory_store_t memory_store;
@@ -499,6 +500,7 @@ int turbo_agent_session_prepare_start_options_internal(
   if (!session || !session->runtime || !parent_link || !out_options) {
     return SALTS_EINVAL;
   }
+  if (session->pending_bound_claim_commit) return SALTS_EBUSY;
   memset(parent_link, 0, sizeof(*parent_link));
   memset(out_options, 0, sizeof(*out_options));
   out_options->thread_id = session->thread_id;
@@ -518,6 +520,7 @@ int turbo_agent_session_prepare_resume_options_internal(
   if (!session || !session->runtime || !session_options || !out_options) {
     return SALTS_EINVAL;
   }
+  if (session->pending_bound_claim_commit) return SALTS_EBUSY;
   if (session_options->scope != TURBO_SESSION_SCOPE_CHECKPOINT &&
       session_options->scope != TURBO_SESSION_SCOPE_THREAD) {
     return SALTS_EINVAL;
@@ -560,14 +563,31 @@ int turbo_agent_session_complete_execution_internal(
     return SALTS_EINVAL;
   }
   rc = turbo_agent_session_capture_summary(session, *summary);
-  if (rc == SALTS_OK && session->inbox) {
-    rc = turbo_agent_inbox_commit_bound_claim(session->inbox);
+  if (rc == SALTS_OK) {
+    session->pending_bound_claim_commit = 0;
+    if (session->inbox) {
+      rc = turbo_agent_inbox_commit_bound_claim(session->inbox);
+      if (rc != SALTS_OK) session->pending_bound_claim_commit = 1;
+    }
   }
   if (rc == SALTS_OK && session->inbox) {
     rc = turbo_agent_session_run_follow_ups(
         session, graph, graph_options, event_sink, event_sink_user_data,
         cancel_token, summary, state);
   }
+  return rc;
+}
+
+/* Retry only the finalization write that failed after a graph already
+ * completed. Never rerun the graph or its tool callbacks from this helper. */
+int turbo_agent_session_retry_bound_claim_commit_internal(
+    turbo_agent_session_t *session) {
+  int rc;
+  if (!session) return SALTS_EINVAL;
+  if (!session->pending_bound_claim_commit) return SALTS_ENOENT;
+  if (!session->inbox) return SALTS_EINVAL;
+  rc = turbo_agent_inbox_commit_bound_claim(session->inbox);
+  if (rc == SALTS_OK) session->pending_bound_claim_commit = 0;
   return rc;
 }
 

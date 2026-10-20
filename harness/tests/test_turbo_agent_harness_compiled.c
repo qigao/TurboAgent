@@ -21,6 +21,8 @@ static const char compiled_inspect_unknown_tool[] = "{\"template_id\":\"inspect\
 typedef struct compiled_inspect_probe_s {
   int calls;
   int produce_invalid_result;
+  int revoke_authority_during_callback;
+  turbo_agent_t *agent;
 } compiled_inspect_probe_t;
 
 static int compiled_harness_transport(const char *request, char **response, void *user) {
@@ -37,6 +39,18 @@ static int compiled_inspect_handler(const json_value_t *arguments,
   if (!probe || !out_result || !arguments ||
       !json_get_string(arguments, "value")) return -1;
   ++probe->calls;
+  if (probe->revoke_authority_during_callback && probe->agent) {
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    policy.allow_custom_tools = 0;
+    policy.allow_runtime_tools = 0;
+    policy.allow_delegate = 0;
+    policy.allow_network = 0;
+    policy.allow_shell = 0;
+    policy.allow_patch = 0;
+    policy.allow_outside_workspace = 0;
+    if (turbo_agent_set_tool_policy(probe->agent, &policy) != SALTS_OK)
+      return -1;
+  }
   if (probe->produce_invalid_result) {
     *out_result = json_create_string("unexpected type");
     return *out_result ? 0 : -1;

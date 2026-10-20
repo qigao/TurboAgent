@@ -595,11 +595,16 @@ static int turbo_agent_harness_execute_compiled_inspect_durable_impl(
   if (out_certificate) *out_certificate = NULL;
   if (out_tool_status) *out_tool_status = TURBO_TOOL_INVALID_ARGUMENT;
   if (out_diagnostic) memset(out_diagnostic, 0, sizeof(*out_diagnostic));
-  if (!harness || !compiler_config || !compiler_config->deny_unlisted_capabilities ||
+  if (!harness || !compiler_config ||
+      compiler_config->struct_size < sizeof(*compiler_config) ||
+      compiler_config->abi_version != TURBO_AGENT_COMPILER_CONFIG_ABI_VERSION ||
+      !compiler_config->deny_unlisted_capabilities ||
+      (compiler_config->allowed_capability_count && !compiler_config->allowed_capabilities) ||
       !source_json || !source_json_size || !out_result || !out_certificate ||
       !out_tool_status ||
       (durable && (!out_replayed ||
-                    !turbo_harness_inspect_key_component(attempt_id, 64))) ||
+                    !turbo_harness_inspect_key_component(attempt_id, 64) ||
+                    strchr(attempt_id, '.') != NULL)) ||
       (context && (context->abi_version != TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION ||
                    context->struct_size < sizeof(*context)))) {
     return SALTS_EINVAL;
@@ -808,6 +813,13 @@ static int turbo_agent_harness_execute_compiled_inspect_durable_impl(
       *out_tool_status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
       rc = SALTS_EIO;
     }
+  }
+  if (rc == SALTS_OK &&
+      turbo_agent_tool_authority_snapshot_is_current(agent, &authority) != 1) {
+    *out_tool_status = TURBO_TOOL_ERROR;
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_CAPABILITY_DENIED,
+        "Host Tool Authority changed during execution; committed result retained but not delivered");
   }
   if (rc == SALTS_OK) {
     *out_result = result;

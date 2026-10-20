@@ -196,7 +196,7 @@ jobs:
           # and private provenance object is deleted by the EXIT trap.
 
   speex-c11-tristate-sidecar:
-    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && github.event.pull_request.head.ref == 'test/speech-tristate-vad-ns-sidecar-184' || github.event.pull_request.head.ref == 'test/speech-multiband-vad-features-184'
+    if: github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent' && (github.event.pull_request.head.ref == 'test/speech-tristate-vad-ns-sidecar-184' || github.event.pull_request.head.ref == 'test/speech-multiband-vad-features-184')
     name: Side-by-side SpeexDSP NS vs C11 tri-state on real private speech/noise
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -8,6 +8,7 @@
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
 #include "turbo_runtime_store.h"
+#include "turbo_runtime_store_sqlite.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -729,6 +730,93 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);
+  }
+
+  it("replays a committed Inspect attempt after SQLite and Harness reopen") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness = NULL;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_ERROR;
+    turbo_runtime_sqlite_config_t sqlite_config;
+    turbo_agent_runtime_store_t store = {0};
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    json_value_t *records = NULL;
+    const json_value_t *attempt;
+    char *directory = tt_make_temp_dir("compiled-inspect-replay");
+    char path[1024];
+    int replayed = -1;
+    int run_rc;
+    int path_len;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(directory);
+    check_equal(register_compiled_inspect(
+        registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    path_len = snprintf(path, sizeof(path), "%s/compiled-inspect.db", directory);
+    check_true(path_len > 0 && (size_t)path_len < sizeof(path));
+    turbo_runtime_sqlite_config_init(&sqlite_config);
+    sqlite_config.path = path;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    store = (turbo_agent_runtime_store_t){0}; /* Runtime owns SQLite after creation. */
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+
+    run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+        allowed, 1, "sqlite_restart_replay", &replayed,
+        &diagnostic, &tool_status, &result, &certificate);
+    check_equal(run_rc, SALTS_OK);
+    check_equal(replayed, 0);
+    check_equal(probe.calls, 1);
+    check_true(json_get_bool(result, "ok", false));
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+
+    turbo_agent_harness_release(harness);
+    harness = NULL;
+
+    /* Reopen the same committed store under a new Runtime/Session owner. */
+    sqlite_config.create_if_missing = 0;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    store = (turbo_agent_runtime_store_t){0};
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+
+    run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+        allowed, 1, "sqlite_restart_replay", &replayed,
+        &diagnostic, &tool_status, &result, &certificate);
+    check_equal(run_rc, SALTS_OK);
+    check_equal(replayed, 1);
+    check_equal(probe.calls, 1);
+    check_true(json_get_bool(result, "ok", false));
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        "thread_id", probe.thread_id, &records), SALTS_OK);
+    check_not_null(records);
+    check_equal(json_array_size(records), 1u);
+    attempt = json_array_get(records, 0);
+    check_not_null(attempt);
+    check_equal(json_get_string(attempt, "phase"), "committed");
+    check_true(json_get_bool(json_object_get(attempt, "result"), "ok", false));
+    turbo_runtime_json_destroy(records);
+    records = NULL;
+
+    json_free(result);
+    json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+    tt_remove_tree(directory);
+    free(directory);
   }
 
   it("does not retry a read-only tool after a result schema mismatch") {

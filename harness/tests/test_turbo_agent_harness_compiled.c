@@ -358,6 +358,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       run_state = json_object_get(run_record, "state_snapshot");
       run_execution = json_object_get(run_state, "compiled_execution");
       check_not_null(run_execution);
+      check_equal(json_get_int(run_execution, "schema_version", 0), 2);
       check_equal(json_get_string(run_execution, "phase"), "committed");
       check_equal(json_get_string(run_execution, "backend"), "runtime_tools");
       check_equal(json_get_string(run_execution, "tool_name"), "repo.inspect");
@@ -741,6 +742,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_tool_status_t tool_status = TURBO_TOOL_OK;
     json_value_t *result = NULL;
     json_value_t *certificate = NULL;
+    int replayed = -1;
 
     check_not_null(pool);
     check_not_null(registry);
@@ -750,11 +752,13 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(set_compiled_host_policy(harness, 1), 0);
     attach_compiled_probe_runtime(harness, &probe);
     {
-      int run_rc = run_compiled_inspect(harness, compiled_inspect_source,
-          allowed, 1, &diagnostic, &tool_status, &result, &certificate);
+      int run_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+          allowed, 1, "invalid_result_no_retry", &replayed,
+          &diagnostic, &tool_status, &result, &certificate);
       /* The invalid-result callback must have run exactly once even if
        * Runtime later reports a separate finalization failure. */
       check_equal(probe.calls, 1);
+      check_equal(replayed, 0);
       check_equal(run_rc, SALTS_EPROTO);
     }
     check_equal(tool_status, TURBO_TOOL_ERROR);
@@ -783,6 +787,36 @@ spec("Harness Phase-1 compiled Inspect boundary") {
                         "violating its admitted schema") != NULL);
       check_null(json_object_get(journal, "result"));
       turbo_runtime_json_destroy(journal_records);
+    }
+
+    /* The same durable identity is fail-closed after an invalid callback result.
+     * Retrying must not call the ostensibly read-only tool. */
+    json_free(certificate); certificate = NULL;
+    {
+      int retry_rc = run_compiled_inspect_attempt(harness, compiled_inspect_source,
+          allowed, 1, "invalid_result_no_retry", &replayed,
+          &diagnostic, &tool_status, &result, &certificate);
+      check_not_equal(retry_rc, SALTS_OK);
+      check_equal(replayed, 0);
+      check_equal(probe.calls, 1);
+      check_null(result);
+      check_not_null(certificate);
+      check_equal(tool_status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      check_true(strstr(diagnostic.message, "automatic callback replay is forbidden") != NULL);
+    }
+    {
+      json_value_t *attempt_records = NULL;
+      const json_value_t *attempt;
+      check_equal(turbo_agent_runtime_store_list_json(
+          probe.runtime, COMPILED_INSPECT_ATTEMPT_COLLECTION,
+          "thread_id", probe.thread_id, &attempt_records), SALTS_OK);
+      check_not_null(attempt_records);
+      check_equal(json_array_size(attempt_records), 1u);
+      attempt = json_array_get(attempt_records, 0);
+      check_not_null(attempt);
+      check_equal(json_get_string(attempt, "phase"), "outcome_unknown");
+      check_null(json_object_get(attempt, "result"));
+      turbo_runtime_json_destroy(attempt_records);
     }
 
     json_free(certificate);

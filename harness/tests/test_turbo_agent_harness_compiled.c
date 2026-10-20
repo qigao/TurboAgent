@@ -3,6 +3,7 @@
 #include "turbo_agent_harness.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
+#include "turbo_agent_inbox.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
 #include "turbo_runtime_store.h"
@@ -141,6 +142,9 @@ static int compiled_inspect_fault_store_put(void *user_data, const char *collect
   if (!fault || !record_json) return -1;
   length = snprintf(phase_token, sizeof(phase_token), "\"phase\":\"%s\"",
                     fault->failed_phase ? fault->failed_phase : "");
+  if (fault->failed_phase && strcmp(fault->failed_phase, "inbox_applied") == 0 &&
+      strcmp(collection, "agent_inbox_transitions") == 0 &&
+      strstr(record_json, "\\"status\\":\\"applied\\"")) return -1;
   if (length > 0 && (size_t)length < sizeof(phase_token) &&
       strstr(record_json, phase_token)) return -1;
   return fault->inner.put(fault->inner.user_data, collection, id, record_json);
@@ -523,6 +527,78 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       turbo_runtime_json_destroy(journal_records);
     }
 
+    json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("keeps the committed Inspect journal when Session inbox finalization fails") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("inbox_applied");
+    turbo_agent_harness_t *harness;
+    turbo_agent_session_t *session;
+    turbo_agent_inbox_config_t inbox_config = {
+        sizeof(inbox_config), TURBO_AGENT_INBOX_ABI_VERSION, 4, 4096, 1024, 1};
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+    json_value_t *message = json_create_object();
+    json_value_t *claim = NULL;
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    json_value_t *journal_records = NULL;
+    const json_value_t *journal;
+    char *inbox_id = NULL;
+    int run_rc;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(store.user_data);
+    check_not_null(message);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1),
+                TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+    session = turbo_agent_app_session(turbo_agent_harness_app(harness));
+    check_not_null(session);
+    check_equal(turbo_agent_session_inbox_configure(session, &inbox_config), SALTS_OK);
+    json_object_set_string(message, "role", "user");
+    json_object_set_string(message, "content", "compiled Inspect finalization failure");
+    check_equal(turbo_agent_session_enqueue(
+        session, TURBO_AGENT_INBOX_STEER, message, 0, &inbox_id), SALTS_OK);
+    check_not_null(inbox_id);
+    check_equal(turbo_agent_session_inbox_claim(
+        session, TURBO_AGENT_INBOX_STEER, "compiled-inspect-finalization-test", &claim), SALTS_OK);
+    check_not_null(claim);
+
+    run_rc = run_compiled_inspect(harness, compiled_inspect_source,
+        allowed, 1, &diagnostic, &tool_status, &result, &certificate);
+    check_equal(run_rc, SALTS_EIO);
+    check_equal(probe.calls, 1);
+    check_null(result);
+    check_not_null(certificate);
+    check_equal(probe.saw_started_journal, 1);
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
+        probe.thread_id, &journal_records), SALTS_OK);
+    check_not_null(journal_records);
+    check_equal(json_array_size(journal_records), 1u);
+    journal = json_array_get(journal_records, 0);
+    check_not_null(journal);
+    /* Tool result commit succeeded before Session's applied-inbox transition failed. */
+    check_equal(json_get_string(journal, "phase"), "committed");
+    check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
+
+    turbo_runtime_json_destroy(journal_records);
+    turbo_runtime_json_destroy(claim);
+    json_free(message);
+    free(inbox_id);
     json_free(certificate);
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);

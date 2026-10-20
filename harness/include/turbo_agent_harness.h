@@ -104,11 +104,11 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
  * replayed into a new Session Run without re-invoking the callback. STARTED or
  * unknown attempts never automatically retry.
  *
- * This uses individual Runtime Store writes, not a transaction; crash guarantees
- * depend on the selected store backend. Runtime's generic graph checkpoint hook
- * is not a per-edge durable commit on ordinary completion/error. This slice does
- * not expose compiled-plan resume/recovery; future recovery must reconcile a
- * `started` / `outcome_unknown` journal instead of blindly invoking again.
+ * The attempt and per-Run journal are separate Runtime Store writes, not one
+ * multi-record transaction. Only a valid `committed` attempt can be replayed;
+ * `started` and `outcome_unknown` are fail-closed and require explicit external
+ * reconciliation rather than automatic callback retry. Crash guarantees depend
+ * on the selected Runtime Store backend.
  *
  * On successful execution, out_result and out_certificate are caller-owned JSON
  * values. After compile admission the certificate is still returned on callback

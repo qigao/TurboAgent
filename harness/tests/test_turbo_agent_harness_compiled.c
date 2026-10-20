@@ -3,6 +3,7 @@
 #include "turbo_agent_harness.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
+#include "turbo_graph.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_json.h"
 #include "turbo_runtime_store.h"
@@ -24,6 +25,12 @@ typedef struct compiled_inspect_probe_s {
   int revoke_authority_during_callback;
   turbo_agent_t *agent;
 } compiled_inspect_probe_t;
+
+static int compiled_identity_rotation_noop(turbo_graph_exec_ctx_t *ctx, void *user_data) {
+  (void)ctx;
+  (void)user_data;
+  return 0;
+}
 
 static int compiled_harness_transport(const char *request, char **response, void *user) {
   (void)request;
@@ -513,6 +520,32 @@ spec("Harness durable compiled Inspect attempt") {
         &record), SALTS_OK);
     check_equal(json_get_string(record, "phase"), "committed");
     json_free(record); record = NULL;
+
+    /* A completed Session graph replaces the Session-owned summary ID strings.
+     * Durable attempt scope must stay tied to the Harness's captured identity,
+     * not a borrowed Session pointer whose lifetime ends at summary capture. */
+    {
+      turbo_agent_session_t *session = turbo_agent_app_session(
+          turbo_agent_harness_app(harness));
+      turbo_graph_t *rotation_graph = turbo_graph_create("attempt-identity-rotation");
+      json_value_t *rotation_state = json_create_object();
+      json_value_t *rotation_summary = NULL;
+      json_value_t *rotation_result = NULL;
+      check_not_null(session);
+      check_not_null(rotation_graph);
+      check_not_null(rotation_state);
+      check_equal(turbo_graph_add_json_value_node_ex(
+          rotation_graph, "noop", "attempt.identity.rotation.v1",
+          compiled_identity_rotation_noop, NULL), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(rotation_graph, "noop"), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_agent_session_start_graph(
+          session, rotation_graph, rotation_state, NULL, NULL, NULL,
+          &rotation_summary, &rotation_result), SALTS_OK);
+      json_free(rotation_state);
+      json_free(rotation_summary);
+      json_free(rotation_result);
+      turbo_graph_destroy(rotation_graph);
+    }
 
     check_equal(run_durable_inspect(harness, compiled_inspect_source, "run_one",
         &replayed, &tool_status, &result, &certificate), SALTS_OK);

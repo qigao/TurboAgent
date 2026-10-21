@@ -132,7 +132,7 @@ static turbo_tool_status_t register_compiled_inspect(
 }
 
 typedef struct compiled_inspect_store_fault_s {
-  turbo_agent_runtime_store_t inner;
+  turbo_agent_runtime_store_ex_t inner;
   const char *failed_phase;
 } compiled_inspect_store_fault_t;
 
@@ -149,59 +149,76 @@ static int compiled_inspect_fault_store_put(void *user_data, const char *collect
       strstr(record_json, "\"status\":\"applied\"")) return -1;
   if (length > 0 && (size_t)length < sizeof(phase_token) &&
       strstr(record_json, phase_token)) return -1;
-  return fault->inner.put(fault->inner.user_data, collection, id, record_json);
+  return fault->inner.store.put(fault->inner.store.user_data, collection, id, record_json);
 }
 
 static int compiled_inspect_fault_store_get(void *user_data, const char *collection,
                                             const char *id, char **out_record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
-  return fault ? fault->inner.get(fault->inner.user_data, collection, id, out_record_json) : -1;
+  return fault ? fault->inner.store.get(fault->inner.store.user_data, collection, id, out_record_json) : -1;
 }
 
 static int compiled_inspect_fault_store_list(void *user_data, const char *collection,
                                              const char *filter_key, const char *filter_value,
                                              char **out_records_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
-  return fault ? fault->inner.list(fault->inner.user_data, collection, filter_key,
-                                   filter_value, out_records_json) : -1;
+  return fault ? fault->inner.store.list(fault->inner.store.user_data, collection, filter_key,
+                                         filter_value, out_records_json) : -1;
 }
 
 static void compiled_inspect_fault_store_free(void *user_data) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
   if (!fault) return;
-  if (fault->inner.user_data_free)
-    fault->inner.user_data_free(fault->inner.user_data);
+  if (fault->inner.store.user_data_free)
+    fault->inner.store.user_data_free(fault->inner.store.user_data);
   free(fault);
 }
 
-static turbo_agent_runtime_store_t compiled_inspect_store_fail_phase(const char *phase) {
-  turbo_agent_runtime_store_t store = {0};
-  turbo_agent_runtime_store_t inner = turbo_agent_runtime_store_memory_create();
+static int compiled_inspect_fault_store_create_if_absent(
+    void *user_data, const char *collection, const char *id, const char *record_json) {
+  compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
+  char phase_token[64];
+  int length;
+  if (!fault || !record_json || !fault->inner.create_if_absent) return SALTS_ENOTSUP;
+  length = snprintf(phase_token, sizeof(phase_token), "\\"phase\\":\\"%s\\"",
+                    fault->failed_phase ? fault->failed_phase : "");
+  if (length > 0 && (size_t)length < sizeof(phase_token) &&
+      fault->failed_phase && strstr(record_json, phase_token)) return SALTS_EIO;
+  return fault->inner.create_if_absent(
+      fault->inner.store.user_data, collection, id, record_json);
+}
+
+static turbo_agent_runtime_store_ex_t compiled_inspect_store_fail_phase(const char *phase) {
+  turbo_agent_runtime_store_ex_t store;
+  turbo_agent_runtime_store_ex_t inner = turbo_agent_runtime_store_memory_create_ex();
   compiled_inspect_store_fault_t *fault;
-  if (!inner.put || !inner.get || !inner.list || !inner.user_data) return store;
+  turbo_agent_runtime_store_ex_init(&store);
+  if (!inner.store.put || !inner.store.get || !inner.store.list || !inner.store.user_data)
+    return store;
   fault = (compiled_inspect_store_fault_t *)calloc(1, sizeof(*fault));
   if (!fault) {
-    if (inner.user_data_free) inner.user_data_free(inner.user_data);
+    if (inner.store.user_data_free) inner.store.user_data_free(inner.store.user_data);
     return store;
   }
   fault->inner = inner;
   fault->failed_phase = phase;
-  store.put = compiled_inspect_fault_store_put;
-  store.get = compiled_inspect_fault_store_get;
-  store.list = compiled_inspect_fault_store_list;
-  store.user_data = fault;
-  store.user_data_free = compiled_inspect_fault_store_free;
+  store.store.put = compiled_inspect_fault_store_put;
+  store.store.get = compiled_inspect_fault_store_get;
+  store.store.list = compiled_inspect_fault_store_list;
+  store.store.user_data = fault;
+  store.store.user_data_free = compiled_inspect_fault_store_free;
+  store.create_if_absent = compiled_inspect_fault_store_create_if_absent;
   return store;
 }
 
 static turbo_agent_harness_t *make_compiled_harness_with_store(
     cmeta_threadpool_t *pool, turbo_tool_registry_t *registry,
-    turbo_agent_runtime_store_t runtime_store) {
+    turbo_agent_runtime_store_ex_t runtime_store) {
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t config;
   session_config.thread_id = COMPILED_INSPECT_TEST_THREAD_ID;
-  session_config.runtime_store = runtime_store;
+  /* Extended Runtime Store is supplied through the additive creation path. */
   session_config.agent_config.model = "gpt-5.4";
   session_config.agent_config.transport_fn = compiled_harness_transport;
   session_config.agent_config.tool_registry = registry;
@@ -209,13 +226,13 @@ static turbo_agent_harness_t *make_compiled_harness_with_store(
   turbo_agent_harness_config_init(&config);
   config.app_config = &app_config;
   config.executor = pool;
-  return turbo_agent_harness_create(&config);
+  return turbo_agent_harness_create_with_runtime_store_ex(&config, &runtime_store);
 }
 
 static turbo_agent_harness_t *make_compiled_harness(
     cmeta_threadpool_t *pool, turbo_tool_registry_t *registry) {
   return make_compiled_harness_with_store(
-      pool, registry, turbo_agent_runtime_store_memory_create());
+      pool, registry, turbo_agent_runtime_store_memory_create_ex());
 }
 
 static int set_compiled_host_policy(turbo_agent_harness_t *harness, int allow_runtime_tools) {
@@ -490,7 +507,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_tool_status_t tool_status = TURBO_TOOL_OK;
     json_value_t *result = NULL;
     json_value_t *certificate = NULL;
-    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("started");
+    turbo_agent_runtime_store_ex_t store = compiled_inspect_store_fail_phase("started");
 
     check_not_null(pool);
     check_not_null(registry);
@@ -529,7 +546,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     const json_value_t *journal;
     turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("committed");
     compiled_inspect_store_fault_t *store_fault =
-        (compiled_inspect_store_fault_t *)store.user_data;
+        (compiled_inspect_store_fault_t *)store.store.user_data;
     int run_rc;
 
     check_not_null(pool);

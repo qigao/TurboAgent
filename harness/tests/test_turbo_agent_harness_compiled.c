@@ -525,6 +525,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_tool_status_t tool_status = TURBO_TOOL_OK;
     json_value_t *result = NULL;
     json_value_t *certificate = NULL;
+    json_value_t *journal_records = NULL;
+    const json_value_t *journal;
     turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("committed");
     compiled_inspect_store_fault_t *store_fault =
         (compiled_inspect_store_fault_t *)store.user_data;
@@ -550,10 +552,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     /* Admission/compilation succeeded; execution failure withholds only result. */
     check_not_null(certificate);
     check_equal(probe.saw_started_journal, 1);
-    {
-      json_value_t *journal_records = NULL;
-      const json_value_t *journal;
-      check_equal(turbo_agent_runtime_store_list_json(
+    check_equal(turbo_agent_runtime_store_list_json(
           probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
           probe.thread_id, &journal_records), SALTS_OK);
       check_not_null(journal_records);
@@ -568,7 +567,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       check_not_null(json_get_string(journal, "plan_hash"));
       check_null(json_object_get(journal, "result"));
       turbo_runtime_json_destroy(journal_records);
-    }
+    journal_records = NULL;
 
     /* The attempt commit failed after one callback, so the durable phase must
      * remain fail-closed. Replaying the same ID must not redispatch it. */

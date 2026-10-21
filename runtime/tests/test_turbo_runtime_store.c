@@ -217,8 +217,8 @@ spec("Runtime record store without Agent") {
   it("creates one memory claim without overwriting and reports unsupported legacy backends") {
     turbo_agent_runtime_store_t memory = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_store_t legacy = store_test_callbacks(&probe);
-    json_value_t *first = json_parse("{\\"winner\\":1}", 12);
-    json_value_t *second = json_parse("{\\"winner\\":2}", 12);
+    json_value_t *first = json_parse("{\"winner\":1}", 12);
+    json_value_t *second = json_parse("{\"winner\":2}", 12);
     check_not_null(first);
     check_not_null(second);
     runtime = turbo_agent_runtime_create(&memory);

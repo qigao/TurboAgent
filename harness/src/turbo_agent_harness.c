@@ -468,7 +468,12 @@ static int turbo_agent_compiled_inspect_attempt_write(
       run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
       run->attempt_record_id, &existing);
   if (is_start) {
-    if (read_status != SALTS_ENOENT) goto cleanup;
+    if (read_status != SALTS_ENOENT) {
+      /* An existing durable claim is a duplicate, not a generic I/O error.
+       * Other lookup failures retain their store status where available. */
+      run->store_status = read_status == SALTS_OK ? SALTS_EALREADY : read_status;
+      goto cleanup;
+    }
   } else {
     if (read_status != SALTS_OK || !existing || json_type(existing) != JSON_OBJECT)
       goto cleanup;

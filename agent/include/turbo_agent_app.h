@@ -18,6 +18,10 @@ typedef struct turbo_agent_app_config_s {
 } turbo_agent_app_config_t;
 
 CXX_C_API turbo_agent_app_t *turbo_agent_app_create(const turbo_agent_app_config_t *config);
+/** Create an App through the explicit extended Runtime Store path. */
+CXX_C_API turbo_agent_app_t *turbo_agent_app_create_with_runtime_store_ex(
+    const turbo_agent_app_config_t *config,
+    const turbo_agent_runtime_store_ex_t *runtime_store);
 CXX_C_API void turbo_agent_app_destroy(turbo_agent_app_t *app);
 
 CXX_C_API turbo_agent_session_t *turbo_agent_app_session(const turbo_agent_app_t *app);

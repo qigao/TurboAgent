@@ -3,10 +3,34 @@
 #include "turbo_runtime_segment.h"
 #include "turbo_runtime_history.h"
 #include <sqlite3.h>
+#include <salts/thread.h>
+#include <stdatomic.h>
 #include <fmt.h>
 #include <tstr.h>
 #include <stdlib.h>
 #include <string.h>
+
+enum { CLAIM_WORKERS = 4, CLAIM_ROUNDS = 32 };
+typedef struct claim_worker_s {
+  turbo_agent_runtime_t *runtime;
+  const char *id;
+  int worker_id;
+  atomic_int *go;
+  int status;
+} claim_worker_t;
+
+static void claim_worker_run(void *data) {
+  claim_worker_t *worker = data;
+  char payload[32];
+  json_value_t *record = json_create_object();
+  worker->status = SALTS_ENOMEM;
+  if (!record) return;
+  snprintf(payload, sizeof(payload), "{\\"winner\\":%d}", worker->worker_id);
+  while (!atomic_load(worker->go)) cmeta_thread_yield();
+  worker->status = turbo_agent_runtime_store_create_json_if_absent(
+      worker->runtime, "attempt_claims", worker->id, record);
+  json_free(record);
+}
 
 static void close_store(turbo_agent_runtime_store_t *store) {
   if (store->user_data_free) store->user_data_free(store->user_data);
@@ -176,6 +200,49 @@ spec("bounded SQLite runtime records") {
     check_equal(store.put(store.user_data, "runs", "next", "invalid"), SALTS_EPROTO);
     check_equal(store.get(store.user_data, "runs", "next", &text), SALTS_OK);
     check_equal(strcmp(text, "{\"updated\":true}"), 0);
+  }
+
+  it("atomically claims one key once under concurrent callers") {
+    cmeta_thread_t threads[CLAIM_WORKERS];
+    claim_worker_t workers[CLAIM_WORKERS];
+    atomic_int go;
+    turbo_agent_runtime_t *runtime = NULL;
+    json_value_t *record = NULL;
+    char id[32];
+    int round, i, winners;
+    check_equal(turbo_runtime_store_sqlite_open(&config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    for (round = 0; round < CLAIM_ROUNDS; ++round) {
+      snprintf(id, sizeof(id), "claim-%d", round);
+      atomic_init(&go, 0);
+      memset(workers, 0, sizeof(workers));
+      for (i = 0; i < CLAIM_WORKERS; ++i) {
+        workers[i].runtime = runtime;
+        workers[i].id = id;
+        workers[i].worker_id = i;
+        workers[i].go = &go;
+        check_equal(cmeta_thread_create(&threads[i], claim_worker_run, &workers[i]), SALTS_OK);
+      }
+      atomic_store(&go, 1);
+      for (i = 0; i < CLAIM_WORKERS; ++i)
+        check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+      winners = 0;
+      for (i = 0; i < CLAIM_WORKERS; ++i) {
+        if (workers[i].status == SALTS_OK) ++winners;
+        else check_equal(workers[i].status, SALTS_EALREADY);
+      }
+      check_equal(winners, 1);
+      check_equal(turbo_agent_runtime_store_get_json_status(
+          runtime, "attempt_claims", id, &record), SALTS_OK);
+      check_true(turbo_runtime_json_value_as_int64(json_object_get(record, "winner"), -1) >= 0);
+      check_true(turbo_runtime_json_value_as_int64(json_object_get(record, "winner"), -1) <
+                 CLAIM_WORKERS);
+      json_free(record); record = NULL;
+    }
+    turbo_agent_runtime_destroy(runtime);
+    runtime = NULL;
   }
 
   it("retains exclusive ownership across commits and releases it on close") {

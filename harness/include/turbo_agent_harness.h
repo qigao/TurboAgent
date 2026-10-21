@@ -87,32 +87,65 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
 /**
  * Synchronous, explicit compiled Inspect admission and execution.
  *
- * This is deliberately a narrow Phase-1 bridge, NOT the Session's durable
- * async Graph / Run / Checkpoint API. Only a frozen read-only Inspect plan with
- * declared PURE or READ(+NETWORK) semantic effects and a strict typed result
- * contract is admitted. Tool callbacks remain trusted registry implementations.
- * The host explicitly supplies capability allowlists through compiler_config;
- * deny_unlisted_capabilities must be enabled.
+ * This narrow Phase-1 API compiles and executes exactly one typed, read-only
+ * Inspect step in the attached Session's existing Run/Checkpoint runtime.
+ * Only PURE or READ(+NETWORK) effects, a strict result contract, and Host-
+ * granted capabilities intersected with the caller's compiler restrictions
+ * are admitted. Side-effecting or UNKNOWN-effect tools are not admitted.
  *
- * Harness serializes this call against all start/resume/fork operations.
- * Compilation and capability/effect/result-contract admission invoke no tools.
- * After admission, the plan-owned projection is the sole execution authority:
- * there is no raw loop fallback or automatic retry. Result validation happens
- * AFTER a callback may have run; invalid results are rejected without re-exec.
+ * The Harness persists a `compiled_inspect_attempts` record in the attached
+ * Runtime Store before callback dispatch. This attempt record is the sole durable
+ * authority for the typed result. Each `agent_compiled_execution_journal` row
+ * contains only Run/authority metadata and a reference to the attempt, never a
+ * second durable result payload. The callback is not entered if the STARTED
+ * attempt or its Run-journal reference cannot be persisted.
  *
- * On admitted execution a caller-owned plan certificate is returned, including
- * when the callback/result verification fails. Return SALTS_OK only on
- * completed, validated result. out_tool_status describes backend outcome.
+ * This convenience API creates a new attempt ID for each call. Callers that need
+ * retry/recovery across a Session-finalization failure must use
+ * `turbo_agent_harness_execute_compiled_inspect_attempt_json` with the same
+ * caller-stable attempt ID. A committed attempt is replayed through the Session
+ * Run; STARTED or unknown attempts fail closed and are never automatically
+ * redispatched.
  *
- * The source registry and provider callbacks must remain quiescent/alive for
- * the entire call; calling this does NOT persist run state, journal effects,
- * manage external Plugin leases, or provide hard process sandboxing.
+ * These are individual Runtime Store writes, not a multi-record transaction;
+ * crash guarantees depend on the selected backend. Runtime's generic graph
+ * checkpoint hook is not a per-edge durable commit on ordinary completion/error.
+ *
+ * On successful execution, out_result and out_certificate are caller-owned JSON
+ * values. After compile admission the certificate is still returned on callback
+ * or result-validation failure. Return SALTS_OK only when the Run commits a valid
+ * typed result; inspect out_tool_status and out_diagnostic for failure details.
+ *
+ * This does not expose async compiled DAG execution, approval transitions,
+ * dynamic Plugin lease management or hard process sandboxing. The source registry
+ * and callback implementations must remain alive and quiescent for the call.
  */
 CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
     turbo_agent_harness_t *harness,
     const turbo_agent_compiler_config_t *compiler_config,
     const char *source_json, size_t source_json_size,
     const turbo_tool_execution_context_t *context,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result,
+    json_value_t **out_certificate);
+
+/**
+ * Execute compiled Inspect under a caller-stable durable attempt identity.
+ *
+ * attempt_id is 1-64 ASCII letters/digits/underscores/hyphens and is scoped to
+ * the Harness's creation-time Session thread identity. A committed attempt is
+ * replayed through the Session Run so that Session finalization can be retried
+ * without re-invoking the tool callback. Existing STARTED/unknown attempts fail
+ * closed. The compiled_inspect_attempts record is the sole durable typed-result
+ * authority; the per-Run journal stores only a reference to that attempt.
+ */
+CXX_C_API int turbo_agent_harness_execute_compiled_inspect_attempt_json(
+    turbo_agent_harness_t *harness,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const char *source_json, size_t source_json_size,
+    const turbo_tool_execution_context_t *context,
+    const char *attempt_id,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,

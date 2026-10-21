@@ -643,6 +643,14 @@ CXX_C_API int turbo_agent_session_inbox_claim(turbo_agent_session_t *session,
   return turbo_agent_inbox_claim(session->inbox, kind, run_id, out_record);
 }
 
+CXX_C_API int turbo_agent_session_inbox_bind_applied_event(turbo_agent_session_t *session,
+                                                            const char *inbox_id,
+                                                            const char *applied_event_id) {
+  return session && session->inbox
+             ? turbo_agent_inbox_bind_applied_event(session->inbox, inbox_id, applied_event_id)
+             : SALTS_EINVAL;
+}
+
 CXX_C_API int turbo_agent_session_inbox_mark_applied(turbo_agent_session_t *session,
                                                      const char *inbox_id,
                                                      const char *applied_event_id) {

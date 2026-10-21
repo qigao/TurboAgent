@@ -67,7 +67,9 @@ void turbo_agent_harness_run_options_init(turbo_agent_harness_run_options_t *opt
   options->abi_version = TURBO_AGENT_HARNESS_ABI_VERSION;
 }
 
-turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_config_t *config) {
+static turbo_agent_harness_t *turbo_agent_harness_create_internal(
+    const turbo_agent_harness_config_t *config,
+    const turbo_agent_runtime_store_ex_t *runtime_store) {
   turbo_agent_harness_t *harness;
 
   if (!turbo_agent_harness_config_valid(config)) {
@@ -83,7 +85,9 @@ turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_conf
     free(harness);
     return NULL;
   }
-  harness->app = turbo_agent_app_create(config->app_config);
+  harness->app = runtime_store
+                     ? turbo_agent_app_create_with_runtime_store_ex(config->app_config, runtime_store)
+                     : turbo_agent_app_create(config->app_config);
   if (!harness->app) {
     cmeta_mutex_destroy(&harness->mutex);
     free(harness);
@@ -108,6 +112,18 @@ turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_conf
   }
   harness->executor = config->executor;
   return harness;
+}
+
+CXX_C_API turbo_agent_harness_t *
+turbo_agent_harness_create(const turbo_agent_harness_config_t *config) {
+  return turbo_agent_harness_create_internal(config, NULL);
+}
+
+CXX_C_API turbo_agent_harness_t *
+turbo_agent_harness_create_with_runtime_store_ex(
+    const turbo_agent_harness_config_t *config,
+    const turbo_agent_runtime_store_ex_t *runtime_store) {
+  return turbo_agent_harness_create_internal(config, runtime_store);
 }
 
 turbo_agent_harness_t *turbo_agent_harness_retain(turbo_agent_harness_t *harness) {

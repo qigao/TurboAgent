@@ -535,9 +535,18 @@ static int turbo_agent_compiled_inspect_attempt_write(
       (result && turbo_runtime_json_object_set_clone(record, "result", result) !=
           TURBO_RUNTIME_JSON_OK)) goto cleanup;
 
-  rc = turbo_agent_runtime_store_put_json(
-      run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
-      run->attempt_record_id, record) == SALTS_OK ? 0 : -1;
+  if (is_start) {
+    /* The read above validates the common path, but it is not the claim.
+     * Only the backend's conditional insert can arbitrate competing Harnesses.
+     * Unsupported backends fail closed; never emulate this with get + put. */
+    rc = turbo_agent_runtime_store_create_json_if_absent(
+        run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        run->attempt_record_id, record) == SALTS_OK ? 0 : -1;
+  } else {
+    rc = turbo_agent_runtime_store_put_json(
+        run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        run->attempt_record_id, record) == SALTS_OK ? 0 : -1;
+  }
 
 cleanup:
   turbo_runtime_json_destroy(record);

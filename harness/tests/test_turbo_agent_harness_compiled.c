@@ -134,6 +134,7 @@ static turbo_tool_status_t register_compiled_inspect(
 typedef struct compiled_inspect_store_fault_s {
   turbo_agent_runtime_store_t inner;
   const char *failed_phase;
+  int claim_failure_status;
 } compiled_inspect_store_fault_t;
 
 static int compiled_inspect_fault_store_put(void *user_data, const char *collection,
@@ -157,6 +158,7 @@ static int compiled_inspect_fault_store_create_if_absent(
     const char *record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
   if (!fault || !fault->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (fault->claim_failure_status != SALTS_OK) return fault->claim_failure_status;
   return fault->inner.create_if_absent(fault->inner.user_data, collection, id, record_json);
 }
 
@@ -517,6 +519,41 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     /* Compilation succeeded, so the API intentionally still returns its certificate
      * on execution failure; only the tool result must remain withheld. */
     check_not_null(certificate);
+
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("fails closed and preserves the atomic claim error before callback dispatch") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase(NULL);
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(store.user_data);
+    ((compiled_inspect_store_fault_t *)store.user_data)->claim_failure_status = SALTS_ENOTSUP;
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1),
+                TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+
+    check_not_equal(run_compiled_inspect(harness, compiled_inspect_source,
+        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
+    check_equal(probe.calls, 0);
+    check_null(result);
+    check_not_null(certificate);
+    check_true(strstr(diagnostic.message, "does not support atomic Inspect attempt claims") != NULL);
 
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);

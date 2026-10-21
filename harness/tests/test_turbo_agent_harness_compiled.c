@@ -152,6 +152,14 @@ static int compiled_inspect_fault_store_put(void *user_data, const char *collect
   return fault->inner.put(fault->inner.user_data, collection, id, record_json);
 }
 
+static int compiled_inspect_fault_store_create_if_absent(
+    void *user_data, const char *collection, const char *id,
+    const char *record_json) {
+  compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
+  if (!fault || !fault->inner.create_if_absent) return SALTS_ENOTSUP;
+  return fault->inner.create_if_absent(fault->inner.user_data, collection, id, record_json);
+}
+
 static int compiled_inspect_fault_store_get(void *user_data, const char *collection,
                                             const char *id, char **out_record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
@@ -187,6 +195,7 @@ static turbo_agent_runtime_store_t compiled_inspect_store_fail_phase(const char 
   fault->inner = inner;
   fault->failed_phase = phase;
   store.put = compiled_inspect_fault_store_put;
+  store.create_if_absent = compiled_inspect_fault_store_create_if_absent;
   store.get = compiled_inspect_fault_store_get;
   store.list = compiled_inspect_fault_store_list;
   store.user_data = fault;

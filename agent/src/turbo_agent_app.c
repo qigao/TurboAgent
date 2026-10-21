@@ -6,22 +6,32 @@ struct turbo_agent_app_s {
   turbo_agent_session_t *session;
 };
 
-CXX_C_API turbo_agent_app_t *turbo_agent_app_create(const turbo_agent_app_config_t *config) {
+static turbo_agent_app_t *turbo_agent_app_create_internal(
+    const turbo_agent_app_config_t *config,
+    const turbo_agent_runtime_store_ex_t *runtime_store) {
   turbo_agent_app_t *app;
-
-  if (!config || !config->session_config) {
-    return NULL;
-  }
+  if (!config || !config->session_config) return NULL;
   app = (turbo_agent_app_t *)calloc(1, sizeof(*app));
-  if (!app) {
-    return NULL;
-  }
-  app->session = turbo_agent_session_create(config->session_config);
+  if (!app) return NULL;
+  app->session = runtime_store
+                     ? turbo_agent_session_create_with_runtime_store_ex(
+                           config->session_config, runtime_store)
+                     : turbo_agent_session_create(config->session_config);
   if (!app->session) {
     free(app);
     return NULL;
   }
   return app;
+}
+
+CXX_C_API turbo_agent_app_t *turbo_agent_app_create(const turbo_agent_app_config_t *config) {
+  return turbo_agent_app_create_internal(config, NULL);
+}
+
+CXX_C_API turbo_agent_app_t *turbo_agent_app_create_with_runtime_store_ex(
+    const turbo_agent_app_config_t *config,
+    const turbo_agent_runtime_store_ex_t *runtime_store) {
+  return turbo_agent_app_create_internal(config, runtime_store);
 }
 
 CXX_C_API void turbo_agent_app_destroy(turbo_agent_app_t *app) {

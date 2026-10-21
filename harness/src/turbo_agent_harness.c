@@ -838,6 +838,9 @@ static int turbo_agent_compiled_inspect_execute_node(
       run->journal_started = 1;
       run->committed = 1;
       run->replayed = 1;
+      /* Report the status persisted with the canonical attempt result, rather
+       * than leaking the ERROR default used before this Run reaches a result. */
+      run->tool_status = (turbo_tool_status_t)saved_status;
       run->failure_rc = SALTS_OK;
       if (turbo_agent_compiled_inspect_run_journal_write(
               run, "committed", TURBO_TOOL_OK, NULL) != 0) {

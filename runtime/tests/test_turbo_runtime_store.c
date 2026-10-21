@@ -7,6 +7,7 @@
 #include <salts/error_codes.h>
 
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -384,8 +385,10 @@ typedef struct store_claim_worker_s {
 
 static void store_claim_worker(void *data) {
   store_claim_worker_t *worker = (store_claim_worker_t *)data;
-  json_value_t *record = json_create_object();
+  json_value_t *record;
   int rc;
+  atomic_fetch_add(worker->ready, 1);
+  record = json_create_object();
   if (!record ||
       turbo_runtime_json_object_set_int64(record, "writer", worker->writer_id) !=
           TURBO_RUNTIME_JSON_OK) {
@@ -393,7 +396,6 @@ static void store_claim_worker(void *data) {
     json_free(record);
     return;
   }
-  atomic_fetch_add(worker->ready, 1);
   while (!atomic_load(worker->go)) cmeta_thread_yield();
   rc = turbo_agent_runtime_store_create_if_absent_json(
       worker->runtime, "claims", worker->key, record);

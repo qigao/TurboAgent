@@ -3,9 +3,18 @@
 #include "turbo_agent.h"
 #include "../src/turbo_agent_runtime_internal.h"
 #include "turbo_model_provider.h"
+#include "turbo_agent_policy.h"
+#include "turbo_tool_registry.h"
 
 #include <stdlib.h>
 #include <string.h>
+
+static int request_schema_tool(const char *arguments, char **out, void *data) {
+  (void)arguments;
+  (void)out;
+  (void)data;
+  return -1;
+}
 
 static int dummy_transport(const char *request_json, char **out_response_json, void *user_data) {
   (void)request_json;
@@ -668,4 +677,74 @@ spec("turbo agent request internals") {
     json_free(state); state = NULL;
     turbo_agent_destroy(agent);
   }
+
+  it("should expose only Host-authorized tools in every provider request schema") {
+    static const struct {
+      const turbo_model_provider_t *(*provider_fn)(void);
+    } providers[] = {
+        {turbo_model_provider_openai_responses},
+        {turbo_model_provider_openai_chat_completions},
+        {turbo_model_provider_openai_compatible_chat_completions},
+        {turbo_model_provider_anthropic_messages},
+    };
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {0};
+    size_t i;
+
+    check_not_null(registry);
+    definition.name = "private.legacy";
+    definition.description = "Host-controlled test tool.";
+    definition.parameters_json = "{\"type\":\"object\",\"properties\":{}}";
+    definition.handler = request_schema_tool;
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+
+    for (i = 0; i < sizeof(providers) / sizeof(providers[0]); ++i) {
+      turbo_agent_config_t config = {0};
+      turbo_agent_t *agent;
+      json_value_t *state;
+      json_value_t *request = NULL;
+      const json_value_t *tools;
+      char *request_json = NULL;
+      turbo_agent_policy_t policy = turbo_agent_policy_default();
+
+      config.model = "schema-policy-test";
+      config.transport_fn = dummy_transport;
+      config.provider = providers[i].provider_fn();
+      config.tool_registry = registry;
+      agent = turbo_agent_create(&config);
+      check_not_null(agent);
+      state = turbo_agent_state_create();
+      check_not_null(state);
+      check_equal(turbo_agent_state_add_user_message(state, "Ping"), 0);
+
+      check_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
+      request = parse_request_json_or_fail(request_json);
+      tools = json_object_get(request, "tools");
+      /* Providers may omit an empty tools field entirely. Both encodings
+       * mean that no ungranted tool was exposed to the model. */
+      if (tools) {
+        check_equal(json_array_size(tools), 0);
+      }
+      json_free(request);
+      request = NULL;
+      free(request_json);
+      request_json = NULL;
+
+      policy.allow_custom_tools = 1;
+      check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
+      check_equal(turbo_agent_build_turn_request(agent, state, &request_json), 0);
+      request = parse_request_json_or_fail(request_json);
+      tools = json_object_get(request, "tools");
+      check_not_null(tools);
+      check_equal(json_array_size(tools), 1);
+
+      json_free(request);
+      free(request_json);
+      json_free(state);
+      turbo_agent_destroy(agent);
+    }
+    turbo_tool_registry_destroy(registry);
+  }
+
+
 }

@@ -1,0 +1,120 @@
+name: TurboAgent SpeechOutput M4 strict C11 fake TTS source conformance (#166)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_output/**'
+      - 'docs/design/cooperative-speech-output-tts.md'
+      - 'CMakeLists.txt'
+      - '.github/workflows/speech-output-m4-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fake-tts:
+    name: M4 C11 fake TTS / ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc
+            cc: gcc
+            cxx: g++
+            flags: "-Wall -Wextra -Wpedantic -Werror -O2"
+          - name: clang
+            cc: clang
+            cxx: clang++
+            flags: "-Wall -Wextra -Wpedantic -Werror -O2"
+          - name: address-undefined
+            cc: gcc
+            cxx: g++
+            flags: "-Wall -Wextra -Wpedantic -Werror -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined"
+          - name: thread
+            cc: gcc
+            cxx: g++
+            flags: "-Wall -Wextra -Wpedantic -Werror -O1 -g -fno-omit-frame-pointer -fsanitize=thread"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Configure dependency-free C11 SpeechOutput and public C++17 consumer
+        shell: bash
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          CFLAGS: ${{ matrix.flags }}
+        run: |
+          set -euo pipefail
+          cmake -S speech_output -B build/speech-output-m4 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            "-DCMAKE_C_FLAGS=$CFLAGS" "-DCMAKE_CXX_FLAGS=$CFLAGS"
+      - name: Compile strict C11 fake Provider and C++17 ABI tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/speech-output-m4 --parallel 2
+      - name: Run bounded cancellation and streaming PCM tests
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          set -euo pipefail
+          ctest --test-dir build/speech-output-m4 --output-on-failure \
+            --timeout 25
+      - name: Verify standalone installed C11 and C++17 consumers
+        shell: bash
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          CFLAGS: ${{ matrix.flags }}
+        run: |
+          set -euo pipefail
+          prefix="$GITHUB_WORKSPACE/build/speech-output-m4/installed"
+          cmake --install build/speech-output-m4 --prefix "$prefix"
+          test -f "$prefix/include/turbo_agent_speech_output.h"
+          archive="$(find "$prefix" -name 'libturbo_agent_speech_output.a' -print -quit)"
+          test -n "$archive"
+          cat > /tmp/tts_m4_public_c11.c <<'C'
+          #include <turbo_agent_speech_output.h>
+          int main(void) {
+            turbo_agent_tts_config_t cfg;
+            turbo_agent_tts_config_init(&cfg);
+            return cfg.abi_version == 1u &&
+                   cfg.output.sample_rate_hz == 24000u &&
+                   cfg.output.frame_ms == 20u ? 0 : 1;
+          }
+          C
+          cat > /tmp/tts_m4_public_cpp17.cpp <<'CPP'
+          #include <turbo_agent_speech_output.h>
+          #include <type_traits>
+          static_assert(std::is_standard_layout<turbo_agent_tts_provider_v1_t>::value,
+                        "TTS v1 must be plain C ABI");
+          int main() {
+            turbo_agent_tts_provider_v1_t api{};
+            turbo_agent_tts_provider_v1_init(&api);
+            return api.abi_version == 1u ? 0 : 1;
+          }
+          CPP
+          "$CC" -std=c11 $CFLAGS -I"$prefix/include" \
+            /tmp/tts_m4_public_c11.c "$archive" -o /tmp/tts_m4_public_c11
+          "$CXX" -std=c++17 $CFLAGS -I"$prefix/include" \
+            /tmp/tts_m4_public_cpp17.cpp "$archive" -o /tmp/tts_m4_public_cpp17
+          /tmp/tts_m4_public_c11
+          /tmp/tts_m4_public_cpp17
+          echo 'PASS: independently installed, consumed, and executed both public ABIs'
+      - name: Verify default OFF, no model and no Playback device backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'option(ENABLE_SPEECH_OUTPUT' CMakeLists.txt
+          grep -Fq 'contract (no TTS model)" OFF)' CMakeLists.txt
+          test ! -d speech_output/models
+          ! grep -RE 'curl|wget|find_package\(Whisper|add_subdirectory\(playback\)' \
+            speech_output/src speech_output/tests speech_output/CMakeLists.txt
+          echo 'PASS: M4.0 does not select real TTS weights or native playback'

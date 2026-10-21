@@ -7,14 +7,17 @@
         {
             "name": "android-base",
             "hidden": true,
-            "inherits": ["flags-android", "android-vcpkg-chainload"],
-            "generator": "Ninja",
+            "inherits": ["flags-android", "android-vcpkg-chainload", "base-ninja"],
+            "binaryDir": "${sourceDir}/build/$env{ANDROID_BUILD_VARIANT}",
             "cacheVariables": {
                 "CMAKE_SYSTEM_NAME": "Android",
                 "SaltsUtils_IDLC_EXECUTABLE": "$penv{TURBOAGENT_HOST_IDLC}",
                 "SaltsUtils_IDLC_HOST_SALTS_ROOT": "$penv{TURBOAGENT_HOST_SALTS_ROOT}",
                 "ANDROID_STL": "c++_shared",
                 "ANDROID_PLATFORM": "android-24",
+                "ENABLE_TESTS": false,
+                "BUILD_TESTS": "OFF",
+                "BUILD_EXAMPLES": "OFF",
                 "BUILD_TESTING": false
             }
         },
@@ -22,7 +25,6 @@
             "name": "android-vcpkg-chainload",
             "hidden": true,
             "cacheVariables": {
-                "VCPKG_MANIFEST_MODE": true,
                 "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake"
             }
         },
@@ -38,26 +40,20 @@
             "name": "android-arm64-v8a-debug",
             "hidden": true,
             "inherits": ["android-base", "developer-mode"],
-            "binaryDir": "${sourceDir}/build/android-arm64-v8a-debug",
+            "environment": { "ANDROID_BUILD_VARIANT": "android-arm64-v8a-debug" },
             "cacheVariables": {
                 "ANDROID_ABI": "arm64-v8a",
-                "VCPKG_TARGET_TRIPLET": "arm64-android",
-                "ENABLE_TESTS": false,
-                "BUILD_TESTS": "OFF",
-                "BUILD_EXAMPLES": "OFF"
+                "VCPKG_TARGET_TRIPLET": "arm64-android"
             }
         },
         {
             "name": "android-arm64-v8a-release",
             "displayName": "Android arm64-v8a Release",
             "inherits": ["android-base", "release-mode"],
-            "binaryDir": "${sourceDir}/build/android-arm64-v8a-release",
+            "environment": { "ANDROID_BUILD_VARIANT": "android-arm64-v8a-release" },
             "cacheVariables": {
                 "ANDROID_ABI": "arm64-v8a",
                 "VCPKG_TARGET_TRIPLET": "arm64-android",
-                "ENABLE_TESTS": false,
-                "BUILD_TESTS": "OFF",
-                "BUILD_EXAMPLES": "OFF",
                 "BUILD_BENCHMARKS": "OFF"
             }
         },
@@ -65,52 +61,40 @@
             "name": "android-x86_64-debug",
             "hidden": true,
             "inherits": ["android-base", "developer-mode"],
-            "binaryDir": "${sourceDir}/build/android-x86_64-debug",
+            "environment": { "ANDROID_BUILD_VARIANT": "android-x86_64-debug" },
             "cacheVariables": {
                 "ANDROID_ABI": "x86_64",
-                "VCPKG_TARGET_TRIPLET": "x64-android",
-                "ENABLE_TESTS": false,
-                "BUILD_TESTS": "OFF",
-                "BUILD_EXAMPLES": "OFF"
+                "VCPKG_TARGET_TRIPLET": "x64-android"
             }
         },
         {
             "name": "android-x86_64-release",
             "hidden": true,
             "inherits": ["android-base", "release-mode"],
-            "binaryDir": "${sourceDir}/build/android-x86_64-release",
+            "environment": { "ANDROID_BUILD_VARIANT": "android-x86_64-release" },
             "cacheVariables": {
                 "ANDROID_ABI": "x86_64",
-                "VCPKG_TARGET_TRIPLET": "x64-android",
-                "ENABLE_TESTS": false,
-                "BUILD_TESTS": "OFF",
-                "BUILD_EXAMPLES": "OFF"
+                "VCPKG_TARGET_TRIPLET": "x64-android"
             }
         },
         {
             "name": "android-x86-debug",
             "hidden": true,
             "inherits": ["android-base", "developer-mode"],
-            "binaryDir": "${sourceDir}/build/android-x86-debug",
+            "environment": { "ANDROID_BUILD_VARIANT": "android-x86-debug" },
             "cacheVariables": {
                 "ANDROID_ABI": "x86",
-                "VCPKG_TARGET_TRIPLET": "x86-android",
-                "ENABLE_TESTS": false,
-                "BUILD_TESTS": "OFF",
-                "BUILD_EXAMPLES": "OFF"
+                "VCPKG_TARGET_TRIPLET": "x86-android"
             }
         },
         {
             "name": "android-x86-release",
             "hidden": true,
             "inherits": ["android-base", "release-mode"],
-            "binaryDir": "${sourceDir}/build/android-x86-release",
+            "environment": { "ANDROID_BUILD_VARIANT": "android-x86-release" },
             "cacheVariables": {
                 "ANDROID_ABI": "x86",
-                "VCPKG_TARGET_TRIPLET": "x86-android",
-                "ENABLE_TESTS": false,
-                "BUILD_TESTS": "OFF",
-                "BUILD_EXAMPLES": "OFF"
+                "VCPKG_TARGET_TRIPLET": "x86-android"
             }
         }
     ]

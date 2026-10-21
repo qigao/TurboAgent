@@ -6,8 +6,9 @@ static const char cli_description[] =
     "Without -p, read one user message per line; /quit or EOF exits.\n"
     "Model configuration: OPENAI_*/ANTHROPIC_* environment and optional .env.\n"
     "Both modes load workspace AGENTS.md and matching skills/ instructions.\n"
-    "Default tools can edit workspace files and run shell commands with host\n"
-    "privileges. --read-only registers only file reading/listing/search.\n"
+    "Default trust profile is inspect: read-only workspace tools, no host shell.\n"
+    "Explicit --trust-profile trusted-local enables host file writes/shell.\n"
+    "--read-only is a legacy inspect alias; approval is unavailable without a host callback.\n"
     "--session-db stores a session; --resume continues completed turns.\n"
     "--mode general selects a general assistant without coding tools.\n"
     "--workflow loop|review|engineering selects execution (default loop).\n"
@@ -27,7 +28,7 @@ void turbo_cli_parse_options(int argc, char **argv, turbo_cli_options_t *options
   char *diagram_to = NULL;
   char *mode = NULL, *instructions = NULL, *knowledge_db = NULL, *index_dir = NULL;
   char *vector_db = NULL, *embedding_url = NULL, *embedding_model = NULL;
-  char *workflow = NULL;
+  char *workflow = NULL, *trust_profile = NULL;
   CmdArgerBool read_only = cmd_arger_false, help = cmd_arger_false, resume = cmd_arger_false;
   CmdArgerBool diagram_origins = cmd_arger_false;
   CmdArgerBool diagram_plan_steps = cmd_arger_false;
@@ -37,6 +38,7 @@ void turbo_cli_parse_options(int argc, char **argv, turbo_cli_options_t *options
     cmd_arger_desc_string(&model, "model", "Override the environment model"),
     cmd_arger_desc_string(&mode, "mode", "Agent mode: coding (default) or general"),
     cmd_arger_desc_string(&workflow, "workflow", "Workflow: loop (default), review (plan/execute with review gate), engineering (also replan failures)"),
+    cmd_arger_desc_string(&trust_profile, "trust-profile", "inspect (default, no writes/shell) or trusted-local (explicit host authority); approval not yet supported"),
     cmd_arger_desc_string(&instructions, "instructions", "Override the agent's instructions with UTF-8 text"),
     cmd_arger_desc_string(&knowledge_db, "knowledge-db", "Dedicated SQLite knowledge index for per-turn FTS5 retrieval"),
     cmd_arger_desc_string(&index_dir, "index-dir", "Import supported text/code files at startup (requires --knowledge-db or --vector-db)"),
@@ -65,5 +67,5 @@ void turbo_cli_parse_options(int argc, char **argv, turbo_cli_options_t *options
     cmd_arger_show_help_and_exit(arguments, count, NULL, 0, argv[0], cli_description, cmd_arger_false);
   *options = (turbo_cli_options_t){workspace, prompt, model, read_only, session_db, resume,
       diagram, diagram_focus, diagram_direction, diagram_depth, diagram_journals, diagram_origins, diagram_to, diagram_plan_steps,
-      mode, instructions, knowledge_db, index_dir, vector_db, embedding_url, embedding_model, workflow};
+      mode, instructions, knowledge_db, index_dir, vector_db, embedding_url, embedding_model, workflow, trust_profile};
 }

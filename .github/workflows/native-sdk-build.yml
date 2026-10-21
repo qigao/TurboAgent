@@ -2,6 +2,12 @@ name: Build and package TurboAgent native SDKs
 
 on:
   workflow_call:
+    inputs:
+      salts_release_tag:
+        description: Exact published Salts Release Tag (never a Git SHA)
+        required: false
+        type: string
+        default: v2.3.0-rc.17
     outputs:
       version:
         description: TurboAgent project version
@@ -13,6 +19,14 @@ permissions:
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 2
+  # Reproducible published package selection. Update tags in a reviewed PR;
+  # the manual CI entry may qualify a new Salts tag before promoting it.
+  SALTS_RELEASE_TAG: ${{ inputs.salts_release_tag || 'v2.3.0-rc.17' }}
+  SALTS_UTILS_RELEASE_TAG: v4.3.0-rc.11
+  CHTTP_RELEASE_TAG: v2.1.0-rc.6
+  TURBOSCRIPT_RELEASE_TAG: v3.0.10
+  PRAKTOR_RELEASE_TAG: v0.4.8
+  TURBOWASM_RELEASE_TAG: v0.2.1
 
 jobs:
   metadata:
@@ -115,7 +129,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
             throw "MSVC x64 toolchain is required"
           }
-          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          "VSDEVCMD_BAT=$vs\Common7\Tools\VsDevCmd.bat" >> $env:GITHUB_ENV
           # The setup actions expose Windows-native paths; presets consume CMake paths.
           foreach ($name in @('VCPKG_ROOT', 'VCPKG_CACHE_REPOSITORY_ROOT', 'RE2C_ROOT')) {
             $path = [Environment]::GetEnvironmentVariable($name)
@@ -134,10 +148,10 @@ jobs:
 
       - name: Restore native SDKs on Windows
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64 -WithWasm
+        run: bash cmake/ci/restore-native-sdk.sh windows-x64 0 1
 
       - name: Configure on Unix
         if: runner.os != 'Windows'
@@ -149,7 +163,7 @@ jobs:
       - name: Configure on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --preset ci-windows-release
+        run: call cmake\ci\run-vsdevcmd.cmd cmake --preset ci-windows-release
 
       - name: Build on Unix
         if: runner.os != 'Windows'
@@ -175,7 +189,23 @@ jobs:
       - name: Build on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset ci-windows-release
+        run: call cmake\ci\run-vsdevcmd.cmd cmake --build --preset ci-windows-release
+
+      - name: Verify Linux PraktorTools has no executable-bound CSTL hash dependency
+        if: success() && matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          lib=build/ci-linux-release/bin/libpraktor_tools.so
+          test -f "$lib"
+          # hash_bytes remains image-local. The PraktorTools shared object
+          # must not import this hidden static symbol from its consumers.
+          if nm -D --undefined-only "$lib" |
+             grep -Eq '[[:space:]]U[[:space:]]+hash_bytes(@|$)'; then
+            echo "PraktorTools has an unresolved private CSTL hash import" >&2
+            exit 1
+          fi
+          echo "PraktorTools CSTL hash symbol ownership: resolved in DSO"
 
       - name: Test on Unix
         if: runner.os != 'Windows' && matrix.tests
@@ -184,10 +214,46 @@ jobs:
           SDK_PRESET: ${{ matrix.preset }}
         run: ctest --preset "$SDK_PRESET"
 
+      # Manual Release-Tag qualification is strictly an installed-package
+      # consumer test. Prove CMake consumed the published .nupkg identified
+      # by the tag and digest, never a source-SHA candidate or stale cache.
+      - name: Verify Windows published Salts Release Tag and CMake origin
+        if: matrix.rid == 'windows-x64' && matrix.tests && github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $manifest = Join-Path $env:GITHUB_WORKSPACE "build/release-provenance/windows-x64.txt"
+          if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "No SDK release provenance" }
+          $tag = $env:SALTS_RELEASE_TAG
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$') {
+            throw "Invalid published Salts tag: $tag"
+          }
+          $asset = "Salts.Native.$($tag.Substring(1)).nupkg"
+          $prefix = "repo=qigao/salts tag=$tag asset=$asset sha256="
+          $records = @(Get-Content -LiteralPath $manifest | Where-Object { $_.StartsWith($prefix) })
+          if ($records.Count -ne 1 -or $records[0].Substring($prefix.Length) -cnotmatch '^[0-9a-f]{64}$') {
+            throw "Missing or ambiguous exact published Salts asset digest"
+          }
+          $cache = "build/ci-windows-release/CMakeCache.txt"
+          $entries = @(Get-Content -LiteralPath $cache | Where-Object { $_ -match '^Salts_DIR:PATH=' })
+          if ($entries.Count -ne 1) { throw "Missing unique installed Salts_DIR" }
+          $actual = [IO.Path]::GetFullPath(($entries[0] -split '=', 2)[1])
+          $expected = [IO.Path]::GetFullPath((Join-Path $env:SALTS_ROOT "lib/cmake/Salts"))
+          if ($actual -ine $expected) {
+            throw "Salts package provenance mismatch: $actual vs $expected"
+          }
+          Write-Host "Published SDK acceptance: tag=$tag asset=$asset; CMake installed root verified"
+
+      - name: Repeat Windows released-Salts workspace cancellation (20x)
+        if: matrix.rid == 'windows-x64' && matrix.tests && github.event_name == 'workflow_dispatch'
+        shell: cmd
+        run: |
+          call cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release --no-tests=error --output-on-failure --repeat until-fail:20 -R "^test_turbo_coding_workspace$"
+
       - name: Test on Windows
         if: runner.os == 'Windows' && matrix.tests
         shell: cmd
-        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --preset ci-windows-release
+        run: call cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release
 
       - name: Install on Unix
         if: runner.os != 'Windows'
@@ -199,7 +265,7 @@ jobs:
       - name: Install on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset install-ci-windows-release
+        run: call cmake\ci\run-vsdevcmd.cmd cmake --build --preset install-ci-windows-release
 
       - name: Record SDK provenance
         shell: bash
@@ -213,6 +279,11 @@ jobs:
           printf 'version=%s\ncommit=%s\nrid=%s\npraktor_tools=%s\n' \
             "$SDK_VERSION" "$GITHUB_SHA" "$SDK_RID" "$praktor" \
             > "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
+          # Dependency selection uses Release Tags, never commit SHAs.
+          # The manifest records exactly which release assets and bytes were used.
+          release_manifest="build/release-provenance/$SDK_RID.txt"
+          test -s "$release_manifest"
+          cat "$release_manifest" >> "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
 
       - uses: actions/upload-artifact@v4
         with:

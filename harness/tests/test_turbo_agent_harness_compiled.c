@@ -1061,7 +1061,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
     harness = make_compiled_harness(pool, registry);
     check_not_null(harness);
-    check_equal(set_compiled_host_policy(harness, 0), 0);
+    /* New Agents grant no tool authority. A compiler allowlist cannot
+     * turn registration or model intent into a Host capability grant. */
 
     check_equal(run_compiled_inspect(harness, compiled_inspect_source,
         allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_EPROTO);

@@ -2,6 +2,8 @@
 #include <json_parser.h>
 #include <tstr.h>
 #include "turbo_agent_app.h"
+#include "turbo_agent_policy.h"
+#include "turbo_agent_session.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_evidence_diagram.h"
 #include "turbo_agent_graph.h"
@@ -193,6 +195,14 @@ static int repeated_step_tool_transport(const char *request_json, char **out, vo
   return response ? planner_tool_test_copy(response, out) : -1;
 }
 
+static int planner_host_admit_fixture_tool(turbo_agent_app_t *app) {
+  turbo_agent_policy_t grant = turbo_agent_policy_default();
+  if (!app) return -1;
+  grant.allow_custom_tools = 1; /* One explicitly Host-owned planning Tool. */
+  return turbo_agent_set_tool_policy(
+      turbo_agent_session_agent(turbo_agent_app_session(app)), &grant);
+}
+
 spec("planner step tool journal identity") {
   static planner_tool_test_state_t state;
   static turbo_tool_registry_t *registry;
@@ -218,6 +228,7 @@ spec("planner step tool journal identity") {
     session.workflow_kind = TURBO_AGENT_SESSION_WORKFLOW_ENGINEERING;
     config.session_config = &session;
     app = turbo_agent_app_create(&config); check_not_null(app);
+    check_equal(planner_host_admit_fixture_tool(app), 0);
   }
   after_each() {
     free(text); text = NULL; json_free(summary); summary = NULL;
@@ -366,6 +377,7 @@ spec("turbo agent planner tools") {
     app_config.session_config = &session_config;
     app = turbo_agent_app_create(&app_config);
     check_not_null(app);
+    check_equal(planner_host_admit_fixture_tool(app), 0);
 
     invoke_result = turbo_agent_app_start_text(app, "plan with inspected context", NULL, &summary,
                                                &result_state);
@@ -417,6 +429,7 @@ spec("turbo agent planner tools") {
     app_config.session_config = &session_config;
     app = turbo_agent_app_create(&app_config);
     check_not_null(app);
+    check_equal(planner_host_admit_fixture_tool(app), 0);
 
     check_equal(turbo_agent_app_invoke_text(app, "recover after failure", NULL, &text, &summary),
                  0);
@@ -464,6 +477,7 @@ spec("turbo agent planner tools") {
     app_config.session_config = &session_config;
     app = turbo_agent_app_create(&app_config);
     check_not_null(app);
+    check_equal(planner_host_admit_fixture_tool(app), 0);
 
     check_equal(
         turbo_agent_app_invoke_text(app, "use a tool while executing", NULL, &text, &summary), 0);

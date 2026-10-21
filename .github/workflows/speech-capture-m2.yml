@@ -1,0 +1,90 @@
+name: TurboAgent Speech Capture M2 bounded PCM source gate (#134)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/**'
+      - '.github/workflows/speech-capture-m2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture-bridge-standalone:
+    name: C11 Speech Capture bridge / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure exact S16LE callback bridge without microphone or backend
+        run: cmake -S speech_input -B build/speech-capture-m2 -DBUILD_TESTING=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Compile C11 production bridge and deterministic PCM fixture
+        run: cmake --build build/speech-capture-m2 --config Release --parallel 2
+      - name: Reject audio format mismatch, stale callback, overflow, and partial tool submission
+        run: ctest --test-dir build/speech-capture-m2 -C Release --no-tests=error --output-on-failure --timeout 30
+
+  capture-bridge-sanitizers:
+    name: C11 Speech Capture bridge / ${{ matrix.kind }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [address, thread]
+    env:
+      CC: gcc
+      SAN_KIND: ${{ matrix.kind }}
+      TSAN_OPTIONS: halt_on_error=1:exitcode=66
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Instrument actual C11 bridge, SpeechInput core and producer fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          san="-fsanitize=address -fsanitize=undefined"
+          if [ "$SAN_KIND" = thread ]; then san="-fsanitize=thread"; fi
+          cmake -S speech_input -B "build/speech-capture-$SAN_KIND" -G Ninja \
+            -DBUILD_TESTING=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_C_FLAGS=-std=c11 -Wall -Wextra -Wpedantic -Werror $san -g -fno-omit-frame-pointer" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$san"
+          cmake --build "build/speech-capture-$SAN_KIND" --parallel 2
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(f"build/speech-capture-{os.environ['SAN_KIND']}")
+          data=json.loads((root/'compile_commands.json').read_text())
+          required=['speech_input/src/turbo_agent_speech_input.c',
+                    'speech_input/capture/src/turbo_agent_speech_capture_bridge.c',
+                    'speech_input/capture/tests/test_turbo_agent_speech_capture_bridge.c',
+                    'speech_input/tests/test_turbo_agent_speech_concurrent.c']
+          flag='-fsanitize=thread' if os.environ['SAN_KIND']=='thread' else '-fsanitize=address'
+          for name in required:
+              matches=[c for c in data if Path(c['file']).resolve()==Path(name).resolve()]
+              if len(matches)!=1 or flag not in matches[0]['command']:
+                  raise SystemExit('Missing real source instrumentation: '+name)
+          print('PASS: all native M1/M2 modules and tests source instrumented')
+          PY
+      - name: Repeat S16LE format and real concurrent callback lifetime tests
+        run: ctest --test-dir build/speech-capture-${{ matrix.kind }} --no-tests=error --output-on-failure --timeout 30 --repeat until-fail:5
+      - name: Save unmodified sanitizer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-capture-m2-${{ matrix.kind }}-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/speech-capture-${{ matrix.kind }}/compile_commands.json
+            build/speech-capture-${{ matrix.kind }}/Testing/Temporary/LastTest.log

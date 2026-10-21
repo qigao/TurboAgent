@@ -62,10 +62,19 @@ static turbo_agent_tool_execution_t admission_call(const char *id, const char *a
   return call;
 }
 
+/* Admission fixtures exercise Host-authorized tools; registration alone no
+ * longer grants execution under the programmatic deny-by-default policy. */
+static turbo_agent_policy_t admission_host_policy(void) {
+  turbo_agent_policy_t policy = turbo_agent_policy_default();
+  policy.allow_custom_tools = 1;
+  return policy;
+}
+
 spec("model tool argument structure before durable admission") {
   it("rejects any non-object or malformed batch member with zero callbacks and journal writes") {
     const char *invalid[] = {"[]", "null", "\"string\"", "42", "{\"unfinished\":"};
     admission_probe_t probe = {0};
+    turbo_agent_policy_t host_policy = admission_host_policy();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_agent_tool_executor_t *executor = NULL;
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
@@ -85,7 +94,7 @@ spec("model tool argument structure before durable admission") {
       calls[0] = admission_call("first", "{\"ok\":true}");
       calls[1] = admission_call("second", invalid[i]);
       check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
-          "thread", "run", NULL, NULL, registry, NULL, calls, 2), SALTS_EPROTO);
+          "thread", "run", NULL, NULL, registry, &host_policy, calls, 2), SALTS_EPROTO);
       check_equal(probe.callbacks, 0);
       check_null(calls[0].output);
       check_null(calls[1].output);
@@ -99,7 +108,7 @@ spec("model tool argument structure before durable admission") {
     calls[0] = admission_call("first", "{\"ok\":true}");
     calls[1] = admission_call("second", "{\"nested\":{\"value\":7}}");
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
-        "thread", "run", NULL, NULL, registry, NULL, calls, 2), SALTS_OK);
+        "thread", "run", NULL, NULL, registry, &host_policy, calls, 2), SALTS_OK);
     check_equal(probe.callbacks, 2);
     check_equal(calls[0].status, TURBO_TOOL_OK);
     check_equal(calls[1].status, TURBO_TOOL_OK);
@@ -115,6 +124,7 @@ spec("model tool argument structure before durable admission") {
 
   it("uses the canonical tool and registered execution policy for journal identity") {
     admission_probe_t probe = {0};
+    turbo_agent_policy_t host_policy = admission_host_policy();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_agent_tool_executor_t *executor = NULL;
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
@@ -138,7 +148,7 @@ spec("model tool argument structure before durable admission") {
     first.policy = (turbo_tool_execution_policy_t){
         TURBO_TOOL_EXECUTION_PARALLEL_SAFE, TURBO_TOOL_IDEMPOTENCY_READ_ONLY};
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
-        "thread", "run", NULL, NULL, registry, NULL, &first, 1), SALTS_OK);
+        "thread", "run", NULL, NULL, registry, &host_policy, &first, 1), SALTS_OK);
     check_equal(first.tool_name, "admission.probe");
     check_equal(first.policy.mode, TURBO_TOOL_EXECUTION_SEQUENTIAL);
     check_equal(first.policy.idempotency, TURBO_TOOL_IDEMPOTENCY_NONE);
@@ -155,7 +165,7 @@ spec("model tool argument structure before durable admission") {
 
     replay.tool_name = "admission.probe";
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
-        "thread", "run", NULL, NULL, registry, NULL, &replay, 1), SALTS_OK);
+        "thread", "run", NULL, NULL, registry, &host_policy, &replay, 1), SALTS_OK);
     check_true(replay.replayed);
     check_equal(replay.output, "ok");
     check_equal(probe.callbacks, 1);
@@ -169,6 +179,7 @@ spec("model tool argument structure before durable admission") {
 
   it("rejects ambiguous sanitized model tool aliases without any side effects") {
     admission_probe_t probe = {0};
+    turbo_agent_policy_t host_policy = admission_host_policy();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_agent_tool_executor_t *executor = NULL;
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
@@ -189,7 +200,7 @@ spec("model tool argument structure before durable admission") {
     check_equal(turbo_tool_registry_add(registry, &slashed), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
-        "thread", "run", NULL, NULL, registry, NULL, &call, 1), SALTS_OK);
+        "thread", "run", NULL, NULL, registry, &host_policy, &call, 1), SALTS_OK);
     check_equal(call.status, TURBO_TOOL_NOT_FOUND);
     check_equal(probe.callbacks, 0);
     check_equal(turbo_agent_runtime_store_list_json(
@@ -208,6 +219,7 @@ spec("model tool argument structure before durable admission") {
         "{\"call_id\":\"alias-call\",\"name\":\"admission_probe\","
         "\"arguments\":\"{}\"}]}";
     admission_probe_t probe = {0};
+    turbo_agent_policy_t host_policy = admission_host_policy();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {
         "admission.probe", "Wire-alias fixture", "{\"type\":\"object\"}",
@@ -227,6 +239,7 @@ spec("model tool argument structure before durable admission") {
     config.tool_registry = registry;
     agent = turbo_agent_create(&config);
     check_not_null(agent);
+    check_equal(turbo_agent_set_tool_policy(agent, &host_policy), 0);
     guardrail.before_tool = admission_canonical_guardrail;
     guardrail.user_data = &probe;
     check_equal(turbo_agent_add_guardrail(agent, &guardrail), 0);
@@ -246,6 +259,7 @@ spec("model tool argument structure before durable admission") {
 
   it("validates every canonical tool schema before recording or executing a batch") {
     admission_probe_t probe = {0};
+    turbo_agent_policy_t host_policy = admission_host_policy();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_agent_tool_executor_t *executor = NULL;
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
@@ -270,7 +284,7 @@ spec("model tool argument structure before durable admission") {
       calls[0] = admission_call("valid-first", "{\"value\":7}");
       calls[1] = admission_call("invalid-second", bad[i]);
       check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
-          "thread", "run", NULL, NULL, registry, NULL, calls, 2), SALTS_EPROTO);
+          "thread", "run", NULL, NULL, registry, &host_policy, calls, 2), SALTS_EPROTO);
       check_equal(probe.callbacks, 0);
       check_equal(turbo_agent_runtime_store_list_json(runtime, "agent_tool_journal",
           "run_id", "run", &records), SALTS_OK);
@@ -281,7 +295,7 @@ spec("model tool argument structure before durable admission") {
     calls[0] = admission_call("valid-first", "{\"value\":7}");
     calls[1] = admission_call("valid-second", "{\"value\":8}");
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL,
-        "thread", "run", NULL, NULL, registry, NULL, calls, 2), SALTS_OK);
+        "thread", "run", NULL, NULL, registry, &host_policy, calls, 2), SALTS_OK);
     check_equal(probe.callbacks, 2);
     free(calls[0].output);
     free(calls[1].output);
@@ -292,6 +306,7 @@ spec("model tool argument structure before durable admission") {
 
   it("fails closed on unsupported schema keywords before any tool side effect") {
     admission_probe_t probe = {0};
+    turbo_agent_policy_t host_policy = admission_host_policy();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_agent_tool_executor_t *executor = NULL;
     turbo_tool_definition_t definition = {
@@ -304,7 +319,7 @@ spec("model tool argument structure before durable admission") {
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, NULL, NULL,
-        NULL, NULL, NULL, NULL, registry, NULL, &call, 1), SALTS_EPROTO);
+        NULL, NULL, NULL, NULL, registry, &host_policy, &call, 1), SALTS_EPROTO);
     check_equal(probe.callbacks, 0);
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);

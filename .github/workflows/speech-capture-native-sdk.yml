@@ -1,0 +1,78 @@
+name: TurboAgent Speech Capture Salts native Windows SDK link (#134)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/speech-capture-native-sdk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  installed-windows-capture:
+    name: Windows native Salts::Capture SDK opt-in
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+      - name: Find exact Visual Studio C11 toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
+            throw 'Required MSVC toolchain not found'
+          }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          foreach ($name in @('VCPKG_ROOT','VCPKG_CACHE_REPOSITORY_ROOT','RE2C_ROOT')) {
+            $path = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($path)) { throw "$name required" }
+            "$name=$($path.Replace('\','/'))" >> $env:GITHUB_ENV
+          }
+      - name: Restore official native Salts/SaltsUtils/CHttp Windows SDKs
+        shell: pwsh
+        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64
+      - name: Require actual installed Salts::Capture native target and compile adapter
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --preset ci-windows-release -DENABLE_SPEECH_INPUT=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DENABLE_SPEECH_CAPTURE_NATIVE=ON -DENABLE_WASM_TOOLS=OFF -DENABLE_PRAKTOR_TOOLS=OFF -DENABLE_CODING_TOOLS=OFF -DENABLE_CODEX_BRIDGE=OFF -DENABLE_MCP_TOOLS=OFF -DBUILD_TESTS=ON
+          if errorlevel 1 exit /b 1
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset ci-windows-release --target turbo_agent_speech_capture_salts test_turbo_agent_speech_capture_bridge
+          if errorlevel 1 exit /b 1
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --test-dir build/ci-windows-release -C Release --no-tests=error -R "^turbo_agent_speech_capture_bridge_core$" --output-on-failure --timeout 30
+      - name: Require feature/owner metadata without starting a microphone
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $cache = Get-Content 'build/ci-windows-release/CMakeCache.txt' -Raw
+          foreach ($flag in @('ENABLE_SPEECH_INPUT:BOOL=ON','ENABLE_SPEECH_CAPTURE_BRIDGE:BOOL=ON','ENABLE_SPEECH_CAPTURE_NATIVE:BOOL=ON')) {
+            if (-not $cache.Contains($flag)) { throw "Feature flag not active: $flag" }
+          }
+          $library = Get-ChildItem 'build/ci-windows-release' -Recurse -File |
+            Where-Object { $_.Name -eq 'turbo_agent_speech_capture_salts.lib' } |
+            Select-Object -First 1
+          if (-not $library) { throw 'Missing native Salts Capture adapter archive' }
+          Get-FileHash -Path $library.FullName -Algorithm SHA256 | Format-List | Out-String | Write-Host
+          "PASS: native Salts::Capture exactly imported, compiled, linked and no real microphone opened" |
+            Tee-Object -FilePath "$env:RUNNER_TEMP\speech-capture-windows.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: speech-capture-salts-windows-native-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/speech-capture-windows.txt

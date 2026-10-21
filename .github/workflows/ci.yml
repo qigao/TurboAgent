@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      salts_release_tag:
+        description: Exact published Salts Release Tag to qualify (not Git SHA)
+        type: string
+        required: true
+        default: v2.3.0-rc.17
 
 permissions:
   contents: read
@@ -17,3 +23,5 @@ concurrency:
 jobs:
   native-sdk:
     uses: ./.github/workflows/native-sdk-build.yml
+    with:
+      salts_release_tag: ${{ inputs.salts_release_tag || 'v2.3.0-rc.17' }}

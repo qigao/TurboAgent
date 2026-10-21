@@ -1,0 +1,124 @@
+name: TurboAgent SpeechInput opt-in installed SDK C11/C++17 (#134)
+
+'on':
+  pull_request:
+    paths:
+      - 'speech_input/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/speech-input-installed-sdk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+jobs:
+  installed-native-consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      TA_SPEECH_INSTALLED: /tmp/ta-speech-m1-sdk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+      - name: Install exact native Linux tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build nasm pkg-config
+      - name: Restore currently published Salts, SaltsUtils and CHttp SDK roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash cmake/ci/restore-native-sdk.sh linux-x64 0 0
+      - name: Build explicit SpeechInput opt-in native consumer profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ci-linux-release \
+            -DENABLE_SPEECH_INPUT=ON \
+            -DENABLE_PRAKTOR_TOOLS=OFF -DENABLE_WASM_TOOLS=OFF \
+            -DENABLE_CODING_TOOLS=OFF -DENABLE_CODEX_BRIDGE=OFF \
+            -DENABLE_MCP_TOOLS=OFF \
+            "-DCMAKE_INSTALL_PREFIX=$TA_SPEECH_INSTALLED"
+          grep -Fx 'ENABLE_SPEECH_INPUT:BOOL=ON' \
+            build/ci-linux-release/CMakeCache.txt
+          cmake --build --preset ci-linux-release --parallel 2
+          ctest --test-dir build/ci-linux-release --no-tests=error \
+            -R '^turbo_agent_speech_input_' --output-on-failure --timeout 30
+          cmake --install build/ci-linux-release --prefix "$TA_SPEECH_INSTALLED"
+          test -f "$TA_SPEECH_INSTALLED/include/turbo_agent_speech_input.h"
+          test -f "$TA_SPEECH_INSTALLED/lib/libturbo_agent_speech_input.a"
+          test -f "$TA_SPEECH_INSTALLED/lib/cmake/TurboAgent/TurboAgentTargets.cmake"
+          sha256sum "$TA_SPEECH_INSTALLED/lib/libturbo_agent_speech_input.a" \
+            | tee "$RUNNER_TEMP/ta-speech-m1-installed.sha256"
+      - name: Independent installed-only C11 and C++17 link plus execute
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/ta-speech-consumer"
+          mkdir -p "$root"
+          cat > "$root/c11.c" <<'C11'
+          #include <turbo_agent_speech_input.h>
+          int main(void) {
+            turbo_agent_speech_config_t config;
+            turbo_agent_speech_config_init(&config);
+            return config.abi_version != TURBO_AGENT_SPEECH_INPUT_ABI_VERSION;
+          }
+          C11
+          cat > "$root/cpp17.cpp" <<'CPP'
+          #include <turbo_agent_speech_input.h>
+          #include <type_traits>
+          static_assert(std::is_standard_layout<turbo_agent_speech_provider_v1_t>::value,
+                        "The public Provider ABI remains standard layout");
+          int main() {
+            turbo_agent_speech_provider_v1_t provider{};
+            turbo_agent_speech_provider_v1_init(&provider);
+            return provider.abi_version != TURBO_AGENT_SPEECH_INPUT_ABI_VERSION;
+          }
+          CPP
+          cat > "$root/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.25)
+          project(ExternalSpeechInstalledConsumer LANGUAGES C CXX)
+          set(CMAKE_C_STANDARD 11)
+          set(CMAKE_CXX_STANDARD 17)
+          find_package(TurboAgent CONFIG REQUIRED
+            PATHS "$ENV{TA_SPEECH_INSTALLED}" NO_DEFAULT_PATH)
+          if(NOT TARGET TurboAgent::SpeechInput)
+            message(FATAL_ERROR "Missing installed opt-in SpeechInput target")
+          endif()
+          add_executable(speech_c11 c11.c)
+          add_executable(speech_cpp17 cpp17.cpp)
+          target_link_libraries(speech_c11 PRIVATE TurboAgent::SpeechInput)
+          target_link_libraries(speech_cpp17 PRIVATE TurboAgent::SpeechInput)
+          CMAKE
+          cmake -S "$root" -B "$root/build" -G Ninja \
+            "-DCMAKE_TOOLCHAIN_FILE=$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed/ci-linux-release" \
+            "-DCMAKE_PREFIX_PATH=$TA_SPEECH_INSTALLED;$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT;$GITHUB_WORKSPACE/vcpkg_installed/ci-linux-release/x64-linux"
+          cmake --build "$root/build" --parallel 2
+          "$root/build/speech_c11"
+          "$root/build/speech_cpp17"
+          echo "PASS: installed TurboAgent::SpeechInput C11/C++17 with no source-tree target" \
+            | tee "$RUNNER_TEMP/ta-speech-m1-consumer.txt"
+      - name: Preserve installed consumer provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-m1-installed-sdk-consumer
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/ta-speech-m1-installed.sha256
+            ${{ runner.temp }}/ta-speech-m1-consumer.txt
+            build/ci-linux-release/Testing/Temporary/LastTest.log

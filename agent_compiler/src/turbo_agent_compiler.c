@@ -369,6 +369,7 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   size_t required_count = 0;
   const json_value_t *execution_metadata = NULL;
   size_t i;
+  int network_effect = 0;
   turbo_agent_executable_plan_t *plan = NULL;
   const char *projection_names[1];
   const turbo_agent_template_descriptor_t *template_descriptor = NULL;
@@ -467,13 +468,22 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
   }
 
   /*
-   * Inspect is read-only by contract. Phase 1 deliberately uses the existing
-   * RuntimeTools idempotency fact rather than inventing a second effect system.
+   * Inspect requires both the independent READ_ONLY idempotency policy and
+   * explicit canonical effect metadata. Legacy registrations normalize to
+   * UNKNOWN and therefore fail closed; capabilities remain a separate gate.
    */
-  if ((template_descriptor->properties & TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY) != 0u &&
-      policy.idempotency != TURBO_TOOL_IDEMPOTENCY_READ_ONLY) {
-    return compile_fail(diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
-                        "read-only template requires a READ_ONLY tool");
+  if ((template_descriptor->properties & TURBO_AGENT_TEMPLATE_PROPERTY_READ_ONLY) != 0u) {
+    turbo_tool_effect_flags_t effects = TURBO_TOOL_EFFECT_UNKNOWN;
+    if (policy.idempotency != TURBO_TOOL_IDEMPOTENCY_READ_ONLY ||
+        turbo_tool_registry_get_effects(
+            source_registry, canonical_tool_name, &effects) != TURBO_TOOL_OK ||
+        (effects != TURBO_TOOL_EFFECT_PURE &&
+         effects != TURBO_TOOL_EFFECT_READ &&
+         effects != (TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK))) {
+      return compile_fail(diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
+                          "read-only template requires READ_ONLY policy and PURE, READ, or READ|NETWORK effects");
+    }
+    network_effect = effects == (TURBO_TOOL_EFFECT_READ | TURBO_TOOL_EFFECT_NETWORK);
   }
 
   if (turbo_tool_registry_get_required_capabilities(
@@ -481,6 +491,19 @@ turbo_agent_compile_status_t turbo_agent_compile_plan(
           &required_count) != TURBO_TOOL_OK) {
     return compile_fail(diagnostic, TURBO_AGENT_COMPILE_UNRESOLVED_TOOL,
                         "tool capability metadata is unavailable");
+  }
+  if (network_effect) {
+    int network_capability_declared = 0;
+    for (i = 0; i < required_count; ++i) {
+      if (required[i] && strcmp(required[i], "network") == 0) {
+        network_capability_declared = 1;
+        break;
+      }
+    }
+    if (!network_capability_declared) {
+      return compile_fail(diagnostic, TURBO_AGENT_COMPILE_TEMPLATE_VIOLATION,
+                          "READ|NETWORK effects require the declared network capability");
+    }
   }
   for (i = 0; i < required_count; ++i) {
     if (!required[i] || !required[i][0] ||

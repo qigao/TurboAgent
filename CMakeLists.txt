@@ -47,6 +47,16 @@ include(CMakeOptions.cmake)
 include(Sanitizers)
 include(CmakeUtils)
 
+# Run with the build preset's runtime environment, without duplicating SDK paths.
+add_custom_target(run-program
+    COMMAND "${CMAKE_COMMAND}" -DLOCAL_ACTION=run
+            "-DTURBOAGENT_CROSSCOMPILING=${CMAKE_CROSSCOMPILING}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunLocal.cmake"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    USES_TERMINAL
+    VERBATIM)
+set_target_properties(run-program PROPERTIES FOLDER "Tools")
+
 set(_turboagent_dependency_roots SALTS_ROOT SALTS_UTILS_ROOT CHTTP_ROOT)
 if(ENABLE_WASM_TOOLS)
   list(APPEND _turboagent_dependency_roots TURBOWASM_ROOT)
@@ -99,6 +109,14 @@ find_package(Threads REQUIRED)
 add_subdirectory(tools)
 include(FindTools)
 add_subdirectory(runtime_core)
+
+# ASR is an optional input adapter, never a Runtime/Compiler dependency.
+# Default OFF preserves the existing SDK, toolchain and native dependencies.
+option(ENABLE_SPEECH_INPUT "Build optional C11 SpeechInput input modality" OFF)
+if(ENABLE_SPEECH_INPUT)
+  add_subdirectory(speech_input)
+endif()
+
 add_subdirectory(runtime_data)
 add_subdirectory(runtime_tools)
 add_subdirectory(agent_compiler)
@@ -122,6 +140,14 @@ add_subdirectory(runtime)
 add_subdirectory(provider)
 add_subdirectory(agent)
 add_subdirectory(harness)
+
+# M4 is an output-only, independent C11 TTS Provider. It never builds,
+# downloads or selects a real model or Playback device by default.
+option(ENABLE_SPEECH_OUTPUT
+  "Build opt-in C11 SpeechOutput Provider contract (no TTS model)" OFF)
+if(ENABLE_SPEECH_OUTPUT)
+  add_subdirectory(speech_output)
+endif()
 add_subdirectory(cli)
 if(ENABLE_WASM_TOOLS)
   add_subdirectory(llm_sandbox)

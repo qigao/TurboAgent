@@ -1,0 +1,87 @@
+name: TurboAgent build with restored Release SDKs
+dotEnv: [.env]
+input_policy: strict
+inputs:
+  HOST:
+    type: string
+    default: windows
+    enum: [windows, unix]
+  RID:
+    type: string
+    default: windows-x64
+    enum: [windows-x64, linux-x64, macos-arm64, android-arm64-v8a]
+  PRESET:
+    type: string
+    default: ci-windows-release
+    enum: [ci-windows-release, ci-linux-release, ci-macos-release, ci-android-release]
+  TASK:
+    type: string
+    default: all
+    enum: [all, configure, refresh, build, test, install]
+  TEST:
+    type: string
+    default: '1'
+    enum: ['0', '1']
+  INSTALL:
+    type: string
+    default: '0'
+    enum: ['0', '1']
+  FRESH:
+    type: string
+    default: '0'
+    enum: ['0', '1']
+tasks:
+  - name: restore-windows
+    when: "$HOST == 'windows'"
+    program: '{{ env.BASH_EXECUTABLE }}'
+    args: [cmake/ci/restore-native-sdk.sh, '{{ RID }}', '0', '1', json]
+    working_dir: .
+    env:
+      SDK_RESTORE_ROOT: '{{ env.SDK_RESTORE_ROOT }}'
+    output_format: json
+    timeout: 30m
+
+  - name: restore-unix
+    when: "$HOST == 'unix'"
+    program: bash
+    args: [cmake/ci/restore-native-sdk.sh, '{{ RID }}', '1', '1', json]
+    working_dir: .
+    env:
+      SDK_RESTORE_ROOT: '{{ env.SDK_RESTORE_ROOT }}'
+    output_format: json
+    timeout: 30m
+
+  - name: cmake-windows
+    depends_on: [restore-windows]
+    when: "$HOST == 'windows'"
+    uses: cmake/workflows/cmake-windows.yml
+    vars:
+      PRESET: '{{ PRESET }}'
+      TASK: '{{ TASK }}'
+      TEST: '{{ TEST }}'
+      INSTALL: '{{ INSTALL }}'
+      FRESH: '{{ FRESH }}'
+      VSDEVCMD_BAT: '{{ env.VSDEVCMD_BAT }}'
+      SALTS_ROOT: '{{ tasks.restore-windows.outputs.data.SALTS_ROOT }}'
+      SALTS_UTILS_ROOT: '{{ tasks.restore-windows.outputs.data.SALTS_UTILS_ROOT }}'
+      CHTTP_ROOT: '{{ tasks.restore-windows.outputs.data.CHTTP_ROOT }}'
+      TURBOWASM_ROOT: '{{ tasks.restore-windows.outputs.data.TURBOWASM_ROOT }}'
+
+  - name: cmake-unix
+    depends_on: [restore-unix]
+    when: "$HOST == 'unix'"
+    uses: cmake/workflows/cmake.yml
+    vars:
+      PRESET: '{{ PRESET }}'
+      TASK: '{{ TASK }}'
+      TEST: '{{ TEST }}'
+      INSTALL: '{{ INSTALL }}'
+      FRESH: '{{ FRESH }}'
+      SALTS_ROOT: '{{ tasks.restore-unix.outputs.data.SALTS_ROOT }}'
+      SALTS_UTILS_ROOT: '{{ tasks.restore-unix.outputs.data.SALTS_UTILS_ROOT }}'
+      CHTTP_ROOT: '{{ tasks.restore-unix.outputs.data.CHTTP_ROOT }}'
+      TURBOWASM_ROOT: '{{ tasks.restore-unix.outputs.data.TURBOWASM_ROOT }}'
+      TURBOSCRIPT_ROOT: '{{ tasks.restore-unix.outputs.data.TURBOSCRIPT_ROOT }}'
+      PRAKTOR_ROOT: '{{ tasks.restore-unix.outputs.data.PRAKTOR_ROOT }}'
+      TURBOAGENT_HOST_IDLC: '{{ tasks.restore-unix.outputs.data.TURBOAGENT_HOST_IDLC }}'
+      TURBOAGENT_HOST_SALTS_ROOT: '{{ tasks.restore-unix.outputs.data.TURBOAGENT_HOST_SALTS_ROOT }}'

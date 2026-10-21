@@ -1,6 +1,7 @@
 #include "../src/turbo_agent_event_internal.h"
 #include "tinytest.h"
 #include "turbo_agent_graph.h"
+#include "turbo_agent_policy.h"
 #include "turbo_tool_registry.h"
 
 #include <stdlib.h>
@@ -104,6 +105,7 @@ spec("tool event publication and recovery") {
     turbo_graph_run_options_t options = {.interrupt_before_nodes = pauses,
                                          .interrupt_before_count = 1};
     turbo_agent_config_t config = {0};
+    turbo_agent_policy_t host_policy = turbo_agent_policy_default();
     turbo_agent_middleware_t middleware = {.after_tool = event_after_tool, .user_data = &probe};
     turbo_tool_definition_t definition = {.name = "probe",
                                           .description = "Event recovery probe",
@@ -128,6 +130,8 @@ spec("tool event publication and recovery") {
     config.tool_registry = registry;
     agent = turbo_agent_create(&config);
     check_not_null(agent);
+    host_policy.allow_custom_tools = 1; /* Explicit test Host admission. */
+    check_equal(turbo_agent_set_tool_policy(agent, &host_policy), 0);
     check_equal(turbo_agent_add_middleware(agent, &middleware), 0);
     graph = turbo_graph_create("tool-event-recovery");
     check_not_null(graph);

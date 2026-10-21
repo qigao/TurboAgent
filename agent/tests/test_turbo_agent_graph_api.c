@@ -173,6 +173,11 @@ spec("turbo agent graph api") {
     config.tool_registry = tool_registry;
     agent = turbo_agent_create(&config);
     check_not_null(agent);
+    /* This test exercises a Host-registered action with explicit authority,
+     * never the unconfigured programmatic Agent default. */
+    policy.allow_custom_tools = 1;
+    policy.allow_shell = 1;
+    check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
     check_equal(turbo_agent_add_action_policy_guardrail(agent, action_registry,
                                                          &policy),
                  0);
@@ -271,6 +276,11 @@ spec("turbo agent graph api") {
     config.tool_registry = tool_registry;
     agent = turbo_agent_create(&config);
     check_not_null(agent);
+    /* This test exercises a Host-registered action with explicit authority,
+     * never the unconfigured programmatic Agent default. */
+    policy.allow_custom_tools = 1;
+    policy.allow_shell = 1;
+    check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
     check_equal(turbo_agent_add_action_policy_guardrail(agent, action_registry,
                                                          &policy),
                  0);
@@ -364,6 +374,11 @@ spec("turbo agent graph api") {
     config.tool_registry = tool_registry;
     agent = turbo_agent_create(&config);
     check_not_null(agent);
+    /* This test exercises a Host-registered action with explicit authority,
+     * never the unconfigured programmatic Agent default. */
+    policy.allow_custom_tools = 1;
+    policy.allow_shell = 1;
+    check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
     policy.workspace_root = "C:\\workspace";
     check_equal(turbo_agent_add_action_policy_guardrail(agent, action_registry,
                                                          &policy),

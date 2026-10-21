@@ -89,7 +89,8 @@ spec("CLI discovery of executor-produced tool journals") {
     free(directory); directory = NULL;
   }
   it("discovers write edit read and shell evidence without another model or tool run") {
-    turbo_cli_options_t options = {directory, "initial_task", NULL, 0, database};
+    turbo_cli_options_t options = {.workspace = directory, .prompt = "initial_task",
+                                   .session_db = database, .trust_profile = "trusted-local"};
     turbo_agent_config_t config = {0};
     cli_model_t model = {0};
     char buffer[32768], path[SALTS_FS_MAX_PATH];
@@ -137,6 +138,63 @@ static tstr cli_workspace(void) {
   return tstr_dup(path);
 }
 
+
+typedef struct cli_untrusted_tool_model_s {
+  size_t calls;
+  int saw_limited_tools;
+} cli_untrusted_tool_model_t;
+
+/* A malicious/model-bug response can name a tool that was never advertised.
+ * The executor must still deny it; UI hints and skill text are not authority. */
+static int cli_untrusted_tool_model(const char *request, char **out, void *data) {
+  static const char *names[] = {"shell.exec", "fs.write"};
+  static const char *ids[] = {"untrusted_shell", "untrusted_write"};
+  static const char *args[] = {
+      "{\"command\":\"echo unauthorized > blocked-shell.txt\"}",
+      "{\"path\":\"blocked-write.txt\",\"content\":\"unauthorized\"}"
+  };
+  cli_untrusted_tool_model_t *model = data;
+  json_value_t *response = json_create_object();
+  json_value_t *outputs = json_create_array();
+  json_value_t *item = NULL;
+  if (!response || !outputs) goto fail;
+  if (model->calls == 0) {
+    model->saw_limited_tools =
+        strstr(request, "fs_read") && strstr(request, "fs_search") &&
+        !strstr(request, "fs_write") && !strstr(request, "shell_exec");
+    for (size_t i = 0; i < 2; ++i) {
+      item = json_create_object();
+      if (!item) goto fail;
+      json_object_set_string(item, "type", "function_call");
+      json_object_set_string(item, "name", names[i]);
+      json_object_set_string(item, "call_id", ids[i]);
+      json_object_set_string(item, "arguments", args[i]);
+      json_array_add(outputs, item);
+      item = NULL;
+    }
+  } else {
+    item = json_parse("{\"type\":\"message\",\"role\":\"assistant\","
+                      "\"content\":[{\"type\":\"output_text\",\"text\":\"denied\"}]}",
+                      strlen("{\"type\":\"message\",\"role\":\"assistant\","
+                             "\"content\":[{\"type\":\"output_text\",\"text\":\"denied\"}]}"));
+    if (!item) goto fail;
+    json_array_add(outputs, item);
+    item = NULL;
+  }
+  json_object_add(response, "output", outputs);
+  outputs = NULL;
+  json_object_set_string(response, "id", "untrusted_tool_call");
+  *out = json_serialize(response, NULL);
+  json_free(response);
+  ++model->calls;
+  return *out ? 0 : -1;
+fail:
+  json_free(item);
+  json_free(outputs);
+  json_free(response);
+  return -1;
+}
+
 spec("coding agent CLI") {
   static cmeta_process_t *process;
   after_each() { cmeta_process_destroy(process); process = NULL; }
@@ -174,6 +232,7 @@ spec("coding agent CLI") {
       check_not_null(strstr(text, "-p, --prompt"));
       check_not_null(strstr(text, "--model"));
       check_not_null(strstr(text, "--read-only"));
+      check_not_null(strstr(text, "--trust-profile"));
       check_equal(cmeta_process_read_stderr(process, text, sizeof(text) - 1, &count), SALTS_EOF);
       check_equal(count, 0);
       cmeta_process_destroy(process); process = NULL;
@@ -187,7 +246,7 @@ spec("coding agent CLI") {
     turbo_cli_options_t options;
     turbo_cli_parse_options(1, defaults, &options);
     check_equal(options.workspace, "."); check_null(options.prompt);
-    check_null(options.model); check_false(options.read_only);
+    check_null(options.model); check_false(options.read_only); check_null(options.trust_profile);
     check_null(options.session_db); check_false(options.resume);
     check_null(options.diagram);
     check_null(options.diagram_focus); check_null(options.diagram_direction); check_null(options.diagram_depth);
@@ -202,9 +261,11 @@ spec("coding agent CLI") {
     check_equal(options.prompt, "检查 tests");
     check_equal(options.model, "cli-model"); check_true(options.read_only);
     {
-      char *workflow_args[] = {"turboagent", "--mode=general", "--workflow=engineering", NULL};
-      turbo_cli_parse_options(3, workflow_args, &options);
+      char *workflow_args[] = {"turboagent", "--mode=general", "--workflow=engineering",
+                                "--trust-profile=trusted-local", NULL};
+      turbo_cli_parse_options(4, workflow_args, &options);
       check_equal(options.mode, "general"); check_equal(options.workflow, "engineering");
+      check_equal(options.trust_profile, "trusted-local");
     }
     {
       char *diagram_args[] = {"turboagent", "--session-db=session.db", "--diagram=json", NULL};
@@ -239,7 +300,7 @@ spec("coding agent CLI") {
 
   it("should run generated tools and preserve chronological conversation across prompts") {
     tstr root = cli_workspace();
-    char *argv[] = {"turboagent", "-C", root, NULL};
+    char *argv[] = {"turboagent", "-C", root, "--trust-profile=trusted-local", NULL};
     turbo_cli_options_t options;
     turbo_agent_config_t config = {0};
     cli_model_t model = {0};
@@ -250,7 +311,7 @@ spec("coding agent CLI") {
     check_not_null(root); check_not_null(input); check_not_null(output); check_not_null(diagnostics);
     config.model = "test-model"; config.transport_fn = cli_model; config.transport_user_data = &model;
     fputs("initial_task\nfollowup_task\n/quit\n", input); rewind(input);
-    turbo_cli_parse_options(3, argv, &options);
+    turbo_cli_parse_options(4, argv, &options);
     check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, &interrupted), 0);
     check_equal(model.calls, 6); check_true(model.chronological);
     check_equal(cmeta_fs_path_join(path, sizeof(path), root, "note.txt"), 0);
@@ -262,9 +323,54 @@ spec("coding agent CLI") {
     fclose(input); fclose(output); fclose(diagnostics); tstr_free(root);
   }
 
+  it("must reject model-forged shell and file writes under default inspect") {
+    tstr root = cli_workspace();
+    turbo_cli_options_t options = {.workspace = root, .prompt = "inspect only"};
+    turbo_agent_config_t config = {0};
+    cli_untrusted_tool_model_t model = {0};
+    FILE *input = tmpfile(), *output = tmpfile(), *diagnostics = tmpfile();
+    char path[SALTS_FS_MAX_PATH];
+    cmeta_fs_stat_t statbuf;
+    check_not_null(root); check_not_null(input); check_not_null(output); check_not_null(diagnostics);
+    config.model = "test-model";
+    config.transport_fn = cli_untrusted_tool_model;
+    config.transport_user_data = &model;
+    check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 0);
+    check_equal(model.calls, 2u);
+    check_true(model.saw_limited_tools);
+    check_equal(cmeta_fs_path_join(path, sizeof(path), root, "blocked-shell.txt"), 0);
+    check_not_equal(cmeta_fs_stat(path, &statbuf), 0);
+    check_equal(cmeta_fs_path_join(path, sizeof(path), root, "blocked-write.txt"), 0);
+    check_not_equal(cmeta_fs_stat(path, &statbuf), 0);
+    fclose(input); fclose(output); fclose(diagnostics);
+    check_equal(cmeta_fs_rmdir(root), 0);
+    tstr_free(root);
+  }
+
+  it("should reject implicit approval and contradictory trusted-local authority before any model call") {
+    tstr root = cli_workspace();
+    turbo_cli_options_t options = {.workspace = root, .prompt = "inspect"};
+    turbo_agent_config_t config = {0};
+    cli_model_t model = {0};
+    FILE *input = tmpfile(), *output = tmpfile(), *diagnostics = tmpfile();
+    check_not_null(root); check_not_null(input); check_not_null(output); check_not_null(diagnostics);
+    config.model = "test-model"; config.transport_fn = cli_model; config.transport_user_data = &model;
+    options.trust_profile = "approval";
+    check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 2);
+    check_equal(model.calls, 0u);
+    options.trust_profile = "trusted-local"; options.read_only = 1;
+    check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 2);
+    check_equal(model.calls, 0u);
+    options.trust_profile = "invalid"; options.read_only = 0;
+    check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 2);
+    check_equal(model.calls, 0u);
+    fclose(input); fclose(output); fclose(diagnostics);
+    check_equal(cmeta_fs_rmdir(root), 0); tstr_free(root);
+  }
+
   it("should apply parsed prompt workspace model and read-only options to a run") {
     tstr root = cli_workspace();
-    char *argv[] = {"turboagent", "--workspace", root, "--read-only", "-p", "inspect",
+    char *argv[] = {"turboagent", "--workspace", root, "-p", "inspect",
                     "--model", "cli-model-override", NULL};
     turbo_cli_options_t options;
     turbo_agent_config_t config = {0};
@@ -275,7 +381,8 @@ spec("coding agent CLI") {
     check_equal(cmeta_fs_path_join(path, sizeof(path), root, "needle.txt"), 0);
     check_equal(cmeta_fs_write_file(path, &contents), 0);
     config.model = "test-model"; config.transport_fn = cli_model; config.transport_user_data = &model;
-    turbo_cli_parse_options(8, argv, &options);
+    turbo_cli_parse_options(7, argv, &options);
+    check_null(options.trust_profile); /* Omitted trust defaults to read-only inspection. */
     check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 0);
     check_equal(model.calls, 2); check_true(model.chronological);
     check_true(model.model_overridden);

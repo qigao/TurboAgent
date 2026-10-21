@@ -1,6 +1,7 @@
 #include "turbo_agent_session_diagnostics_internal.h"
 #include "turbo_runtime_json.h"
 #include "turbo_tool_schema.h"
+#include "turbo_agent_tool_authority_internal.h"
 
 #include <string.h>
 
@@ -132,6 +133,7 @@ turbo_agent_session_get_tool_schema_status(const turbo_agent_session_diagnostic_
   static const char *formats[] = {"openai_responses", "openai_chat", "openai_compatible_chat",
                                   "anthropic"};
   const turbo_tool_registry_t *registry;
+  turbo_tool_registry_t *visible_registry = NULL;
   const char *selected_format;
   json_value_t *status = NULL;
   size_t i;
@@ -144,10 +146,19 @@ turbo_agent_session_get_tool_schema_status(const turbo_agent_session_diagnostic_
   *out_status_json = NULL;
   *out_selected_ok = 0;
 
-  registry = view->registry;
+  /*
+   * Startup schema status must describe the same Host-authorized tool set
+   * that the request builder exposes to the model.
+   */
+  if (turbo_agent_tool_authority_project(&view->tool_policy, view->registry,
+                                         &visible_registry) != TURBO_TOOL_OK) {
+    return -1;
+  }
+  registry = visible_registry;
   selected_format = turbo_agent_session_selected_tool_schema_format(view);
   status = json_create_object();
   if (!status) {
+    turbo_tool_registry_destroy(visible_registry);
     return -1;
   }
 
@@ -177,6 +188,7 @@ turbo_agent_session_get_tool_schema_status(const turbo_agent_session_diagnostic_
 cleanup:
   json_free(status);
   status = NULL;
+  turbo_tool_registry_destroy(visible_registry);
   return rc;
 }
 
@@ -387,6 +399,7 @@ cleanup:
 static int turbo_agent_session_build_tool_schemas(const turbo_agent_session_diagnostic_view_t *view,
                                                   json_value_t **out_tool_schemas_json) {
   const turbo_tool_registry_t *registry;
+  turbo_tool_registry_t *visible_registry = NULL;
   json_value_t *schemas = NULL;
   json_value_t *registry_json = NULL;
   json_value_t *openai_responses = NULL;
@@ -394,12 +407,19 @@ static int turbo_agent_session_build_tool_schemas(const turbo_agent_session_diag
   json_value_t *openai_compatible_chat = NULL;
   json_value_t *anthropic = NULL;
   int rc = -1;
+  int has_registry;
 
   if (!view || !out_tool_schemas_json) {
     return -1;
   }
   *out_tool_schemas_json = NULL;
   registry = view->registry;
+  has_registry = registry != NULL;
+  if (turbo_agent_tool_authority_project(&view->tool_policy, registry,
+                                         &visible_registry) != TURBO_TOOL_OK) {
+    return -1;
+  }
+  registry = visible_registry;
 
   registry_json = turbo_tool_schema_build_registry_json_value(registry);
   if (!registry_json) {
@@ -414,7 +434,7 @@ static int turbo_agent_session_build_tool_schemas(const turbo_agent_session_diag
     goto cleanup;
   }
 
-  if (diagnostic_set(schemas, "has_tool_registry", json_create_bool(registry ? 1 : 0)) != 0)
+  if (diagnostic_set(schemas, "has_tool_registry", json_create_bool(has_registry ? 1 : 0)) != 0)
     goto cleanup;
   if (diagnostic_set(schemas, "tool_count", json_create_number((double)view->tool_count)) != 0)
     goto cleanup;
@@ -444,6 +464,7 @@ cleanup:
   openai_compatible_chat = NULL;
   json_free(anthropic);
   anthropic = NULL;
+  turbo_tool_registry_destroy(visible_registry);
   return rc;
 }
 

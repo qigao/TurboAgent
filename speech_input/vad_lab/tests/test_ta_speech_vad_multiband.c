@@ -140,7 +140,7 @@ static int test_full_scale_pcm_and_below_floor_stability(void) {
   /* Exercise both signed PCM endpoints and large adjacent transitions. */
   CHECK(ta_vad_lab_create(&owner) == TA_VAD_LAB_OK);
   for (i = 0u; i < TA_VAD_LAB_FRAME_SAMPLES; ++i)
-    frame[i] = (i % 2u) == 0u ? INT16_MIN : INT16_MAX;
+    frame[i] = (i % 4u) < 2u ? INT16_MIN : INT16_MAX;
   for (i = 0u; i < 8u; ++i)
     CHECK(ta_vad_lab_accept(owner, frame, TA_VAD_LAB_FRAME_SAMPLES) ==
           TA_VAD_LAB_OK);

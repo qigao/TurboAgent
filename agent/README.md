@@ -3,6 +3,10 @@
 For an executable coding or general assistant with persistent sessions and FTS5
 or vector retrieval, see the [TurboAgent CLI](../cli/README.md).
 
+The proposed [engineering task workbench](../docs/design/engineering-task-workbench.md)
+connects evidence, reviewable proposals and execution in staged delivery. It is a
+product/design roadmap, not an additional implemented runtime or API guarantee.
+
 `TurboAgent::Agent` is the reusable Agent kernel for graph-driven LLM workflows.
 It composes Runtime, Provider and RuntimeTools with Agent policy and state for
 desktop, server, and embedded-friendly native builds:

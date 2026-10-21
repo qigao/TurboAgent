@@ -1281,6 +1281,11 @@ omitting the option restores the existing neighborhood output.
 
 ## Proposed artifact relationships and reviewable jobs
 
+The [engineering task workbench plan](../../docs/design/engineering-task-workbench.md)
+turns this proposal into product scenarios, an M0 read-only slice, ownership rules
+and staged acceptance gates. The implementation status and boundaries below remain
+applicable; the plan does not introduce another runtime or result owner.
+
 Status: broader design proposal. The read-only diagram slice above is implemented;
 the artifact index, durable Job lifecycle, scheduler and interactive UI are not.
 The working assumption is that core discovery/review works without Praktor,

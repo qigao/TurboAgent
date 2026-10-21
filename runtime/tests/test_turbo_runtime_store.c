@@ -237,16 +237,6 @@ spec("Runtime record store without Agent") {
     check_equal(turbo_agent_runtime_store_create_json_if_absent(
         runtime, "claims", "one", first), SALTS_ENOTSUP);
     turbo_agent_runtime_destroy(runtime); runtime = NULL;
-    root = tt_make_temp_dir("turbo-runtime-claim-file");
-    check_not_null(root);
-    {
-      turbo_agent_runtime_store_t file = turbo_agent_runtime_store_file_create(root);
-      check_null(file.create_if_absent);
-      runtime = turbo_agent_runtime_create(&file);
-      check_not_null(runtime);
-      check_equal(turbo_agent_runtime_store_create_json_if_absent(
-          runtime, "claims", "one", first), SALTS_ENOTSUP);
-    }
     json_free(first);
     json_free(second);
   }
@@ -405,5 +395,40 @@ spec("Runtime record store without Agent") {
     check_null(output);
     check_equal(turbo_agent_runtime_store_list_json(runtime, "items", "group", "absent", &output), -1);
     check_null(output);
+  }
+}
+
+
+spec("File store rejects non-atomic claim") {
+  static tstr root;
+  static turbo_agent_runtime_t *runtime;
+
+  before_each() {
+    root = NULL;
+    runtime = NULL;
+  }
+
+  after_each() {
+    turbo_agent_runtime_destroy(runtime);
+    runtime = NULL;
+    if (root) tt_remove_tree(root);
+    tstr_free(root);
+    root = NULL;
+  }
+
+  it("reports unsupported without falling back to get then put") {
+    turbo_agent_runtime_store_t file;
+    json_value_t *record = json_parse("{\"winner\":1}", 12);
+    root = tt_make_temp_dir("turbo-runtime-claim-file");
+    check_not_null(root);
+    check_not_null(record);
+    file = turbo_agent_runtime_store_file_create(root);
+    check_not_null(file.put);
+    check_null(file.create_if_absent);
+    runtime = turbo_agent_runtime_create(&file);
+    check_not_null(runtime);
+    check_equal(turbo_agent_runtime_store_create_json_if_absent(
+        runtime, "claims", "one", record), SALTS_ENOTSUP);
+    json_free(record);
   }
 }

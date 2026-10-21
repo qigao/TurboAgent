@@ -555,6 +555,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_not_null(certificate);
     check_true(strstr(diagnostic.message, "does not support atomic Inspect attempt claims") != NULL);
 
+    json_free(certificate);
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);
@@ -591,6 +592,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_not_null(certificate);
     check_true(strstr(diagnostic.message, "could not persist durable Inspect STARTED attempt") != NULL);
 
+    json_free(certificate);
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);

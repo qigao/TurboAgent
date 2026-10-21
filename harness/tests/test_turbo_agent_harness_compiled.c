@@ -616,6 +616,10 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(turbo_agent_session_inbox_claim(
         session, TURBO_AGENT_INBOX_STEER, "compiled-inspect-finalization-test", &claim), SALTS_OK);
     check_not_null(claim);
+    /* Give the active claim a bound event so the real Session finalizer must
+     * persist its applied transition after the compiled attempt is committed. */
+    check_equal(turbo_agent_session_inbox_bind_applied_event(
+        session, inbox_id, "compiled-inspect-finalization-event"), SALTS_OK);
 
     run_rc = run_compiled_inspect_attempt(harness, "finalization-replay",
         compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
@@ -769,8 +773,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       check_not_null(json_get_string(journal, "execution_id"));
       check_not_null(json_get_string(journal, "plan_hash"));
       check_not_null(json_object_get(journal, "certificate"));
-      check_true(strstr(json_get_string(journal, "diagnostic") ?
-                        json_get_string(journal, "diagnostic") : "",
+      check_true(strstr(json_get_string(journal, "error") ?
+                        json_get_string(journal, "error") : "",
                         "violating its admitted schema") != NULL);
       check_null(json_object_get(journal, "result"));
       turbo_runtime_json_destroy(journal_records);

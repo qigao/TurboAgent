@@ -226,6 +226,22 @@ int turbo_agent_runtime_store_put_json(turbo_agent_runtime_t *runtime, const cha
   return rc;
 }
 
+int turbo_agent_runtime_store_create_json_if_absent(
+    turbo_agent_runtime_t *runtime, const char *collection, const char *id,
+    const json_value_t *record_json) {
+  char *serialized;
+  int rc;
+  if (!runtime || !collection || !id || !record_json) return SALTS_EINVAL;
+  if (!runtime->store.create_if_absent) return SALTS_ENOTSUP;
+  serialized = json_serialize(record_json, NULL);
+  if (!serialized) return SALTS_ENOMEM;
+  cmeta_mutex_lock(&runtime->store_mutex);
+  rc = runtime->store.create_if_absent(runtime->store.user_data, collection, id, serialized);
+  cmeta_mutex_unlock(&runtime->store_mutex);
+  json_serialize_free(serialized);
+  return rc;
+}
+
 int turbo_agent_runtime_store_get_json_status(turbo_agent_runtime_t *runtime, const char *collection,
                                        const char *id, json_value_t **out_record_json) {
   char *serialized = NULL;
@@ -345,6 +361,29 @@ static int turbo_agent_runtime_memory_store_put(void *user_data, const char *col
   record->next = store->head;
   store->head = record;
   return 0;
+}
+
+static int turbo_agent_runtime_memory_store_create_if_absent(
+    void *user_data, const char *collection, const char *id, const char *record_json) {
+  turbo_agent_runtime_memory_store_t *store = (turbo_agent_runtime_memory_store_t *)user_data;
+  turbo_agent_runtime_memory_record_t *record;
+  if (!store || !collection || !id || !record_json) return SALTS_EINVAL;
+  for (record = store->head; record; record = record->next) {
+    if (strcmp(record->collection, collection) == 0 && strcmp(record->id, id) == 0)
+      return SALTS_EALREADY;
+  }
+  record = (turbo_agent_runtime_memory_record_t *)calloc(1, sizeof(*record));
+  if (!record) return SALTS_ENOMEM;
+  record->collection = turbo_runtime_store_strdup(collection);
+  record->id = turbo_runtime_store_strdup(id);
+  record->record_json = turbo_runtime_store_strdup(record_json);
+  if (!record->collection || !record->id || !record->record_json) {
+    free(record->collection); free(record->id); free(record->record_json); free(record);
+    return SALTS_ENOMEM;
+  }
+  record->next = store->head;
+  store->head = record;
+  return SALTS_OK;
 }
 
 static int turbo_agent_runtime_memory_store_get(void *user_data, const char *collection,
@@ -630,6 +669,7 @@ CXX_C_API turbo_agent_runtime_store_t turbo_agent_runtime_store_memory_create(vo
   store.list = turbo_agent_runtime_memory_store_list;
   store.user_data = user_data;
   store.user_data_free = turbo_agent_runtime_memory_store_destroy;
+  store.create_if_absent = turbo_agent_runtime_memory_store_create_if_absent;
   return store;
 }
 

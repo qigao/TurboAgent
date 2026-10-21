@@ -3,6 +3,7 @@
 #include "turbo_runtime_segment.h"
 #include "turbo_runtime_history.h"
 #include <sqlite3.h>
+#include <stdio.h>
 #include <fmt.h>
 #include <tstr.h>
 #include <stdlib.h>
@@ -176,6 +177,33 @@ spec("bounded SQLite runtime records") {
     check_equal(store.put(store.user_data, "runs", "next", "invalid"), SALTS_EPROTO);
     check_equal(store.get(store.user_data, "runs", "next", &text), SALTS_OK);
     check_equal(strcmp(text, "{\"updated\":true}"), 0);
+  }
+
+  it("does not overwrite an existing attempt claim") {
+    turbo_agent_runtime_t *runtime = NULL;
+    json_value_t *first = json_create_object();
+    json_value_t *duplicate = json_create_object();
+    json_value_t *stored = NULL;
+    check_not_null(first);
+    check_not_null(duplicate);
+    check_equal(turbo_runtime_json_object_set_int64(first, "winner", 1), 0);
+    check_equal(turbo_runtime_json_object_set_int64(duplicate, "winner", 2), 0);
+    check_equal(turbo_runtime_store_sqlite_open(&config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_runtime_store_create_json_if_absent(
+        runtime, "attempt_claims", "single-session-attempt", first), SALTS_OK);
+    check_equal(turbo_agent_runtime_store_create_json_if_absent(
+        runtime, "attempt_claims", "single-session-attempt", duplicate), SALTS_EALREADY);
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "attempt_claims", "single-session-attempt", &stored), SALTS_OK);
+    check_equal(turbo_runtime_json_value_as_int64(
+        json_object_get(stored, "winner"), -1), 1);
+    json_free(stored);
+    json_free(first);
+    json_free(duplicate);
+    turbo_agent_runtime_destroy(runtime);
   }
 
   it("retains exclusive ownership across commits and releases it on close") {

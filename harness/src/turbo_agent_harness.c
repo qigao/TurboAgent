@@ -381,6 +381,7 @@ typedef struct turbo_agent_compiled_inspect_run_s {
   int committed;
   int replayed;
   int failure_rc;
+  int store_status;
   char failure_message[256];
   turbo_agent_compile_diagnostic_t *diagnostic;
   json_value_t *result;
@@ -452,6 +453,7 @@ static int turbo_agent_compiled_inspect_attempt_write(
   const char *existing_phase;
   char updated_at[32];
   int read_status;
+  int store_status = SALTS_OK;
   int rc = -1;
   int is_start;
 
@@ -466,7 +468,12 @@ static int turbo_agent_compiled_inspect_attempt_write(
       run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
       run->attempt_record_id, &existing);
   if (is_start) {
-    if (read_status != SALTS_ENOENT) goto cleanup;
+    if (read_status != SALTS_ENOENT) {
+      /* An existing durable claim is a duplicate, not a generic I/O error.
+       * Other lookup failures retain their store status where available. */
+      run->store_status = read_status == SALTS_OK ? SALTS_EALREADY : read_status;
+      goto cleanup;
+    }
   } else {
     if (read_status != SALTS_OK || !existing || json_type(existing) != JSON_OBJECT)
       goto cleanup;
@@ -535,9 +542,22 @@ static int turbo_agent_compiled_inspect_attempt_write(
       (result && turbo_runtime_json_object_set_clone(record, "result", result) !=
           TURBO_RUNTIME_JSON_OK)) goto cleanup;
 
-  rc = turbo_agent_runtime_store_put_json(
-      run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
-      run->attempt_record_id, record) == SALTS_OK ? 0 : -1;
+  if (is_start) {
+    /* The read above validates the common path, but it is not the claim.
+     * Only the backend's conditional insert can arbitrate competing Harnesses.
+     * Unsupported backends fail closed; never emulate this with get + put. */
+    store_status = turbo_agent_runtime_store_create_json_if_absent(
+        run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        run->attempt_record_id, record);
+    run->store_status = store_status;
+    /* Preserve the Runtime Store status for the caller's failure diagnostic;
+     * every non-success remains fail-closed and prevents callback dispatch. */
+    rc = store_status == SALTS_OK ? 0 : store_status;
+  } else {
+    rc = turbo_agent_runtime_store_put_json(
+        run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        run->attempt_record_id, record) == SALTS_OK ? 0 : -1;
+  }
 
 cleanup:
   turbo_runtime_json_destroy(record);
@@ -890,9 +910,15 @@ static int turbo_agent_compiled_inspect_execute_node(
    * Run journal reference. Neither failure may permit callback dispatch. */
   if (turbo_agent_compiled_inspect_attempt_write(
           run, "started", TURBO_TOOL_UNKNOWN_SIDE_EFFECT, NULL, NULL) != 0) {
+    const char *claim_message = run->store_status == SALTS_EALREADY
+        ? "durable Inspect attempt already exists; callback was not invoked"
+        : run->store_status == SALTS_ENOTSUP
+            ? "Runtime Store does not support atomic Inspect attempt claims; callback was not invoked"
+            : "could not persist durable Inspect STARTED attempt; callback was not invoked";
     turbo_agent_compiled_inspect_fail(run, TURBO_AGENT_COMPILE_OK,
-        TURBO_TOOL_ERROR, SALTS_EIO,
-        "could not persist durable Inspect STARTED attempt; callback was not invoked");
+        TURBO_TOOL_ERROR,
+        run->store_status != SALTS_OK ? run->store_status : SALTS_EIO,
+        claim_message);
     (void)turbo_agent_compiled_inspect_set_phase(
         ctx->json_value_state, "journal_failed", run->tool_status, run->failure_message);
     return -1;

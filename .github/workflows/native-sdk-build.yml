@@ -172,6 +172,20 @@ jobs:
           SDK_PRESET: ${{ matrix.preset }}
         run: cmake --build --preset "$SDK_PRESET"
 
+      - name: Verify Linux PraktorTools resolves CSTL hash inside the DSO
+        if: success() && matrix.rid == 'linux-x64' && matrix.praktor == 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          lib=build/ci-linux-release/bin/libpraktor_tools.so
+          test -f "$lib"
+          if nm -D --undefined-only "$lib" |
+             grep -Eq '[[:space:]]U[[:space:]]+hash_bytes(@|$)'; then
+            echo "PraktorTools has an unresolved private CSTL hash import" >&2
+            exit 1
+          fi
+          echo "PraktorTools CSTL hash symbol ownership: resolved in DSO"
+
       - name: Build on Windows
         if: runner.os == 'Windows'
         shell: cmd

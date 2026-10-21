@@ -3,6 +3,7 @@
 
 #include "turbo_agent_app.h"
 #include "turbo_agent.h"
+#include "turbo_agent_policy.h"
 #include "turbo_agent_graph.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_agent_session.h"
@@ -998,7 +999,7 @@ spec("turbo agent app api") {
     turbo_tool_registry_destroy(registry);
   }
 
-  it("should report provider tool schemas through app diagnostics") {
+  it("should hide ungranted tool schemas through app diagnostics") {
     turbo_agent_config_t agent_config = {0};
     turbo_agent_session_config_t session_config = {0};
     turbo_agent_app_config_t app_config = {0};
@@ -1006,8 +1007,6 @@ spec("turbo agent app api") {
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {0};
     json_value_t *schemas = NULL;
-    json_value_t *openai_compatible_chat;
-    json_value_t *function_object;
 
     check_not_null(registry);
     definition.name = "app.echo";
@@ -1016,7 +1015,6 @@ spec("turbo agent app api") {
     definition.strict = 1;
     definition.handler = app_tool_echo_handler;
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
-
     agent_config.model = "gpt-5.4";
     agent_config.transport_fn = app_success_transport;
     agent_config.tool_registry = registry;
@@ -1031,18 +1029,13 @@ spec("turbo agent app api") {
     check_not_null(schemas);
     check_true(json_get_bool(schemas, "has_tool_registry", false));
     check_equal(json_get_int(schemas, "tool_count", -1), 1);
-    check_equal(json_array_size(json_object_get(schemas, "registry")), 1);
-    check_equal(json_array_size(json_object_get(schemas, "openai_responses")),
-                  1);
-    check_equal(json_array_size(json_object_get(schemas, "openai_chat")), 1);
-    check_equal(json_array_size(json_object_get(schemas, "anthropic")), 1);
-    openai_compatible_chat = json_object_get(schemas, "openai_compatible_chat");
-    check_equal(json_array_size(openai_compatible_chat), 1);
-    function_object =
-        json_object_get(json_array_get(openai_compatible_chat, 0), "function");
-    check_equal(json_get_string(function_object, "name"), "app_echo");
+    check_equal(json_array_size(json_object_get(schemas, "registry")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_responses")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_chat")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_compatible_chat")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "anthropic")), 0);
 
-    json_free(schemas); schemas = NULL;
+    json_free(schemas);
     turbo_agent_app_destroy(app);
     turbo_tool_registry_destroy(registry);
   }
@@ -1097,7 +1090,7 @@ spec("turbo agent app api") {
     check_not_null(structured_output);
     check_not_null(tool_schema_status);
     check_equal(json_get_int(capabilities, "tool_count", -1), 1);
-    check_equal(json_array_size(json_object_get(tool_schemas, "registry")), 1);
+    check_equal(json_array_size(json_object_get(tool_schemas, "registry")), 0);
     check_true(json_get_bool(workflow, "ok", false));
     check_false(json_get_bool(structured_output, "configured", true));
     check_equal(json_get_string(tool_schema_status, "selected_format"),
@@ -3271,6 +3264,7 @@ spec("turbo agent app api") {
     turbo_agent_config_t parent_agent_config = {0};
     turbo_agent_session_config_t parent_session_config = {0};
     turbo_agent_app_config_t app_config = {0};
+    turbo_agent_policy_t host_policy = turbo_agent_policy_default();
     turbo_agent_app_t *app;
     app_tool_transport_state_t transport_state = {0};
     json_value_t *result_state = NULL;
@@ -3315,6 +3309,10 @@ spec("turbo agent app api") {
 
     app = turbo_agent_app_create(&app_config);
     check_not_null(app);
+    host_policy.allow_custom_tools = 1; /* Host-approved delegate Tool. */
+    host_policy.allow_delegate = 1;
+    check_equal(turbo_agent_set_tool_policy(
+        turbo_agent_session_agent(turbo_agent_app_session(app)), &host_policy), 0);
     check_equal(turbo_agent_app_start_text(app, "delegate this", NULL, &summary, &result_state),
                  0);
     check_equal(transport_state.call_count, 2);

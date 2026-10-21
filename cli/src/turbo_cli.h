@@ -29,6 +29,8 @@ typedef struct turbo_cli_options_s {
   const char *embedding_url; /* Full OpenAI-compatible embeddings endpoint. */
   const char *embedding_model;
   const char *workflow; /* NULL/loop, review, engineering; independent of mode. */
+  /* Private CLI-only trust choice; NULL defaults to inspect (no shell/write). */
+  const char *trust_profile; /* inspect | trusted-local; approval requires a future real host callback. */
 } turbo_cli_options_t;
 
 /* Process entry only: CmdParser prints help/errors to stdout and exits with 1.

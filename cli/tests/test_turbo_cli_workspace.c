@@ -206,7 +206,8 @@ spec("CLI workspace instructions") {
     check_not_null(root); check_not_null(input); check_not_null(output); check_not_null(diagnostics);
     check_equal(cmeta_fs_path_join(path, sizeof(path), root, "skills"), 0);
     check_equal(cmeta_fs_mkdir(path, 0700), 0);
-    options = (turbo_cli_options_t){.workspace = root, .prompt = "review"};
+    options = (turbo_cli_options_t){.workspace = root, .prompt = "review",
+                                    .trust_profile = "trusted-local"};
     model = (workspace_model_t){.root = root, .valid = 1};
     config = (turbo_agent_config_t){.model = "workspace-test", .instructions = "BASE_MARKER",
                                    .transport_fn = workspace_model, .transport_user_data = &model};
@@ -238,7 +239,7 @@ spec("CLI workspace instructions") {
   it("should allow a read-only skill without exposing write or shell tools") {
     check_equal(workspace_write(root, "AGENTS.md", "ROOT_OLD", 8), 0);
     check_equal(workspace_write(root, "skills/review.md", review_skill, sizeof(review_skill) - 1), 0);
-    options.read_only = 1;
+    options.read_only = 1; options.trust_profile = "inspect";
     model.inspect_context = 1; model.read_only = 1;
     check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 0);
     check_equal(model.calls, 1); check_true(model.valid);
@@ -268,12 +269,21 @@ spec("CLI workspace instructions") {
     }
   }
 
+  it("rejects AGENTS-specified shell skills under default inspect before model transport") {
+    options.trust_profile = NULL; /* CLI default must be untrusted inspection. */
+    options.prompt = "build";
+    check_equal(workspace_write(root, "skills/build.md", build_skill,
+                                sizeof(build_skill) - 1), 0);
+    check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 1);
+    check_equal(model.calls, 0);
+  }
+
   it("should deny shell and patch skills in read-only mode before making a model request") {
     static const char patch_skill[] =
         "---\nname: patch\ndescription: Edit code\ntriggers: [build]\n"
         "tools: [fs.edit]\ncapabilities: [patch]\n---\nEdit.\n";
     const char *skills[] = {build_skill, patch_skill};
-    options.prompt = "build"; options.read_only = 1;
+    options.prompt = "build"; options.read_only = 1; options.trust_profile = "inspect";
     for (size_t i = 0; i < sizeof(skills) / sizeof(skills[0]); ++i) {
       check_equal(workspace_write(root, "skills/build.md", skills[i], strlen(skills[i])), 0);
       check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 1);

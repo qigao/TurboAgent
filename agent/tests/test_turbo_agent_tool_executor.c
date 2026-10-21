@@ -209,18 +209,92 @@ fail:
 
 static turbo_agent_t *tool_executor_agent(turbo_tool_registry_t *registry) {
   turbo_agent_config_t config = {0};
+  turbo_agent_policy_t host_policy = turbo_agent_policy_default();
+  turbo_agent_t *agent;
   config.model = "gpt-5.4";
   config.transport_fn = tool_executor_transport;
   config.tool_registry = registry;
-  return turbo_agent_create(&config);
+  agent = turbo_agent_create(&config);
+  if (!agent) return NULL;
+  /* Existing positive executor tests explicitly grant the fixture registry.
+   * The global programmatic default no longer implicitly executes tools. */
+  host_policy.allow_custom_tools = 1;
+  host_policy.allow_runtime_tools = 1;
+  host_policy.allow_network = 1;
+  host_policy.allow_delegate = 1;
+  host_policy.allow_shell = 1;
+  host_policy.allow_patch = 1;
+  if (turbo_agent_set_tool_policy(agent, &host_policy) != 0) {
+    turbo_agent_destroy(agent);
+    return NULL;
+  }
+  return agent;
+}
+
+static turbo_agent_policy_t tool_executor_legacy_grant(void) {
+  turbo_agent_policy_t policy = turbo_agent_policy_default();
+  policy.allow_custom_tools = 1; /* Host-owned untyped test Tool Registry. */
+  return policy;
 }
 
 spec("turbo agent tool executor") {
+  it("should deny an ungranted legacy Tool both at creation and after policy reset") {
+    tool_executor_probe_t probe = {0};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_tool_definition_t definition = {"ungranted", "Tool", "{}",
+                                          NULL, 1, tool_executor_probe_handler, NULL, &probe, NULL};
+    turbo_agent_config_t config = {0};
+    turbo_agent_policy_t grant = turbo_agent_policy_default();
+    turbo_agent_t *agent;
+    const char *ids[] = {"one"};
+    const char *names[] = {"ungranted"};
+    const char *args[] = {"{}"};
+    json_value_t *state;
+    turbo_graph_exec_ctx_t ctx = {0};
+
+    cmeta_mutex_init(&probe.mutex);
+    check_not_null(registry);
+    check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+    config.model = "gpt-5.4";
+    config.transport_fn = tool_executor_transport;
+    config.tool_registry = registry;
+    agent = turbo_agent_create(&config);
+    check_not_null(agent);
+    state = tool_executor_state(ids, names, args, 1, 0);
+    check_not_null(state);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 0);
+    check_equal(turbo_agent_state_guardrail_rejection_reason(state), "custom_tools_disabled");
+    turbo_runtime_json_destroy(state);
+
+    grant.allow_custom_tools = 1;
+    check_equal(turbo_agent_set_tool_policy(agent, &grant), 0);
+    state = tool_executor_state(ids, names, args, 1, 0);
+    check_not_null(state);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 1);
+    turbo_runtime_json_destroy(state);
+
+    check_equal(turbo_agent_set_tool_policy(agent, NULL), 0);
+    state = tool_executor_state(ids, names, args, 1, 0);
+    check_not_null(state);
+    ctx.state = state;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 1);
+    check_equal(turbo_agent_state_guardrail_rejection_reason(state), "custom_tools_disabled");
+    turbo_runtime_json_destroy(state);
+    turbo_agent_destroy(agent);
+    turbo_tool_registry_destroy(registry);
+    cmeta_mutex_destroy(&probe.mutex);
+  }
+
 
   it("should validate a complete batch before the first side effect") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_t *agent;
@@ -254,7 +328,7 @@ spec("turbo agent tool executor") {
     turbo_tool_definition_v2_t definition = {
         sizeof(turbo_tool_definition_v2_t),
         TURBO_TOOL_DEFINITION_V2_ABI_VERSION,
-        {"probe", "Probe", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+        {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}", NULL, 1, tool_executor_probe_handler, NULL,
          &probe, NULL},
         {TURBO_TOOL_EXECUTION_PARALLEL_SAFE, TURBO_TOOL_IDEMPOTENCY_READ_ONLY}};
     turbo_agent_tool_executor_config_t executor_config;
@@ -300,7 +374,7 @@ spec("turbo agent tool executor") {
   it("should enforce output bounds without committing oversized output") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_tool_executor_config_t executor_config;
@@ -344,7 +418,7 @@ spec("turbo agent tool executor") {
     turbo_tool_definition_v3_t definition = {
         sizeof(turbo_tool_definition_v3_t),
         TURBO_TOOL_DEFINITION_V3_ABI_VERSION,
-        {"remote", "Remote", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+        {"remote", "Remote", "{\"type\":\"object\",\"additionalProperties\":true}", NULL, 1, tool_executor_probe_handler, NULL,
          &probe, NULL},
         {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE},
         required,
@@ -365,6 +439,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add_v3(registry, &definition), TURBO_TOOL_OK);
     agent = tool_executor_agent(registry);
     check_not_null(agent);
+    policy.allow_runtime_tools = 1;
     policy.allow_network = 0;
     check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
     state = tool_executor_state(ids, names, args, 1, 0);
@@ -395,7 +470,7 @@ spec("turbo agent tool executor") {
     turbo_tool_definition_v3_t definition = {
         sizeof(turbo_tool_definition_v3_t),
         TURBO_TOOL_DEFINITION_V3_ABI_VERSION,
-        {"remote", "Remote", "{\"type\":\"object\"}", NULL, 1, tool_executor_probe_handler, NULL,
+        {"remote", "Remote", "{\"type\":\"object\",\"additionalProperties\":true}", NULL, 1, tool_executor_probe_handler, NULL,
          &probe, NULL},
         {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE},
         required,
@@ -427,6 +502,7 @@ spec("turbo agent tool executor") {
   }
 
   it("should propagate execution context into a context-aware callback") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     tool_executor_context_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_v4_t definition = {0};
@@ -448,7 +524,7 @@ spec("turbo agent tool executor") {
     definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
     definition.definition.name = "context_probe";
     definition.definition.description = "Observe execution context.";
-    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.parameters_json = "{\"type\":\"object\",\"additionalProperties\":true}";
     definition.definition.strict = 1;
     definition.definition.user_data = &probe;
     definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
@@ -466,7 +542,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_cancel_source_create(&cancel_config, &source), SALTS_OK);
     check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, token, "thread-7", "run-8",
-                                                   NULL, NULL, registry, NULL, &call, 1),
+                                                   NULL, NULL, registry, &host_policy, &call, 1),
                 SALTS_OK);
     check_equal(call.status, TURBO_TOOL_OK);
     check_equal(probe.calls, 1);
@@ -488,6 +564,7 @@ spec("turbo agent tool executor") {
   }
 
   it("should forward backend events and replay journaled full detail") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_v4_t definition = {0};
     turbo_agent_tool_executor_t *executor = NULL;
@@ -511,7 +588,7 @@ spec("turbo agent tool executor") {
     definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
     definition.definition.name = "observe";
     definition.definition.description = "Observed tool";
-    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.parameters_json = "{\"type\":\"object\",\"additionalProperties\":true}";
     definition.definition.strict = 1;
     definition.execution_policy.mode = TURBO_TOOL_EXECUTION_SEQUENTIAL;
     definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_NONE;
@@ -525,7 +602,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_agent_tool_executor_execute(
                     executor, runtime, NULL, "thread-observe", "run-observe",
                     tool_executor_event_capture, &capture,
-                    registry, NULL, &first, 1),
+                    registry, &host_policy, &first, 1),
                 SALTS_OK);
     check_equal(first.status, TURBO_TOOL_OK);
     check_equal(first.output, "{\"ok\":true}");
@@ -537,7 +614,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_agent_tool_executor_execute(
                     executor, runtime, NULL, "thread-observe", "run-observe",
                     tool_executor_event_capture, &capture,
-                    registry, NULL, &replay, 1),
+                    registry, &host_policy, &replay, 1),
                 SALTS_OK);
     check_true(replay.replayed != 0);
     check_equal(capture.events, 1);
@@ -555,9 +632,10 @@ spec("turbo agent tool executor") {
   }
 
   it("should observe cancellation before invoking a synchronous callback") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_tool_executor_t *executor = NULL;
@@ -576,8 +654,7 @@ spec("turbo agent tool executor") {
     check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
     check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
     check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
-    check_equal(turbo_agent_tool_executor_execute(executor, NULL, token, NULL, NULL, NULL, NULL, registry,
-                                                   NULL, &call, 1),
+    check_equal(turbo_agent_tool_executor_execute(executor, NULL, token, NULL, NULL, NULL, NULL, registry, &host_policy, &call, 1),
                  SALTS_OK);
     check_equal(call.status, TURBO_TOOL_CANCELLED);
     check_equal(probe.calls, 0);
@@ -591,9 +668,10 @@ spec("turbo agent tool executor") {
   }
 
   it("should not retry a callback after a started journal loses its commit") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_tool_executor_t *executor = NULL;
@@ -627,14 +705,14 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &first, 1),
+                                                   NULL, NULL, registry, &host_policy, &first, 1),
                  SALTS_OK);
     check_equal(fault->puts, 3);
     check_equal(fault->committed_seen, 1);
     check_equal(first.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_equal(probe.calls, 1);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &recovered, 1),
+                                                   NULL, NULL, registry, &host_policy, &recovered, 1),
                  SALTS_OK);
     check_equal(recovered.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_equal(probe.calls, 1);
@@ -648,9 +726,10 @@ spec("turbo agent tool executor") {
   }
 
   it("should replay committed output and reject a changed call identity") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\"}",
+    turbo_tool_definition_t definition = {"probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
                                           NULL,    1,       tool_executor_probe_handler,
                                           NULL,    &probe,  NULL};
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
@@ -686,21 +765,21 @@ spec("turbo agent tool executor") {
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
     check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &first, 1),
+                                                   NULL, NULL, registry, &host_policy, &first, 1),
                  SALTS_OK);
     check_equal(probe.calls, 1);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &replay, 1),
+                                                   NULL, NULL, registry, &host_policy, &replay, 1),
                  SALTS_OK);
     check_equal(probe.calls, 1);
     check_true(replay.replayed != 0);
     check_equal(replay.output, "{\"value\":1}");
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &next_turn, 1),
+                                                   NULL, NULL, registry, &host_policy, &next_turn, 1),
                  SALTS_OK);
     check_equal(probe.calls, 2);
     check_equal(turbo_agent_tool_executor_execute(executor, runtime, NULL, "thread", "run",
-                                                   NULL, NULL, registry, NULL, &changed, 1),
+                                                   NULL, NULL, registry, &host_policy, &changed, 1),
                  SALTS_EPROTO);
     check_equal(probe.calls, 2);
 
@@ -715,6 +794,7 @@ spec("turbo agent tool executor") {
   }
 
   it("preserves legacy persisted journal SHA-256 framing") {
+    turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
     static const char expected_journal_id[] =
         "5725bca02643d34e59e4b5a8a7084ba9098130ffd4a81be0e2dbb157c01cc12a";
     static const char expected_arguments_hash[] =
@@ -722,7 +802,7 @@ spec("turbo agent tool executor") {
     tool_executor_probe_t probe = {0};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {
-        "probe", "Probe", "{\"type\":\"object\"}",
+        "probe", "Probe", "{\"type\":\"object\",\"additionalProperties\":true}",
         NULL, 1, tool_executor_probe_handler, NULL, &probe, NULL};
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store);
@@ -747,7 +827,7 @@ spec("turbo agent tool executor") {
         turbo_agent_tool_executor_execute(
             executor, runtime, NULL,
             "thread-golden", "run-golden",
-            NULL, NULL, registry, NULL, &call, 1),
+            NULL, NULL, registry, &host_policy, &call, 1),
         SALTS_OK);
     check_equal(call.status, TURBO_TOOL_OK);
     check_equal(probe.calls, 1);

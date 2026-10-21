@@ -110,6 +110,38 @@ static int sqlite_store_put(void *data, const char *collection, const char *id,
   return sqlite_store_status(rc);
 }
 
+static int sqlite_store_create_if_absent(void *data, const char *collection,
+                                               const char *id, const char *text) {
+  sqlite_store_t *store = data;
+  sqlite3_stmt *stmt = NULL;
+  json_value_t *record;
+  size_t bytes;
+  int rc, changes = 0, status;
+  if (!store || !sqlite_store_key(collection) || !sqlite_store_key(id) || !text)
+    return SALTS_EINVAL;
+  bytes = strlen(text);
+  if (bytes > store->max_record_bytes) return SALTS_ENOSPC;
+  if (!vstr_utf8_valid(vstr_from_cstr(text))) return SALTS_EPROTO;
+  record = json_parse(text, bytes);
+  if (!record) return SALTS_EPROTO;
+  json_free(record);
+  rc = sqlite3_prepare_v2(store->db,
+      "INSERT INTO runtime_records(collection,id,payload) VALUES(?1,?2,?3) "
+      "ON CONFLICT(collection,id) DO NOTHING", -1, &stmt, NULL);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 1, collection, -1, SQLITE_STATIC);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 2, id, -1, SQLITE_STATIC);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 3, text, (int)bytes, SQLITE_STATIC);
+  if (rc == SQLITE_OK) rc = sqlite3_step(stmt);
+  if (rc == SQLITE_DONE) changes = sqlite3_changes(store->db);
+  {
+    int finish = sqlite3_finalize(stmt);
+    if (rc == SQLITE_DONE) rc = finish;
+  }
+  status = sqlite_store_status(rc);
+  if (status != SALTS_OK) return status;
+  return changes == 1 ? SALTS_OK : SALTS_EALREADY;
+}
+
 static int sqlite_store_row(sqlite_store_t *store, sqlite3_stmt *stmt,
                             json_value_t **out, const char **text, size_t *bytes) {
   *out = NULL;
@@ -287,7 +319,8 @@ int turbo_runtime_store_sqlite_open(const turbo_runtime_sqlite_config_t *config,
   if (status != SALTS_OK) goto fail;
   tstr_free(sql);
   *out_store = (turbo_agent_runtime_store_t){sqlite_store_put, sqlite_store_get, sqlite_store_list,
-                                           store, sqlite_store_destroy};
+                                           store, sqlite_store_destroy,
+                                           sqlite_store_create_if_absent};
   return SALTS_OK;
 fail:
   sqlite3_finalize(stmt);

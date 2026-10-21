@@ -3,6 +3,7 @@
 #include "turbo_agent_graph.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_agent_session.h"
+#include "turbo_agent_policy.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_workflow.h"
 #include "turbo_model_provider.h"
@@ -1414,19 +1415,13 @@ spec("turbo agent session api") {
     turbo_agent_session_destroy(session);
   }
 
-  it("should report provider tool schemas through session diagnostics") {
+  it("should hide ungranted tool schemas through session diagnostics") {
     turbo_agent_session_config_t config = {0};
-    turbo_agent_session_t *session;
     turbo_agent_config_t agent_config = {0};
+    turbo_agent_session_t *session;
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t definition = {0};
     json_value_t *schemas = NULL;
-    json_value_t *registry_tools;
-    json_value_t *openai_responses;
-    json_value_t *openai_chat;
-    json_value_t *openai_compatible_chat;
-    json_value_t *anthropic;
-    json_value_t *function_object;
 
     check_not_null(registry);
     definition.name = "session.echo";
@@ -1435,7 +1430,6 @@ spec("turbo agent session api") {
     definition.strict = 1;
     definition.handler = session_tool_echo_handler;
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
-
     agent_config.model = "gpt-5.4";
     agent_config.transport_fn = session_success_transport;
     agent_config.tool_registry = registry;
@@ -1449,34 +1443,13 @@ spec("turbo agent session api") {
     check_not_null(schemas);
     check_true(json_get_bool(schemas, "has_tool_registry", false));
     check_equal(json_get_int(schemas, "tool_count", -1), 1);
+    check_equal(json_array_size(json_object_get(schemas, "registry")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_responses")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_chat")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "openai_compatible_chat")), 0);
+    check_equal(json_array_size(json_object_get(schemas, "anthropic")), 0);
 
-    registry_tools = json_object_get(schemas, "registry");
-    openai_responses = json_object_get(schemas, "openai_responses");
-    openai_chat = json_object_get(schemas, "openai_chat");
-    openai_compatible_chat = json_object_get(schemas, "openai_compatible_chat");
-    anthropic = json_object_get(schemas, "anthropic");
-    check_equal(json_array_size(registry_tools), 1);
-    check_equal(json_array_size(openai_responses), 1);
-    check_equal(json_array_size(openai_chat), 1);
-    check_equal(json_array_size(openai_compatible_chat), 1);
-    check_equal(json_array_size(anthropic), 1);
-
-    check_equal(json_get_string(json_array_get(registry_tools, 0), "name"),
-                 "session.echo");
-    check_equal(json_get_string(json_array_get(openai_responses, 0), "name"),
-                 "session_echo");
-    function_object =
-        json_object_get(json_array_get(openai_chat, 0), "function");
-    check_equal(json_get_string(function_object, "name"), "session.echo");
-    check_true(json_get_bool(function_object, "strict", false));
-    function_object = json_object_get(json_array_get(openai_compatible_chat, 0),
-                                            "function");
-    check_equal(json_get_string(function_object, "name"), "session_echo");
-    check_false(json_get_bool(function_object, "strict", false));
-    check_equal(json_get_string(json_array_get(anthropic, 0), "name"),
-                 "session.echo");
-
-    json_free(schemas); schemas = NULL;
+    json_free(schemas);
     turbo_agent_session_destroy(session);
     turbo_tool_registry_destroy(registry);
   }
@@ -1507,7 +1480,7 @@ spec("turbo agent session api") {
     turbo_agent_session_destroy(session);
   }
 
-  it("should report startup diagnostics for invalid tool schemas") {
+  it("should keep ungranted invalid tool schemas out of startup diagnostics") {
     turbo_agent_session_config_t config = {0};
     turbo_agent_session_t *session;
     turbo_agent_config_t agent_config = {0};
@@ -1543,12 +1516,12 @@ spec("turbo agent session api") {
     check_equal(turbo_agent_session_get_startup_diagnostics(session, &diagnostics), 0);
     check_not_null(diagnostics);
     check_equal(json_get_int(diagnostics, "schema_version", -1), 1);
-    check_false(json_get_bool(diagnostics, "ok", true));
+    check_true(json_get_bool(diagnostics, "ok", false));
     errors = json_object_get(diagnostics, "errors");
-    check_equal(json_array_size(errors), 1);
-    check_equal(json_string(json_array_get(errors, 0)),
-                 "invalid_tool_schemas");
-    check_true(json_is_null(json_object_get(diagnostics, "tool_schemas")));
+    check_equal(json_array_size(errors), 0);
+    check_not_null(json_object_get(diagnostics, "tool_schemas"));
+    check_equal(json_array_size(json_object_get(
+                      json_object_get(diagnostics, "tool_schemas"), "registry")), 0);
     capabilities = json_object_get(diagnostics, "capabilities");
     check_not_null(capabilities);
     check_equal(json_get_int(capabilities, "tool_count", -1), 2);
@@ -1562,6 +1535,7 @@ spec("turbo agent session api") {
     turbo_agent_session_config_t config = {0};
     turbo_agent_session_t *session;
     turbo_agent_config_t agent_config = {0};
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     turbo_tool_definition_t dotted = {0};
     turbo_tool_definition_t slashed = {0};
@@ -1592,12 +1566,19 @@ spec("turbo agent session api") {
     session = turbo_agent_session_create(&config);
     check_not_null(session);
 
+    /*
+     * This regression targets provider-format validation for tools the Host
+     * has selected. Default-deny must be tested separately: without this
+     * explicit grant, both fixtures are correctly hidden from schema checks.
+     */
+    policy.allow_custom_tools = 1;
+    check_equal(turbo_agent_set_tool_policy(turbo_agent_session_agent(session), &policy), 0);
     check_equal(turbo_agent_session_get_startup_diagnostics(session, &diagnostics), 0);
     check_not_null(diagnostics);
     check_true(json_get_bool(diagnostics, "ok", false));
     errors = json_object_get(diagnostics, "errors");
     check_equal(json_array_size(errors), 0);
-    check_true(json_is_null(json_object_get(diagnostics, "tool_schemas")));
+    check_not_null(json_object_get(diagnostics, "tool_schemas"));
     status = json_object_get(diagnostics, "tool_schema_status");
     check_equal(json_get_string(status, "selected_format"), "anthropic");
     compatible_status = json_object_get(status, "openai_compatible_chat");

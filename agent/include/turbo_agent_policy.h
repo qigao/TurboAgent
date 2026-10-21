@@ -2,6 +2,7 @@
 #define TURBO_AGENT_POLICY_H
 
 #include <turbo_agent_api.h>
+#include <stdint.h>
 
 #include "turbo_action_tool.h"
 
@@ -43,6 +44,24 @@ typedef enum {
   TURBO_AGENT_POLICY_CAPABILITY_OUTSIDE_WORKSPACE = 6
 } turbo_agent_policy_capability_t;
 
+#define TURBO_AGENT_TOOL_AUTHORITY_SNAPSHOT_ABI_VERSION 1u
+#define TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(capability) (UINT32_C(1) << (capability))
+
+typedef struct turbo_agent_tool_authority_snapshot_s {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  uint64_t generation;
+  uint32_t capability_mask;
+  uint32_t reserved;
+} turbo_agent_tool_authority_snapshot_t;
+
+/**
+ * Fail-closed policy for new programmatic Agents, NULL checks and policy reset.
+ * It grants no custom/runtime/network/delegate/shell/patch capabilities.
+ * Hosts explicitly populate allowed capabilities on a policy snapshot and
+ * call turbo_agent_set_tool_policy() before any model-driven tool dispatch.
+ * Merely registering a Tool or selecting a Skill never grants execution.
+ */
 CXX_C_API turbo_agent_policy_t turbo_agent_policy_default(void);
 CXX_C_API int turbo_agent_policy_validate_path(const turbo_agent_policy_t *policy,
                                                const char *path);
@@ -68,9 +87,31 @@ CXX_C_API turbo_agent_policy_decision_t turbo_agent_policy_check_tool(
 /**
  * Replace the policy enforced by the Agent tool executor.
  * The policy and workspace root are copied. This is a quiescent control-plane
- * operation; NULL restores bounded defaults.
+ * operation; NULL restores bounded defaults. The Host must serialize it with
+ * all Agent/Harness executions and policy/snapshot reads, and wait for active
+ * Runs and callbacks to finish. Calling it from a tool, store or event callback
+ * during execution is unsupported. The atomic generation is an invalidation
+ * token, not synchronization for the policy fields or workspace-root lifetime.
  */
 CXX_C_API int turbo_agent_set_tool_policy(turbo_agent_t *agent, const turbo_agent_policy_t *policy);
+
+/**
+ * Capture the Agent's Host-granted tool capabilities and policy generation.
+ * This contains no registry-derived authority: tool identity, required
+ * capabilities, effects and result contracts must still be frozen by the
+ * execution admission layer. Policy updates are quiescent control-plane
+ * operations; a captured generation must be rechecked immediately before a
+ * not-yet-started tool callback.
+ */
+CXX_C_API int turbo_agent_tool_authority_snapshot_get(
+    const turbo_agent_t *agent, turbo_agent_tool_authority_snapshot_t *out_snapshot);
+
+/**
+ * Return 1 when current, 0 when revoked/stale, and -1 for invalid input.
+ * This check does not acquire a policy lease or permit concurrent replacement.
+ */
+CXX_C_API int turbo_agent_tool_authority_snapshot_is_current(
+    const turbo_agent_t *agent, const turbo_agent_tool_authority_snapshot_t *snapshot);
 CXX_C_API turbo_agent_policy_decision_t turbo_agent_policy_check_action(
     const turbo_agent_policy_t *policy, const turbo_action_tool_definition_t *definition,
     const json_value_t *args, const char **out_reason);

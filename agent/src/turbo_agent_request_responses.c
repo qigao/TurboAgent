@@ -3,6 +3,7 @@
 #include "turbo_agent_request_messages_internal.h"
 #include "turbo_agent_request_text_internal.h"
 #include "turbo_agent_runtime_internal.h"
+#include "turbo_agent_tool_authority_internal.h"
 #include "turbo_agent_state_memory_internal.h"
 #include "turbo_tool_schema.h"
 
@@ -14,6 +15,7 @@ int turbo_agent_build_responses_turn_request(const turbo_agent_t *agent,
   json_value_t *input = NULL;
   json_value_t *canonical_messages = NULL;
   json_value_t *tools = NULL;
+  turbo_tool_registry_t *visible_registry = NULL;
   char *instructions = NULL;
   int rc = -1;
   if (!agent || !state || !out_request_json) return -1;
@@ -30,7 +32,9 @@ int turbo_agent_build_responses_turn_request(const turbo_agent_t *agent,
   instructions = turbo_agent_build_effective_instructions(agent, state);
   if ((agent->instructions || turbo_agent_state_memory_layer_count(state) > 0) && !instructions)
     goto done;
-  tools = turbo_tool_schema_build_openai_tools(agent->tool_registry);
+  if (turbo_agent_tool_authority_project(&agent->tool_policy, agent->tool_registry,
+                                         &visible_registry) != TURBO_TOOL_OK) goto done;
+  tools = turbo_tool_schema_build_openai_tools(visible_registry);
   if (!tools) goto done;
   config.input = input;
   config.tools = tools;
@@ -41,5 +45,6 @@ done:
   json_free(input);
   json_free(canonical_messages);
   json_free(tools);
+  turbo_tool_registry_destroy(visible_registry);
   return rc;
 }

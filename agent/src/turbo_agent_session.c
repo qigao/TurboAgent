@@ -643,6 +643,14 @@ CXX_C_API int turbo_agent_session_inbox_claim(turbo_agent_session_t *session,
   return turbo_agent_inbox_claim(session->inbox, kind, run_id, out_record);
 }
 
+CXX_C_API int turbo_agent_session_inbox_bind_applied_event(turbo_agent_session_t *session,
+                                                            const char *inbox_id,
+                                                            const char *applied_event_id) {
+  return session && session->inbox
+             ? turbo_agent_inbox_bind_applied_event(session->inbox, inbox_id, applied_event_id)
+             : SALTS_EINVAL;
+}
+
 CXX_C_API int turbo_agent_session_inbox_mark_applied(turbo_agent_session_t *session,
                                                      const char *inbox_id,
                                                      const char *applied_event_id) {
@@ -742,6 +750,7 @@ int turbo_agent_session_diagnostic_view_internal(
       .has_runtime = session->runtime != NULL,
       .has_memory_store = turbo_agent_session_memory_store(session) != NULL,
       .registry = turbo_agent_session_tool_registry(session),
+      .tool_policy = session->agent ? session->agent->tool_policy : turbo_agent_policy_default(),
       .tool_count = turbo_agent_session_tool_count(session),
       .workflow_kind = session->workflow_kind,
       .memory_namespace = session->memory_namespace,

@@ -591,6 +591,42 @@ turbo_tool_schema_validate_arguments_json_value(
   return status;
 }
 
+/* Explicit validation of a registered, owned result contract. Reuse the
+ * parameter-schema evaluator because it accepts arbitrary JSON value types,
+ * not only object arguments. The wrapper borrows registry metadata; the
+ * evaluator clones it before applying strict additionalProperties defaults. */
+turbo_tool_schema_validation_status_t
+turbo_tool_schema_validate_result_json_value(
+    const turbo_tool_registry_t *registry,
+    const char *tool_name,
+    const json_value_t *result,
+    char *diagnostic,
+    size_t diagnostic_capacity) {
+  const char *canonical_name = NULL;
+  const char *result_schema_json = NULL;
+  const json_value_t *result_schema = NULL;
+  turbo_tool_definition_t view = {0};
+  int strict = 0;
+
+  if (diagnostic && diagnostic_capacity) diagnostic[0] = '\0';
+  if (!registry || !tool_name || !result ||
+      turbo_tool_registry_resolve_name(registry, tool_name, &canonical_name) != TURBO_TOOL_OK ||
+      !canonical_name ||
+      turbo_tool_registry_get_result_contract(
+          registry, canonical_name, &result_schema_json, &result_schema, &strict) !=
+          TURBO_TOOL_OK ||
+      !result_schema) {
+    turbo_tool_schema_diagnostic(diagnostic, diagnostic_capacity,
+                                 "no registered result schema for tool", NULL);
+    return TURBO_TOOL_SCHEMA_INVALID_ARGUMENT;
+  }
+  (void)result_schema_json;
+  view.parameters_schema = result_schema;
+  view.strict = strict;
+  return turbo_tool_schema_validate_arguments_json_value(
+      &view, result, diagnostic, diagnostic_capacity);
+}
+
 static int turbo_tool_schema_openai_name_char_valid(char ch) {
   return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
          (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';

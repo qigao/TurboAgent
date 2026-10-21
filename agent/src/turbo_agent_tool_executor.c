@@ -5,6 +5,7 @@
 #include "turbo_agent_runtime_internal.h"
 #include "turbo_runtime_store.h"
 #include "turbo_agent_util_internal.h"
+#include "turbo_tool_schema.h"
 
 #include <cmeta_crypto.h>
 #include <salts/thread.h>
@@ -282,6 +283,37 @@ turbo_agent_tool_cancel_status(const turbo_cancel_token_t *cancel_token) {
   return rc == SALTS_ETIMEDOUT ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
 }
 
+/* Check the entire model-originating batch before publishing any Journal record.
+ * Schema/Capability admission is handled separately; this structural gate
+ * prevents invalid JSON from reaching a callback or entering the durable log.
+ * Callbacks still consume the original, unchanged arguments text. */
+static int turbo_agent_tool_arguments_valid(const turbo_tool_registry_t *registry,
+                                            const char *canonical_tool_name,
+                                            const char *arguments_json) {
+  json_value_t *arguments = NULL;
+  turbo_tool_definition_t definition = {0};
+  size_t index;
+  int valid = 0;
+  if (!registry || !canonical_tool_name || !arguments_json) return 0;
+  arguments = json_parse(arguments_json, strlen(arguments_json));
+  if (!arguments || json_type(arguments) != JSON_OBJECT) goto done;
+  /* Use the same RuntimeTools schema validator as AgentCompiler; the lookup
+   * consumes only borrowed canonical registry metadata, never a new authority.
+   * All arguments are checked after middleware and before any journal write. */
+  for (index = 0; index < turbo_tool_registry_count(registry); ++index) {
+    if (turbo_tool_registry_get_definition(registry, index, &definition) != TURBO_TOOL_OK)
+      goto done;
+    if (definition.name && strcmp(definition.name, canonical_tool_name) == 0) {
+      valid = turbo_tool_schema_validate_arguments_json_value(
+          &definition, arguments, NULL, 0) == TURBO_TOOL_SCHEMA_VALID;
+      break;
+    }
+  }
+done:
+  json_free(arguments);
+  return valid;
+}
+
 static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executor,
                                             turbo_agent_runtime_t *runtime, const char *thread_id,
                                             const char *run_id,
@@ -494,6 +526,30 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
       return SALTS_EMSGSIZE;
   }
   cmeta_mutex_lock(&executor->batch_mutex);
+  /* The executor is also called directly by trusted host code. Never trust
+   * a caller-supplied alias or execution policy as the durable identity:
+   * RuntimeTools' registered canonical name and policy are authoritative. */
+  for (index = 0; index < call_count; ++index) {
+    const char *canonical_name = NULL;
+    turbo_tool_execution_policy_t registered_policy = {0};
+    turbo_tool_status_t status;
+    if (calls[index].replayed) continue;
+    status = turbo_tool_registry_resolve_name(
+        registry, calls[index].tool_name, &canonical_name);
+    if (status == TURBO_TOOL_NOT_FOUND) {
+      calls[index].status = TURBO_TOOL_NOT_FOUND;
+      calls[index].replayed = 1;
+      continue;
+    }
+    if (status != TURBO_TOOL_OK || !canonical_name ||
+        turbo_tool_registry_get_execution_policy(
+            registry, canonical_name, &registered_policy) != TURBO_TOOL_OK) {
+      rc = SALTS_EPROTO;
+      goto cleanup;
+    }
+    calls[index].tool_name = canonical_name;
+    calls[index].policy = registered_policy;
+  }
   for (index = 0; index < call_count; ++index) {
     const char *reason = NULL;
     const char *const *required_capabilities = NULL;
@@ -512,6 +568,17 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
       calls[index].status = TURBO_TOOL_ERROR;
       calls[index].replayed = 1;
       calls[index].policy_reason = reason ? reason : "tool_policy_denied";
+    }
+  }
+  /* Do not create a partial planned batch if a later call has malformed
+   * JSON. In particular, before_tool middleware may have changed arguments
+   * after the Workflow node's initial preflight. */
+  for (index = 0; index < call_count; ++index) {
+    if (!calls[index].replayed &&
+        !turbo_agent_tool_arguments_valid(
+            registry, calls[index].tool_name, calls[index].arguments_json)) {
+      rc = SALTS_EPROTO;
+      goto cleanup;
     }
   }
   for (index = 0; index < call_count; ++index) {

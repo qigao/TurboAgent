@@ -72,10 +72,14 @@ semantics. Legacy tools without metadata require `custom_tools`; unknown
 metadata fails closed. This avoids guessing authority from a tool name.
 
 The workspace layer first decides whether a tool may be exposed to the model.
-Before any callback or `started` journal record, the Agent tool executor checks
-the same registry metadata against its copied policy. Middleware, review,
-guardrails, cancellation, backpressure, output limits, result trace, and
-journal commit remain in the normal Agent workflow. Direct
+The general Agent request builders also project the registry through the copied
+Host capability policy before serializing model-visible schemas for Responses,
+Chat, OpenAI-compatible Chat, or Anthropic. Session schema diagnostics use the
+same projection, so registered-but-ungranted tools are not advertised as
+available. Before any callback or `started` journal record, the Agent tool
+executor checks the same registry metadata against its copied policy.
+Middleware, review, guardrails, cancellation, backpressure, output limits,
+result trace, and journal commit remain in the normal Agent workflow. Direct
 `turbo_tool_registry_execute*()` calls are intentionally low-level host APIs
 and do not represent Agent execution.
 
@@ -105,11 +109,15 @@ delegation does not broaden authority.
 
 Both CLI modes prepare the workspace catalog on the input thread for each new
 user turn. General mode uses an empty registry; it can select instruction-only
-skills but cannot satisfy a skill's coding-tool requirements. Coding mode keeps
-its existing tool registry and read-only policy. Catalog selection never grants
-additional authority. General-mode workspace instructions are an intentional
-behavior extension; callers wanting unrelated instructions should select a
-separate workspace with `-C`.
+skills but cannot satisfy a skill's coding-tool requirements. Coding mode
+selects its tool registry **only from host CLI arguments**: the default
+`--trust-profile inspect` registers `fs.read/list/search` and denies host
+shell/patch, while explicit `--trust-profile trusted-local` registers workspace
+writers and the host shell. `--read-only` is the inspect alias; interactive
+approval remains unavailable without a real Host callback. Catalog selection,
+AGENTS.md and Skills never grant additional authority. General-mode workspace
+instructions are an intentional behavior extension; callers wanting unrelated
+instructions should select a separate workspace with `-C`.
 
 The CLI's `--workflow loop|review|engineering` chooses an existing Session
 preset, with `loop` remaining the default. Rather than applying a planner JSON
@@ -232,12 +240,20 @@ It does not contain file contents, tool arguments, credentials, or model data.
 
 ## Compatibility and migration
 
-Existing agents that assign `turbo_agent_config_t.tool_registry` directly are
-unchanged under the default policy. Existing tools registered through
-`turbo_tool_registry_add()` retain their sequential execution policy and are
-classified as `custom_tools` by Agent execution. New registries can use
-`turbo_tool_registry_add_v3()` for explicit capability metadata; hosts can call
-`turbo_agent_set_tool_policy()` to restrict a directly-created agent.
+Agents that assign `turbo_agent_config_t.tool_registry` directly now
+**start with zero Tool Authority**. Registering a tool advertises its schema,
+but does not grant execution. `turbo_agent_policy_default()` denies
+`custom_tools`, `runtime_tools`, `delegate`, `network`, `shell`, and `patch`
+until a Host explicitly grants the required capabilities using
+`turbo_agent_set_tool_policy()`. Passing `NULL` resets to this fail-closed
+policy; it does not restore historical implicit Host privileges.
+
+Legacy tools added through `turbo_tool_registry_add()` retain their sequential
+execution policy and count as `custom_tools` (an intentionally broad Host
+grant). Prefer `turbo_tool_registry_add_v3()` with explicit, narrow capability
+metadata for new tools. Hosts must set the **admitted policy** on the Agent
+before invoking a model-driven tool; Agent instructions, Skills, model text and
+registry registration never create a Host grant.
 Applications adopt the workspace layer by:
 
 1. Creating and populating their source tool registry as before.
@@ -248,9 +264,12 @@ Applications adopt the workspace layer by:
    or calling `turbo_agent_workspace_prepare()` when the host manages the
    selection lifecycle itself.
 
-Rollback requires only returning to `turbo_agent_create()` with the original
-registry and instruction string. No persistent state or data format is
-migrated.
+Direct `turbo_agent_create()` with an original registry is allowed but
+cannot execute its tools until the Host sets an explicit policy. A Host may
+revoke privileges on a quiescent Agent with
+`turbo_agent_set_tool_policy(agent, NULL)`. No persistent state or data format
+is migrated. Low-level direct `turbo_tool_registry_execute*()` functions are
+separate Host APIs and are **not** implicitly protected by Agent admission.
 
 ## Verification scope
 

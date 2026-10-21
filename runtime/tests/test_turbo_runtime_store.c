@@ -84,6 +84,15 @@ static turbo_agent_runtime_store_t store_test_callbacks(store_test_probe_t *prob
   return store;
 }
 
+static int store_test_create_error(void *data, const char *collection,
+                                      const char *id, const char *record_json) {
+  store_test_probe_t *probe = (store_test_probe_t *)data;
+  (void)collection; (void)id; (void)record_json;
+  store_test_enter(probe);
+  store_test_leave(probe);
+  return SALTS_EIO;
+}
+
 enum { STORE_TEST_WORKERS = 4, STORE_TEST_ROUNDS = 32 };
 typedef struct store_test_worker_s {
   turbo_agent_runtime_t *runtime;
@@ -485,6 +494,34 @@ spec("Runtime Store atomic create-if-absent") {
     check_equal(turbo_agent_runtime_store_create_if_absent_json(
         runtime, "items", "one", record), SALTS_ENOTSUP);
     check_equal(atomic_load(&probe.calls), 0);
+    json_free(record);
+    turbo_agent_runtime_destroy(runtime);
+    check_equal(probe.destroyed, 1);
+  }
+}
+
+spec("Runtime Store atomic claim backend errors") {
+  it("preserves backend errors without treating them as an available claim") {
+    store_test_probe_t probe = {0};
+    turbo_agent_runtime_store_ex_t extended = {0};
+    turbo_agent_runtime_t *runtime;
+    json_value_t *record = json_create_object();
+    atomic_init(&probe.active, 0);
+    atomic_init(&probe.overlaps, 0);
+    atomic_init(&probe.calls, 0);
+    atomic_init(&probe.go, 0);
+    extended.struct_size = sizeof(extended);
+    extended.abi_version = TURBO_AGENT_RUNTIME_STORE_EX_ABI_VERSION;
+    extended.store = store_test_callbacks(&probe);
+    extended.create_if_absent = store_test_create_error;
+    runtime = turbo_agent_runtime_create_ex(&extended);
+    check_not_null(runtime);
+    check_not_null(record);
+    check_equal(turbo_agent_runtime_store_create_if_absent_json(
+        runtime, "items", "one", record), SALTS_EIO);
+    /* Exactly one callback ran: no get/put fallback is attempted. */
+    check_equal(atomic_load(&probe.calls), 1);
+    check_equal(atomic_load(&probe.overlaps), 0);
     json_free(record);
     turbo_agent_runtime_destroy(runtime);
     check_equal(probe.destroyed, 1);

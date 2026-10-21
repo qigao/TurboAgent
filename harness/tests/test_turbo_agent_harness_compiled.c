@@ -623,7 +623,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     run_rc = run_compiled_inspect_attempt(harness, "commit-failure-replay",
         compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
         &result, &certificate);
-    check_not_equal(run_rc, SALTS_OK);
+    check_equal(run_rc, SALTS_EALREADY);
+    check_true(strstr(diagnostic.message, "attempt already exists") != NULL);
     check_null(result);
     check_equal(probe.calls, 1);
     check_not_null(certificate);
@@ -693,7 +694,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     run_rc = run_compiled_inspect_attempt(harness, "started-replay",
         compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
         &result, &certificate);
-    check_not_equal(run_rc, SALTS_OK);
+    check_equal(run_rc, SALTS_EALREADY);
+    check_true(strstr(diagnostic.message, "attempt already exists") != NULL);
     check_equal(probe.calls, 1);
     check_null(result);
     check_not_null(certificate);

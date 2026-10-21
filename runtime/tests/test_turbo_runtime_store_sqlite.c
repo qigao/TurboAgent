@@ -3,6 +3,7 @@
 #include "turbo_runtime_segment.h"
 #include "turbo_runtime_history.h"
 #include <sqlite3.h>
+#include <stdio.h>
 #include <salts/thread.h>
 #include <stdatomic.h>
 #include <fmt.h>

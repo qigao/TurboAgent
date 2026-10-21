@@ -42,6 +42,7 @@ typedef struct {
   uint32_t input_frames;
   uint32_t nonzero_frames;
   uint32_t above_floor_frames;
+  uint32_t below_floor_nonzero_frames;
   uint32_t voicing_cue_frames;
   uint32_t tonal_cue_frames;
   uint32_t power_modulation_events;

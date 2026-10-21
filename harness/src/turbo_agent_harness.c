@@ -92,22 +92,19 @@ turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_conf
   {
     turbo_agent_session_t *session = turbo_agent_app_session(harness->app);
     const char *thread_id = turbo_agent_session_thread_id(session);
-    size_t thread_id_size;
-    if (!thread_id || !thread_id[0]) {
-      turbo_agent_app_destroy(harness->app);
-      cmeta_mutex_destroy(&harness->mutex);
-      free(harness);
-      return NULL;
+    if (thread_id && thread_id[0]) {
+      size_t thread_id_size = strlen(thread_id) + 1;
+      harness->compiled_attempt_thread_id = (char *)malloc(thread_id_size);
+      if (!harness->compiled_attempt_thread_id) {
+        turbo_agent_app_destroy(harness->app);
+        cmeta_mutex_destroy(&harness->mutex);
+        free(harness);
+        return NULL;
+      }
+      memcpy(harness->compiled_attempt_thread_id, thread_id, thread_id_size);
     }
-    thread_id_size = strlen(thread_id) + 1;
-    harness->compiled_attempt_thread_id = (char *)malloc(thread_id_size);
-    if (!harness->compiled_attempt_thread_id) {
-      turbo_agent_app_destroy(harness->app);
-      cmeta_mutex_destroy(&harness->mutex);
-      free(harness);
-      return NULL;
-    }
-    memcpy(harness->compiled_attempt_thread_id, thread_id, thread_id_size);
+    /* Ordinary Harness creation historically permits an empty thread ID.
+     * Durable compiled Inspect captures a stable scope lazily when invoked. */
   }
   harness->executor = config->executor;
   return harness;
@@ -1092,6 +1089,26 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
   session = turbo_agent_app_session(harness->app);
   agent = turbo_agent_session_agent(session);
   runtime = turbo_agent_session_runtime(session);
+  if (!harness->compiled_attempt_thread_id && session) {
+    const char *current_thread_id = turbo_agent_session_thread_id(session);
+    if (current_thread_id && current_thread_id[0]) {
+      const size_t thread_id_size = strlen(current_thread_id) + 1;
+      char *thread_id_copy = (char *)malloc(thread_id_size);
+      if (!thread_id_copy) {
+        rc = SALTS_ENOMEM;
+        goto done;
+      }
+      memcpy(thread_id_copy, current_thread_id, thread_id_size);
+      /* Harness serializes compiled Inspect against Session operations. */
+      harness->compiled_attempt_thread_id = thread_id_copy;
+    }
+  }
+  if (!harness->compiled_attempt_thread_id || !harness->compiled_attempt_thread_id[0]) {
+    rc = turbo_agent_harness_compiled_reject(
+        out_diagnostic, TURBO_AGENT_COMPILE_SOURCE_INVALID,
+        "durable compiled Inspect requires a stable Session thread ID; configure one or complete a Session Run first");
+    goto done;
+  }
   if (!agent || !runtime ||
       turbo_agent_tool_authority_snapshot_get(agent, &authority) != 0) {
     rc = turbo_agent_harness_compiled_reject(

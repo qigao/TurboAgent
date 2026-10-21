@@ -134,8 +134,7 @@ static int sqlite_store_create_if_absent(void *data, const char *collection, con
   if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 3, text, (int)bytes, SQLITE_STATIC);
   if (rc == SQLITE_OK) rc = sqlite3_step(stmt);
   if (rc != SQLITE_DONE) {
-    int finish = sqlite3_finalize(stmt);
-    if (rc == SQLITE_DONE) rc = finish;
+    sqlite3_finalize(stmt);
     return sqlite_store_status(rc);
   }
   rc = sqlite3_finalize(stmt);

@@ -613,6 +613,104 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     cmeta_threadpool_destroy(pool);
   }
 
+  it("refuses to redispatch when the durable attempt remains STARTED") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {.produce_invalid_result = 1};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("outcome_unknown");
+    compiled_inspect_store_fault_t *store_fault =
+        (compiled_inspect_store_fault_t *)store.user_data;
+    turbo_agent_harness_t *harness;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    json_value_t *attempt_records = NULL;
+    json_value_t *run_records = NULL;
+    const json_value_t *record;
+    int run_rc;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(store_fault);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1),
+                TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(pool, registry, store);
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+
+    /* Callback ran and produced an invalid result; injected failure prevents
+     * the terminal OUTCOME_UNKNOWN attempt write, preserving STARTED durably. */
+    run_rc = run_compiled_inspect_attempt(harness, "started-replay",
+        compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
+        &result, &certificate);
+    check_not_equal(run_rc, SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_null(result);
+    check_not_null(certificate);
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
+        probe.thread_id, &attempt_records), SALTS_OK);
+    check_not_null(attempt_records);
+    check_equal(json_array_size(attempt_records), 1u);
+    record = json_array_get(attempt_records, 0);
+    check_not_null(record);
+    check_equal(json_get_string(record, "attempt_id"), "started-replay");
+    check_equal(json_get_string(record, "phase"), "started");
+    check_null(json_object_get(record, "result"));
+    turbo_runtime_json_destroy(attempt_records);
+    attempt_records = NULL;
+
+    /* Once storage recovers, retry the exact same ID. STARTED is ambiguous:
+     * no callback redispatch is allowed, and the canonical row stays STARTED. */
+    store_fault->failed_phase = NULL;
+    json_free(certificate);
+    certificate = NULL;
+    run_rc = run_compiled_inspect_attempt(harness, "started-replay",
+        compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
+        &result, &certificate);
+    check_not_equal(run_rc, SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_null(result);
+    check_not_null(certificate);
+
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
+        probe.thread_id, &attempt_records), SALTS_OK);
+    check_not_null(attempt_records);
+    check_equal(json_array_size(attempt_records), 1u);
+    record = json_array_get(attempt_records, 0);
+    check_not_null(record);
+    check_equal(json_get_string(record, "phase"), "started");
+    check_equal(json_get_string(record, "attempt_id"), "started-replay");
+    check_null(json_object_get(record, "result"));
+    turbo_runtime_json_destroy(attempt_records);
+
+    check_equal(turbo_agent_runtime_store_list_json(
+        probe.runtime, COMPILED_INSPECT_RUN_JOURNAL_COLLECTION, "thread_id",
+        probe.thread_id, &run_records), SALTS_OK);
+    check_not_null(run_records);
+    check_equal(json_array_size(run_records), 2u);
+    {
+      size_t i;
+      for (i = 0; i < json_array_size(run_records); ++i) {
+        const json_value_t *run_record = json_array_get(run_records, i);
+        check_not_null(run_record);
+        check_equal(json_get_string(run_record, "attempt_id"), "started-replay");
+        check_null(json_object_get(run_record, "result"));
+      }
+    }
+    turbo_runtime_json_destroy(run_records);
+    json_free(result);
+    json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
   it("keeps the committed Inspect journal when Session inbox finalization fails") {
     const char *allowed[] = {"runtime_tools"};
     compiled_inspect_probe_t probe = {0};

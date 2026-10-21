@@ -6,6 +6,7 @@
 #include <fmt.h>
 #include <tstr.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdatomic.h>
 #include <salts/thread.h>
@@ -408,7 +409,12 @@ spec("SQLite Runtime Store atomic create-if-absent") {
       stored = NULL;
     }
     json_free(candidate);
-    check_equal(turbo_runtime_store_sqlite_open(&config, &store), SALTS_EBUSY);
+    {
+      turbo_agent_runtime_store_t second = {0};
+      check_equal(turbo_runtime_store_sqlite_open(&config, &second), SALTS_EBUSY);
+      check_null(second.user_data);
+      close_store(&second);
+    }
   }
 
   it("reports an unsupported conditional-create capability on legacy stores") {

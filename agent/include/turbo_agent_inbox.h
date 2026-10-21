@@ -78,6 +78,18 @@ CXX_C_API int turbo_agent_session_inbox_claim(turbo_agent_session_t *session,
                                               json_value_t **out_record);
 
 /**
+ * @brief Bind the active claim to the event that represents it in the current Run.
+ *
+ * Call only after the corresponding event has been added to the Run state.
+ * This does not commit the inbox transition; Session finalization commits it
+ * after the Run summary/state is persisted. A failed transition write leaves
+ * the bound claim available for a later finalization retry.
+ */
+CXX_C_API int turbo_agent_session_inbox_bind_applied_event(turbo_agent_session_t *session,
+                                                           const char *inbox_id,
+                                                           const char *applied_event_id);
+
+/**
  * @brief Commit an applied transition after the matching history/checkpoint
  * event is durable, release capacity, and wake blocked producers.
  */

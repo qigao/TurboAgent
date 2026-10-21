@@ -33,6 +33,7 @@ typedef struct {
 
 struct turbo_agent_runtime_s {
   turbo_agent_runtime_store_t store;
+  turbo_agent_runtime_store_create_if_absent_fn create_if_absent;
   cmeta_mutex_t store_mutex;
 };
 
@@ -226,6 +227,24 @@ int turbo_agent_runtime_store_put_json(turbo_agent_runtime_t *runtime, const cha
   return rc;
 }
 
+int turbo_agent_runtime_store_create_if_absent_json(turbo_agent_runtime_t *runtime,
+                                                    const char *collection, const char *id,
+                                                    const json_value_t *record_json) {
+  char *serialized;
+  int rc;
+  if (!runtime || !collection || !id || !record_json) return SALTS_EINVAL;
+  if (!runtime->create_if_absent) return SALTS_ENOTSUP;
+  serialized = json_serialize(record_json, NULL);
+  if (!serialized) return SALTS_ENOMEM;
+  cmeta_mutex_lock(&runtime->store_mutex);
+  rc = runtime->create_if_absent(runtime->store.user_data, collection, id, serialized);
+  cmeta_mutex_unlock(&runtime->store_mutex);
+  json_serialize_free(serialized);
+  if (rc == TURBO_AGENT_RUNTIME_STORE_CREATE_CREATED ||
+      rc == TURBO_AGENT_RUNTIME_STORE_CREATE_EXISTS || rc < 0) return rc;
+  return SALTS_EPROTO;
+}
+
 int turbo_agent_runtime_store_get_json_status(turbo_agent_runtime_t *runtime, const char *collection,
                                        const char *id, json_value_t **out_record_json) {
   char *serialized = NULL;
@@ -306,22 +325,19 @@ static void turbo_agent_runtime_memory_store_destroy(void *user_data) {
   free(store);
 }
 
-static int turbo_agent_runtime_memory_store_put(void *user_data, const char *collection,
-                                                const char *id, const char *record_json) {
+static int turbo_agent_runtime_memory_store_insert(void *user_data, const char *collection,
+                                                  const char *id, const char *record_json,
+                                                  int create_only) {
   turbo_agent_runtime_memory_store_t *store = (turbo_agent_runtime_memory_store_t *)user_data;
   turbo_agent_runtime_memory_record_t *record;
   char *record_copy;
 
-  if (!store || !collection || !id || !record_json) {
-    return -1;
-  }
-
+  if (!store || !collection || !id || !record_json) return -1;
   for (record = store->head; record; record = record->next) {
     if (strcmp(record->collection, collection) == 0 && strcmp(record->id, id) == 0) {
+      if (create_only) return TURBO_AGENT_RUNTIME_STORE_CREATE_EXISTS;
       record_copy = turbo_runtime_store_strdup(record_json);
-      if (!record_copy) {
-        return -1;
-      }
+      if (!record_copy) return -1;
       free(record->record_json);
       record->record_json = record_copy;
       return 0;
@@ -329,9 +345,7 @@ static int turbo_agent_runtime_memory_store_put(void *user_data, const char *col
   }
 
   record = (turbo_agent_runtime_memory_record_t *)calloc(1, sizeof(*record));
-  if (!record) {
-    return -1;
-  }
+  if (!record) return -1;
   record->collection = turbo_runtime_store_strdup(collection);
   record->id = turbo_runtime_store_strdup(id);
   record->record_json = turbo_runtime_store_strdup(record_json);
@@ -344,7 +358,17 @@ static int turbo_agent_runtime_memory_store_put(void *user_data, const char *col
   }
   record->next = store->head;
   store->head = record;
-  return 0;
+  return TURBO_AGENT_RUNTIME_STORE_CREATE_CREATED;
+}
+
+static int turbo_agent_runtime_memory_store_put(void *user_data, const char *collection,
+                                                const char *id, const char *record_json) {
+  return turbo_agent_runtime_memory_store_insert(user_data, collection, id, record_json, 0);
+}
+
+static int turbo_agent_runtime_memory_store_create_if_absent(
+    void *user_data, const char *collection, const char *id, const char *record_json) {
+  return turbo_agent_runtime_memory_store_insert(user_data, collection, id, record_json, 1);
 }
 
 static int turbo_agent_runtime_memory_store_get(void *user_data, const char *collection,
@@ -617,6 +641,13 @@ static int turbo_agent_runtime_file_store_list(void *user_data, const char *coll
   return *out_records_json ? 0 : -1;
 }
 
+CXX_C_API void turbo_agent_runtime_store_ex_init(turbo_agent_runtime_store_ex_t *store) {
+  if (!store) return;
+  memset(store, 0, sizeof(*store));
+  store->struct_size = sizeof(*store);
+  store->abi_version = TURBO_AGENT_RUNTIME_STORE_EX_ABI_VERSION;
+}
+
 CXX_C_API turbo_agent_runtime_store_t turbo_agent_runtime_store_memory_create(void) {
   turbo_agent_runtime_store_t store = {0};
   turbo_agent_runtime_memory_store_t *user_data;
@@ -631,6 +662,16 @@ CXX_C_API turbo_agent_runtime_store_t turbo_agent_runtime_store_memory_create(vo
   store.user_data = user_data;
   store.user_data_free = turbo_agent_runtime_memory_store_destroy;
   return store;
+}
+
+CXX_C_API turbo_agent_runtime_store_ex_t turbo_agent_runtime_store_memory_create_ex(void) {
+  turbo_agent_runtime_store_ex_t extended;
+  turbo_agent_runtime_store_ex_init(&extended);
+  extended.store = turbo_agent_runtime_store_memory_create();
+  if (extended.store.put) {
+    extended.create_if_absent = turbo_agent_runtime_memory_store_create_if_absent;
+  }
+  return extended;
 }
 
 CXX_C_API turbo_agent_runtime_store_t turbo_agent_runtime_store_file_create(const char *root_dir) {
@@ -677,24 +718,43 @@ CXX_C_API turbo_agent_runtime_store_t turbo_agent_runtime_store_file_create(cons
   return store;
 }
 
-CXX_C_API turbo_agent_runtime_t *
-turbo_agent_runtime_create(const turbo_agent_runtime_store_t *store) {
-  turbo_agent_runtime_t *runtime;
+CXX_C_API turbo_agent_runtime_store_ex_t
+turbo_agent_runtime_store_file_create_ex(const char *root_dir) {
+  turbo_agent_runtime_store_ex_t extended;
+  turbo_agent_runtime_store_ex_init(&extended);
+  extended.store = turbo_agent_runtime_store_file_create(root_dir);
+  /* Portable cross-process exclusive file creation is not implemented. */
+  extended.create_if_absent = NULL;
+  return extended;
+}
 
-  if (!store || !store->put || !store->get || !store->list) {
-    return NULL;
-  }
+static turbo_agent_runtime_t *turbo_agent_runtime_create_internal(
+    const turbo_agent_runtime_store_t *store,
+    turbo_agent_runtime_store_create_if_absent_fn create_if_absent) {
+  turbo_agent_runtime_t *runtime;
+  if (!store || !store->put || !store->get || !store->list) return NULL;
   runtime = (turbo_agent_runtime_t *)calloc(1, sizeof(*runtime));
-  if (!runtime) {
-    return NULL;
-  }
+  if (!runtime) return NULL;
   runtime->store = *store;
+  runtime->create_if_absent = create_if_absent;
   cmeta_mutex_init(&runtime->store_mutex);
   if (!runtime->store_mutex) {
     free(runtime);
     return NULL;
   }
   return runtime;
+}
+
+CXX_C_API turbo_agent_runtime_t *
+turbo_agent_runtime_create(const turbo_agent_runtime_store_t *store) {
+  return turbo_agent_runtime_create_internal(store, NULL);
+}
+
+CXX_C_API turbo_agent_runtime_t *
+turbo_agent_runtime_create_ex(const turbo_agent_runtime_store_ex_t *store) {
+  if (!store || store->struct_size != sizeof(*store) ||
+      store->abi_version != TURBO_AGENT_RUNTIME_STORE_EX_ABI_VERSION) return NULL;
+  return turbo_agent_runtime_create_internal(&store->store, store->create_if_absent);
 }
 
 CXX_C_API void turbo_agent_runtime_destroy(turbo_agent_runtime_t *runtime) {

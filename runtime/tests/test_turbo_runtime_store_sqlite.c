@@ -21,11 +21,12 @@ typedef struct claim_worker_s {
 
 static void claim_worker_run(void *data) {
   claim_worker_t *worker = data;
-  char payload[32];
   json_value_t *record = json_create_object();
   worker->status = SALTS_ENOMEM;
   if (!record) return;
-  snprintf(payload, sizeof(payload), "{\\"winner\\":%d}", worker->worker_id);
+  if (turbo_runtime_json_object_set_int64(record, "winner", worker->worker_id) != 0) {
+    json_free(record); return;
+  }
   while (!atomic_load(worker->go)) cmeta_thread_yield();
   worker->status = turbo_agent_runtime_store_create_json_if_absent(
       worker->runtime, "attempt_claims", worker->id, record);

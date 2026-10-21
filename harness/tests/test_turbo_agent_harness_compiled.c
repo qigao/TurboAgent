@@ -241,6 +241,24 @@ static turbo_agent_harness_t *make_compiled_harness(
       pool, registry, turbo_agent_runtime_store_memory_create_ex());
 }
 
+static turbo_agent_harness_t *make_compiled_harness_with_legacy_store(
+    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry,
+    turbo_agent_runtime_store_t runtime_store) {
+  turbo_agent_session_config_t session_config = {0};
+  turbo_agent_app_config_t app_config = {0};
+  turbo_agent_harness_config_t config;
+  session_config.thread_id = COMPILED_INSPECT_TEST_THREAD_ID;
+  session_config.runtime_store = runtime_store;
+  session_config.agent_config.model = "gpt-5.4";
+  session_config.agent_config.transport_fn = compiled_harness_transport;
+  session_config.agent_config.tool_registry = registry;
+  app_config.session_config = &session_config;
+  turbo_agent_harness_config_init(&config);
+  config.app_config = &app_config;
+  config.executor = pool;
+  return turbo_agent_harness_create(&config);
+}
+
 static int set_compiled_host_policy(turbo_agent_harness_t *harness, int allow_runtime_tools) {
   turbo_agent_policy_t policy = turbo_agent_policy_default();
   turbo_agent_t *agent = turbo_agent_session_agent(
@@ -287,6 +305,42 @@ static int run_compiled_inspect_attempt(turbo_agent_harness_t *harness,
   return turbo_agent_harness_execute_compiled_inspect_attempt_json(
       harness, &config, source, strlen(source), NULL, attempt_id, diagnostic,
       tool_status, result, certificate);
+}
+
+spec("Harness compiled Inspect requires conditional-create capability") {
+  it("fails closed before callback dispatch for a legacy-only store") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+    json_value_t *result = NULL;
+    json_value_t *certificate = NULL;
+    int rc;
+
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1),
+                TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_legacy_store(pool, registry, store);
+    check_not_null(harness);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    attach_compiled_probe_runtime(harness, &probe);
+    rc = run_compiled_inspect_attempt(harness, "legacy-no-claim", compiled_inspect_source,
+        allowed, 1, &diagnostic, &tool_status, &result, &certificate);
+    check_not_equal(rc, SALTS_OK);
+    check_equal(probe.calls, 0);
+    check_null(result);
+    json_free(result);
+    json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
 }
 
 spec("Harness Phase-1 compiled Inspect boundary") {

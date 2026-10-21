@@ -431,7 +431,7 @@ static void memory_callback_claim_worker(void *data) {
   int rc;
   int length;
   atomic_fetch_add(worker->ready, 1);
-  length = snprintf(payload, sizeof(payload), "{\\"writer\\":%d}", worker->writer_id);
+  length = snprintf(payload, sizeof(payload), "{\"writer\":%d}", worker->writer_id);
   if (length < 0 || (size_t)length >= sizeof(payload) || !worker->backend ||
       !worker->backend->create_if_absent) {
     atomic_fetch_add(worker->errors, 1);
@@ -553,7 +553,7 @@ spec("Runtime Store atomic create-if-absent") {
     json_free(stored);
     stored = NULL;
     check_equal(backend.create_if_absent(backend.store.user_data, "direct-claims", key,
-                                         "{\\"writer\\":999}"),
+                                         "{\"writer\":999}"),
                 TURBO_AGENT_RUNTIME_STORE_CREATE_EXISTS);
     check_equal(backend.store.get(backend.store.user_data, "direct-claims", key, &stored_text),
                 SALTS_OK);

@@ -444,6 +444,7 @@ CXX_C_API turbo_agent_session_t *
 turbo_agent_session_create_with_runtime_store_ex(
     const turbo_agent_session_config_t *config,
     const turbo_agent_runtime_store_ex_t *runtime_store) {
+  if (!runtime_store) return NULL;
   return turbo_agent_session_create_internal(config, runtime_store);
 }
 

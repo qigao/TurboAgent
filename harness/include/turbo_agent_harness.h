@@ -119,6 +119,9 @@ CXX_C_API int turbo_agent_harness_start_text(turbo_agent_harness_t *harness, con
  * This does not expose async compiled DAG execution, approval transitions,
  * dynamic Plugin lease management or hard process sandboxing. The source registry
  * and callback implementations must remain alive and quiescent for the call.
+ * The Host must keep the Agent tool policy stable until this synchronous call
+ * returns, including store/tool/event callbacks and result delivery. Generation
+ * checks do not permit concurrent or callback-reentrant policy replacement.
  */
 CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
     turbo_agent_harness_t *harness,
@@ -139,6 +142,9 @@ CXX_C_API int turbo_agent_harness_execute_compiled_inspect_json(
  * without re-invoking the tool callback. Existing STARTED/unknown attempts fail
  * closed. The compiled_inspect_attempts record is the sole durable typed-result
  * authority; the per-Run journal stores only a reference to that attempt.
+ * Replay requires matching plan/contract and Host policy generation, even if
+ * replacement grants are identical. The same policy-stability requirement as
+ * execute_compiled_inspect_json applies throughout this call.
  */
 CXX_C_API int turbo_agent_harness_execute_compiled_inspect_attempt_json(
     turbo_agent_harness_t *harness,

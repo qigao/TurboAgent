@@ -1078,6 +1078,21 @@ spec("Harness Phase-1 compiled Inspect boundary") {
       json_free(certificate);
       certificate = NULL;
 
+      /* An unchanged generation can deliver the committed result without
+       * dispatching the callback again. */
+      check_equal(run_compiled_inspect_attempt(harness, "quiescent-generation",
+          compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
+          &result, &certificate), SALTS_OK);
+      check_equal(tool_status, TURBO_TOOL_OK);
+      check_true(json_get_bool(result, "ok", false));
+      check_not_null(certificate);
+      check_equal(probe.calls, 1);
+      check_equal(probe.saw_started_journal, 1);
+      json_free(result);
+      result = NULL;
+      json_free(certificate);
+      certificate = NULL;
+
       /* The synchronous Run and all its callbacks have returned. The Host
        * serializes policy replacement here, never inside a callback. Keeping
        * identical grants isolates generation identity from capability denial. */
@@ -1112,6 +1127,22 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
 
     turbo_runtime_json_destroy(journal_records);
+    json_free(certificate);
+    certificate = NULL;
+
+    /* A fresh attempt under the replacement policy still executes and delivers
+     * a valid result. Stale replay rejection must not poison the Harness. */
+    check_equal(run_compiled_inspect_attempt(harness, "replacement-generation",
+        compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
+        &result, &certificate), SALTS_OK);
+    check_equal(diagnostic.status, TURBO_AGENT_COMPILE_OK);
+    check_equal(tool_status, TURBO_TOOL_OK);
+    check_true(json_get_bool(result, "ok", false));
+    check_not_null(certificate);
+    check_equal(probe.calls, 2);
+    check_equal(probe.saw_started_journal, 2);
+
+    json_free(result);
     json_free(certificate);
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);

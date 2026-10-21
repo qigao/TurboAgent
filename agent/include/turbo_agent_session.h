@@ -9,6 +9,7 @@
 #include "turbo_agent_context.h"
 #include "turbo_agent_inbox.h"
 #include "turbo_agent_runtime.h"
+#include "turbo_runtime_store.h"
 
 #ifdef __cplusplus
 extern "C" {

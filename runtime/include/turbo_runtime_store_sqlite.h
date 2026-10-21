@@ -51,6 +51,10 @@ CXX_C_API void turbo_runtime_sqlite_config_init(turbo_runtime_sqlite_config_t *c
 CXX_C_API int turbo_runtime_store_sqlite_open(
     const turbo_runtime_sqlite_config_t *config, turbo_agent_runtime_store_t *out_store);
 
+/** Extended opener enables the atomic conditional-insert capability. */
+CXX_C_API int turbo_runtime_store_sqlite_open_ex(
+    const turbo_runtime_sqlite_config_t *config, turbo_agent_runtime_store_ex_t *out_store);
+
 #ifdef __cplusplus
 }
 #endif

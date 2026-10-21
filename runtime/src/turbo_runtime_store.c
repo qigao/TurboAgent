@@ -25,6 +25,7 @@ typedef struct turbo_agent_runtime_memory_record_s {
 
 typedef struct {
   turbo_agent_runtime_memory_record_t *head;
+  cmeta_mutex_t mutex;
 } turbo_agent_runtime_memory_store_t;
 
 typedef struct {
@@ -322,10 +323,11 @@ static void turbo_agent_runtime_memory_store_destroy(void *user_data) {
     free(record);
     record = next;
   }
+  cmeta_mutex_destroy(&store->mutex);
   free(store);
 }
 
-static int turbo_agent_runtime_memory_store_insert(void *user_data, const char *collection,
+static int turbo_agent_runtime_memory_store_insert_unlocked(void *user_data, const char *collection,
                                                   const char *id, const char *record_json,
                                                   int create_only) {
   turbo_agent_runtime_memory_store_t *store = (turbo_agent_runtime_memory_store_t *)user_data;
@@ -359,6 +361,19 @@ static int turbo_agent_runtime_memory_store_insert(void *user_data, const char *
   record->next = store->head;
   store->head = record;
   return TURBO_AGENT_RUNTIME_STORE_CREATE_CREATED;
+}
+
+static int turbo_agent_runtime_memory_store_insert(void *user_data, const char *collection,
+                                                  const char *id, const char *record_json,
+                                                  int create_only) {
+  turbo_agent_runtime_memory_store_t *store = (turbo_agent_runtime_memory_store_t *)user_data;
+  int rc;
+  if (!store) return SALTS_EINVAL;
+  cmeta_mutex_lock(&store->mutex);
+  rc = turbo_agent_runtime_memory_store_insert_unlocked(
+      user_data, collection, id, record_json, create_only);
+  cmeta_mutex_unlock(&store->mutex);
+  return rc;
 }
 
 static int turbo_agent_runtime_memory_store_put(void *user_data, const char *collection,
@@ -654,6 +669,11 @@ CXX_C_API turbo_agent_runtime_store_t turbo_agent_runtime_store_memory_create(vo
 
   user_data = (turbo_agent_runtime_memory_store_t *)calloc(1, sizeof(*user_data));
   if (!user_data) {
+    return store;
+  }
+  cmeta_mutex_init(&user_data->mutex);
+  if (!user_data->mutex) {
+    free(user_data);
     return store;
   }
   store.put = turbo_agent_runtime_memory_store_put;

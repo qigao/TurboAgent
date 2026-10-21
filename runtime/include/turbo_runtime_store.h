@@ -76,7 +76,11 @@ CXX_C_API void turbo_agent_runtime_store_ex_init(turbo_agent_runtime_store_ex_t 
 CXX_C_API turbo_agent_runtime_t *
 turbo_agent_runtime_create(const turbo_agent_runtime_store_t *store);
 
-/** Bind a versioned descriptor, including optional atomic create-if-absent. */
+/**
+ * Bind a versioned descriptor, including optional atomic create-if-absent.
+ * On success the Runtime takes ownership of store->store.user_data. If
+ * validation or allocation fails, ownership remains with the caller.
+ */
 CXX_C_API turbo_agent_runtime_t *
 turbo_agent_runtime_create_ex(const turbo_agent_runtime_store_ex_t *store);
 

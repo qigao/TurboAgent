@@ -239,12 +239,14 @@ static int test_owner_independent_replay_and_cap(void) {
 int main(void) {
   if (test_stationary_tone_and_alternating_sparse_bands() != 0 ||
       test_uniform_amplitude_scaling_preserves_normalized_flux() != 0 ||
+      test_full_scale_pcm_and_below_floor_stability() != 0 ||
       test_silence_discontinuity_and_zero() != 0 ||
       test_owner_independent_replay_and_cap() != 0)
     return 1;
   puts("{\"sparse_bands\":4,\"sample_rate\":16000,"
        "\"samples_per_frame\":320,\"flux_detects_frequency_switch\":true,"
        "\"silence_does_not_create_flux_transition\":true,"
+       "\"full_scale_and_below_floor_stable\":true,"
        "\"two_owners_deterministic\":true,\"pcm_retained\":false,"
        "\"model_inference_used\":false,\"confidence_reject_unchanged\":true}");
   return 0;

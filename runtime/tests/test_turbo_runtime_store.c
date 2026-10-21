@@ -236,6 +236,17 @@ spec("Runtime record store without Agent") {
     check_not_null(runtime);
     check_equal(turbo_agent_runtime_store_create_json_if_absent(
         runtime, "claims", "one", first), SALTS_ENOTSUP);
+    turbo_agent_runtime_destroy(runtime); runtime = NULL;
+    root = tt_make_temp_dir("turbo-runtime-claim-file");
+    check_not_null(root);
+    {
+      turbo_agent_runtime_store_t file = turbo_agent_runtime_store_file_create(root);
+      check_not_null(file.create_if_absent);
+      runtime = turbo_agent_runtime_create(&file);
+      check_not_null(runtime);
+      check_equal(turbo_agent_runtime_store_create_json_if_absent(
+          runtime, "claims", "one", first), SALTS_ENOTSUP);
+    }
     json_free(first);
     json_free(second);
   }

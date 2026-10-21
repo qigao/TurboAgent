@@ -12,12 +12,17 @@
 
 static const double pi = 3.1415926535897932384626433832795;
 
-static void make_sparse_probe_tone(int16_t *pcm, unsigned int bin) {
+static void make_sparse_probe_tone_amplitude(
+    int16_t *pcm, unsigned int bin, double amplitude) {
   size_t sample;
   for (sample = 0u; sample < TA_VAD_LAB_FRAME_SAMPLES; ++sample)
-    pcm[sample] = (int16_t)(7000.0 *
+    pcm[sample] = (int16_t)(amplitude *
         sin((2.0 * pi * (double)bin * (double)sample) /
             (double)TA_VAD_LAB_FRAME_SAMPLES));
+}
+
+static void make_sparse_probe_tone(int16_t *pcm, unsigned int bin) {
+  make_sparse_probe_tone_amplitude(pcm, bin, 7000.0);
 }
 
 static int check_band_result(const ta_vad_lab_result_t *r) {
@@ -94,6 +99,37 @@ static int test_stationary_tone_and_alternating_sparse_bands(void) {
   return 0;
 }
 
+static int test_uniform_amplitude_scaling_preserves_normalized_flux(void) {
+  ta_vad_lab_owner_t *steady_owner = NULL;
+  ta_vad_lab_owner_t *scaled_owner = NULL;
+  ta_vad_lab_result_t steady;
+  ta_vad_lab_result_t scaled;
+  int16_t frame[TA_VAD_LAB_FRAME_SAMPLES];
+  size_t i;
+  CHECK(ta_vad_lab_create(&steady_owner) == TA_VAD_LAB_OK);
+  CHECK(ta_vad_lab_create(&scaled_owner) == TA_VAD_LAB_OK);
+  for (i = 0u; i < 80u; ++i) {
+    make_sparse_probe_tone_amplitude(frame, 23u, 7000.0);
+    CHECK(ta_vad_lab_accept(steady_owner, frame, 320u) == TA_VAD_LAB_OK);
+    make_sparse_probe_tone_amplitude(
+        frame, 23u, i % 2u == 0u ? 3500.0 : 12000.0);
+    CHECK(ta_vad_lab_accept(scaled_owner, frame, 320u) == TA_VAD_LAB_OK);
+  }
+  CHECK(ta_vad_lab_settle(steady_owner, &steady) == TA_VAD_LAB_OK);
+  CHECK(ta_vad_lab_settle(scaled_owner, &scaled) == TA_VAD_LAB_OK);
+  CHECK(check_band_result(&steady) == 0);
+  CHECK(check_band_result(&scaled) == 0);
+  CHECK(steady.sparse_band_flux_transitions == 79u);
+  CHECK(scaled.sparse_band_flux_transitions == 79u);
+  CHECK(steady.mean_sparse_band_flux < 0.01);
+  CHECK(scaled.mean_sparse_band_flux < 0.01);
+  CHECK(fabs(steady.mean_sparse_band_flux -
+             scaled.mean_sparse_band_flux) < 0.01);
+  CHECK(ta_vad_lab_destroy(&steady_owner) == TA_VAD_LAB_OK);
+  CHECK(ta_vad_lab_destroy(&scaled_owner) == TA_VAD_LAB_OK);
+  return 0;
+}
+
 static int test_silence_discontinuity_and_zero(void) {
   ta_vad_lab_owner_t *owner = NULL;
   ta_vad_lab_result_t r;
@@ -158,6 +194,7 @@ static int test_owner_independent_replay_and_cap(void) {
 
 int main(void) {
   if (test_stationary_tone_and_alternating_sparse_bands() != 0 ||
+      test_uniform_amplitude_scaling_preserves_normalized_flux() != 0 ||
       test_silence_discontinuity_and_zero() != 0 ||
       test_owner_independent_replay_and_cap() != 0)
     return 1;

@@ -237,9 +237,12 @@ spec("bounded SQLite runtime records") {
       check_equal(winners, 1);
       check_equal(turbo_agent_runtime_store_get_json_status(
           runtime, "attempt_claims", id, &record), SALTS_OK);
-      check_true(turbo_runtime_json_value_as_int64(json_object_get(record, "winner"), -1) >= 0);
-      check_true(turbo_runtime_json_value_as_int64(json_object_get(record, "winner"), -1) <
-                 CLAIM_WORKERS);
+      for (i = 0; i < CLAIM_WORKERS; ++i) {
+        if (workers[i].status == SALTS_OK) {
+          check_equal(turbo_runtime_json_value_as_int64(
+              json_object_get(record, "winner"), -1), workers[i].worker_id);
+        }
+      }
       json_free(record); record = NULL;
     }
     turbo_agent_runtime_destroy(runtime);

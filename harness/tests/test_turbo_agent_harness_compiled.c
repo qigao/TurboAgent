@@ -548,8 +548,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_not_null(harness);
     check_equal(set_compiled_host_policy(harness, 1), 0);
 
-    check_not_equal(run_compiled_inspect(harness, compiled_inspect_source,
-        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
+    check_equal(run_compiled_inspect(harness, compiled_inspect_source,
+        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_ENOTSUP);
     check_equal(probe.calls, 0);
     check_null(result);
     check_not_null(certificate);

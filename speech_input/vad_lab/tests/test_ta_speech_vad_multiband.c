@@ -165,6 +165,7 @@ static int test_full_scale_pcm_and_below_floor_stability(void) {
   CHECK(check_band_result(&low_level) == 0);
   CHECK(low_level.nonzero_frames == 8u);
   CHECK(low_level.above_floor_frames == 0u);
+  CHECK(low_level.below_floor_nonzero_frames == 8u);
   CHECK(low_level.sparse_band_observed_frames == 0u);
   CHECK(low_level.sparse_band_flux_transitions == 0u);
   CHECK(low_level.mean_sparse_band_entropy == 0.0);

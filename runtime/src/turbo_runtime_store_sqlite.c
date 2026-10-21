@@ -110,6 +110,42 @@ static int sqlite_store_put(void *data, const char *collection, const char *id,
   return sqlite_store_status(rc);
 }
 
+static int sqlite_store_create_if_absent(void *data, const char *collection, const char *id,
+                                         const char *text) {
+  sqlite_store_t *store = data;
+  sqlite3_stmt *stmt = NULL;
+  json_value_t *record;
+  size_t bytes;
+  int rc;
+  int changed;
+  if (!store || !sqlite_store_key(collection) || !sqlite_store_key(id) || !text)
+    return SALTS_EINVAL;
+  bytes = strlen(text);
+  if (bytes > store->max_record_bytes) return SALTS_ENOSPC;
+  if (!vstr_utf8_valid(vstr_from_cstr(text))) return SALTS_EPROTO;
+  record = json_parse(text, bytes);
+  if (!record) return SALTS_EPROTO;
+  json_free(record);
+  rc = sqlite3_prepare_v2(store->db,
+      "INSERT INTO runtime_records(collection,id,payload) VALUES(?1,?2,?3) "
+      "ON CONFLICT(collection,id) DO NOTHING", -1, &stmt, NULL);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 1, collection, -1, SQLITE_STATIC);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 2, id, -1, SQLITE_STATIC);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_text(stmt, 3, text, (int)bytes, SQLITE_STATIC);
+  if (rc == SQLITE_OK) rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    int finish = sqlite3_finalize(stmt);
+    if (rc == SQLITE_DONE) rc = finish;
+    return sqlite_store_status(rc);
+  }
+  rc = sqlite3_finalize(stmt);
+  if (rc != SQLITE_OK) return sqlite_store_status(rc);
+  changed = sqlite3_changes(store->db);
+  if (changed == 1) return TURBO_AGENT_RUNTIME_STORE_CREATE_CREATED;
+  if (changed == 0) return TURBO_AGENT_RUNTIME_STORE_CREATE_EXISTS;
+  return SALTS_EPROTO;
+}
+
 static int sqlite_store_row(sqlite_store_t *store, sqlite3_stmt *stmt,
                             json_value_t **out, const char **text, size_t *bytes) {
   *out = NULL;
@@ -295,4 +331,17 @@ fail:
   tstr_free(sql);
   sqlite_store_destroy(store);
   return status;
+}
+
+int turbo_runtime_store_sqlite_open_ex(const turbo_runtime_sqlite_config_t *config,
+                                      turbo_agent_runtime_store_ex_t *out_store) {
+  turbo_agent_runtime_store_t legacy = {0};
+  int status;
+  if (!out_store) return SALTS_EINVAL;
+  turbo_agent_runtime_store_ex_init(out_store);
+  status = turbo_runtime_store_sqlite_open(config, &legacy);
+  if (status != SALTS_OK) return status;
+  out_store->store = legacy;
+  out_store->create_if_absent = sqlite_store_create_if_absent;
+  return SALTS_OK;
 }

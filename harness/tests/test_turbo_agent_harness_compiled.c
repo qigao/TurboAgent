@@ -803,6 +803,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
         (compiled_inspect_store_fault_t *)store.user_data;
     turbo_agent_harness_t *harness;
     turbo_agent_session_t *session;
+    turbo_agent_tool_authority_snapshot_t committed_authority = {0};
+    turbo_agent_tool_authority_snapshot_t restored_authority = {0};
     turbo_agent_inbox_config_t inbox_config = {
         sizeof(inbox_config), TURBO_AGENT_INBOX_ABI_VERSION, 4, 4096, 1024, 1};
     turbo_agent_compile_diagnostic_t diagnostic = {0};
@@ -829,6 +831,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     attach_compiled_probe_runtime(harness, &probe);
     session = turbo_agent_app_session(turbo_agent_harness_app(harness));
     check_not_null(session);
+    check_equal(turbo_agent_tool_authority_snapshot_get(
+        turbo_agent_session_agent(session), &committed_authority), 0);
     check_equal(turbo_agent_session_inbox_configure(session, &inbox_config), SALTS_OK);
     json_object_set_string(message, "role", "user");
     json_object_set_string(message, "content", "compiled Inspect finalization failure");
@@ -899,11 +903,39 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     run_rc = run_compiled_inspect_attempt(harness, "finalization-replay",
         compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
         &result, &certificate);
-    check_not_equal(run_rc, SALTS_OK);
+    check_equal(run_rc, SALTS_EPROTO);
+    check_equal(diagnostic.status, TURBO_AGENT_COMPILE_CAPABILITY_DENIED);
     check_null(result);
+    check_null(certificate);
     check_equal(probe.calls, 1);
-    json_free(certificate);
-    certificate = NULL;
+
+    /* All synchronous calls have returned before the Host restores the grant.
+     * Restoring identical permissions must not revive the old committed
+     * generation, even when the caller repeats its retry. */
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    check_equal(turbo_agent_tool_authority_snapshot_get(
+        turbo_agent_session_agent(session), &restored_authority), 0);
+    check_equal(committed_authority.capability_mask, restored_authority.capability_mask);
+    check_not_equal(committed_authority.generation, restored_authority.generation);
+    check_equal(turbo_agent_tool_authority_snapshot_is_current(
+        turbo_agent_session_agent(session), &committed_authority), 0);
+    {
+      size_t retry;
+      for (retry = 0; retry < 2; ++retry) {
+        run_rc = run_compiled_inspect_attempt(harness, "finalization-replay",
+            compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
+            &result, &certificate);
+        check_equal(run_rc, SALTS_EPROTO);
+        check_equal(diagnostic.status, TURBO_AGENT_COMPILE_SOURCE_INVALID);
+        check_equal(tool_status, TURBO_TOOL_ERROR);
+        check_null(result);
+        check_not_null(certificate);
+        check_equal(probe.calls, 1);
+        check_equal(probe.saw_started_journal, 1);
+        json_free(certificate);
+        certificate = NULL;
+      }
+    }
 
     check_equal(turbo_agent_runtime_store_list_json(
         probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
@@ -914,6 +946,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_not_null(journal);
     check_equal(json_get_string(journal, "phase"), "committed");
     check_equal(json_get_string(journal, "attempt_id"), "finalization-replay");
+    check_equal(json_get_double(journal, "authority_generation", -1.0),
+                (double)committed_authority.generation);
     check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
     turbo_runtime_json_destroy(journal_records);
     journal_records = NULL;
@@ -930,6 +964,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
         check_not_null(run_journal);
         check_equal(json_get_string(run_journal, "phase"), "committed");
         check_equal(json_get_string(run_journal, "attempt_id"), "finalization-replay");
+        check_equal(json_get_double(run_journal, "authority_generation", -1.0),
+                    (double)committed_authority.generation);
         check_not_null(json_get_string(run_journal, "attempt_record_id"));
         check_null(json_object_get(run_journal, "result"));
       }

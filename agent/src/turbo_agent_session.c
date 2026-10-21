@@ -342,23 +342,31 @@ static int turbo_agent_session_copy_optional_config(
   return 0;
 }
 
-CXX_C_API turbo_agent_session_t *
-turbo_agent_session_create(const turbo_agent_session_config_t *config) {
+static turbo_agent_session_t *turbo_agent_session_create_internal(
+    const turbo_agent_session_config_t *config,
+    const turbo_agent_runtime_store_ex_t *extended_store) {
   turbo_agent_session_t *session;
   turbo_agent_runtime_store_t runtime_store;
   turbo_agent_config_t effective_config = {0};
   const turbo_model_provider_t *provider;
   int create_agent;
 
-  if (!config) {
-    return NULL;
-  }
-  runtime_store = config->runtime_store;
-  if (!runtime_store.put || !runtime_store.get || !runtime_store.list) {
-    runtime_store = turbo_agent_runtime_store_memory_create();
-  }
-  if (!runtime_store.put || !runtime_store.get || !runtime_store.list) {
-    return NULL;
+  if (!config) return NULL;
+  if (extended_store) {
+    const turbo_agent_runtime_store_t *legacy = &config->runtime_store;
+    if (extended_store->struct_size != sizeof(*extended_store) ||
+        extended_store->abi_version != TURBO_AGENT_RUNTIME_STORE_EX_ABI_VERSION ||
+        legacy->put || legacy->get || legacy->list || legacy->user_data ||
+        legacy->user_data_free ||
+        !extended_store->store.put || !extended_store->store.get ||
+        !extended_store->store.list) return NULL;
+    runtime_store = extended_store->store;
+  } else {
+    runtime_store = config->runtime_store;
+    if (!runtime_store.put || !runtime_store.get || !runtime_store.list) {
+      runtime_store = turbo_agent_runtime_store_memory_create();
+    }
+    if (!runtime_store.put || !runtime_store.get || !runtime_store.list) return NULL;
   }
 
   session = (turbo_agent_session_t *)calloc(1, sizeof(*session));
@@ -369,7 +377,9 @@ turbo_agent_session_create(const turbo_agent_session_config_t *config) {
     return NULL;
   }
 
-  session->runtime = turbo_agent_runtime_create(&runtime_store);
+  session->runtime = extended_store
+                         ? turbo_agent_runtime_create_ex(extended_store)
+                         : turbo_agent_runtime_create(&runtime_store);
   if (!session->runtime) {
     if (runtime_store.user_data_free) {
       runtime_store.user_data_free(runtime_store.user_data);
@@ -424,6 +434,19 @@ failure:
   turbo_agent_session_destroy(session);
   return NULL;
 }
+
+CXX_C_API turbo_agent_session_t *
+turbo_agent_session_create(const turbo_agent_session_config_t *config) {
+  return turbo_agent_session_create_internal(config, NULL);
+}
+
+CXX_C_API turbo_agent_session_t *
+turbo_agent_session_create_with_runtime_store_ex(
+    const turbo_agent_session_config_t *config,
+    const turbo_agent_runtime_store_ex_t *runtime_store) {
+  return turbo_agent_session_create_internal(config, runtime_store);
+}
+
 
 CXX_C_API void turbo_agent_session_destroy(turbo_agent_session_t *session) {
   if (!session) {

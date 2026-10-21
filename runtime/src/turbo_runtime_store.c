@@ -386,8 +386,8 @@ static int turbo_agent_runtime_memory_store_create_if_absent(
   return turbo_agent_runtime_memory_store_insert(user_data, collection, id, record_json, 1);
 }
 
-static int turbo_agent_runtime_memory_store_get(void *user_data, const char *collection,
-                                                const char *id, char **out_record_json) {
+static int turbo_agent_runtime_memory_store_get_unlocked(void *user_data, const char *collection,
+                                                          const char *id, char **out_record_json) {
   turbo_agent_runtime_memory_store_t *store = (turbo_agent_runtime_memory_store_t *)user_data;
   turbo_agent_runtime_memory_record_t *record;
 
@@ -404,6 +404,17 @@ static int turbo_agent_runtime_memory_store_get(void *user_data, const char *col
   return SALTS_ENOENT;
 }
 
+static int turbo_agent_runtime_memory_store_get(void *user_data, const char *collection,
+                                                const char *id, char **out_record_json) {
+  turbo_agent_runtime_memory_store_t *store = (turbo_agent_runtime_memory_store_t *)user_data;
+  int rc;
+  if (!store) return SALTS_EINVAL;
+  cmeta_mutex_lock(&store->mutex);
+  rc = turbo_agent_runtime_memory_store_get_unlocked(user_data, collection, id, out_record_json);
+  cmeta_mutex_unlock(&store->mutex);
+  return rc;
+}
+
 static int turbo_runtime_store_json_matches_filter(const json_value_t *record, const char *filter_key,
                                             const char *filter_value) {
   const char *value;
@@ -415,9 +426,9 @@ static int turbo_runtime_store_json_matches_filter(const json_value_t *record, c
   return value && strcmp(value, filter_value) == 0;
 }
 
-static int turbo_agent_runtime_memory_store_list(void *user_data, const char *collection,
-                                                 const char *filter_key, const char *filter_value,
-                                                 char **out_records_json) {
+static int turbo_agent_runtime_memory_store_list_unlocked(void *user_data, const char *collection,
+                                                         const char *filter_key, const char *filter_value,
+                                                         char **out_records_json) {
   turbo_agent_runtime_memory_store_t *store = (turbo_agent_runtime_memory_store_t *)user_data;
   turbo_agent_runtime_memory_record_t *record;
   json_value_t *records_json;
@@ -456,6 +467,22 @@ static int turbo_agent_runtime_memory_store_list(void *user_data, const char *co
   }
   turbo_runtime_store_json_free(&records_json);
   return *out_records_json ? 0 : -1;
+}
+
+static int turbo_agent_runtime_memory_store_list(void *user_data, const char *collection,
+                                                 const char *filter_key, const char *filter_value,
+                                                 char **out_records_json) {
+  turbo_agent_runtime_memory_store_t *store = (turbo_agent_runtime_memory_store_t *)user_data;
+  int rc;
+  if (!store) {
+    if (out_records_json) *out_records_json = NULL;
+    return SALTS_EINVAL;
+  }
+  cmeta_mutex_lock(&store->mutex);
+  rc = turbo_agent_runtime_memory_store_list_unlocked(
+      user_data, collection, filter_key, filter_value, out_records_json);
+  cmeta_mutex_unlock(&store->mutex);
+  return rc;
 }
 
 static void turbo_agent_runtime_file_store_destroy(void *user_data) {

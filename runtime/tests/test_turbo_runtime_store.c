@@ -527,3 +527,24 @@ spec("Runtime Store atomic claim backend errors") {
     check_equal(probe.destroyed, 1);
   }
 }
+
+spec("File Runtime Store atomic claim capability") {
+  it("returns unsupported rather than emulating a conditional create") {
+    char *directory = tt_make_temp_dir("turbo-file-claim-unsupported");
+    turbo_agent_runtime_store_ex_t store;
+    turbo_agent_runtime_t *runtime = NULL;
+    json_value_t *record = json_create_object();
+    check_not_null(directory);
+    store = turbo_agent_runtime_store_file_create_ex(directory);
+    check_not_null(store.store.put);
+    runtime = turbo_agent_runtime_create_ex(&store);
+    check_not_null(runtime);
+    check_not_null(record);
+    check_equal(turbo_agent_runtime_store_create_if_absent_json(
+        runtime, "claims", "one", record), SALTS_ENOTSUP);
+    json_free(record);
+    turbo_agent_runtime_destroy(runtime);
+    tt_remove_tree(directory);
+    free(directory);
+  }
+}

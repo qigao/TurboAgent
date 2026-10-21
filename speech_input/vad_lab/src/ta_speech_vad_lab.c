@@ -25,6 +25,7 @@ struct ta_vad_lab_owner {
   uint32_t frame_count;
   uint32_t nonzero_count;
   uint32_t above_floor_count;
+  uint32_t below_floor_nonzero_count;
   uint32_t voicing_count;
   uint32_t tonal_count;
   uint32_t modulation_count;
@@ -219,6 +220,7 @@ ta_vad_lab_error_t ta_vad_lab_accept(ta_vad_lab_owner_t *owner,
     if (correlation >= 0.75 && concentration >= 0.72)
       ++owner->tonal_count;
   } else {
+    if (nonzero != 0u) ++owner->below_floor_nonzero_count;
     /* Silence / below-floor input interrupts spectral flux continuity.
      * No cross-gap transition is falsely recorded as a speech feature. */
     owner->previous_band_valid = 0u;
@@ -237,6 +239,7 @@ ta_vad_lab_error_t ta_vad_lab_settle(ta_vad_lab_owner_t *owner,
   output.input_frames = owner->frame_count;
   output.nonzero_frames = owner->nonzero_count;
   output.above_floor_frames = owner->above_floor_count;
+  output.below_floor_nonzero_frames = owner->below_floor_nonzero_count;
   output.voicing_cue_frames = owner->voicing_count;
   output.tonal_cue_frames = owner->tonal_count;
   output.power_modulation_events = owner->modulation_count;

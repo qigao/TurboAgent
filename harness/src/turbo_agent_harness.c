@@ -551,9 +551,19 @@ static int turbo_agent_compiled_inspect_attempt_write(
       (result && turbo_runtime_json_object_set_clone(record, "result", result) !=
           TURBO_RUNTIME_JSON_OK)) goto cleanup;
 
-  rc = turbo_agent_runtime_store_put_json(
-      run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
-      run->attempt_record_id, record) == SALTS_OK ? 0 : -1;
+  if (is_start) {
+    /* The backend primitive is the claim linearization point. No get+put or
+     * upsert fallback is permitted; unsupported stores fail before dispatch. */
+    rc = turbo_agent_runtime_store_create_if_absent_json(
+             run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+             run->attempt_record_id, record) ==
+                 TURBO_AGENT_RUNTIME_STORE_CREATE_CREATED
+             ? 0 : -1;
+  } else {
+    rc = turbo_agent_runtime_store_put_json(
+        run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
+        run->attempt_record_id, record) == SALTS_OK ? 0 : -1;
+  }
 
 cleanup:
   turbo_runtime_json_destroy(record);

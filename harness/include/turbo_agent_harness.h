@@ -11,6 +11,7 @@
 #include "turbo_agent_app.h"
 #include "turbo_agent_execution.h"
 #include "turbo_agent_compiler.h"
+#include "turbo_runtime_store.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +58,16 @@ CXX_C_API void turbo_agent_harness_run_options_init(turbo_agent_harness_run_opti
 
 CXX_C_API turbo_agent_harness_t *
 turbo_agent_harness_create(const turbo_agent_harness_config_t *config);
+
+/**
+ * Create a Harness with an explicit versioned Runtime Store. The legacy store
+ * in config->app_config->session_config must be zeroed. This additive entry
+ * point preserves the size/layout of all existing Harness/App/Session configs.
+ */
+CXX_C_API turbo_agent_harness_t *
+turbo_agent_harness_create_with_runtime_store_ex(
+    const turbo_agent_harness_config_t *config,
+    const turbo_agent_runtime_store_ex_t *runtime_store);
 CXX_C_API turbo_agent_harness_t *turbo_agent_harness_retain(turbo_agent_harness_t *harness);
 CXX_C_API void turbo_agent_harness_release(turbo_agent_harness_t *harness);
 

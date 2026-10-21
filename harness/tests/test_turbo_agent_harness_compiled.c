@@ -544,7 +544,7 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     json_value_t *certificate = NULL;
     json_value_t *journal_records = NULL;
     const json_value_t *journal;
-    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("committed");
+    turbo_agent_runtime_store_ex_t store = compiled_inspect_store_fail_phase("committed");
     compiled_inspect_store_fault_t *store_fault =
         (compiled_inspect_store_fault_t *)store.store.user_data;
     int run_rc;
@@ -636,9 +636,9 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
     cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("outcome_unknown");
+    turbo_agent_runtime_store_ex_t store = compiled_inspect_store_fail_phase("outcome_unknown");
     compiled_inspect_store_fault_t *store_fault =
-        (compiled_inspect_store_fault_t *)store.user_data;
+        (compiled_inspect_store_fault_t *)store.store.user_data;
     turbo_agent_harness_t *harness;
     turbo_agent_compile_diagnostic_t diagnostic = {0};
     turbo_tool_status_t tool_status = TURBO_TOOL_OK;
@@ -734,9 +734,9 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
     cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
-    turbo_agent_runtime_store_t store = compiled_inspect_store_fail_phase("inbox_applied");
+    turbo_agent_runtime_store_ex_t store = compiled_inspect_store_fail_phase("inbox_applied");
     compiled_inspect_store_fault_t *store_fault =
-        (compiled_inspect_store_fault_t *)store.user_data;
+        (compiled_inspect_store_fault_t *)store.store.user_data;
     turbo_agent_harness_t *harness;
     turbo_agent_session_t *session;
     turbo_agent_inbox_config_t inbox_config = {

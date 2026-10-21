@@ -61,8 +61,9 @@ turbo_agent_harness_create(const turbo_agent_harness_config_t *config);
 
 /**
  * Create a Harness with an explicit versioned Runtime Store. The legacy store
- * in config->app_config->session_config must be zeroed. This additive entry
- * point preserves the size/layout of all existing Harness/App/Session configs.
+ * in config->app_config->session_config must be zeroed. NULL/invalid extended
+ * descriptors fail closed; this entry point never falls back to legacy creation.
+ * The additive entry preserves existing Harness/App/Session config layouts.
  */
 CXX_C_API turbo_agent_harness_t *
 turbo_agent_harness_create_with_runtime_store_ex(

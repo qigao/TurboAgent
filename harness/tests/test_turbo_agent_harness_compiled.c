@@ -177,15 +177,21 @@ static void compiled_inspect_fault_store_free(void *user_data) {
 static int compiled_inspect_fault_store_create_if_absent(
     void *user_data, const char *collection, const char *id, const char *record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
-  char phase_token[64];
-  int length;
+  json_value_t *record;
+  const char *phase;
+  int rc;
   if (!fault || !record_json || !fault->inner.create_if_absent) return SALTS_ENOTSUP;
-  length = snprintf(phase_token, sizeof(phase_token), "\\"phase\\":\\"%s\\"",
-                    fault->failed_phase ? fault->failed_phase : "");
-  if (length > 0 && (size_t)length < sizeof(phase_token) &&
-      fault->failed_phase && strstr(record_json, phase_token)) return SALTS_EIO;
-  return fault->inner.create_if_absent(
+  record = json_parse(record_json, strlen(record_json));
+  if (!record) return SALTS_EPROTO;
+  phase = json_get_string(record, "phase");
+  if (fault->failed_phase && phase && strcmp(phase, fault->failed_phase) == 0) {
+    json_free(record);
+    return SALTS_EIO;
+  }
+  json_free(record);
+  rc = fault->inner.create_if_absent(
       fault->inner.store.user_data, collection, id, record_json);
+  return rc;
 }
 
 static turbo_agent_runtime_store_ex_t compiled_inspect_store_fail_phase(const char *phase) {

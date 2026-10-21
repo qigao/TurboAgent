@@ -370,3 +370,121 @@ spec("Runtime record store without Agent") {
     check_null(output);
   }
 }
+
+typedef struct store_claim_worker_s {
+  turbo_agent_runtime_t *runtime;
+  int writer_id;
+  const char *key;
+  atomic_int *ready;
+  atomic_int *go;
+  atomic_int *created;
+  atomic_int *exists;
+  atomic_int *errors;
+} store_claim_worker_t;
+
+static void store_claim_worker(void *data) {
+  store_claim_worker_t *worker = (store_claim_worker_t *)data;
+  json_value_t *record = json_create_object();
+  int rc;
+  if (!record ||
+      turbo_runtime_json_object_set_int64(record, "writer", worker->writer_id) !=
+          TURBO_RUNTIME_JSON_OK) {
+    atomic_fetch_add(worker->errors, 1);
+    json_free(record);
+    return;
+  }
+  atomic_fetch_add(worker->ready, 1);
+  while (!atomic_load(worker->go)) cmeta_thread_yield();
+  rc = turbo_agent_runtime_store_create_if_absent_json(
+      worker->runtime, "claims", worker->key, record);
+  if (rc == TURBO_AGENT_RUNTIME_STORE_CREATE_CREATED) atomic_fetch_add(worker->created, 1);
+  else if (rc == TURBO_AGENT_RUNTIME_STORE_CREATE_EXISTS) atomic_fetch_add(worker->exists, 1);
+  else atomic_fetch_add(worker->errors, 1);
+  json_free(record);
+}
+
+spec("Runtime Store atomic create-if-absent") {
+  it("creates one immutable winner under concurrent same-handle claims") {
+    enum { CLAIM_WORKERS = 8, CLAIM_ROUNDS = 8 };
+    turbo_agent_runtime_store_ex_t backend = turbo_agent_runtime_store_memory_create_ex();
+    turbo_agent_runtime_t *runtime = turbo_agent_runtime_create_ex(&backend);
+    cmeta_thread_t threads[CLAIM_WORKERS] = {0};
+    store_claim_worker_t workers[CLAIM_WORKERS];
+    atomic_int ready, go, created, exists, errors;
+    json_value_t *candidate = NULL;
+    json_value_t *stored = NULL;
+    char key[32];
+    int round, i;
+    check_not_null(runtime);
+    for (round = 0; round < CLAIM_ROUNDS; ++round) {
+      atomic_init(&ready, 0);
+      atomic_init(&go, 0);
+      atomic_init(&created, 0);
+      atomic_init(&exists, 0);
+      atomic_init(&errors, 0);
+      snprintf(key, sizeof(key), "claim-%d", round);
+      for (i = 0; i < CLAIM_WORKERS; ++i) {
+        workers[i] = (store_claim_worker_t){runtime, i, key, &ready, &go,
+                                            &created, &exists, &errors};
+        check_equal(cmeta_thread_create(&threads[i], store_claim_worker, &workers[i]), SALTS_OK);
+      }
+      while (atomic_load(&ready) != CLAIM_WORKERS) cmeta_thread_yield();
+      atomic_store(&go, 1);
+      for (i = 0; i < CLAIM_WORKERS; ++i)
+        check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+      check_equal(atomic_load(&created), 1);
+      check_equal(atomic_load(&exists), CLAIM_WORKERS - 1);
+      check_equal(atomic_load(&errors), 0);
+
+      check_equal(turbo_agent_runtime_store_get_json_status(
+          runtime, "claims", key, &stored), SALTS_OK);
+      check_not_null(stored);
+      {
+        int64_t winning_writer =
+            turbo_runtime_json_value_as_int64(json_object_get(stored, "writer"), -1);
+        check_true(winning_writer >= 0 && winning_writer < CLAIM_WORKERS);
+      }
+      json_free(stored);
+      stored = NULL;
+
+      candidate = json_create_object();
+      check_not_null(candidate);
+      check_equal(turbo_runtime_json_object_set_int64(candidate, "writer", 999),
+                  TURBO_RUNTIME_JSON_OK);
+      check_equal(turbo_agent_runtime_store_create_if_absent_json(
+          runtime, "claims", key, candidate), TURBO_AGENT_RUNTIME_STORE_CREATE_EXISTS);
+      json_free(candidate);
+      candidate = NULL;
+      check_equal(turbo_agent_runtime_store_get_json_status(
+          runtime, "claims", key, &stored), SALTS_OK);
+      check_not_null(stored);
+      check_true(turbo_runtime_json_value_as_int64(json_object_get(stored, "writer"), -1) != 999);
+      json_free(stored);
+      stored = NULL;
+    }
+    json_free(candidate);
+    json_free(stored);
+    turbo_agent_runtime_destroy(runtime);
+  }
+
+  it("does not infer conditional-create support from legacy get and put callbacks") {
+    store_test_probe_t probe = {0};
+    turbo_agent_runtime_store_t backend;
+    turbo_agent_runtime_t *runtime;
+    json_value_t *record = json_create_object();
+    atomic_init(&probe.active, 0);
+    atomic_init(&probe.overlaps, 0);
+    atomic_init(&probe.calls, 0);
+    atomic_init(&probe.go, 0);
+    backend = store_test_callbacks(&probe);
+    runtime = turbo_agent_runtime_create(&backend);
+    check_not_null(runtime);
+    check_not_null(record);
+    check_equal(turbo_agent_runtime_store_create_if_absent_json(
+        runtime, "items", "one", record), SALTS_ENOTSUP);
+    check_equal(atomic_load(&probe.calls), 0);
+    json_free(record);
+    turbo_agent_runtime_destroy(runtime);
+    check_equal(probe.destroyed, 1);
+  }
+}

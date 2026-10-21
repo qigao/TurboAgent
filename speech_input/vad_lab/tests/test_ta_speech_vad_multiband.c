@@ -130,6 +130,50 @@ static int test_uniform_amplitude_scaling_preserves_normalized_flux(void) {
   return 0;
 }
 
+static int test_full_scale_pcm_and_below_floor_stability(void) {
+  ta_vad_lab_owner_t *owner = NULL;
+  ta_vad_lab_result_t full_scale;
+  ta_vad_lab_result_t low_level;
+  int16_t frame[TA_VAD_LAB_FRAME_SAMPLES];
+  size_t i;
+
+  /* Exercise both signed PCM endpoints and large adjacent transitions. */
+  CHECK(ta_vad_lab_create(&owner) == TA_VAD_LAB_OK);
+  for (i = 0u; i < TA_VAD_LAB_FRAME_SAMPLES; ++i)
+    frame[i] = (i % 2u) == 0u ? INT16_MIN : INT16_MAX;
+  for (i = 0u; i < 8u; ++i)
+    CHECK(ta_vad_lab_accept(owner, frame, TA_VAD_LAB_FRAME_SAMPLES) ==
+          TA_VAD_LAB_OK);
+  CHECK(ta_vad_lab_settle(owner, &full_scale) == TA_VAD_LAB_OK);
+  CHECK(check_band_result(&full_scale) == 0);
+  CHECK(full_scale.nonzero_frames == 8u);
+  CHECK(full_scale.above_floor_frames == 8u);
+  CHECK(full_scale.sparse_band_observed_frames == 8u);
+  CHECK(full_scale.sparse_band_flux_transitions == 7u);
+  CHECK(full_scale.decision != TA_VAD_LAB_NON_SPEECH_CONFIDENT);
+  CHECK(ta_vad_lab_destroy(&owner) == TA_VAD_LAB_OK);
+
+  /* RMS well below the 64-count diagnostic floor must not enter the
+   * sparse spectrum, and must remain UNCERTAIN rather than hard-rejected. */
+  CHECK(ta_vad_lab_create(&owner) == TA_VAD_LAB_OK);
+  for (i = 0u; i < TA_VAD_LAB_FRAME_SAMPLES; ++i)
+    frame[i] = (int16_t)(((i % 2u) == 0u) ? 40 : -40);
+  for (i = 0u; i < 8u; ++i)
+    CHECK(ta_vad_lab_accept(owner, frame, TA_VAD_LAB_FRAME_SAMPLES) ==
+          TA_VAD_LAB_OK);
+  CHECK(ta_vad_lab_settle(owner, &low_level) == TA_VAD_LAB_OK);
+  CHECK(check_band_result(&low_level) == 0);
+  CHECK(low_level.nonzero_frames == 8u);
+  CHECK(low_level.above_floor_frames == 0u);
+  CHECK(low_level.sparse_band_observed_frames == 0u);
+  CHECK(low_level.sparse_band_flux_transitions == 0u);
+  CHECK(low_level.mean_sparse_band_entropy == 0.0);
+  CHECK(low_level.mean_sparse_band_flux == 0.0);
+  CHECK(low_level.decision == TA_VAD_LAB_UNCERTAIN);
+  CHECK(ta_vad_lab_destroy(&owner) == TA_VAD_LAB_OK);
+  return 0;
+}
+
 static int test_silence_discontinuity_and_zero(void) {
   ta_vad_lab_owner_t *owner = NULL;
   ta_vad_lab_result_t r;

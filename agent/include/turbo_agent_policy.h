@@ -80,7 +80,11 @@ CXX_C_API turbo_agent_policy_decision_t turbo_agent_policy_check_tool(
 /**
  * Replace the policy enforced by the Agent tool executor.
  * The policy and workspace root are copied. This is a quiescent control-plane
- * operation; NULL restores bounded defaults.
+ * operation; NULL restores bounded defaults. The Host must serialize it with
+ * all Agent/Harness executions and policy/snapshot reads, and wait for active
+ * Runs and callbacks to finish. Calling it from a tool, store or event callback
+ * during execution is unsupported. The atomic generation is an invalidation
+ * token, not synchronization for the policy fields or workspace-root lifetime.
  */
 CXX_C_API int turbo_agent_set_tool_policy(turbo_agent_t *agent, const turbo_agent_policy_t *policy);
 
@@ -95,7 +99,10 @@ CXX_C_API int turbo_agent_set_tool_policy(turbo_agent_t *agent, const turbo_agen
 CXX_C_API int turbo_agent_tool_authority_snapshot_get(
     const turbo_agent_t *agent, turbo_agent_tool_authority_snapshot_t *out_snapshot);
 
-/** Return 1 when current, 0 when revoked/stale, and -1 for invalid input. */
+/**
+ * Return 1 when current, 0 when revoked/stale, and -1 for invalid input.
+ * This check does not acquire a policy lease or permit concurrent replacement.
+ */
 CXX_C_API int turbo_agent_tool_authority_snapshot_is_current(
     const turbo_agent_t *agent, const turbo_agent_tool_authority_snapshot_t *snapshot);
 CXX_C_API turbo_agent_policy_decision_t turbo_agent_policy_check_action(

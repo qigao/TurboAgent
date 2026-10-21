@@ -28,8 +28,6 @@ typedef struct compiled_inspect_probe_s {
   int saw_started_journal;
   turbo_agent_runtime_t *runtime;
   const char *thread_id;
-  turbo_agent_t *agent;
-  int revoke_authority_during_callback;
 } compiled_inspect_probe_t;
 
 static int compiled_harness_transport(const char *request, char **response, void *user) {
@@ -85,11 +83,6 @@ static int compiled_inspect_handler(const json_value_t *arguments,
   if (probe->runtime && probe->thread_id) {
     if (!compiled_journal_has_phase(probe->runtime, probe->thread_id, "started")) return -1;
     ++probe->saw_started_journal;
-  }
-  if (probe->revoke_authority_during_callback) {
-    turbo_agent_policy_t denied = turbo_agent_policy_default();
-    denied.allow_runtime_tools = 0;
-    if (!probe->agent || turbo_agent_set_tool_policy(probe->agent, &denied) != 0) return -1;
   }
   if (probe->produce_invalid_result) {
     *out_result = json_create_string("unexpected type");
@@ -1046,9 +1039,9 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     cmeta_threadpool_destroy(pool);
   }
 
-  it("withholds the result when Host Tool Authority is revoked during the callback") {
+  it("rejects an old committed generation after a quiescent same-grant policy update") {
     const char *allowed[] = {"runtime_tools"};
-    compiled_inspect_probe_t probe = {.revoke_authority_during_callback = 1};
+    compiled_inspect_probe_t probe = {0};
     cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
     cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
@@ -1068,18 +1061,43 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_not_null(harness);
     check_equal(set_compiled_host_policy(harness, 1), 0);
     attach_compiled_probe_runtime(harness, &probe);
-    probe.agent = turbo_agent_session_agent(
-        turbo_agent_app_session(turbo_agent_harness_app(harness)));
-    check_not_null(probe.agent);
+    {
+      turbo_agent_t *agent = turbo_agent_session_agent(
+          turbo_agent_app_session(turbo_agent_harness_app(harness)));
+      turbo_agent_tool_authority_snapshot_t before = {0};
+      turbo_agent_tool_authority_snapshot_t after = {0};
+      check_not_null(agent);
+      check_equal(turbo_agent_tool_authority_snapshot_get(agent, &before), 0);
+      check_equal(run_compiled_inspect_attempt(harness, "quiescent-generation",
+          compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
+          &result, &certificate), SALTS_OK);
+      check_true(json_get_bool(result, "ok", false));
+      check_equal(probe.calls, 1);
+      json_free(result);
+      result = NULL;
+      json_free(certificate);
+      certificate = NULL;
 
-    check_not_equal(run_compiled_inspect(harness, compiled_inspect_source,
-        allowed, 1, &diagnostic, &tool_status, &result, &certificate), SALTS_OK);
-    check_equal(probe.calls, 1);
-    check_equal(probe.saw_started_journal, 1);
-    check_null(result);
-    check_not_null(certificate);
-    check_equal(tool_status, TURBO_TOOL_ERROR);
-    check_true(strstr(diagnostic.message, "Host Tool Authority changed during callback") != NULL);
+      /* The synchronous Run and all its callbacks have returned. The Host
+       * serializes policy replacement here, never inside a callback. Keeping
+       * identical grants isolates generation identity from capability denial. */
+      check_equal(set_compiled_host_policy(harness, 1), 0);
+      check_equal(turbo_agent_tool_authority_snapshot_get(agent, &after), 0);
+      check_equal(before.capability_mask, after.capability_mask);
+      check_not_equal(before.generation, after.generation);
+      check_equal(turbo_agent_tool_authority_snapshot_is_current(agent, &before), 0);
+      check_equal(turbo_agent_tool_authority_snapshot_is_current(agent, &after), 1);
+
+      check_not_equal(run_compiled_inspect_attempt(harness, "quiescent-generation",
+          compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
+          &result, &certificate), SALTS_OK);
+      check_null(result);
+      check_equal(tool_status, TURBO_TOOL_ERROR);
+      check_equal(diagnostic.status, TURBO_AGENT_COMPILE_SOURCE_INVALID);
+      check_true(strstr(diagnostic.message, "identity or contract") != NULL);
+      check_equal(probe.calls, 1);
+      check_equal(probe.saw_started_journal, 1);
+    }
 
     check_equal(turbo_agent_runtime_store_list_json(
         probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, "thread_id",
@@ -1088,10 +1106,10 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(json_array_size(journal_records), 1u);
     journal = json_array_get(journal_records, 0);
     check_not_null(journal);
-    check_equal(json_get_string(journal, "phase"), "outcome_unknown");
+    check_equal(json_get_string(journal, "phase"), "committed");
     check_equal(json_get_string(journal, "tool_name"), "repo.inspect");
-    check_equal(json_get_int(journal, "tool_status", -1), TURBO_TOOL_ERROR);
-    check_null(json_object_get(journal, "result"));
+    check_equal(json_get_int(journal, "tool_status", -1), TURBO_TOOL_OK);
+    check_true(json_get_bool(json_object_get(journal, "result"), "ok", false));
 
     turbo_runtime_json_destroy(journal_records);
     json_free(certificate);

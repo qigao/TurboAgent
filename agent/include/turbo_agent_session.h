@@ -114,6 +114,18 @@ CXX_C_API turbo_agent_session_t *
 turbo_agent_session_create(const turbo_agent_session_config_t *config);
 
 /**
+ * Create a Session using a versioned Runtime Store descriptor without changing
+ * the legacy, unversioned Session config layout. The config's legacy
+ * runtime_store must be entirely zeroed; otherwise creation fails and the caller
+ * retains both descriptors. A complete extended backend transfers ownership
+ * once construction begins, including on later construction failure.
+ */
+CXX_C_API turbo_agent_session_t *
+turbo_agent_session_create_with_runtime_store_ex(
+    const turbo_agent_session_config_t *config,
+    const turbo_agent_runtime_store_ex_t *runtime_store);
+
+/**
  * @brief Destroy one session wrapper.
  * @param session Session handle, may be NULL.
  */

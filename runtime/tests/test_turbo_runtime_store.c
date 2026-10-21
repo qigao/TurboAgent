@@ -214,6 +214,33 @@ spec("Runtime record store without Agent") {
     check_null(output);
   }
 
+  it("creates one memory claim without overwriting and reports unsupported legacy backends") {
+    turbo_agent_runtime_store_t memory = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_store_t legacy = store_test_callbacks(&probe);
+    json_value_t *first = json_parse("{\"winner\":1}", 12);
+    json_value_t *second = json_parse("{\"winner\":2}", 12);
+    check_not_null(first);
+    check_not_null(second);
+    runtime = turbo_agent_runtime_create(&memory);
+    check_not_null(runtime);
+    check_equal(turbo_agent_runtime_store_create_json_if_absent(
+        runtime, "claims", "one", first), SALTS_OK);
+    check_equal(turbo_agent_runtime_store_create_json_if_absent(
+        runtime, "claims", "one", second), SALTS_EALREADY);
+    check_equal(turbo_agent_runtime_store_get_json_status(
+        runtime, "claims", "one", &output), SALTS_OK);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(output, "winner"), -1), 1);
+    json_free(output); output = NULL;
+    turbo_agent_runtime_destroy(runtime); runtime = NULL;
+    runtime = turbo_agent_runtime_create(&legacy);
+    check_not_null(runtime);
+    check_equal(turbo_agent_runtime_store_create_json_if_absent(
+        runtime, "claims", "one", first), SALTS_ENOTSUP);
+    turbo_agent_runtime_destroy(runtime); runtime = NULL;
+    json_free(first);
+    json_free(second);
+  }
+
   it("keeps independent values and isolates collections, replacements, and filters") {
     static const char input[] = "{\"group\":\"a\",\"value\":9007199254740993}";
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
@@ -368,5 +395,40 @@ spec("Runtime record store without Agent") {
     check_null(output);
     check_equal(turbo_agent_runtime_store_list_json(runtime, "items", "group", "absent", &output), -1);
     check_null(output);
+  }
+}
+
+
+spec("File store rejects non-atomic claim") {
+  static char *root;
+  static turbo_agent_runtime_t *runtime;
+
+  before_each() {
+    root = NULL;
+    runtime = NULL;
+  }
+
+  after_each() {
+    turbo_agent_runtime_destroy(runtime);
+    runtime = NULL;
+    if (root) tt_remove_tree(root);
+    free(root);
+    root = NULL;
+  }
+
+  it("reports unsupported without falling back to get then put") {
+    turbo_agent_runtime_store_t file;
+    json_value_t *record = json_parse("{\"winner\":1}", 12);
+    root = tt_make_temp_dir("turbo-runtime-claim-file");
+    check_not_null(root);
+    check_not_null(record);
+    file = turbo_agent_runtime_store_file_create(root);
+    check_not_null(file.put);
+    check_null(file.create_if_absent);
+    runtime = turbo_agent_runtime_create(&file);
+    check_not_null(runtime);
+    check_equal(turbo_agent_runtime_store_create_json_if_absent(
+        runtime, "claims", "one", record), SALTS_ENOTSUP);
+    json_free(record);
   }
 }

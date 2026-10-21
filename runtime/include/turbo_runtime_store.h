@@ -20,6 +20,8 @@ typedef int (*turbo_agent_runtime_store_list_fn)(void *user_data, const char *co
                                                  const char *filter_value,
                                                  char **out_records_json);
 typedef void (*turbo_agent_runtime_store_user_data_free_fn)(void *user_data);
+typedef int (*turbo_agent_runtime_store_create_if_absent_fn)(
+    void *user_data, const char *collection, const char *id, const char *record_json);
 
 typedef struct turbo_agent_runtime_store_s {
   turbo_agent_runtime_store_put_fn put;
@@ -27,6 +29,9 @@ typedef struct turbo_agent_runtime_store_s {
   turbo_agent_runtime_store_list_fn list;
   void *user_data;
   turbo_agent_runtime_store_user_data_free_fn user_data_free;
+  /* Optional atomic backend primitive; NULL means unsupported. Appended to keep
+   * existing positional initializers source-compatible. */
+  turbo_agent_runtime_store_create_if_absent_fn create_if_absent;
 } turbo_agent_runtime_store_t;
 
 /**
@@ -100,6 +105,18 @@ CXX_C_API int turbo_agent_runtime_store_get_json(
 CXX_C_API int turbo_agent_runtime_store_get_json_status(
     turbo_agent_runtime_t *runtime, const char *collection, const char *id,
     json_value_t **out_record_json);
+
+/**
+ * Atomically create one record if its (collection,id) key is absent.
+ * Returns SALTS_OK when created, SALTS_EALREADY when the key already exists,
+ * SALTS_ENOTSUP when the backend has no atomic primitive, or the backend error.
+ * A losing call never overwrites the winner. This is an atomic claim only within
+ * the backend's documented scope; it does not by itself promise crash durability.
+ * The input JSON is borrowed for this call.
+ */
+CXX_C_API int turbo_agent_runtime_store_create_json_if_absent(
+    turbo_agent_runtime_t *runtime, const char *collection, const char *id,
+    const json_value_t *record_json);
 
 /**
  * List records as an independently owned array; errors/output ownership match

@@ -400,7 +400,7 @@ spec("Runtime record store without Agent") {
 
 
 spec("File store rejects non-atomic claim") {
-  static tstr root;
+  static char *root;
   static turbo_agent_runtime_t *runtime;
 
   before_each() {
@@ -412,7 +412,7 @@ spec("File store rejects non-atomic claim") {
     turbo_agent_runtime_destroy(runtime);
     runtime = NULL;
     if (root) tt_remove_tree(root);
-    tstr_free(root);
+    free(root);
     root = NULL;
   }
 

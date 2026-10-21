@@ -414,6 +414,37 @@ static void store_claim_worker(void *data) {
   json_free(record);
 }
 
+typedef struct memory_callback_claim_worker_s {
+  turbo_agent_runtime_store_ex_t *backend;
+  int writer_id;
+  const char *key;
+  atomic_int *ready;
+  atomic_int *go;
+  atomic_int *created;
+  atomic_int *exists;
+  atomic_int *errors;
+} memory_callback_claim_worker_t;
+
+static void memory_callback_claim_worker(void *data) {
+  memory_callback_claim_worker_t *worker = (memory_callback_claim_worker_t *)data;
+  char payload[64];
+  int rc;
+  int length;
+  atomic_fetch_add(worker->ready, 1);
+  length = snprintf(payload, sizeof(payload), "{\\"writer\\":%d}", worker->writer_id);
+  if (length < 0 || (size_t)length >= sizeof(payload) || !worker->backend ||
+      !worker->backend->create_if_absent) {
+    atomic_fetch_add(worker->errors, 1);
+    return;
+  }
+  while (!atomic_load(worker->go)) cmeta_thread_yield();
+  rc = worker->backend->create_if_absent(worker->backend->store.user_data,
+                                          "direct-claims", worker->key, payload);
+  if (rc == TURBO_AGENT_RUNTIME_STORE_CREATE_CREATED) atomic_fetch_add(worker->created, 1);
+  else if (rc == TURBO_AGENT_RUNTIME_STORE_CREATE_EXISTS) atomic_fetch_add(worker->exists, 1);
+  else atomic_fetch_add(worker->errors, 1);
+}
+
 spec("Runtime Store atomic create-if-absent") {
   it("creates one immutable winner under concurrent same-handle claims") {
     enum { CLAIM_WORKERS = 8, CLAIM_ROUNDS = 8 };
@@ -476,6 +507,63 @@ spec("Runtime Store atomic create-if-absent") {
     json_free(candidate);
     json_free(stored);
     turbo_agent_runtime_destroy(runtime);
+  }
+
+  it("serializes the memory backend claim callback itself") {
+    enum { CLAIM_WORKERS = 8 };
+    turbo_agent_runtime_store_ex_t backend = turbo_agent_runtime_store_memory_create_ex();
+    memory_callback_claim_worker_t workers[CLAIM_WORKERS];
+    cmeta_thread_t threads[CLAIM_WORKERS] = {0};
+    atomic_int ready, go, created, exists, errors;
+    char key[] = "same-key";
+    char *stored_text = NULL;
+    json_value_t *stored = NULL;
+    int i;
+    check_not_null(backend.store.put);
+    check_not_null(backend.create_if_absent);
+    atomic_init(&ready, 0);
+    atomic_init(&go, 0);
+    atomic_init(&created, 0);
+    atomic_init(&exists, 0);
+    atomic_init(&errors, 0);
+    for (i = 0; i < CLAIM_WORKERS; ++i) {
+      workers[i] = (memory_callback_claim_worker_t){&backend, i, key, &ready, &go,
+                                                    &created, &exists, &errors};
+      check_equal(cmeta_thread_create(&threads[i], memory_callback_claim_worker, &workers[i]),
+                  SALTS_OK);
+    }
+    while (atomic_load(&ready) != CLAIM_WORKERS) cmeta_thread_yield();
+    atomic_store(&go, 1);
+    for (i = 0; i < CLAIM_WORKERS; ++i)
+      check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+    check_equal(atomic_load(&created), 1);
+    check_equal(atomic_load(&exists), CLAIM_WORKERS - 1);
+    check_equal(atomic_load(&errors), 0);
+    check_equal(backend.store.get(backend.store.user_data, "direct-claims", key, &stored_text),
+                SALTS_OK);
+    check_not_null(stored_text);
+    stored = json_parse(stored_text, strlen(stored_text));
+    check_not_null(stored);
+    {
+      int64_t winner = turbo_runtime_json_value_as_int64(json_object_get(stored, "writer"), -1);
+      check_true(winner >= 0 && winner < CLAIM_WORKERS);
+    }
+    free(stored_text);
+    stored_text = NULL;
+    json_free(stored);
+    stored = NULL;
+    check_equal(backend.create_if_absent(backend.store.user_data, "direct-claims", key,
+                                         "{\\"writer\\":999}"),
+                TURBO_AGENT_RUNTIME_STORE_CREATE_EXISTS);
+    check_equal(backend.store.get(backend.store.user_data, "direct-claims", key, &stored_text),
+                SALTS_OK);
+    check_not_null(stored_text);
+    stored = json_parse(stored_text, strlen(stored_text));
+    check_not_null(stored);
+    check_true(turbo_runtime_json_value_as_int64(json_object_get(stored, "writer"), -1) != 999);
+    free(stored_text);
+    json_free(stored);
+    if (backend.store.user_data_free) backend.store.user_data_free(backend.store.user_data);
   }
 
   it("does not infer conditional-create support from legacy get and put callbacks") {

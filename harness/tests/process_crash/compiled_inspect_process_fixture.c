@@ -11,7 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { FIXTURE_FAILURE = 2, FIXTURE_CRASH = 86 };
+enum {
+  FIXTURE_FAILURE = 2, FIXTURE_CRASH = 86,
+  ATTEMPT_SCHEMA_VERSION = 2, RUN_REFERENCE_SCHEMA_VERSION = 1
+};
 #define ATTEMPTS "compiled_inspect_attempts"
 #define RUN_REFERENCES "agent_compiled_execution_journal"
 #define THREAD_ID "compiled-crash-thread"
@@ -260,7 +263,7 @@ static int evidence(fixture_t *f, const char *phase, int calls, int deliveries, 
         text_is(attempt, "attempt_id", ATTEMPT_ID) && text_is(attempt, "tool_name", "repo.inspect") &&
         json_get_string(attempt, "id") && json_get_string(attempt, "execution_id") &&
         json_get_string(attempt, "plan_hash") && json_object_get(attempt, "certificate") &&
-        json_get_int(attempt, "schema_version", -1) == 1 &&
+        json_get_int(attempt, "schema_version", -1) == ATTEMPT_SCHEMA_VERSION &&
         json_get_int(attempt, "effects", -1) == TURBO_TOOL_EFFECT_READ &&
         json_get_int(attempt, "authority_generation", -1) == 2;
     if (!strcmp(phase, "committed"))
@@ -273,11 +276,17 @@ static int evidence(fixture_t *f, const char *phase, int calls, int deliveries, 
   for (size_t i = 0; valid && i < json_array_size(references); ++i) {
     const json_value_t *reference = json_array_get(references, i);
     valid = phase && text_is(reference, "attempt_record_id", json_get_string(attempt, "id")) &&
+        json_get_int(reference, "schema_version", -1) == RUN_REFERENCE_SCHEMA_VERSION &&
         text_is(reference, "thread_id", THREAD_ID) && text_is(reference, "attempt_id", ATTEMPT_ID) &&
         text_is(reference, "plan_hash", json_get_string(attempt, "plan_hash")) &&
         !json_object_get(reference, "result");
     if (valid && crash_only) valid = text_is(reference, "phase", f->cut->run_phase);
   }
+  if (!valid) fprintf(stderr,
+      "%s evidence: expected phase=%s; attempts=%zu schema=%d generation=%d references=%zu\n",
+      f->cut->name, phase ? phase : "absent", json_array_size(attempts),
+      json_get_int(attempt, "schema_version", -1), json_get_int(attempt, "authority_generation", -1),
+      json_array_size(references));
   json_free(attempts); json_free(references);
   REQUIRE(valid);
   return 0;

@@ -28,7 +28,8 @@ The target links `TurboAgent::Harness` through public interfaces, runs under nat
 `BUILD_TESTS`, and is excluded from cross compilation. No workflow, dependency pin,
 public API, production execution or schema changes are needed.
 
-`compiled_inspect_attempts` is the sole canonical typed-result owner. A thin store
+`compiled_inspect_attempts` (schema 2) is the sole canonical typed-result owner;
+Run references use schema 1. A thin store
 adapter delegates to real SQLite `create_if_absent`/`put` and exits immediately
 before or after the selected successful operation. Every Run-journal record must
 reference the same attempt and plan, and contain no second `result` payload.

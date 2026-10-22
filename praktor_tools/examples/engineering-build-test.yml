@@ -1,0 +1,89 @@
+input_policy: strict
+inputs:
+  preset:
+    type: string
+    required: true
+  source_revision:
+    type: string
+    required: true
+outputs:
+  preset:
+    type: string
+    required: true
+    value: "{{ variables.preset }}"
+  verified:
+    type: boolean
+    required: true
+    value: "{{ tasks.verify.outputs.result }}"
+  source_revision:
+    type: string
+    required: true
+    value: "{{ tasks.build.outputs.result.source_revision }}"
+  artifact_id:
+    type: string
+    required: true
+    value: "{{ tasks.build.outputs.result.artifact_id }}"
+  build_exit_code:
+    type: integer
+    required: true
+    value: "{{ tasks.build.outputs.result.exit_code }}"
+  exit_code:
+    type: integer
+    required: true
+    value: "{{ tasks.test.outputs.result.exit_code }}"
+  tests_total:
+    type: integer
+    required: true
+    value: "{{ tasks.test.outputs.result.tests_total }}"
+  tests_passed:
+    type: integer
+    required: true
+    value: "{{ tasks.test.outputs.result.tests_passed }}"
+  tests_failed:
+    type: integer
+    required: true
+    value: "{{ tasks.test.outputs.result.tests_failed }}"
+  tests_skipped:
+    type: integer
+    required: true
+    value: "{{ tasks.test.outputs.result.tests_skipped }}"
+tasks:
+  - name: request
+    tool: engineering.check_request
+    with:
+      preset: "{{ variables.preset }}"
+      source_revision: "{{ variables.source_revision }}"
+  - name: build
+    depends_on: [request]
+    tool: engineering.build
+    with:
+      preset: "{{ variables.preset }}"
+      source_revision: "{{ variables.source_revision }}"
+  - name: build_gate
+    depends_on: [build]
+    tool: engineering.check_build
+    with:
+      exit_code: "{{ tasks.build.outputs.result.exit_code }}"
+      expected_revision: "{{ variables.source_revision }}"
+      source_revision: "{{ tasks.build.outputs.result.source_revision }}"
+      artifact_id: "{{ tasks.build.outputs.result.artifact_id }}"
+  - name: test
+    depends_on: [build_gate]
+    tool: engineering.test
+    with:
+      preset: "{{ variables.preset }}"
+      source_revision: "{{ variables.source_revision }}"
+      artifact_id: "{{ tasks.build.outputs.result.artifact_id }}"
+  - name: verify
+    depends_on: [test]
+    tool: engineering.check_tests
+    with:
+      exit_code: "{{ tasks.test.outputs.result.exit_code }}"
+      expected_revision: "{{ variables.source_revision }}"
+      source_revision: "{{ tasks.test.outputs.result.source_revision }}"
+      expected_artifact: "{{ tasks.build.outputs.result.artifact_id }}"
+      artifact_id: "{{ tasks.test.outputs.result.artifact_id }}"
+      tests_total: "{{ tasks.test.outputs.result.tests_total }}"
+      tests_passed: "{{ tasks.test.outputs.result.tests_passed }}"
+      tests_failed: "{{ tasks.test.outputs.result.tests_failed }}"
+      tests_skipped: "{{ tasks.test.outputs.result.tests_skipped }}"

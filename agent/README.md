@@ -3,6 +3,11 @@
 For an executable coding or general assistant with persistent sessions and FTS5
 or vector retrieval, see the [TurboAgent CLI](../cli/README.md).
 
+The proposed [dual-track product roadmap](../docs/design/agent-product-roadmap.md)
+keeps a general Agent product and an [engineering task workbench](../docs/design/engineering-task-workbench.md)
+as separately deliverable routes over the same native kernel. It defines shared
+ownership and independent acceptance; the proposed products add no implemented runtime or API guarantee.
+
 `TurboAgent::Agent` is the reusable Agent kernel for graph-driven LLM workflows.
 It composes Runtime, Provider and RuntimeTools with Agent policy and state for
 desktop, server, and embedded-friendly native builds:

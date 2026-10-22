@@ -99,6 +99,9 @@ int main(int argc, char **argv) {
           (i == 3 ? TURBO_AGENT_ROUTER_TOOL_PROPOSALS : 0);
       endpoints[i].max_difficulty = 100;
       endpoints[i].max_input_tokens = endpoints[i].max_output_tokens = 100000;
+      turbo_agent_guardrail_t response_guard = {0};
+      response_guard.after_model = single_agent_report_response_guard;
+      if (turbo_agent_add_guardrail(agents[i], &response_guard)) goto done;
     }
   }
   guard.before_tool = single_agent_report_guard;

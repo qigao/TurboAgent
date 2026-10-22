@@ -178,6 +178,9 @@ spec("one Host goal composed from different model workers") {
         f.endpoints[i].max_difficulty = 100;
         f.endpoints[i].max_input_tokens = f.endpoints[i].max_output_tokens = 10000;
         f.endpoints[i].input_price_micros = f.endpoints[i].output_price_micros = 1000;
+        turbo_agent_guardrail_t response_guard = {0};
+        response_guard.after_model = single_agent_report_response_guard;
+        check_equal(turbo_agent_add_guardrail(f.agents[i], &response_guard), SALTS_OK);
       }
     }
     turbo_agent_guardrail_t guard = {0}; guard.before_tool = single_agent_report_guard;
@@ -316,9 +319,9 @@ spec("one Host goal composed from different model workers") {
     for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
   }
 
-  it("does not truncate an embedded NUL while handing the aggregate to the tool model") {
+  it("rejects an embedded NUL in the raw aggregate response before accepting a normalized handoff") {
     f.nul_aggregate = 1;
-    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EPROTO);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EIO);
     check_null(delivery); check_equal(phase, "aggregation");
     check_equal(atomic_load(&f.models[3].calls), 0); check_equal(atomic_load(&f.tool_calls), 0);
   }

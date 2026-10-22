@@ -44,6 +44,13 @@ an endpoint choice, or the source catalog. Every handoff is bounded and checked;
 the original goal/source and each aggregation draft are at most 64 KiB, and serialized
 packets at most 1 MiB, without truncation.
 
+Each model Agent also installs a Host response guard over the original parsed Provider
+response: reject embedded NUL in strings/keys, depth above 64, or more than 65,536 JSON
+values. Provider text normalization uses C strings, so a check only on the normalized
+canonical event would miss an already shortened raw value. Guard rejection makes the
+execution fail before any handoff or tool effect. This is an explicit example policy,
+not a global change to Provider APIs or every Agent's response semantics.
+
 The tool model may propose exactly one `document_render` call. A Host guard permits
 only that registered tool and demands an exact call/name/argument approval. The review
 callback runs on the serialized Host after all current executions are terminal,

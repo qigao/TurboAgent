@@ -30,6 +30,41 @@ typedef struct single_agent_report_config_s {
   void *review_user;
 } single_agent_report_config_t;
 
+/* Validate the raw Provider response before accepting its normalized event.
+ * Provider text APIs use C strings; checking only a later canonical event
+ * cannot recover text already shortened at an embedded NUL. */
+static int single_agent_report_response_strings(const json_value_t *value,
+    unsigned depth, size_t *remaining) {
+  if (!value || depth > 64 || !*remaining) return 0;
+  --*remaining;
+  if (json_type(value) == JSON_STRING) {
+    const char *text = json_string(value);
+    return text && strlen(text) == json_string_len(value);
+  }
+  if (json_type(value) == JSON_ARRAY) {
+    for (size_t i = 0; i < json_array_size(value); ++i)
+      if (!single_agent_report_response_strings(json_array_get(value, i), depth + 1, remaining)) return 0;
+  } else if (json_type(value) == JSON_OBJECT) {
+    for (size_t i = 0; i < json_object_size(value); ++i) {
+      const char *key = json_object_key(value, i);
+      if (!key || strlen(key) != json_object_key_len(value, i) ||
+          !single_agent_report_response_strings(json_object_value(value, i), depth + 1, remaining)) return 0;
+    }
+  }
+  return 1;
+}
+
+static int single_agent_report_response_guard(turbo_agent_t *agent, const json_value_t *state,
+    const char *text, const json_value_t *response, const char **reason, void *user) {
+  size_t remaining = 65536;
+  (void)agent; (void)state; (void)text; (void)user;
+  if (!single_agent_report_response_strings(response, 0, &remaining)) {
+    *reason = "report_response_string_or_structure_limit";
+    return -1;
+  }
+  return 0;
+}
+
 /* A presence-only guard is insufficient. This example permits exactly the
  * reviewed renderer, and requires an exact canonical approval for every call. */
 static int single_agent_report_guard(turbo_agent_t *agent, const json_value_t *state,

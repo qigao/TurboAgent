@@ -113,8 +113,13 @@ skills but cannot satisfy a skill's coding-tool requirements. Coding mode
 selects its tool registry **only from host CLI arguments**: the default
 `--trust-profile inspect` registers `fs.read/list/search` and denies host
 shell/patch, while explicit `--trust-profile trusted-local` registers workspace
-writers and the host shell. `--read-only` is the inspect alias; interactive
-approval remains unavailable without a real Host callback. Catalog selection,
+writers and the host shell. `--read-only` is the inspect alias. The explicit
+`--trust-profile approval` exposes those tools only in the single-tool coding
+loop: known reads proceed, while effects require a fresh exact-call Host
+confirmation after the paused execution drains. General mode, tool batches and
+nested review/engineering approval are not supported by that initial profile.
+See the [CLI approval contract](../../cli/README.md) for limits and rejection
+behavior. Catalog selection,
 AGENTS.md and Skills never grant additional authority. General-mode workspace
 instructions are an intentional behavior extension; callers wanting unrelated
 instructions should select a separate workspace with `-C`.
@@ -142,7 +147,11 @@ worker and duplicate CLI retrieval; those presets remain SDK-only. The worker
 owns execution state until completion, and the next catalog refresh occurs only
 after it drains. Completed-turn resume projects conversation history into a
 fresh state and seeds a new plan, not an interrupted checkpoint continuation.
-Review gates remain enforced; the CLI has no approval UI or implicit approval.
+Plan-workflow review gates remain enforced and cannot use the coding-loop
+approval UI. The explicit approval profile resumes only its canonical Tool
+approval checkpoint within the same process, retaining the original authority,
+deadline and cumulative step budget; it does not make an unfinished stored
+session automatically resumable or grant authority from persisted state.
 
 No stored-data migration is required. Returning to `--workflow loop` restores
 the original execution topology for subsequent completed-conversation turns.

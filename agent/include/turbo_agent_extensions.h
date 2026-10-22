@@ -22,6 +22,13 @@ typedef int (*turbo_agent_middleware_before_model_fn)(
 typedef int (*turbo_agent_middleware_after_model_fn)(
     turbo_agent_t *agent, json_value_t *state, const char *request_json,
     char **inout_response_json, int transport_status, void *user_data);
+/**
+ * before_tool receives a runtime-owned tstr through char ** for source/ABI
+ * compatibility. To replace it, allocate with tstr_dup (or another tstr
+ * constructor) and release the previous value with tstr_free. The runtime
+ * retains ownership of the replacement through guardrail/executor dispatch.
+ * A malloc/strdup buffer is not a valid replacement for this hook.
+ */
 typedef int (*turbo_agent_middleware_before_tool_fn)(
     turbo_agent_t *agent, json_value_t *state, const char *call_id,
     const char *tool_name, char **inout_arguments_json, void *user_data);

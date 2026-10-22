@@ -1,5 +1,5 @@
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
-add_library(turbo_cli_driver STATIC src/turbo_cli.c src/turbo_cli_options.c src/turbo_cli_storage.c src/turbo_cli_diagram.c src/turbo_cli_knowledge.c src/turbo_cli_vector.c)
+add_library(turbo_cli_driver STATIC src/turbo_cli.c src/turbo_cli_approval.c src/turbo_cli_options.c src/turbo_cli_storage.c src/turbo_cli_diagram.c src/turbo_cli_knowledge.c src/turbo_cli_vector.c)
 target_include_directories(turbo_cli_driver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(turbo_cli_driver PUBLIC TurboAgent::Harness)
 target_link_libraries(turbo_cli_driver PRIVATE Salts::CmdParser unofficial::sqlite3::sqlite3)
@@ -22,6 +22,7 @@ if(BUILD_TESTS AND ENABLE_CODING_TOOLS)
   cmake_add_test(SOURCES tests/test_turbo_cli.c tests/test_turbo_cli_workspace.c tests/test_turbo_cli_live.c
                  tests/test_turbo_cli_diagnostics.c tests/test_turbo_cli_completion.c
                  tests/test_turbo_cli_tool_cancel.c
+                 tests/test_turbo_cli_approval.c
                  tests/test_turbo_cli_storage.c
                  tests/test_turbo_cli_knowledge.c
                  tests/test_turbo_cli_vector.c

@@ -7,6 +7,7 @@ existing `OPENAI_*` / `ANTHROPIC_*` environment configuration and optional `.env
 ```sh
 turboagent -C /absolute/workspace -p "Explain why the tests fail" # inspect by default
 turboagent --trust-profile trusted-local -C /absolute/workspace -p "Fix the failing tests"
+turboagent --trust-profile approval -C /absolute/workspace -p "Propose and review a file change"
 turboagent --read-only -p "Explain this repository" # legacy inspect alias
 ```
 
@@ -31,6 +32,8 @@ state array and remains single-attempt; it does not automatically replay a task.
 Custom v1 callbacks have no structured HTTP metadata, so their HTTP status is 0.
 
 Only a `completed` execution can print an answer or become conversation history.
+The explicit coding-loop approval profile may resume a canonical Tool approval
+pause in the same process after a Host decision; the pause itself is not an answer.
 Runtime return code 0 may also represent a successfully recorded cancellation,
 deadline expiry or workflow pause; those outcomes exit with 1 even if their state
 contains model text. Ctrl-C exits with 130, including a signal observed after the
@@ -56,13 +59,37 @@ CLI coding mode defaults to **`--trust-profile inspect`**, which registers only
 `fs.read`, `fs.list` and `fs.search` and denies shell/patch authorization.
 `--read-only` is an alias for this limited tool profile. To enable `fs.write`,
 `fs.edit` and `shell.exec`, the host must explicitly pass
-**`--trust-profile trusted-local`** (and not combine it with `--read-only`).
-There is no interactive Host approval callback yet: `--trust-profile approval`
-is rejected, not treated as implicit approval or an execution fallback.
+**`--trust-profile trusted-local`**, or select **`--trust-profile approval`**
+for the single-tool coding loop. Neither profile combines with `--read-only`.
+The effective trust profile is printed to stderr for both interactive and `-p` runs.
+
+The approval profile allows known PURE/READ tools without a question and pauses
+before each effectful call. After the execution and callbacks drain, it displays
+the exact canonical tool/call/arguments, semantic effect flags, checkpoint/Run/
+thread identity, authority generation and original monotonic deadline. Request
+bytes outside printable ASCII are escaped to prevent terminal control/formatting
+from hiding fields. Approval requires typing `approve <fresh UUID>` exactly;
+any other line, EOF, input error or cancellation aborts without admitting a resume.
+The Host decision is bound to that checkpoint and call. The shared ToolNode
+revalidates final middleware arguments and consumes approval before dispatch;
+a later identical call needs a new decision. A quiescent same-grant policy
+replacement invalidates the old authority generation. No policy setter runs in
+an execution callback and the registry remains immutable throughout the CLI.
+
+This first slice explicitly rejects approval with general mode, review or
+engineering workflows. Tool batches are denied before partial dispatch; issue
+at most one tool call per response. Unknown effects are denied. Approval text is
+bounded to 64 KiB, raw model responses to 64 KiB/depth 64/65536 JSON nodes, and
+review attempts to 32 per turn. The original 128 cumulative graph steps and
+ten-minute deadline are preserved across resumes. The blocking terminal reader
+may await a line; a late or cancelled decision is rejected before any resume,
+and no hard UI wakeup latency is promised. Paused/denied work leaves the existing
+unfinished session marker; a new process cannot restore authority or automatically
+resume it. There is no additional result store or persistent approval grant.
 File tools use retained workspace root capabilities; `fs.list` and `fs.search` accept `.`.
 Search takes a literal `pattern` and a file/directory `path`, returns matching
 lines, and reports limits/skips through `truncated` and metrics.
-**Trusted-local shell commands have full host privileges**, inherited environment
+**Approved and trusted-local shell commands have full host privileges**, inherited environment
 and filesystem/network access. Changing `cwd` does not sandbox the process.
 The trust selection comes only from host CLI arguments, never AGENTS.md,
 Skills, retrieved content or the model output. Model-generated calls to tools
@@ -115,8 +142,8 @@ and discovery depth to 4. No second session store or instruction parser is added
 The CLI defaults to an in-memory session with bounded input and
 execution: 64 KiB per prompt, 1 MiB projected conversation input, 64 user turns,
 128 graph steps and 10 minutes per turn. Exceeding a bound fails explicitly.
-It prints completed answers rather than incremental tokens. It does not expose
-an approval UI or interactive TUI controls. When building with
+It prints completed answers rather than incremental tokens. Apart from the
+bounded coding-loop approval prompt, it has no interactive TUI controls. When building with
 CodingTools disabled, the CLI remains available without workspace tools.
 
 Follow-up turns use `turbo_agent_session_create_follow_up_state_json_value` to
@@ -140,9 +167,10 @@ The execution handle remains retained through this consumption boundary.
 | `engineering` | The same plan/execute path plus failure detection and up to three replans |
 
 `review` names the SDK's review gate, not a second model performing a critique.
-The gate is open unless review is requested. The CLI does not automatically
-approve requests or provide an approval UI: a paused run exits nonzero and is
-not committed as a completed conversation turn.
+The gate is open unless review is requested. Plan-workflow pauses exit nonzero
+and are not committed as completed conversation turns. The exact-call approval
+UI above is restricted to the coding `loop`; it does not approve these nested
+workflow reviews or bypass plan admission.
 
 ```sh
 turboagent --mode general --workflow review -C /workspace -p "release-summary: summarize these notes"

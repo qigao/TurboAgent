@@ -30,7 +30,14 @@ if(BUILD_TESTS AND ENABLE_CODING_TOOLS)
   target_compile_definitions(test_turbo_cli_storage PRIVATE
     CLI_STORAGE_FIXTURE="$<TARGET_FILE:cli_storage_fixture>")
   add_dependencies(test_turbo_cli_storage cli_storage_fixture)
-  set_tests_properties(test_turbo_cli_storage PROPERTIES TIMEOUT 30)
+  # This budget covers the entire SQLite/diagram/session suite, not one
+  # operation. Windows CI can exceed 30s while still completing healthy cases;
+  # child-process fixtures retain their separate 5s execution deadlines.
+  if(WIN32)
+    set_tests_properties(test_turbo_cli_storage PROPERTIES TIMEOUT 90)
+  else()
+    set_tests_properties(test_turbo_cli_storage PROPERTIES TIMEOUT 30)
+  endif()
   target_include_directories(test_turbo_cli_diagnostics PRIVATE "${PROJECT_SOURCE_DIR}/agent/tests")
   target_include_directories(test_turbo_cli_vector PRIVATE "${PROJECT_SOURCE_DIR}/agent/tests")
   target_link_libraries(test_turbo_cli_vector PRIVATE CHttp::Server unofficial::sqlite3::sqlite3)

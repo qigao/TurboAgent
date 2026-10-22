@@ -2,6 +2,7 @@
 #include "turbo_cli_approval.h"
 #include "turbo_runtime_json.h"
 #include <cmeta_fs.h>
+#include <fmt.h>
 #include <salts/clock.h>
 #include <stdlib.h>
 #include <string.h>

@@ -255,11 +255,11 @@ jobs:
         shell: cmd
         run: call cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release
 
-      # #180 needs a same-run distribution, not another isolated green result.
-      # TinyTest verbose output includes case-body times; CTest and the wrapper
-      # also measure fixture/process overhead. Keep the existing test budgets.
+      # #180 qualified the suite budget using recorded fresh-process runs.
+      # Keep extended timing on manual acceptance; ordinary CI runs the full
+      # suite above once, including every storage assertion and child deadline.
       - name: Measure Windows CLI storage in five fresh processes
-        if: runner.os == 'Windows' && matrix.tests
+        if: runner.os == 'Windows' && matrix.tests && github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -302,7 +302,7 @@ jobs:
           }
 
       - name: Retain Windows CLI storage timing and failure output
-        if: always() && runner.os == 'Windows' && matrix.tests
+        if: always() && runner.os == 'Windows' && matrix.tests && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: cli-storage-timing-windows

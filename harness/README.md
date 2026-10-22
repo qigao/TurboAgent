@@ -19,3 +19,7 @@ embedded adapter's function exports have moved from Agent into Harness.
 See the [lifecycle design](../agent/docs/harness-adapter.md),
 [server protocol](../agent/docs/harness-server.md), and
 [module migration](../agent/docs/module-separation.md#harness-and-session-submission-boundary).
+
+The [compiled Inspect process-crash tests](docs/compiled-inspect-process-crash.md)
+exercise the real Harness/Session/SQLite path across abrupt process exit and
+explicit restart, including atomic attempt claims and metadata-only Run references.

@@ -283,3 +283,16 @@ proposals, one-time collection, quiescent generation invalidation, heartbeat/dea
 gates, retained live ownership, oversized text and the escaped serialized limit across
 sixteen individually valid worker outputs. Existing Router and tool-loop regressions
 remain enabled through the unchanged native CMake/CTest presets.
+
+## One application over these primitives
+
+The [single Agent report example](../examples/single-agent-report.md) connects the
+three slices into one Host goal: context handoff, two independent model workers,
+explicit aggregation, checkpoint approval and tool-receipt-based delivery. It uses
+existing public APIs and a bounded synchronous Host composition, without installing
+another task scheduler or storing a second Runtime result. Its offline integration
+test checks actual Provider messages and canonical run identities, rejection/abort,
+quiescent authority invalidation, partial admission cleanup, Provider failure and
+refusal to accept model completion claims or invalid tool results as delivery.
+It is a shared application pattern for general Agent and engineering-workbench
+routes, not a claim that the report renderer implements engineering task acceptance.

@@ -1028,6 +1028,9 @@ explicit result validation. A bounded group now supervises independent model wor
 and builds canonical evidence input for a separately Host-selected aggregation model.
 A shared Host tool lane stays serialized; parallel tool execution, durable worker
 takeover and real-model quality/cost evaluation remain separate acceptance work.
+The [single Agent report example](examples/single-agent-report.md) composes these
+APIs into one Host goal/context, two model drafts, explicit aggregation, canonical
+approval and validated tool-artifact delivery, with offline integration coverage.
 
 For composition inside larger graphs and tool runtimes, `Runtime V2` now also
 adds:

@@ -22,6 +22,10 @@ desktop, server, and embedded-friendly native builds:
 - bounded tool executor with versioned execution policy and durable journal
 - configurable provider retry metadata and exact usage records
 
+The native [Tool Journal process-crash regressions](docs/tool-journal-process-crash.md)
+exercise abrupt exit/restart at planned, started, effect, commit and pre-delivery
+boundaries, retaining unknown effects for explicit reconciliation.
+
 Workspace operations belong to the optional `TurboAgent::CodingTools` target,
 which provides bounded `fs.read`, `fs.list`, `fs.search`, `fs.write`, `fs.edit`
 and shell command tools. Hosts explicitly select the admitted tools **and**

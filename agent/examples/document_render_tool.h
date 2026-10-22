@@ -79,9 +79,13 @@ static const document_render_source_t *document_render_find_source(
   return NULL;
 }
 
-static int document_render_text_valid(const char *text, size_t limit, int multiline) {
+static int document_render_text_valid(const json_value_t *value, size_t limit, int multiline) {
+  const char *text;
   size_t i;
-  if (!text || !text[0] || strlen(text) > limit) return 0;
+  if (!value || json_type(value) != JSON_STRING) return 0;
+  text = json_string(value);
+  if (!text || !text[0] || strlen(text) != json_string_len(value) ||
+      strlen(text) > limit) return 0;
   for (i = 0; text[i]; ++i) {
     unsigned char c = (unsigned char)text[i];
     if ((c < 32 && !(multiline && c == '\n')) || c == 127) return 0;
@@ -137,11 +141,14 @@ static int document_render_handler(const json_value_t *arguments,
           TURBO_TOOL_SCHEMA_VALID) return status;
   title = json_get_string(arguments, "title");
   passages = json_object_get(arguments, "passages");
-  if (!document_render_text_valid(title, DOCUMENT_RENDER_MAX_TITLE_BYTES, 0)) return status;
+  if (!document_render_text_valid(json_object_get(arguments, "title"),
+                                  DOCUMENT_RENDER_MAX_TITLE_BYTES, 0)) return status;
   for (i = 0; i < json_array_size(passages); ++i) {
     const json_value_t *passage = json_array_get(passages, i);
-    if (!document_render_text_valid(json_get_string(passage, "text"),
+    if (!document_render_text_valid(json_object_get(passage, "text"),
                                     DOCUMENT_RENDER_MAX_TEXT_BYTES, 1) ||
+        !document_render_text_valid(json_object_get(passage, "source_id"),
+                                    DOCUMENT_RENDER_MAX_ID_BYTES, 0) ||
         !document_render_find_source(catalog, json_get_string(passage, "source_id"))) return status;
   }
   status = TURBO_TOOL_OUT_OF_MEMORY;

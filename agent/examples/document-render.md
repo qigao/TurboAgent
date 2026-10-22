@@ -45,7 +45,7 @@ explicitly checks policy before its direct RuntimeTools call, and explicitly val
 Direct RuntimeTools does not itself provide Agent approval/journal/compiler guarantees.
 
 `test_turbo_document_render_example.c` is included in the normal Harness CTest suite.
-It checks rendering/escaping and UTF-8, invalid sources and parameters, ambiguous catalogs, Skill grant projection,
+It checks rendering/escaping and UTF-8, embedded NUL, invalid sources and parameters, ambiguous catalogs, Skill grant projection,
 and the same tool under compiled Inspect: default denial, committed replay without callback re-entry,
 quiescent same-grant generation invalidation, revoked result delivery and invalid-result rejection.
 These tests do not extend compiled Inspect guarantees to arbitrary ordinary-loop tools or multi-step workflows.

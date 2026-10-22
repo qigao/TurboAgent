@@ -152,6 +152,31 @@ spec("document render Host example") {
     turbo_tool_registry_destroy(registry);
   }
 
+  it("rejects embedded NUL without accepting a truncated source identity or draft") {
+    static const char *const invalid[] = {
+        "{\"title\":\"Report\\u0000hidden\",\"passages\":[{\"text\":\"Draft\",\"source_id\":\"brief\"}]}",
+        "{\"title\":\"Report\",\"passages\":[{\"text\":\"Draft\\u0000hidden\",\"source_id\":\"brief\"}]}",
+        "{\"title\":\"Report\",\"passages\":[{\"text\":\"Draft\",\"source_id\":\"brief\\u0000unknown\"}]}"};
+    document_render_catalog_t catalog = {render_sources, 2};
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    size_t i;
+    check_not_null(registry);
+    check_equal(document_render_register(registry, &catalog), TURBO_TOOL_OK);
+    for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+      json_value_t *arguments = json_parse(invalid[i], strlen(invalid[i]));
+      json_value_t *result = NULL;
+      /* A parser may reject this domain input itself. If it preserves NUL,
+       * the tool must reject it before C-string matching or rendering. */
+      if (arguments) {
+        check_not_equal(turbo_tool_registry_execute_json_value(
+                            registry, "document_render", arguments, &result), TURBO_TOOL_OK);
+      }
+      check_null(result);
+      json_free(arguments);
+    }
+    turbo_tool_registry_destroy(registry);
+  }
+
   it("accepts the documented byte and passage limits and rejects excess text") {
     static const char seed[] =
         "{\"title\":\"Report\",\"passages\":[{\"text\":\"Draft\",\"source_id\":\"brief\"}]}";

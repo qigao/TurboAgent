@@ -136,9 +136,9 @@ static int approval_rewrite(turbo_agent_t *agent, json_value_t *state,
   (void)agent; (void)state; (void)id; (void)name;
   if (probe->rewrite && ++probe->middleware_calls > 1) {
     static const char changed[] = "{\"changed\":true}";
-    char *copy = malloc(sizeof(changed));
+    tstr copy = tstr_dup(changed);
     if (!copy) return -1;
-    memcpy(copy, changed, sizeof(changed)); free(*args); *args = copy;
+    tstr_free(*args); *args = copy;
   }
   return 0;
 }
@@ -164,9 +164,12 @@ spec("CLI exact-call approval integration") {
   after_each() {
     cmeta_fs_buf_free(&file); file = (cmeta_fs_buf_t){0};
     tstr_free(probe.last_challenge); probe.last_challenge = NULL;
-    if (input) fclose(input); if (output) fclose(output); if (diagnostics) fclose(diagnostics);
+    if (input) fclose(input);
+    if (output) fclose(output);
+    if (diagnostics) fclose(diagnostics);
     input = output = diagnostics = NULL;
-    if (root) tt_remove_tree(root); free(root); root = NULL;
+    if (root) tt_remove_tree(root);
+    free(root); root = NULL;
   }
   it("executes an aliased file call only after exact Host review and completes the session") {
     tstr database = tstr_format("{}/session.db", root);

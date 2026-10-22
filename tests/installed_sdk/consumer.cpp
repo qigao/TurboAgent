@@ -1,4 +1,3 @@
-#include <tinytest.h>
 #include <turbo_agent.h>
 #include <turbo_agent_policy.h>
 #include <turbo_agent_state.h>
@@ -10,6 +9,7 @@
 #include <turbo_agent_runtime_remote_chttp.h>
 #include <turbo_graph.h>
 #include <turbo_state_graph.h>
+#include <tinytest.hpp>
 
 static int reject_model_transport(const char *, char **response, void *) {
   if (response) *response = nullptr;

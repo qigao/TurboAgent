@@ -114,16 +114,18 @@ CXX_C_API turbo_agent_t *turbo_agent_create_with_action_tools(
  */
 CXX_C_API void turbo_agent_destroy(turbo_agent_t *agent);
 
+#ifdef __cplusplus
+}
+#endif
+
+/* Each public extension owns its linkage guard. Its dependencies may contain
+ * C++ templates, so umbrella includes must stay outside this C linkage block. */
 #include "turbo_agent_extensions.h"
 #include "turbo_agent_memory_store.h"
 #include "turbo_agent_resilience.h"
 #include "turbo_agent_runtime.h"
 #include "turbo_agent_state.h"
 #include "turbo_agent_tool_executor.h"
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif
 

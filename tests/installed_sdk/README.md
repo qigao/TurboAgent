@@ -40,3 +40,12 @@ This qualifies the installed TurboAgent tree against those exact selected
 SDKs. It does not unpack/reconsume the final NuGet, relocate dependencies,
 publish a release, select an unpublished SDK, provide a device runner, or
 replace #69 provider provenance, #122 corrected SDK or #123 sanitizer gates.
+
+The first Linux execution (CI #1008) passed the existing 140-entry suite and
+configured the relocated package, then reproduced a public C++ include-order
+defect: `turbo_agent.h` included extensions inside its `extern "C"` block,
+placing the transitive `<atomic>` templates under C linkage. The umbrella now
+closes its own linkage block before including independently guarded extensions.
+The C++ consumer deliberately includes `turbo_agent.h` first, before TinyTest
+or a standard C++ header, to keep that regression observable. No C symbol,
+structure layout, function signature or policy lifecycle contract changes.

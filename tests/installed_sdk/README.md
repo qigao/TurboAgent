@@ -36,10 +36,29 @@ environment variables must still identify the selected installed releases.
 The driver restores the prefix on success or a failed subprocess. Abrupt
 runner termination can leave the disposable CI prefix relocated.
 
-This qualifies the installed TurboAgent tree against those exact selected
-SDKs. It does not unpack/reconsume the final NuGet, relocate dependencies,
-publish a release, select an unpublished SDK, provide a device runner, or
-replace #69 provider provenance, #122 corrected SDK or #123 sanitizer gates.
+The final NuGet gate runs the same four consumers again in fresh Linux and
+Windows jobs after packaging. `cmake/ci/verify-nuget-sdk.py stage` exports the
+producer's installed vcpkg triplet and selected dependency SDK directories as
+a temporary test context. It records the actual producer cache, dependency
+manifest and SHA-256 inventory of every installed TurboAgent file. The context
+is separate from the public NuGet and expires after seven days; it does not
+add dependencies to the shipped package or rebuild/reselect them.
+
+The `consume` action checks the final `.nupkg` identity, package version,
+repository commit, all four RID manifests/configs, and every selected RID file
+against the producer inventory. It unpacks the actual final package and test
+context into fresh locations, with no producer build/install tree available.
+Both native jobs reuse `run-sdk-consumers.cmake` for the complete independent
+configure/build/CTest graph. The CI/release reusable workflow fails if either
+post-pack consumer fails; packing alone no longer completes the workflow.
+
+This qualifies the final package's selected C11/C++17 consumers against those
+exact dependencies, including their relocation in this test context. It does
+not provide full symbol/ABI closure, prove arbitrary dependency/toolchain
+compatibility, publish a release, select an unpublished SDK, provide a device
+runner, or replace #69 provider provenance, #122 corrected SDK or #123 sanitizer
+gates. macOS and Android retain build/install coverage; they do not run these
+native package consumers.
 
 The first Linux execution (CI #1008) passed the existing 140-entry suite and
 configured the relocated package, then reproduced a public C++ include-order

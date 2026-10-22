@@ -255,6 +255,60 @@ jobs:
         shell: cmd
         run: call cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release
 
+      # #180 needs a same-run distribution, not another isolated green result.
+      # TinyTest verbose output includes case-body times; CTest and the wrapper
+      # also measure fixture/process overhead. Keep the existing test budgets.
+      - name: Measure Windows CLI storage in five fresh processes
+        if: runner.os == 'Windows' && matrix.tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $directory = Join-Path $env:GITHUB_WORKSPACE "build/cli-storage-timing"
+          New-Item -ItemType Directory -Force -Path $directory | Out-Null
+          @(
+            "commit=$env:GITHUB_SHA"
+            "runner_os=$env:RUNNER_OS"
+            "image_os=$env:ImageOS"
+            "image_version=$env:ImageVersion"
+            "processor=$env:PROCESSOR_IDENTIFIER"
+            "processor_count=$env:NUMBER_OF_PROCESSORS"
+            "preset=ci-windows-release"
+            "order=after-full-suite;serial;five-new-CTest-and-test-processes"
+            "case_times=TinyTest-body-only;CTest-includes-fixtures;wall-includes-VS-wrapper"
+          ) | Set-Content "$directory/context.txt"
+          & ctest --version | Add-Content "$directory/context.txt"
+          Select-String -Path "build/ci-windows-release/CMakeCache.txt" `
+            -Pattern '^(CMAKE_C_COMPILER|CMAKE_BUILD_TYPE|CMAKE_GENERATOR|Salts_DIR):' |
+            ForEach-Object { $_.Line } | Add-Content "$directory/context.txt"
+          Copy-Item "build/release-provenance/windows-x64.txt" "$directory/dependencies.txt"
+          $measurements = @()
+          foreach ($iteration in 1..5) {
+            Write-Host "CLI storage iteration $iteration/5"
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            & .\cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release `
+              --no-tests=error --verbose -R "^test_turbo_cli_storage$" `
+              --output-log "$directory/iteration-$iteration.log" `
+              --output-junit "$directory/iteration-$iteration.xml"
+            $result = $LASTEXITCODE
+            $watch.Stop()
+            $measurements += [pscustomobject]@{
+              iteration = $iteration
+              wall_ms = $watch.ElapsedMilliseconds
+              ctest_exit = $result
+            }
+            $measurements | Export-Csv "$directory/measurements.csv" -NoTypeInformation
+            if ($result -ne 0) { exit $result }
+          }
+
+      - name: Retain Windows CLI storage timing and failure output
+        if: always() && runner.os == 'Windows' && matrix.tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-storage-timing-windows
+          path: build/cli-storage-timing/
+          if-no-files-found: warn
+
       - name: Install on Unix
         if: runner.os != 'Windows'
         shell: bash

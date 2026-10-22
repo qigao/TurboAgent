@@ -1,0 +1,20 @@
+{
+  "version": 6,
+  "configurePresets": [{
+    "name": "native",
+    "generator": "Ninja",
+    "binaryDir": "${sourceDir}/../../build/installed-consumers-$env{SDK_RID}",
+    "cacheVariables": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_C_COMPILER": "$env{TURBOAGENT_CONSUMER_CC}",
+      "CMAKE_CXX_COMPILER": "$env{TURBOAGENT_CONSUMER_CXX}"
+    }
+  }],
+  "buildPresets": [{"name": "native", "configurePreset": "native"}],
+  "testPresets": [{
+    "name": "native",
+    "configurePreset": "native",
+    "output": {"outputOnFailure": true},
+    "execution": {"noTestsAction": "error"}
+  }]
+}

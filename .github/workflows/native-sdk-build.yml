@@ -321,6 +321,20 @@ jobs:
         shell: cmd
         run: call cmake\ci\run-vsdevcmd.cmd cmake --build --preset install-ci-windows-release
 
+      - name: Verify relocated installed SDK consumers on Linux
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        env:
+          SDK_RID: ${{ matrix.rid }}
+        run: cmake -P cmake/ci/verify-installed-sdk.cmake
+
+      - name: Verify relocated installed SDK consumers on Windows
+        if: matrix.rid == 'windows-x64'
+        shell: cmd
+        env:
+          SDK_RID: ${{ matrix.rid }}
+        run: call cmake\ci\run-vsdevcmd.cmd cmake -P cmake/ci/verify-installed-sdk.cmake
+
       - name: Record SDK provenance
         shell: bash
         env:

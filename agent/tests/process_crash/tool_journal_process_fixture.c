@@ -1,5 +1,6 @@
 #include "../../src/turbo_agent_tool_executor_internal.h"
 #include "../../src/turbo_agent_tool_journal_internal.h"
+#include "turbo_tool_schema.h"
 #include "turbo_runtime_store_sqlite.h"
 #include <fmt.h>
 #include <tstr.h>

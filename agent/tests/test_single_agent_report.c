@@ -21,7 +21,7 @@ struct report_fixture_s {
   cmeta_threadpool_t *pool;
   single_agent_report_config_t config;
   document_render_catalog_t catalog;
-  atomic_int tool_calls;
+  atomic_int tool_calls, authority_calls;
   int approval, reviews, context_ok, bad_receipt, no_tool, fail_index, proposal_index, revoke, nul_aggregate;
 };
 
@@ -29,6 +29,14 @@ static char *report_copy(const char *text) {
   char *copy = malloc(strlen(text) + 1);
   if (copy) memcpy(copy, text, strlen(text) + 1);
   return copy;
+}
+
+static int report_authority_transport(const char *request, char **out, void *user) {
+  report_fixture_t *f = user;
+  (void)request;
+  *out = NULL;
+  atomic_fetch_add(&f->authority_calls, 1);
+  return -77; /* The Host authority must never issue a model request. */
 }
 
 static int report_transport(const char *request, char **out, void *user) {
@@ -135,6 +143,7 @@ spec("one Host goal composed from different model workers") {
     f.approval = 1; f.fail_index = f.proposal_index = -1;
     f.catalog = (document_render_catalog_t){sources, 1};
     atomic_init(&f.tool_calls, 0);
+    atomic_init(&f.authority_calls, 0);
     f.tools = turbo_tool_registry_create(); check_not_null(f.tools);
     turbo_tool_definition_v6_t tool = document_render_definition(&f.catalog);
     tool.definition.json_value_handler = report_tool; tool.definition.user_data = &f;
@@ -151,6 +160,8 @@ spec("one Host goal composed from different model workers") {
         f.models[i].fixture = &f; f.models[i].index = i;
         atomic_init(&f.models[i].calls, 0);
         c.transport_fn = report_transport; c.transport_user_data = &f.models[i];
+      } else {
+        c.transport_fn = report_authority_transport; c.transport_user_data = &f;
       }
       f.agents[i] = turbo_agent_create(&c); check_not_null(f.agents[i]);
       check_equal(turbo_agent_set_tool_policy(f.agents[i], &policy), SALTS_OK);
@@ -190,6 +201,7 @@ spec("one Host goal composed from different model workers") {
   after_each() {
     /* A successful destroy proves all accepted tasks/reservations were released
      * by the Host flow, including early failure and partial admission. */
+    check_equal(atomic_load(&f.authority_calls), 0);
     check_equal(turbo_agent_router_destroy(f.router), SALTS_OK);
     check_equal(turbo_agent_router_destroy(f.tool_router), SALTS_OK);
     cmeta_threadpool_destroy(f.pool);

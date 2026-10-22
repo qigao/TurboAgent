@@ -224,7 +224,11 @@ static int turbo_agent_inbox_latest_transition(turbo_agent_inbox_t *inbox, const
   *out_transition = NULL;
   if (turbo_agent_runtime_store_list_json(inbox->runtime, TURBO_AGENT_INBOX_TRANSITIONS_COLLECTION,
                                           "inbox_id", inbox_id, &transitions) != 0)
-    return SALTS_ENOENT;
+    return SALTS_EIO;
+  if (!transitions || json_type(transitions) != JSON_ARRAY) {
+    turbo_runtime_json_destroy(transitions);
+    return SALTS_EPROTO;
+  }
   for (index = 0; index < json_array_size(transitions); ++index) {
     const json_value_t *candidate = json_array_get(transitions, index);
     double value = json_get_double(candidate, "transition_seq", 0);
@@ -289,9 +293,52 @@ cleanup:
   return rc;
 }
 
+/* A later Run may replace the thread head without carrying this input event.
+ * Reconcile the claim against its named Run, never a different Run or a scan
+ * of history. A failed read cannot establish that the event did not happen. */
+static int turbo_agent_inbox_claimed_state(turbo_agent_inbox_t *inbox,
+                                           const char *inbox_id, json_value_t **out_state) {
+  json_value_t *transition = NULL;
+  json_value_t *run = NULL;
+  const char *run_id;
+  const char *stored_run_id;
+  const char *thread_id;
+  int rc;
+  *out_state = NULL;
+  rc = turbo_agent_inbox_latest_transition(inbox, inbox_id, &transition);
+  if (rc != SALTS_OK) goto done;
+  run_id = json_get_string(transition, "claimed_by_run_id");
+  if (!run_id || !run_id[0]) { rc = SALTS_EPROTO; goto done; }
+  rc = turbo_agent_runtime_store_get_json_status(inbox->runtime, "runs", run_id, &run);
+  if (rc == SALTS_ENOENT) {
+    /* A claim can precede any persisted Run/event. Only typed absence permits
+     * requeue; ambiguous legacy failures and all other errors fail closed. */
+    rc = SALTS_OK;
+    goto done;
+  }
+  if (rc != SALTS_OK) goto done;
+  stored_run_id = json_get_string(run, "id");
+  thread_id = json_get_string(run, "thread_id");
+  if (!stored_run_id || strcmp(stored_run_id, run_id) || !thread_id ||
+      strcmp(thread_id, inbox->thread_id)) { rc = SALTS_EPROTO; goto done; }
+  rc = turbo_agent_runtime_get_run_state_json_value(inbox->runtime, run_id, out_state) == 0
+      ? SALTS_OK : SALTS_EIO;
+  if (rc == SALTS_OK && (!*out_state || json_type(*out_state) != JSON_OBJECT ||
+      (json_object_get(*out_state, "events") &&
+       json_type(json_object_get(*out_state, "events")) != JSON_NULL &&
+       json_type(json_object_get(*out_state, "events")) != JSON_ARRAY))) rc = SALTS_EPROTO;
+done:
+  if (rc != SALTS_OK) {
+    turbo_runtime_json_destroy(*out_state);
+    *out_state = NULL;
+  }
+  turbo_runtime_json_destroy(transition);
+  turbo_runtime_json_destroy(run);
+  return rc;
+}
+
 static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
   json_value_t *payloads = NULL;
-  json_value_t *runs = NULL;
   json_value_t *events = NULL;
   size_t index;
   if (turbo_agent_runtime_store_list_json(inbox->runtime, TURBO_AGENT_INBOX_PAYLOADS_COLLECTION,
@@ -305,7 +352,6 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
     int rc;
     if (!inbox_id) {
       turbo_runtime_json_destroy(events);
-      turbo_runtime_json_destroy(runs);
       turbo_runtime_json_destroy(payloads);
       return SALTS_EIO;
     }
@@ -315,7 +361,6 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
     if (rc == SALTS_ENOENT) continue;
     if (rc != SALTS_OK) {
       turbo_runtime_json_destroy(events);
-      turbo_runtime_json_destroy(runs);
       turbo_runtime_json_destroy(payloads);
       return rc;
     }
@@ -327,25 +372,17 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
       if (entry.transition_seq >= TURBO_AGENT_INBOX_MAX_EXACT_JSON_INTEGER) {
         turbo_agent_inbox_ready_reset(&entry);
         turbo_runtime_json_destroy(events);
-        turbo_runtime_json_destroy(runs);
         turbo_runtime_json_destroy(payloads);
         return SALTS_ERANGE;
       }
-      if (!runs && turbo_agent_runtime_list_runs(inbox->runtime, inbox->thread_id, &runs) != 0) {
+      turbo_runtime_json_destroy(events);
+      events = NULL;
+      rc = turbo_agent_inbox_claimed_state(inbox, inbox_id, &events);
+      if (rc != SALTS_OK) {
         turbo_agent_inbox_ready_reset(&entry);
         turbo_runtime_json_destroy(events);
-        turbo_runtime_json_destroy(runs);
         turbo_runtime_json_destroy(payloads);
-        return SALTS_EIO;
-      }
-      if (json_array_size(runs) > 0 && !events &&
-          turbo_agent_runtime_get_thread_head_state_json_value(inbox->runtime, inbox->thread_id,
-                                                               &events) != 0) {
-        turbo_agent_inbox_ready_reset(&entry);
-        turbo_runtime_json_destroy(events);
-        turbo_runtime_json_destroy(runs);
-        turbo_runtime_json_destroy(payloads);
-        return SALTS_EIO;
+        return rc;
       }
       state_events = events ? json_object_get(events, "events") : NULL;
       for (event_index = 0; state_events && event_index < json_array_size(state_events);
@@ -359,6 +396,12 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
                        : "",
                    inbox_id) == 0) {
           event_id = json_get_string(event, "event_id");
+          if (!event_id || !event_id[0]) {
+            turbo_agent_inbox_ready_reset(&entry);
+            turbo_runtime_json_destroy(events);
+            turbo_runtime_json_destroy(payloads);
+            return SALTS_EPROTO;
+          }
           break;
         }
       }
@@ -369,7 +412,6 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
         turbo_agent_inbox_ready_reset(&entry);
         if (rc != SALTS_OK) {
           turbo_runtime_json_destroy(events);
-          turbo_runtime_json_destroy(runs);
           turbo_runtime_json_destroy(payloads);
           return rc;
         }
@@ -381,7 +423,6 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
       if (rc != SALTS_OK) {
         turbo_agent_inbox_ready_reset(&entry);
         turbo_runtime_json_destroy(events);
-        turbo_runtime_json_destroy(runs);
         turbo_runtime_json_destroy(payloads);
         return rc;
       }
@@ -393,7 +434,6 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
           entry.payload_bytes > inbox->config.max_total_bytes - inbox->used_bytes) {
         turbo_agent_inbox_ready_reset(&entry);
         turbo_runtime_json_destroy(events);
-        turbo_runtime_json_destroy(runs);
         turbo_runtime_json_destroy(payloads);
         return SALTS_EBUSY;
       }
@@ -405,14 +445,12 @@ static int turbo_agent_inbox_recover(turbo_agent_inbox_t *inbox) {
       if (rc != SALTS_OK) {
         turbo_agent_inbox_ready_reset(&entry);
         turbo_runtime_json_destroy(events);
-        turbo_runtime_json_destroy(runs);
         turbo_runtime_json_destroy(payloads);
         return rc;
       }
     } else turbo_agent_inbox_ready_reset(&entry);
   }
   turbo_runtime_json_destroy(events);
-  turbo_runtime_json_destroy(runs);
   turbo_runtime_json_destroy(payloads);
   return SALTS_OK;
 }

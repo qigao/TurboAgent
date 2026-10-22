@@ -28,13 +28,25 @@ The following-Run case withholds applied-transition writes, then explicitly
 completes a second no-op graph whose state contains no Inbox event. Both Session
 finalizers encounter the injected write failure. The original Run retains the
 actual input event while the thread head advances. Recovery must not forget that
-event merely because it is absent from the newer head.
+event merely because it is absent from the newer head. Recovery now selects the
+exact `claimed_by_run_id`, validates the Run/thread identity and loads that Run's
+canonical persisted state. It does not scan other Runs or introduce another input
+or result owner. Only a typed missing Run or a successfully read state without
+the matching event permits requeue. Storage errors, foreign ownership, malformed
+state and invalid matching-event identity fail closed. Transition-query errors
+are no longer treated as absence of a committed enqueue.
 
 The native verifier checks immutable payload, latest transition sequence/status,
 claiming Run identity, actual Run/head states, matching applied-event identity and
 independent model/delivery counters. Recovery must not invoke a model or launch a
-workflow. Queued inputs can be explicitly claimed/requeued; applied inputs cannot
+workflow; Run counts must stay unchanged during configuration, without a Run-list
+fallback inside recovery. Independent negative processes inject transition-query
+failure, owning-Run read failure, foreign thread ownership and malformed owning
+state, and verify errors leave the durable payload/transition intact. Queued inputs can be explicitly claimed/requeued; applied inputs cannot
 be claimed again. Another process checks the recovered state remains stable.
+
+At the two early cuts, the claim is durable while no Run/head has been published.
+The verifier requires typed ENOENT for those records, not an arbitrary read error.
 
 The compiled Inspect Session-finalization unit fixture also uses a real Session
 Run to create/bind its Inbox event. It does not bind a fabricated event that was

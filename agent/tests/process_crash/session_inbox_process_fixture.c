@@ -31,7 +31,7 @@ typedef struct fixture_s {
   turbo_agent_runtime_store_t inner;
   turbo_agent_runtime_t *runtime, *oracle;
   turbo_agent_session_t *session;
-  int inject, block_applied, blocked, model_calls;
+  int inject, block_applied, blocked, model_calls, read_fault, owner_reads, run_lists;
 } fixture_t;
 static int failure(const char *what, int line) {
   fprintf(stderr, "Inbox process fixture line %d: %s\n", line, what);
@@ -80,10 +80,40 @@ static int store_put(void *user, const char *collection, const char *id, const c
 }
 static int store_get(void *user, const char *collection, const char *id, char **out) {
   fixture_t *f = user;
+  if (f->read_fault && !strcmp(collection, "runs")) {
+    ++f->owner_reads;
+    if (f->read_fault == 1) return SALTS_EIO;
+    if (f->read_fault == 2 || f->read_fault == 3) {
+      json_value_t *record = NULL;
+      char *serialized;
+      int rc = f->inner.get(f->inner.user_data, collection, id, out);
+      if (rc != SALTS_OK && rc != SALTS_ENOENT) return rc;
+      if (rc == SALTS_ENOENT) {
+        record = json_create_object();
+        if (!record || turbo_runtime_json_object_set_string(record, "id", id) ||
+            turbo_runtime_json_object_set_string(record, "thread_id", THREAD_ID)) {
+          json_free(record); return SALTS_ENOMEM;
+        }
+      } else record = json_parse(*out, strlen(*out));
+      if (!record || (f->read_fault == 2 &&
+          turbo_runtime_json_object_set_string(record, "thread_id", "foreign-thread")) ||
+          (f->read_fault == 3 && turbo_runtime_json_object_set_string(record, "state_snapshot", "invalid JSON"))) {
+        json_free(record); return SALTS_EPROTO;
+      }
+      serialized = json_serialize(record, NULL); json_free(record);
+      if (!serialized) return SALTS_ENOMEM;
+      free(*out); *out = malloc(strlen(serialized) + 1);
+      if (*out) memcpy(*out, serialized, strlen(serialized) + 1);
+      json_serialize_free(serialized);
+      return *out ? SALTS_OK : SALTS_ENOMEM;
+    }
+  }
   return f->inner.get(f->inner.user_data, collection, id, out);
 }
 static int store_list(void *user, const char *collection, const char *key, const char *value, char **out) {
   fixture_t *f = user;
+  if (!strcmp(collection, "runs")) ++f->run_lists;
+  if (f->read_fault == 4 && !strcmp(collection, TRANSITIONS)) return SALTS_EIO;
   return f->inner.list(f->inner.user_data, collection, key, value, out);
 }
 static int store_create(void *user, const char *collection, const char *id, const char *text) {
@@ -166,7 +196,7 @@ static const char *find_event(const json_value_t *state, const char *id) {
   return NULL;
 }
 static int evidence(fixture_t *f, const char *expected_status) {
-  json_value_t *payloads = NULL, *transitions = NULL, *owner = NULL, *head = NULL;
+  json_value_t *payloads = NULL, *transitions = NULL, *owner = NULL, *head = NULL, *record = NULL;
   const json_value_t *payload, *latest = NULL;
   const char *id, *run = NULL, *event;
   int n, valid;
@@ -186,8 +216,18 @@ static int evidence(fixture_t *f, const char *expected_status) {
     if (current > seq) { seq = current; latest = transition; }
   }
   REQUIRE(run && latest && text_is(latest, "status", expected_status));
-  REQUIRE(!turbo_agent_runtime_get_run_state_json_value(f->runtime, run, &owner));
-  REQUIRE(!turbo_agent_runtime_get_thread_head_state_json_value(f->runtime, THREAD_ID, &head));
+  n = turbo_agent_runtime_store_get_json_status(f->runtime, "runs", run, &record);
+  if (f->cut->owner_event) {
+    REQUIRE(n == SALTS_OK && text_is(record, "id", run) && text_is(record, "thread_id", THREAD_ID));
+    REQUIRE(!turbo_agent_runtime_get_run_state_json_value(f->runtime, run, &owner));
+  } else REQUIRE(n == SALTS_ENOENT && !record);
+  json_free(record); record = NULL;
+  n = turbo_agent_runtime_get_published_thread_head(f->runtime, THREAD_ID, &record);
+  if (f->cut->owner_event) {
+    REQUIRE(n == SALTS_OK && record);
+    REQUIRE(!turbo_agent_runtime_get_thread_head_state_json_value(f->runtime, THREAD_ID, &head));
+  } else REQUIRE(n == SALTS_ENOENT && !record);
+  json_free(record);
   event = find_event(owner, id);
   valid = !!event == f->cut->owner_event && !!find_event(head, id) == f->cut->head_event;
   if (text_is(latest, "status", "applied")) valid = valid && text_is(latest, "applied_event_id", event);
@@ -207,7 +247,27 @@ static int exercise(fixture_t *f, const char *mode) {
   int rc = FIXTURE_FAILURE, operation;
   if (!strcmp(mode, "init")) return count_put(f, "model", 0) || count_put(f, "delivery", 0);
   if (!strcmp(mode, "inspect")) return evidence(f, f->cut->raw_status);
-  REQUIRE(!configure(f));
+  if (!strcmp(mode, "owner_error") || !strcmp(mode, "owner_foreign") ||
+      !strcmp(mode, "owner_state_error") || !strcmp(mode, "transition_error")) {
+    f->read_fault = !strcmp(mode, "owner_error") ? 1 : !strcmp(mode, "owner_foreign") ? 2 :
+        !strcmp(mode, "owner_state_error") ? 3 : 4;
+    operation = configure(f);
+    REQUIRE(operation == (f->read_fault == 2 ? SALTS_EPROTO : SALTS_EIO));
+    REQUIRE(!f->run_lists && (f->read_fault == 4 || f->owner_reads > 0));
+    f->read_fault = 0;
+    REQUIRE(!f->model_calls);
+    return evidence(f, f->cut->raw_status);
+  }
+  {
+    json_value_t *before = NULL, *after = NULL;
+    REQUIRE(!turbo_agent_runtime_list_runs(f->runtime, THREAD_ID, &before));
+    f->run_lists = 0;
+    operation = configure(f);
+    REQUIRE(!operation && !f->run_lists);
+    REQUIRE(!turbo_agent_runtime_list_runs(f->runtime, THREAD_ID, &after));
+    REQUIRE(json_array_size(before) == json_array_size(after));
+    json_free(before); json_free(after);
+  }
   if (!strcmp(mode, "crash")) {
     input = message(); REQUIRE(input);
     REQUIRE(!turbo_agent_session_enqueue(f->session, TURBO_AGENT_INBOX_STEER, input, 0, &id));

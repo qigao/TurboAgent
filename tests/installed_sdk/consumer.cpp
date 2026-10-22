@@ -1,0 +1,60 @@
+#include <tinytest.h>
+#include <turbo_agent.h>
+#include <turbo_agent_policy.h>
+#include <turbo_agent_state.h>
+#include <turbo_agent_harness.h>
+#include <turbo_agent_harness_server.h>
+#include <turbo_agent_harness_transport.h>
+#include <turbo_agent_runtime_remote.h>
+#include <turbo_agent_runtime_remote_client.h>
+#include <turbo_agent_runtime_remote_chttp.h>
+#include <turbo_graph.h>
+#include <turbo_state_graph.h>
+
+static int reject_model_transport(const char *, char **response, void *) {
+  if (response) *response = nullptr;
+  return -1;
+}
+
+spec("installed C++17 SDK consumer") {
+  it("constructs and releases exported runtime and Agent objects") {
+    auto *graph = turbo_graph_create("installed-cpp17");
+    auto *state = turbo_agent_state_create_json_value();
+    turbo_agent_config_t config{};
+    config.model = "installed-sdk-no-network";
+    config.transport_fn = reject_model_transport;
+    auto *agent = turbo_agent_create(&config);
+    check_not_null(graph);
+    check_not_null(state);
+    check_not_null(agent);
+
+    turbo_agent_tool_authority_snapshot_t before{};
+    turbo_agent_tool_authority_snapshot_t after{};
+    check_equal(turbo_agent_tool_authority_snapshot_get(agent, &before), SALTS_OK);
+    check_equal(before.capability_mask, 0u);
+    auto policy = turbo_agent_policy_default();
+    policy.allow_custom_tools = 1;
+    // No execution is active: policy replacement remains quiescent.
+    check_equal(turbo_agent_set_tool_policy(agent, &policy), SALTS_OK);
+    check_equal(turbo_agent_tool_authority_snapshot_is_current(agent, &before), 0);
+    check_equal(turbo_agent_tool_authority_snapshot_get(agent, &after), SALTS_OK);
+    check_equal(turbo_agent_tool_authority_snapshot_is_current(agent, &after), 1);
+    check_true((after.capability_mask & TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(
+        TURBO_AGENT_POLICY_CAPABILITY_CUSTOM_TOOLS)) != 0);
+
+    turbo_agent_destroy(agent);
+    json_free(state);
+    turbo_graph_destroy(graph);
+  }
+
+  it("receives the Harness configuration ABI across the C++ boundary") {
+    turbo_agent_harness_config_t config{};
+    turbo_agent_harness_run_options_t options{};
+    turbo_agent_harness_config_init(&config);
+    turbo_agent_harness_run_options_init(&options);
+    check_equal(config.struct_size, sizeof(config));
+    check_equal(options.struct_size, sizeof(options));
+    check_equal(config.abi_version, TURBO_AGENT_HARNESS_ABI_VERSION);
+    check_equal(options.abi_version, TURBO_AGENT_HARNESS_ABI_VERSION);
+  }
+}

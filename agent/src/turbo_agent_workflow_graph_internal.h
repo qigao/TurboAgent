@@ -25,6 +25,12 @@ CXX_C_API int turbo_agent_planner_tool_node(turbo_graph_exec_ctx_t *ctx, void *u
 /* scope is a synchronous borrow identifying one owned planner/executor version. */
 CXX_C_API int turbo_agent_tool_node_scoped(turbo_graph_exec_ctx_t *ctx, void *user_data,
                                           const char *scope);
+/* Opt-in supervised dispatch: preserve generic ToolNode behavior, but report
+ * callback/guardrail failure and validate post-middleware results explicitly. */
+enum { TURBO_AGENT_TOOL_CHECK_OK, TURBO_AGENT_TOOL_CHECK_FAILED,
+       TURBO_AGENT_TOOL_CHECK_INVALID_RESULT };
+CXX_C_API int turbo_agent_tool_node_checked(turbo_graph_exec_ctx_t *ctx, void *agent,
+                                           int *out_outcome);
 CXX_C_API turbo_graph_exec_status_t turbo_agent_workflow_add_planner_core(
     turbo_graph_t *graph, const char *planner_node_name, turbo_agent_t *planner_agent,
     const char *plan_commit_node_name, const char *plan_step_node_name);

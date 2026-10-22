@@ -11,6 +11,8 @@ extern "C" {
 
 #define TURBO_AGENT_ROUTER_ABI_VERSION 1u
 #define TURBO_AGENT_ROUTER_MAX_ENDPOINTS 16u
+#define TURBO_AGENT_ROUTER_MAX_MODEL_TURNS 16u
+#define TURBO_AGENT_ROUTER_MAX_REVIEW_RESUMES 32u
 
 typedef struct turbo_agent_router_s turbo_agent_router_t;
 typedef struct turbo_agent_router_task_s turbo_agent_router_task_t;
@@ -102,7 +104,50 @@ CXX_C_API int turbo_agent_router_submit(turbo_agent_router_t *router,
     cmeta_threadpool_t *executor, const turbo_agent_router_request_t *request,
     const json_value_t *input, turbo_agent_router_task_t **out_task);
 
-/** Borrowed stable Execution UUID; distinct from canonical Runtime run ids. */
+/**
+ * Opt-in supervised model/tool loop, with 2..16 model turns and one tool per
+ * turn. Requires EXECUTE, TOOL_PROPOSALS, the exact same immutable ToolRegistry
+ * on child and authority, and a Host-configured before_tool guardrail. The Host
+ * is responsible for that guardrail's approval/path policy. Tools execute on
+ * the authority Agent through its normal ToolNode, executor and Journal;
+ * child capability checks also apply. Require known effects and strict result
+ * contracts before dispatch; validate results after Host output hooks, before
+ * another model call. No implicit execution/recovery retry is installed.
+ *
+ * Admission estimate = per-turn estimate * max_model_turns, including history
+ * as estimated by the Host. This is not a hard billing cap. The final turn is
+ * reserved for consuming results; a further proposal interrupts before effects.
+ * A shared authority tool lane excludes every other Router task until release,
+ * including while waiting for approval. Caller input review flags are cleared.
+ * Other bounds, ownership, errors and quiescent requirements match submit().
+ * Failures/limits interrupt with router_tool_loop.reason and failure state;
+ * inspect these even when the Runtime operation itself succeeded.
+ */
+CXX_C_API int turbo_agent_router_submit_tool_loop(turbo_agent_router_t *router,
+    cmeta_threadpool_t *executor, const turbo_agent_router_request_t *request,
+    const json_value_t *input, unsigned max_model_turns,
+    turbo_agent_router_task_t **out_task);
+
+/**
+ * Review the current terminal approval checkpoint using existing Runtime
+ * approve_review/reject_review commands. approved is 0 or 1. The command loads
+ * the canonical checkpoint; caller-owned result JSON cannot modify approval.
+ * Approval is bound to the exact tool/call/arguments, then cleared on success.
+ * A rejection records an interruption without dispatch or automatic replanning.
+ * Only approval_pending is resumable, at most 32 accepted review segments, using
+ * the original deadline. EBUSY while running; EINVAL for other interruptions;
+ * EPERM for stale authority; ECANCELED after loss/cancellation/rejection;
+ * ETIMEDOUT after deadline; ERANGE at the review bound. Executor rejection is
+ * returned unchanged and preserves the previous segment's result/checkpoint.
+ * On acceptance, the previous unclaimed result is released, and take_result()
+ * becomes available once for the new segment. The first Execution UUID remains
+ * the task id; inspect.execution_id identifies the current segment. Same owners
+ * must remain alive; this API does not claim restart or remote reconciliation.
+ */
+CXX_C_API int turbo_agent_router_task_review(turbo_agent_router_task_t *task,
+    cmeta_threadpool_t *executor, int approved);
+
+/** Borrowed stable first Execution UUID; distinct from canonical Runtime run ids. */
 CXX_C_API const char *turbo_agent_router_task_id(const turbo_agent_router_task_t *task);
 CXX_C_API int turbo_agent_router_task_wait(turbo_agent_router_task_t *task, uint64_t timeout_ms);
 CXX_C_API int turbo_agent_router_task_cancel(turbo_agent_router_task_t *task,
@@ -121,7 +166,7 @@ CXX_C_API int turbo_agent_router_task_heartbeat(turbo_agent_router_task_t *task,
 CXX_C_API int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *task,
                                               json_value_t **out_view);
 /**
- * Move Runtime summary/state once after terminal. API success means ownership
+ * Move Runtime summary/state once per segment after terminal. API success means ownership
  * transfer, not execution success. Inspect Execution status/runtime_result_code
  * as well: a Runtime failure can have a NULL summary and an owned failure state.
  * Successful execution still does not validate a model's answer.

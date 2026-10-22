@@ -50,10 +50,13 @@ if(BUILD_TESTS)
     LIBS
     praktor_tools
     agent_compiler
+    TurboAgent::Agent
     Salts::Core
     Salts::TinyTest
     INCLUDES
     include
     FOLDER
     "Praktor Tools/tests")
+  target_compile_definitions(test_engineering_workflow PRIVATE
+    ENGINEERING_WORKFLOW_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/examples/engineering-build-test.yml")
 endif()

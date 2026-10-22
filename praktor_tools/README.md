@@ -18,6 +18,13 @@ replanning. Praktor owns deterministic workflow execution.
 
 The model never supplies a workflow path.
 
+The [engineering build/test Host example](examples/engineering-build-test.md)
+combines a reviewed five-step YAML workflow with native request/result checks.
+Hosts provide their build/test backends; offline fixtures exercise authority,
+cancellation and evidence validation. Successful transport is checked separately
+from verified completion. This example adds no default CLI tool or durable
+multi-step recovery guarantee.
+
 ## Build
 
 ```cmake

@@ -71,8 +71,14 @@ determine observed elapsed time, not a separately measured provider latency. The
 observations are not durable; a Host needing a durable supervision audit must record
 them through its existing audit integration. Runtime remains the source of run evidence.
 
-Take summary/state once after terminal and verify the canonical summary status and
-the task's domain result. A completed model node does not prove the task is done.
+Take summary/state once after terminal and verify Execution status, its underlying
+`runtime_result_code`, the summary when present, and the task's domain result.
+Result-transfer success only transfers ownership. A Provider/graph failure can
+return a null summary and an owned state carrying `model_error`; it is still an
+Execution failure. Runtime can fail before committing a run/checkpoint, so neither
+this API nor the route state proves that every failed attempt has durable evidence.
+A Host needing that audit must capture the failure state and inspection facts through
+its existing audit integration. A completed model node does not prove the task is done.
 An unresponsive or stale-authority result is withheld; inspect the existing Runtime
 using the bound thread/run identity for reconciliation. Release returns busy until
 terminal, and Router destruction returns busy until all task handles are released.

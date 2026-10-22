@@ -329,7 +329,12 @@ spec("bounded tiered model Router") {
     check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
     check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
     check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
-    check_equal(json_get_string(summary, "status"), "failed");
+    check_null(summary);
+    check_not_null(turbo_agent_state_model_error_detail(state));
+    check_equal(turbo_agent_router_task_inspect(task, &view), SALTS_OK);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "execution_status"), -1),
+                TURBO_AGENT_EXECUTION_FAILED);
+    check_true(turbo_runtime_json_value_as_int64(json_object_get(view, "runtime_result_code"), 0) < 0);
     check_equal(atomic_load(&transport[2].calls), 1);
     check_equal(atomic_load(&transport[1].calls), 0);
   }

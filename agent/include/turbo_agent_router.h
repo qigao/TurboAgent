@@ -121,8 +121,10 @@ CXX_C_API int turbo_agent_router_task_heartbeat(turbo_agent_router_task_t *task,
 CXX_C_API int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *task,
                                               json_value_t **out_view);
 /**
- * Move canonical summary/state once after terminal. Check the summary/status:
- * API success does not establish task completion or validate a model's answer.
+ * Move Runtime summary/state once after terminal. API success means ownership
+ * transfer, not execution success. Inspect Execution status/runtime_result_code
+ * as well: a Runtime failure can have a NULL summary and an owned failure state.
+ * Successful execution still does not validate a model's answer.
  * EBUSY before terminal; EALREADY after take; EPERM for stale authority;
  * ECANCELED for an unresponsive child, with NULL outputs on every rejection.
  * Rejected results remain inspectable in the endpoint's existing Runtime by

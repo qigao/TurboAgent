@@ -125,6 +125,7 @@ spec("bounded tiered model Router") {
     tools = turbo_tool_registry_create();
     check_not_null(tools);
     tool.name = "effect";
+    tool.description = "Offline effect fixture; the Router must never dispatch it.";
     tool.parameters_json = "{\"type\":\"object\"}";
     tool.json_value_handler = router_fixture_tool;
     check_equal(turbo_tool_registry_add(tools, &tool), TURBO_TOOL_OK);

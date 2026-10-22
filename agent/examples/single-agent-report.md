@@ -65,7 +65,13 @@ child generation. Policy replacement remains quiescent. A same-grant replacement
 at the terminal review boundary invalidates further execution; no runtime callback changes policy.
 
 The normal Host ToolNode/executor/Journal performs dispatch and validates strict results
-before the final model turn. Delivery checks Execution status, Runtime result code,
+before the final model turn. Ordinary ToolExecutor invokes the text/context handler;
+the existing renderer originally registers a JSON value handler. This example explicitly
+adds a bounded text/context adapter that parses arguments, calls that same renderer,
+and serializes the owned result into the executor's malloc/free output contract.
+It does not add an implicit conversion to generic RuntimeTools entry points. Existing
+executor argument/output limits also apply, independently of the renderer's domain limits.
+Delivery checks Execution status, Runtime result code,
 canonical completion/lineage, failure state, pending tools and the loop reason. It then
 requires the actual canonical tool-result receipt, validates the renderer's schema,
 and returns its Markdown. A model saying the task is complete cannot substitute for a

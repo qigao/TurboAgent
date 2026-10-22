@@ -67,7 +67,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   tools = turbo_tool_registry_create();
-  if (!tools || document_render_register(tools, &catalog) != TURBO_TOOL_OK) goto done;
+  turbo_tool_definition_v6_t tool = single_agent_report_tool_definition(&catalog);
+  if (!tools || turbo_tool_registry_add_v6(tools, &tool) != TURBO_TOOL_OK) goto done;
   /* Explicit control-plane grants, installed before any queued/running work. */
   policy.allow_delegate = 1; policy.allow_runtime_tools = 1;
   turbo_agent_retry_policy_init(&retry); retry.max_attempts = 1;

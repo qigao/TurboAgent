@@ -5,6 +5,39 @@
 #include "turbo_agent_router.h"
 #include "turbo_agent_session.h"
 #include <salts/clock.h>
+#include <stdlib.h>
+
+/* Ordinary ToolExecutor uses the text/context entry point. Adapt explicitly
+ * rather than assuming a JSON-only registration is callable through it. */
+static turbo_tool_status_t single_agent_report_render(const char *text,
+    const turbo_tool_execution_context_t *context, char **out, void *user) {
+  json_value_t *args = NULL, *result = NULL;
+  char *serialized = NULL;
+  turbo_tool_status_t status = TURBO_TOOL_INVALID_ARGUMENT;
+  (void)context; /* Executor supplies and checks its cancellation boundary. */
+  if (!out || !text) return status;
+  *out = NULL;
+  args = json_parse(text, strlen(text));
+  if (!args) goto done;
+  status = (turbo_tool_status_t)document_render_handler(args, &result, user);
+  if (status != TURBO_TOOL_OK) goto done;
+  status = TURBO_TOOL_OUT_OF_MEMORY;
+  serialized = json_serialize(result, NULL);
+  if (!serialized) goto done;
+  *out = malloc(strlen(serialized) + 1);
+  if (!*out) goto done;
+  memcpy(*out, serialized, strlen(serialized) + 1);
+  status = TURBO_TOOL_OK;
+done:
+  json_serialize_free(serialized); json_free(args); json_free(result);
+  return status;
+}
+
+static turbo_tool_definition_v6_t single_agent_report_tool_definition(document_render_catalog_t *catalog) {
+  turbo_tool_definition_v6_t definition = document_render_definition(catalog);
+  definition.context_handler = single_agent_report_render;
+  return definition;
+}
 
 /* Example-only synchronous Host composition, not an installed API. The caller
  * exclusively owns the Router, pool, agents, stores and immutable registry.

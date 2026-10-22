@@ -86,15 +86,16 @@ static int report_wait_for_deadline(const char *request, const turbo_cancel_toke
   return response->transport_status;
 }
 
-static int report_tool(const json_value_t *args, json_value_t **out, void *user) {
+static turbo_tool_status_t report_tool(const char *args,
+    const turbo_tool_execution_context_t *context, char **out, void *user) {
   report_fixture_t *f = user;
   atomic_fetch_add(&f->tool_calls, 1);
   if (!turbo_agent_current_tool_approval_granted()) return TURBO_TOOL_ERROR;
   if (f->bad_receipt) {
-    *out = json_parse("{\"markdown\":false}", strlen("{\"markdown\":false}"));
+    *out = report_copy("{\"markdown\":false}");
     return *out ? TURBO_TOOL_OK : TURBO_TOOL_OUT_OF_MEMORY;
   }
-  return document_render_handler(args, out, &f->catalog);
+  return single_agent_report_render(args, context, out, &f->catalog);
 }
 
 static int report_host_review(const json_value_t *summary, const json_value_t *state, void *user) {
@@ -149,8 +150,9 @@ spec("one Host goal composed from different model workers") {
     atomic_init(&f.tool_calls, 0);
     atomic_init(&f.authority_calls, 0);
     f.tools = turbo_tool_registry_create(); check_not_null(f.tools);
-    turbo_tool_definition_v6_t tool = document_render_definition(&f.catalog);
-    tool.definition.json_value_handler = report_tool; tool.definition.user_data = &f;
+    turbo_tool_definition_v6_t tool = single_agent_report_tool_definition(&f.catalog);
+    tool.definition.json_value_handler = NULL; tool.context_handler = report_tool;
+    tool.definition.user_data = &f;
     check_equal(turbo_tool_registry_add_v6(f.tools, &tool), TURBO_TOOL_OK);
     turbo_agent_policy_t policy = turbo_agent_policy_default();
     policy.allow_delegate = 1; policy.allow_runtime_tools = 1;

@@ -144,7 +144,7 @@ static int no_transport(const char *request, char **response, void *user) {
 }
 static int inspect_callback(const json_value_t *arguments, json_value_t **out, void *user) {
   fixture_t *f = user;
-  json_value_t *records = NULL;
+  json_value_t *records = NULL, *ok;
   int valid;
   *out = NULL;
   ++f->callbacks;
@@ -156,7 +156,9 @@ static int inspect_callback(const json_value_t *arguments, json_value_t **out, v
   /* Instrumentation observes callback entry; this does not admit WRITE tools. */
   if (f->inject && !strcmp(f->cut->name, "in_callback")) _Exit(FIXTURE_CRASH);
   *out = json_create_object();
-  if (!*out || turbo_runtime_json_object_set(*out, "ok", json_create_bool(1))) {
+  ok = json_create_bool(1);
+  if (!*out || !ok || turbo_runtime_json_object_set(*out, "ok", ok)) {
+    json_free(ok); /* The checked setter transfers ownership only on success. */
     json_free(*out); *out = NULL; return -1;
   }
   return 0;

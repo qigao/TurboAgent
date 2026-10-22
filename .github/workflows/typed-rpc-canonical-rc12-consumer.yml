@@ -4,6 +4,8 @@ name: TurboAgent current-main Typed RPC installed canonical-Unicode rc.12 candid
   pull_request:
     paths:
       - '.github/workflows/typed-rpc-canonical-rc12-consumer.yml'
+      - 'agent/CMakeLists.txt'
+      - 'agent/tests/rpc_generated/**'
   workflow_dispatch:
 
 permissions:

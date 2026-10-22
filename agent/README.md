@@ -26,6 +26,21 @@ The native [Tool Journal process-crash regressions](docs/tool-journal-process-cr
 exercise abrupt exit/restart at planned, started, effect, commit and pre-delivery
 boundaries, retaining unknown effects for explicit reconciliation.
 
+The shared ToolNode validates declared `strict_result` contracts before publishing
+successful tool output to the model, including committed Journal replay. The
+RuntimeTools-owned validator checks the final text after Host middleware and
+guardrails; invalid, missing or unsupported results become a fixed
+`tool_result_contract_invalid` error. Checked Router calls keep their stronger
+requirement for an explicit result contract and their invalid-result outcome.
+Opaque and non-strict results retain ordinary loop compatibility, and direct
+trusted Host RuntimeTools calls retain their explicit validation API.
+
+The Journal records the original callback outcome before presentation hooks.
+A rejected presentation does not roll back effects, erase the committed record,
+or redispatch the callback. Replay rechecks current Host policy and validates the
+result again; it cannot turn a prior successful callback into proof of a valid
+result. This shared Agent-loop gate does not establish full backend parity (#73).
+
 The [Session Inbox process-crash regressions](docs/session-inbox-process-crash.md)
 check durable input application separately from workflow completion and delivery,
 including a later Run that publishes a different thread head.

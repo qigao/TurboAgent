@@ -6,6 +6,11 @@
 #include <stdatomic.h>
 #include <stdio.h>
 
+/* Private synchronous Host seam, not an installed API or a command-line flag.
+ * Request strings are borrowed only for this call. 1 approves this exact call,
+ * 0 rejects, negative aborts. NULL selects the stdin challenge/response UI. */
+typedef int (*turbo_cli_approval_fn)(const json_value_t *request, void *user_data);
+
 typedef struct turbo_cli_options_s {
   const char *workspace;
   const char *prompt;
@@ -30,7 +35,9 @@ typedef struct turbo_cli_options_s {
   const char *embedding_model;
   const char *workflow; /* NULL/loop, review, engineering; independent of mode. */
   /* Private CLI-only trust choice; NULL defaults to inspect (no shell/write). */
-  const char *trust_profile; /* inspect | trusted-local; approval requires a future real host callback. */
+  const char *trust_profile; /* inspect | approval (coding loop only) | trusted-local. */
+  turbo_cli_approval_fn approval;
+  void *approval_user_data;
 } turbo_cli_options_t;
 
 /* Process entry only: CmdParser prints help/errors to stdout and exits with 1.

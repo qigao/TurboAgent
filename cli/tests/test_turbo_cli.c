@@ -347,7 +347,7 @@ spec("coding agent CLI") {
     tstr_free(root);
   }
 
-  it("should reject implicit approval and contradictory trusted-local authority before any model call") {
+  it("should reject contradictory trust choices before any model call") {
     tstr root = cli_workspace();
     turbo_cli_options_t options = {.workspace = root, .prompt = "inspect"};
     turbo_agent_config_t config = {0};
@@ -355,7 +355,7 @@ spec("coding agent CLI") {
     FILE *input = tmpfile(), *output = tmpfile(), *diagnostics = tmpfile();
     check_not_null(root); check_not_null(input); check_not_null(output); check_not_null(diagnostics);
     config.model = "test-model"; config.transport_fn = cli_model; config.transport_user_data = &model;
-    options.trust_profile = "approval";
+    options.trust_profile = "approval"; options.read_only = 1;
     check_equal(turbo_cli_run(&options, input, output, diagnostics, &config, NULL), 2);
     check_equal(model.calls, 0u);
     options.trust_profile = "trusted-local"; options.read_only = 1;

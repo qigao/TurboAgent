@@ -45,4 +45,10 @@ if(BUILD_TESTS)
   cmake_add_test(SOURCES ${TEST_SOURCES}
     LIBS TurboAgent::Agent Salts::TinyTest
     INCLUDES include tests FOLDER "Agent/tests")
+
+  # Real installed-SDK Typed RPC fixture: generated C11 client/server plus a
+  # separate Provider DSO. Keep it out of cross-compilation profiles.
+  if(NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory(tests/rpc_generated)
+  endif()
 endif()

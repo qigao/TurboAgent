@@ -226,7 +226,7 @@ static int evidence(fixture_t *f, const char *expected_status) {
   if (f->cut->owner_event) {
     REQUIRE(n == SALTS_OK && record);
     REQUIRE(!turbo_agent_runtime_get_thread_head_state_json_value(f->runtime, THREAD_ID, &head));
-  } else REQUIRE(n == SALTS_ENOENT && !record);
+  } else REQUIRE(n == SALTS_EBUSY && !record);
   json_free(record);
   event = find_event(owner, id);
   valid = !!event == f->cut->owner_event && !!find_event(head, id) == f->cut->head_event;

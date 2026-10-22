@@ -45,8 +45,10 @@ failure, owning-Run read failure, foreign thread ownership and malformed owning
 state, and verify errors leave the durable payload/transition intact. Queued inputs can be explicitly claimed/requeued; applied inputs cannot
 be claimed again. Another process checks the recovered state remains stable.
 
-At the two early cuts, the claim is durable while no Run/head has been published.
-The verifier requires typed ENOENT for those records, not an arbitrary read error.
+At the two early cuts, the claim is durable before a Run snapshot is persisted.
+The verifier requires typed ENOENT for that Run and EBUSY for the already-adopted
+head with no published segment, as specified by the public head API. Neither is
+an arbitrary read error or permission to start another workflow.
 
 The compiled Inspect Session-finalization unit fixture also uses a real Session
 Run to create/bind its Inbox event. It does not bind a fabricated event that was

@@ -10,6 +10,7 @@
 #include "turbo_agent_workflow_graph_internal.h"
 
 #include "turbo_tool_registry.h"
+#include "turbo_tool_schema.h"
 #include <fmt.h>
 
 #include <stdio.h>
@@ -105,8 +106,8 @@ static int turbo_agent_tool_calls_preflight(const turbo_tool_registry_t *registr
   return SALTS_OK;
 }
 
-int turbo_agent_tool_node_scoped(turbo_graph_exec_ctx_t *ctx, void *user_data,
-                                 const char *scope) {
+static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_data,
+                                     const char *scope, int *out_outcome) {
   turbo_agent_t *agent = (turbo_agent_t *)user_data;
   const json_value_t *tool_calls;
   turbo_agent_tool_execution_t *calls = NULL;
@@ -118,6 +119,8 @@ int turbo_agent_tool_node_scoped(turbo_graph_exec_ctx_t *ctx, void *user_data,
   tstr local_turn_key = NULL, scoped_turn_key = NULL;
   int guardrail_rejected = 0;
   int rc = -1;
+
+  if (out_outcome) *out_outcome = TURBO_AGENT_TOOL_CHECK_OK;
 
   if (!ctx || !ctx->state || !agent) return -1;
   tool_calls = turbo_agent_last_model_tool_calls(ctx->state);
@@ -316,6 +319,20 @@ int turbo_agent_tool_node_scoped(turbo_graph_exec_ctx_t *ctx, void *user_data,
       calls[index].output = guardrail_output;
       calls[index].status = TURBO_TOOL_ERROR;
     }
+    if (out_outcome) {
+      if (calls[index].status != TURBO_TOOL_OK) {
+        if (*out_outcome == TURBO_AGENT_TOOL_CHECK_OK)
+          *out_outcome = TURBO_AGENT_TOOL_CHECK_FAILED;
+      } else {
+        json_value_t *result = calls[index].output
+            ? json_parse(calls[index].output, strlen(calls[index].output)) : NULL;
+        if (!result || turbo_tool_schema_validate_result_json_value(
+                agent->tool_registry, calls[index].tool_name, result, NULL, 0) !=
+                    TURBO_TOOL_SCHEMA_VALID)
+          *out_outcome = TURBO_AGENT_TOOL_CHECK_INVALID_RESULT;
+        json_free(result);
+      }
+    }
     turbo_agent_emit_trace(agent, ctx->state, TURBO_AGENT_TRACE_TOOL_RESULT, calls[index].tool_name,
                            calls[index].call_id, calls[index].output, (int)calls[index].status);
     output_item =
@@ -348,6 +365,17 @@ cleanup:
   turbo_agent_tool_executions_destroy(calls, count);
   tstr_free(scoped_turn_key); tstr_free(local_turn_key);
   return rc;
+}
+
+int turbo_agent_tool_node_scoped(turbo_graph_exec_ctx_t *ctx, void *user_data,
+                                 const char *scope) {
+  return turbo_agent_tool_node_run(ctx, user_data, scope, NULL);
+}
+
+int turbo_agent_tool_node_checked(turbo_graph_exec_ctx_t *ctx, void *agent,
+                                  int *out_outcome) {
+  if (!out_outcome) return SALTS_EINVAL;
+  return turbo_agent_tool_node_run(ctx, agent, NULL, out_outcome);
 }
 
 int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {

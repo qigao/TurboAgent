@@ -1021,9 +1021,11 @@ a more obvious `create_agent(...).invoke(...)`-style entrypoint.
 
 The [tiered model Router](docs/tiered-model-router.md) adds explicit planning/execution
 model selection over existing Execution and Runtime owners, with estimated-budget
-admission, Host heartbeat supervision and generation-checked delivery. Its first
-slice runs a single model node and returns tool proposals for separate authorization.
-It does not implement a multi-worker coding loop or durable worker takeover.
+admission, Host heartbeat supervision and generation-checked delivery. The original
+single-model path returns proposals for separate authorization. An opt-in bounded
+tool loop now uses Host tool policy/guardrails, checkpoint approval/resume and
+explicit result validation. A shared Host tool lane is serialized; multi-worker
+aggregation and durable worker takeover remain separate acceptance work.
 
 For composition inside larger graphs and tool runtimes, `Runtime V2` now also
 adds:

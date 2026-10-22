@@ -15,6 +15,8 @@ extern "C" {
 #define TURBO_AGENT_ROUTER_MAX_REVIEW_RESUMES 32u
 #define TURBO_AGENT_ROUTER_GROUP_MAX_TEXT_BYTES 65536u
 #define TURBO_AGENT_ROUTER_GROUP_MAX_INPUT_BYTES 1048576u
+#define TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION "router_observations"
+#define TURBO_AGENT_ROUTER_OBSERVATION_MAX_BYTES 16384u
 
 typedef struct turbo_agent_router_s turbo_agent_router_t;
 typedef struct turbo_agent_router_task_s turbo_agent_router_task_t;
@@ -173,6 +175,55 @@ CXX_C_API int turbo_agent_router_task_heartbeat(turbo_agent_router_task_t *task,
 /** Owned diagnostic view, not another durable run/result store. */
 CXX_C_API int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *task,
                                               json_value_t **out_view);
+/**
+ * Persist one immutable, versioned Host supervision observation through an
+ * existing Runtime Store's atomic create-if-absent operation. id uses the
+ * Router 1..64 ASCII letter/digit/_/- format; each observation needs a distinct
+ * Host-selected id. The store must be independent of every Router endpoint
+ * Runtime. Host serializes this operation and all other use of that store.
+ *
+ * Records selected route/task/segment/thread/parent identity, actual Execution
+ * status/result code, terminal Runtime anchors when available, liveness and
+ * captured-authority validity. No prompt, answer, tool arguments/results, raw
+ * Runtime state, policy grant or resumable handle is persisted. Before terminal,
+ * result code/anchors are null. Observe terminal before take_result(): EALREADY
+ * after a segment's result was moved. Group-owned tasks permit this read-only
+ * observation through a retained alias, only before group release.
+ *
+ * Returns OK, EINVAL, ENOMEM, EPROTO (invalid canonical metadata), ENOBUFS
+ * (identity/model/provider bounds or >16 KiB serialized record), EALREADY for an
+ * existing id, ENOTSUP without atomic create, or the backend error unchanged.
+ * No overwrite, read/list fallback, retry, cancellation or delivery occurs.
+ * A backend error may follow a committed write: explicitly load the same id to
+ * reconcile and compare expected task/segment/lineage; an older colliding record
+ * is not acknowledgement of this observation. Do not assume absence. Failure
+ * leaves task/result ownership intact.
+ *
+ * This is an explicit observation after admission, not durable admission or a
+ * complete audit. A crash before this call can leave unrecorded work. Durability,
+ * capacity and synchronization follow the selected backend (SQLite supports
+ * committed records; memory is volatile). No cross-record/tool transaction.
+ * A stored observation is historical, never current liveness, authority,
+ * completed delivery, effect certainty or permission to resume/retry. Monotonic
+ * clocks belong to the origin process; timestamps do not order different records.
+ */
+CXX_C_API int turbo_agent_router_task_record_observation(
+    const turbo_agent_router_task_t *task, turbo_agent_runtime_t *host_runtime,
+    const char *id);
+/**
+ * Load exactly one observation by id from a trusted Host Runtime Store, validate
+ * schema/identity/size and return an owned JSON tree. No Router/Agent is needed
+ * after restart. This starts no work and changes no execution/delivery state.
+ * out_record is cleared on entry; release success with json_free(). Returns
+ * OK, EINVAL, EPROTO, ENOBUFS, ENOMEM or backend status unchanged (including
+ * ENOENT). A missing observation does not prove that work/effects never started.
+ * Host must reconcile with canonical Runtime/Journal evidence and current
+ * authority before any explicit recovery; #74's unknown-effect gate still applies.
+ * Example: record_observation(task, host_runtime, host_id); check rc; after
+ * reopening that store, load_observation(host_runtime, host_id, &record).
+ */
+CXX_C_API int turbo_agent_router_load_observation(turbo_agent_runtime_t *host_runtime,
+    const char *id, json_value_t **out_record);
 /**
  * Move Runtime summary/state once per segment after terminal. API success means ownership
  * transfer, not execution success. Inspect Execution status/runtime_result_code

@@ -688,6 +688,15 @@ vcpkg entries. Salts owns its crypto provider. Journal SHA-256 still hashes
 `first + NUL + second`; context SHA-256 still hashes the exact serialized bytes.
 The fixed journal regression passed with both the former and new implementations.
 
+The unused historical `vendor/cjwt` source, examples and tests have been removed.
+Neither the root build nor `vendor/CMakeLists.txt` used it; retaining its separate
+OpenSSL discovery and link requirements obscured the active dependency contract.
+This cleanup does not remove GmSSL from the manifest: the published Chttp Crypto
+component still requires that private provider closure. SDK/provider provenance
+and final installed-consumer qualification remain separate release gates (#69,
+#71). Historical OpenSSL examples in repository skill documentation are not
+compiled production source or package dependency declarations.
+
 ## SQLite RuntimeStore and CLI publication
 
 Persistent conversations need committed record writes and one authoritative

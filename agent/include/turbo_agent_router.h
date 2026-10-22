@@ -195,7 +195,9 @@ CXX_C_API int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *t
  * existing id, ENOTSUP without atomic create, or the backend error unchanged.
  * No overwrite, read/list fallback, retry, cancellation or delivery occurs.
  * A backend error may follow a committed write: explicitly load the same id to
- * reconcile; do not assume absence. Failure leaves task/result ownership intact.
+ * reconcile and compare expected task/segment/lineage; an older colliding record
+ * is not acknowledgement of this observation. Do not assume absence. Failure
+ * leaves task/result ownership intact.
  *
  * This is an explicit observation after admission, not durable admission or a
  * complete audit. A crash before this call can leave unrecorded work. Durability,

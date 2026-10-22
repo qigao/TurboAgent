@@ -22,7 +22,11 @@ put/get/list is never substituted. Saving does not retry or read after failure.
 
 A backend can commit and then return an error. That error is propagated unchanged;
 the Host must explicitly load the same id to learn whether its record exists. Absence
-does not prove that work/effects never started. The API changes no task state, takes
+does not prove that work/effects never started. A found record can belong to an older
+colliding task: compare task/current Execution/thread/parent identities with the
+expected invocation before accepting it as the attempted observation. EALREADY is
+a conflict, not an acknowledgement that the requested observation was recorded.
+The API changes no task state, takes
 no result, admits no work and requests no cancellation. It can therefore fail while
 the original task remains owned and running; the Host must still supervise and drain it.
 

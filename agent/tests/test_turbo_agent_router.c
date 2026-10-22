@@ -598,6 +598,25 @@ spec("bounded tiered model Router") {
     check_equal(audit.creates, 2); check_equal(atomic_load(&transport[2].calls), 1);
   }
 
+  it("keeps a colliding record bound to its original task rather than acknowledging a different task") {
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_record_observation(task, audit_runtime, "collision"), SALTS_OK);
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "collision", &view), SALTS_OK);
+    check_equal(turbo_agent_router_task_release(task), SALTS_OK); task = NULL;
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_true(strcmp(json_get_string(view, "task_id"), turbo_agent_router_task_id(task)) != 0);
+    check_equal(turbo_agent_router_task_record_observation(task, audit_runtime, "collision"), SALTS_EALREADY);
+    json_value_t *again = NULL;
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "collision", &again), SALTS_OK);
+    check_equal(json_get_string(view, "task_id"), json_get_string(again, "task_id"));
+    check_true(strcmp(json_get_string(again, "task_id"), turbo_agent_router_task_id(task)) != 0);
+    json_free(again);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(atomic_load(&transport[2].calls), 2); check_equal(audit.puts, 0);
+  }
+
   it("rejects a backend without atomic create even when ordinary put is available") {
     turbo_agent_runtime_destroy(audit_runtime); audit_runtime = router_audit_runtime(&audit, 0);
     check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);

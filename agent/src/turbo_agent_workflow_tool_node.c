@@ -331,6 +331,33 @@ static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_dat
       calls[index].output = guardrail_output;
       calls[index].status = TURBO_TOOL_ERROR;
     }
+    /* A callback may have committed before cancellation, and replay bypasses
+     * callback entry entirely. Recheck control after Host hooks at the shared
+     * presentation boundary. Preserve the Journal and any already-unknown
+     * effect status; cancellation cannot roll back an observed callback. */
+    if (calls[index].status == TURBO_TOOL_OK && saved_context.cancel_token) {
+      int stopped = turbo_cancel_token_check(saved_context.cancel_token);
+      if (stopped != SALTS_OK) {
+        turbo_tool_status_t status = stopped == SALTS_ETIMEDOUT
+            ? TURBO_TOOL_DEADLINE_EXCEEDED : stopped == SALTS_ECANCELED
+            ? TURBO_TOOL_CANCELLED : TURBO_TOOL_ERROR;
+        const char *reason = turbo_agent_tool_status_reason(status);
+        char *error = turbo_agent_format_tool_error(calls[index].tool_name, reason);
+        if (!error) {
+          turbo_agent_state_set_model_error(ctx->state, "tool",
+                                            "failed to format stopped tool result");
+          rc = -1;
+          goto cleanup;
+        }
+        free(calls[index].output);
+        calls[index].output = error;
+        calls[index].status = status;
+        guardrail_rejected = 1;
+        turbo_agent_state_set_guardrail_rejection(ctx->state, "tool_result", reason);
+        turbo_agent_emit_trace(agent, ctx->state, TURBO_AGENT_TRACE_GUARDRAIL_REJECTED,
+            "tool_result", reason, calls[index].tool_name, -1);
+      }
+    }
     if (calls[index].status != TURBO_TOOL_OK) {
       if (out_outcome && *out_outcome == TURBO_AGENT_TOOL_CHECK_OK)
         *out_outcome = TURBO_AGENT_TOOL_CHECK_FAILED;

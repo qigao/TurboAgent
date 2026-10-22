@@ -22,7 +22,7 @@ struct report_fixture_s {
   single_agent_report_config_t config;
   document_render_catalog_t catalog;
   atomic_int tool_calls, authority_calls;
-  int approval, reviews, context_ok, bad_receipt, no_tool, fail_index, proposal_index, revoke, nul_aggregate;
+  int approval, reviews, context_ok, bad_receipt, no_tool, fail_index, proposal_index, revoke, nul_aggregate, late_review;
 };
 
 static char *report_copy(const char *text) {
@@ -111,6 +111,10 @@ static int report_host_review(const json_value_t *summary, const json_value_t *s
     policy.allow_delegate = 1; policy.allow_runtime_tools = 1;
     int rc = turbo_agent_set_tool_policy(f->agents[f->revoke == 1 ? 4 : 3], &policy);
     if (rc) return -1;
+  }
+  if (f->late_review) {
+    uint64_t until = cmeta_monotonic_ms() + f->config.timeout_ms;
+    while (cmeta_monotonic_ms() <= until) cmeta_thread_yield();
   }
   return f->approval;
 }
@@ -332,6 +336,14 @@ spec("one Host goal composed from different model workers") {
     check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ERANGE);
     check_null(delivery); check_equal(phase, "admission");
     for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
+  }
+
+  it("rejects an approval returned after the Host deadline before any resumed tool or model call") {
+    f.config.timeout_ms = 1000; f.late_review = 1;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ETIMEDOUT);
+    check_null(delivery); check_equal(phase, "approval"); check_equal(f.reviews, 1);
+    check_true(f.context_ok); check_equal(atomic_load(&f.tool_calls), 0);
+    check_equal(atomic_load(&f.models[3].calls), 1);
   }
 
   it("rejects an oversized Host context packet before model admission") {

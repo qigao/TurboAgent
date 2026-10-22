@@ -20,7 +20,10 @@ The Host reserves the sum of two worker request budget ceilings, one aggregation
 ceiling and the two-turn tool-loop ceiling before admission. These are estimates,
 not actual billing or a hard spend limit. One monotonic deadline covers all stages,
 including time spent reviewing. Each admitted segment receives only the remaining
-time; approval never resets it. The local synchronous example uses that deadline as
+time through the Router's relative-timeout admission API; approval never resets it.
+The Host also rejects a late review decision before resume admission. This is
+cooperative execution control, not a precise wall-clock stop guarantee. The local
+synchronous example uses that deadline as
 its heartbeat/liveness bound and polls in short wait slices without inventing provider
 heartbeats. Distributed workers need their own authenticated liveness integration.
 
@@ -47,6 +50,9 @@ callback runs on the serialized Host after all current executions are terminal,
 borrowing summary/state only until it returns. Approval resumes the canonical checkpoint;
 rejecting or aborting performs no tool effect. Only one accepted approval is supported
 by this example; another approval request or failure stops instead of replanning.
+The synchronous review callback (including the executable's terminal input) can wait
+past the deadline; it installs no background UI timer. A late response is rejected
+before resume. A production UI should bound its own wait and support cancellation.
 The original Host authority generation spans the whole task, and Router checks each
 child generation. Policy replacement remains quiescent. A same-grant replacement
 at the terminal review boundary invalidates further execution; no runtime callback changes policy.

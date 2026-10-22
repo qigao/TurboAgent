@@ -276,6 +276,9 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
     if (turbo_agent_tool_authority_snapshot_is_current(config->authority, &authority) != 1) {
       rc = SALTS_EPERM; goto done;
     }
+    /* A synchronous UI may return late. Reject that decision before resume
+     * admission, independently of the Router's relative admission clock. */
+    if (cmeta_monotonic_ms() >= deadline) { rc = SALTS_ETIMEDOUT; goto done; }
     rc = turbo_agent_router_task_review(task, config->pool, approved);
     if (!rc) rc = single_agent_report_wait(task, deadline);
     if (rc) goto done;

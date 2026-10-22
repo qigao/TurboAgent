@@ -240,7 +240,7 @@ spec("bounded tiered model Router") {
   it("requires delegation and never widens Host grants to match a child") {
     grant.allow_delegate = 0;
     check_equal(turbo_agent_set_tool_policy(agents[0], &grant), 0);
-    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_EACCES);
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_EPERM);
     check_null(task);
     grant.allow_delegate = 1;
     check_equal(turbo_agent_set_tool_policy(agents[0], &grant), 0);
@@ -340,7 +340,7 @@ spec("bounded tiered model Router") {
       check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
       turbo_agent_policy_t policy = child ? turbo_agent_policy_default() : grant;
       check_equal(turbo_agent_set_tool_policy(agents[child ? 2 : 0], &policy), 0);
-      check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_EACCES);
+      check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_EPERM);
       check_null(summary); check_null(state);
       check_equal(atomic_load(&transport[2].calls), 1);
     }

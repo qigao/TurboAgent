@@ -120,7 +120,7 @@ static int router_authority_current(const turbo_agent_router_task_t *task) {
 
 static int router_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   turbo_agent_router_task_t *task = user_data;
-  if (!router_authority_current(task)) return SALTS_EACCES;
+  if (!router_authority_current(task)) return SALTS_EPERM;
   return turbo_agent_model_node(ctx, task->endpoint->config.agent);
 }
 
@@ -196,7 +196,7 @@ int turbo_agent_router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *
       !input || json_type(input) != JSON_OBJECT) return SALTS_EINVAL;
   if (turbo_agent_tool_authority_snapshot_get(router->authority_agent, &parent) != 0 ||
       !(parent.capability_mask & TURBO_AGENT_TOOL_AUTHORITY_CAPABILITY_BIT(
-                                    TURBO_AGENT_POLICY_CAPABILITY_DELEGATE))) return SALTS_EACCES;
+                                    TURBO_AGENT_POLICY_CAPABILITY_DELEGATE))) return SALTS_EPERM;
   for (i = 0; i < router->count; ++i) {
     router_endpoint_t *endpoint = &router->endpoints[i];
     const turbo_agent_router_endpoint_t *e = &endpoint->config;
@@ -337,7 +337,7 @@ int turbo_agent_router_task_take_result(turbo_agent_router_task_t *task,
   if (task->taken) return SALTS_EALREADY;
   if (turbo_agent_execution_wait(task->execution, 0) != SALTS_OK) return SALTS_EBUSY;
   if (task->unresponsive) return SALTS_ECANCELED;
-  if (!router_authority_current(task)) return SALTS_EACCES;
+  if (!router_authority_current(task)) return SALTS_EPERM;
   rc = turbo_agent_execution_take_result(task->execution, out_summary, out_state);
   if (rc == SALTS_OK) task->taken = 1;
   return rc;

@@ -94,7 +94,7 @@ CXX_C_API int turbo_agent_router_destroy(turbo_agent_router_t *router);
  * heartbeat interval <= timeout, and Host thread/parent-run identity are required.
  * Token counts/prices are admission estimates, not a billing or token hard cap.
  * Configure backend output bounds, cooperative cancellation and retries explicitly.
- * Returns EACCES for missing delegation, ENOENT for no qualified affordable
+ * Returns EPERM for missing delegation, ENOENT for no qualified affordable
  * endpoint, EBUSY if qualified endpoints are occupied, or Executor admission
  * errors unchanged. *out_task is NULL on rejection; no alternative is retried.
  */
@@ -123,7 +123,7 @@ CXX_C_API int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *t
 /**
  * Move canonical summary/state once after terminal. Check the summary/status:
  * API success does not establish task completion or validate a model's answer.
- * EBUSY before terminal; EALREADY after take; EACCES for stale authority;
+ * EBUSY before terminal; EALREADY after take; EPERM for stale authority;
  * ECANCELED for an unresponsive child, with NULL outputs on every rejection.
  * Rejected results remain inspectable in the endpoint's existing Runtime by
  * thread/run identity. Policy checks require quiescence. No rejected output is

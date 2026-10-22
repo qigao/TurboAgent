@@ -10,7 +10,7 @@ target_link_libraries(test_turboagent_typed_rpc PRIVATE
   CHttp::Server CHttp::Client Salts::DataBind Salts::CMeta Salts::TinyTest)
 target_include_directories(test_turboagent_typed_rpc PRIVATE
   "${turboagent_typed_rpc_GENERATED_DIR}"
-  "${PROJECT_SOURCE_DIR}/agent/tests")
+  "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_dependencies(test_turboagent_typed_rpc
   turboagent_typed_rpc_idl_codegen)
 set_target_properties(test_turboagent_typed_rpc PROPERTIES

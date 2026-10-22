@@ -198,22 +198,38 @@ static turbo_agent_runtime_store_t compiled_inspect_store_fail_phase(const char 
   return store;
 }
 
-static turbo_agent_harness_t *make_compiled_harness_with_store(
+static turbo_agent_harness_t *make_compiled_harness_with_transport(
     cmeta_threadpool_t *pool, turbo_tool_registry_t *registry,
-    turbo_agent_runtime_store_t runtime_store) {
+    turbo_agent_runtime_store_t runtime_store, turbo_agent_transport_fn transport) {
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t config;
   session_config.thread_id = COMPILED_INSPECT_TEST_THREAD_ID;
   session_config.runtime_store = runtime_store;
   session_config.agent_config.model = "gpt-5.4";
-  session_config.agent_config.transport_fn = compiled_harness_transport;
+  session_config.agent_config.transport_fn = transport;
   session_config.agent_config.tool_registry = registry;
   app_config.session_config = &session_config;
   turbo_agent_harness_config_init(&config);
   config.app_config = &app_config;
   config.executor = pool;
   return turbo_agent_harness_create(&config);
+}
+
+static turbo_agent_harness_t *make_compiled_harness_with_store(
+    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry,
+    turbo_agent_runtime_store_t runtime_store) {
+  return make_compiled_harness_with_transport(pool, registry, runtime_store,
+      compiled_harness_transport);
+}
+
+static int compiled_inbox_prepare_transport(const char *request, char **response, void *user) {
+  static const char result[] = "{\"id\":\"inbox_prepare\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"prepared\"}]}]}";
+  (void)request; (void)user;
+  *response = malloc(sizeof(result));
+  if (!*response) return -1;
+  memcpy(*response, result, sizeof(result));
+  return 0;
 }
 
 static turbo_agent_harness_t *make_compiled_harness(
@@ -810,7 +826,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_agent_compile_diagnostic_t diagnostic = {0};
     turbo_tool_status_t tool_status = TURBO_TOOL_OK;
     json_value_t *message = json_create_object();
-    json_value_t *claim = NULL;
+    json_value_t *prepare_summary = NULL;
+    json_value_t *prepare_state = NULL;
     json_value_t *result = NULL;
     json_value_t *certificate = NULL;
     json_value_t *journal_records = NULL;
@@ -825,7 +842,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_not_null(message);
     check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1),
                 TURBO_TOOL_OK);
-    harness = make_compiled_harness_with_store(pool, registry, store);
+    harness = make_compiled_harness_with_transport(pool, registry, store,
+        compiled_inbox_prepare_transport);
     check_not_null(harness);
     check_equal(set_compiled_host_policy(harness, 1), 0);
     attach_compiled_probe_runtime(harness, &probe);
@@ -839,13 +857,24 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     check_equal(turbo_agent_session_enqueue(
         session, TURBO_AGENT_INBOX_STEER, message, 0, &inbox_id), SALTS_OK);
     check_not_null(inbox_id);
-    check_equal(turbo_agent_session_inbox_claim(
-        session, TURBO_AGENT_INBOX_STEER, "compiled-inspect-finalization-test", &claim), SALTS_OK);
-    check_not_null(claim);
-    /* Give the active claim a bound event so the real Session finalizer must
-     * persist its applied transition after the compiled attempt is committed. */
-    check_equal(turbo_agent_session_inbox_bind_applied_event(
-        session, inbox_id, "compiled-inspect-finalization-event"), SALTS_OK);
+    /* Let the real before-turn hook add/bind the Inbox event to a Run state.
+     * The injected applied-write failure leaves that legitimate bound claim
+     * available for the subsequent compiled Run's finalization retry. */
+    check_equal(turbo_agent_session_start_text(session, "prepare Inbox event", NULL,
+        &prepare_summary, &prepare_state), SALTS_EIO);
+    check_not_null(prepare_summary);
+    check_not_null(prepare_state);
+    {
+      const json_value_t *events = json_object_get(prepare_state, "events");
+      size_t i;
+      int found = 0;
+      for (i = 0; i < json_array_size(events); ++i) {
+        const json_value_t *event = json_array_get(events, i);
+        const char *id = json_get_string(event, "inbox_id");
+        if (id && !strcmp(id, inbox_id) && json_get_string(event, "event_id")) found = 1;
+      }
+      check_true(found);
+    }
 
     run_rc = run_compiled_inspect_attempt(harness, "finalization-replay",
         compiled_inspect_source, allowed, 1, &diagnostic, &tool_status,
@@ -973,7 +1002,8 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     turbo_runtime_json_destroy(journal_records);
     journal_records = NULL;
 
-    turbo_runtime_json_destroy(claim);
+    turbo_runtime_json_destroy(prepare_summary);
+    turbo_runtime_json_destroy(prepare_state);
     json_free(message);
     free(inbox_id);
     json_free(result);

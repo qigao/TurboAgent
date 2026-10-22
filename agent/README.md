@@ -26,6 +26,10 @@ The native [Tool Journal process-crash regressions](docs/tool-journal-process-cr
 exercise abrupt exit/restart at planned, started, effect, commit and pre-delivery
 boundaries, retaining unknown effects for explicit reconciliation.
 
+The [Session Inbox process-crash regressions](docs/session-inbox-process-crash.md)
+check durable input application separately from workflow completion and delivery,
+including a later Run that publishes a different thread head.
+
 Workspace operations belong to the optional `TurboAgent::CodingTools` target,
 which provides bounded `fs.read`, `fs.list`, `fs.search`, `fs.write`, `fs.edit`
 and shell command tools. Hosts explicitly select the admitted tools **and**

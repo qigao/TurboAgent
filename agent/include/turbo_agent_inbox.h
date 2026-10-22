@@ -44,6 +44,12 @@ typedef struct turbo_agent_inbox_config_s {
  * and max_items/max_total_bytes include queued plus claimed records.
  * max_follow_ups_per_execution bounds automatically chained turns. The session
  * must have an explicit or previously captured thread id.
+ * Recovery reconciles a claimed input with its claimed_by_run_id's persisted
+ * state, even when a later Run has replaced the thread head. Missing events
+ * requeue the input; storage errors or mismatched Run ownership fail closed.
+ * APPLIED describes input consumption, not workflow completion or tool success.
+ * Serialize configuration with conflicting Runtime mutations; recovery is not
+ * an atomic query across multiple records or concurrent Inbox owners.
  */
 CXX_C_API int turbo_agent_session_inbox_configure(turbo_agent_session_t *session,
                                                   const turbo_agent_inbox_config_t *config);

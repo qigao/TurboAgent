@@ -192,3 +192,94 @@ invalidation, child/Host permission, replay result validation, unknown effects,
 result middleware, turn bounds, bounded queue rejection and liveness/deadline gates.
 No paid-model quality, durable supervision, remote loss recovery or multi-worker
 acceptance claim is made; #213 remains open for those remaining gates.
+
+## Bounded worker groups and explicit aggregation
+
+The next slice adds a Host-owned group for 2..16 **model-only** Router tasks. Submit
+reviewed subtasks through the existing `submit()` API, using distinct thread ids and
+one common parent run id, then pass the accepted handle array to `group_adopt()`.
+Successful adoption clears those array slots and transfers every task to the group;
+rejection leaves every slot unchanged. An adopted task cannot be taken, cancelled,
+polled or released through an old alias. Group release waits for all actual terminal
+states and releases all endpoint reservations together. Read-only task inspection
+and waiting do not transfer ownership.
+
+This is a deliberate alternative to adding a batch scheduler or another supervisor
+Runtime. The current supervisor/handoff scaffold routes nodes inside one graph, while
+a Router group supervises independent existing Executions and Runtime stores. The
+Host's existing bounded pool supplies the parallelism. No worker, queue, admission
+retry, lease takeover, copied Runtime state or durable group database is added.
+The group keeps bounded handles and supervision facts; Execution remains the sole
+result owner. A private terminal-result borrow supports synchronous inspection only
+under exclusive Host ownership, ending at take/release, without a concurrent lease.
+Existing callers and config layouts remain compatible; rollback is to keep using
+individual Router tasks.
+
+Adoption is **not atomic batch admission**. If the second submit is rejected after the
+first was accepted, the first still belongs to the Host. The Host must cancel/wait/
+release it or explicitly retain it; a failed adoption never detaches it. Reserve all
+worker estimates and any aggregation estimate in the Host's task budget before
+submitting. The group reports the sum of admitted estimates but makes no retroactive
+budget, actual billing or rollback claim. Endpoint reservations persist even after a
+worker finishes, so another submitted task cannot silently reuse its Agent/store.
+
+`group_poll()` observes every member at one Host monotonic timestamp. An observed
+loss, authority invalidation, Provider failure, cancellation/deadline or unresolved
+tool proposal records a sticky failure and requests parent cancellation of siblings.
+Polling is explicit: there is no background supervision thread. A member heartbeat
+first polls the entire group, so repeatedly renewing one member cannot hide another's
+expiry. Late heartbeats cannot revive a failed group. `group_wait()` applies one total
+wait budget; success means all terminal, including failures. It does not renew
+heartbeats or prove external effects stopped. The Host must keep polling/renewing
+live members according to each admitted interval, including when work is queued.
+
+`group_build_input(group, host_task, &input)` is a fail-closed fan-in projection, not
+an automatic aggregation model call. All members must be terminal, responsive under
+the Host's observations, authorized under their captured parent/child generations,
+and successful with nonempty model text, no pending tools and no failure state. The
+projection includes group/task/endpoint/thread/Runtime run/checkpoint/parent identity
+and actual model text in adoption order, regardless of completion order. Model claims
+that another worker finished are never used to establish this barrier.
+
+The returned Session-compatible input carries a JSON evidence bundle in a **user
+message**. Worker text is untrusted data, not system instructions or tool authority.
+The Host chooses and configures the aggregation model and its trusted instructions
+separately, then explicitly calls ordinary Router `submit()` with a PLAN request.
+The executable integration test exercises two real offline model workers concurrently
+and sends their canonical evidence to a third independently routed aggregation model.
+This supports parallel analysis, alternative solution drafts and engineering task
+reviews. It does not establish answer quality, a correct code change, majority
+consensus, or completed external work. The aggregation result must still be checked
+and any tool proposal needs the normal Host-authorized execution path.
+
+Both `host_task` and each worker text are limited to 64 KiB. Serialized evidence is
+limited to 1 MiB, including JSON escaping and identity fields. Oversize input fails
+without truncation or consuming canonical results. Building succeeds at most once;
+results are still owned by Execution. `group_take_results()` transfers each original
+summary/state pair once into a caller-provided array after a full terminal/authority/
+loss preflight. Pairs retain adoption order, and the returned count always reports
+actual transfers. Transfer success alone does not mean execution success: diagnostic
+collection after failed/cancelled runs can include a NULL summary and failure state.
+Loss or stale authority withholds the whole collection before any transfer.
+
+The aggregate input is an immediate owned projection, not a second retained result
+store. A policy change after it was delivered cannot recall that already owned data,
+but blocks a later raw-result collection. Policy replacement remains quiescent,
+including queued work and callbacks; group observation only compares generation
+tokens and never makes ordinary policy fields safe for concurrent mutation.
+
+Tool-loop tasks cannot be adopted. Parallel model workers therefore do not introduce
+concurrent Host tool callbacks, approval mutation or workspace writes. Existing tool
+loops keep their exclusive authority lane through task release. Parallel tool
+execution would require explicit shared hook-state ownership, immutable policy leases
+or locks and reclamation, store concurrency, independent approval identities and
+cancellation/drain guarantees. Those mechanisms and remote/durable recovery remain
+separate acceptance work, along with real-model quality/cost evaluation for #213.
+
+`test_turbo_agent_router_group` covers real concurrent Responses/compatible-Chat
+workers, explicit aggregation, adoption validation/ownership, shared parent identity,
+partial queue rejection, Provider failure with sibling cancellation, unresolved tool
+proposals, one-time collection, quiescent generation invalidation, heartbeat/deadline
+gates, retained live ownership, oversized text and the escaped serialized limit across
+sixteen individually valid worker outputs. Existing Router and tool-loop regressions
+remain enabled through the unchanged native CMake/CTest presets.

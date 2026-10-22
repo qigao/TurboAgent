@@ -18,6 +18,12 @@ typedef struct turbo_agent_execution_hooks_s {
   void *user_data;
 } turbo_agent_execution_hooks_t;
 
+/* Synchronous terminal-result inspection by an exclusive Host owner. Borrowed
+ * trees remain immutable and valid only until take_result/release. The caller
+ * serializes all result-taking/releasing APIs; this is not a concurrent lease. */
+int turbo_agent_execution_peek_result_internal(const turbo_agent_execution_t *execution,
+    const json_value_t **out_summary, const json_value_t **out_state);
+
 int turbo_agent_execution_start_internal(cmeta_threadpool_t *executor,
                                          turbo_agent_runtime_t *runtime, turbo_graph_t *graph,
                                          const json_value_t *state,

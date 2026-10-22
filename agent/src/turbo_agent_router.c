@@ -1,4 +1,4 @@
-#include "turbo_agent_router.h"
+#include "turbo_agent_router_internal.h"
 #include "turbo_agent_graph.h"
 #include "turbo_agent_runtime_internal.h"
 #include "turbo_agent_execution_internal.h"
@@ -11,38 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct router_endpoint_s {
-  turbo_agent_router_endpoint_t config;
-  tstr id;
-  int busy;
-} router_endpoint_t;
-
-struct turbo_agent_router_s {
-  turbo_agent_t *authority_agent;
-  size_t count;
-  int tool_lane_busy;
-  router_endpoint_t endpoints[TURBO_AGENT_ROUTER_MAX_ENDPOINTS];
-};
-
-struct turbo_agent_router_task_s {
-  turbo_agent_router_t *router;
-  router_endpoint_t *endpoint;
-  turbo_graph_t *graph;
-  turbo_agent_execution_t *execution, *identity_execution;
-  tstr review_checkpoint;
-  uint64_t deadline_ms;
-  unsigned max_model_turns, model_turns, review_resumes;
-  int pending_review, review_cancelled;
-  turbo_agent_tool_authority_snapshot_t parent_authority, child_authority;
-  tstr thread_id;
-  uint64_t started_ms, observed_ms, heartbeat_ms, estimated_micros;
-  uint64_t budget_micros;
-  unsigned heartbeat_timeout_ms, difficulty, input_tokens, output_tokens, required_capabilities;
-  turbo_agent_router_role_t role;
-  int unresponsive, taken;
-};
-
-static int router_id_valid(const char *text) {
+int turbo_agent_router_id_valid_internal(const char *text) {
   size_t i, n = text ? strlen(text) : 0;
   if (!n || n > 64) return 0;
   for (i = 0; i < n; ++i) {
@@ -90,7 +59,7 @@ int turbo_agent_router_create(const turbo_agent_router_config_t *config,
       config->endpoint_count > TURBO_AGENT_ROUTER_MAX_ENDPOINTS) return SALTS_EINVAL;
   for (i = 0; i < config->endpoint_count; ++i) {
     const turbo_agent_router_endpoint_t *e = &config->endpoints[i];
-    if (!router_id_valid(e->id) || !e->agent || !e->runtime ||
+    if (!turbo_agent_router_id_valid_internal(e->id) || !e->agent || !e->runtime ||
         e->agent == config->authority_agent || !e->roles || (e->roles & ~3u) ||
         !e->capabilities || (e->capabilities & ~7u) ||
         e->max_difficulty > 100 || !e->max_input_tokens || e->max_input_tokens > 1000000 ||
@@ -120,7 +89,7 @@ int turbo_agent_router_create(const turbo_agent_router_config_t *config,
   return SALTS_OK;
 }
 
-static int router_authority_current(const turbo_agent_router_task_t *task) {
+int turbo_agent_router_authority_current_internal(const turbo_agent_router_task_t *task) {
   return turbo_agent_tool_authority_snapshot_is_current(
              task->router->authority_agent, &task->parent_authority) == 1 &&
          turbo_agent_tool_authority_snapshot_is_current(
@@ -157,7 +126,7 @@ static int router_loop_halt(turbo_graph_exec_ctx_t *ctx, turbo_agent_router_task
 static int router_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   turbo_agent_router_task_t *task = user_data;
   int rc;
-  if (!router_authority_current(task)) return SALTS_EPERM;
+  if (!turbo_agent_router_authority_current_internal(task)) return SALTS_EPERM;
   if (task->max_model_turns && task->model_turns >= task->max_model_turns)
     return router_loop_halt(ctx, task, "turn_limit");
   if (task->max_model_turns) ++task->model_turns;
@@ -182,7 +151,7 @@ static int router_tools_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   const json_value_t *schema;
   turbo_tool_effect_flags_t effects = 0;
   int strict = 0, outcome, rc;
-  if (!router_authority_current(task)) return SALTS_EPERM;
+  if (!turbo_agent_router_authority_current_internal(task)) return SALTS_EPERM;
   if (task->review_cancelled) return router_loop_halt(ctx, task, "review_rejected");
   if (!calls || json_array_size(calls) != 1 ||
       !turbo_agent_tool_call_record_fields(json_array_get(calls, 0),
@@ -301,7 +270,7 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
       request->budget_micros > UINT64_C(9007199254740991) ||
       !request->timeout_ms || request->timeout_ms > 86400000 ||
       !request->heartbeat_timeout_ms || request->heartbeat_timeout_ms > request->timeout_ms ||
-      !router_id_valid(request->thread_id) || !request->parent_link ||
+      !turbo_agent_router_id_valid_internal(request->thread_id) || !request->parent_link ||
       !request->parent_link->parent_agent_run_id || !request->parent_link->parent_agent_run_id[0] ||
       !input || json_type(input) != JSON_OBJECT) return SALTS_EINVAL;
   if (router->tool_lane_busy) return SALTS_EBUSY;
@@ -351,6 +320,7 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   task->parent_authority = parent;
   task->child_authority = selected_child;
   task->thread_id = tstr_dup(request->thread_id);
+  task->parent_run_id = tstr_dup(request->parent_link->parent_agent_run_id);
   task->started_ms = task->observed_ms = task->heartbeat_ms = now;
   task->heartbeat_timeout_ms = request->heartbeat_timeout_ms;
   task->estimated_micros = best_cost;
@@ -366,7 +336,7 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   state = json_clone(input);
   decision = router_decision(task);
   rc = SALTS_ENOMEM;
-  if (!task->thread_id || !task->graph || !state || !decision) goto rejected;
+  if (!task->thread_id || !task->parent_run_id || !task->graph || !state || !decision) goto rejected;
   if (turbo_runtime_json_object_set(state, "model_route", decision) != TURBO_RUNTIME_JSON_OK)
     goto rejected;
   decision = NULL;
@@ -403,6 +373,7 @@ rejected:
   json_free(decision);
   turbo_graph_destroy(task->graph);
   tstr_free(task->thread_id);
+  tstr_free(task->parent_run_id);
   free(task);
   return rc;
 }
@@ -439,7 +410,7 @@ int turbo_agent_router_task_review(turbo_agent_router_task_t *task, cmeta_thread
     return SALTS_EINVAL;
   if (turbo_agent_execution_wait(task->execution, 0) != SALTS_OK) return SALTS_EBUSY;
   if (task->unresponsive || task->review_cancelled) return SALTS_ECANCELED;
-  if (!router_authority_current(task)) return SALTS_EPERM;
+  if (!turbo_agent_router_authority_current_internal(task)) return SALTS_EPERM;
   turbo_agent_execution_get_status(task->execution, &status);
   if (status != TURBO_AGENT_EXECUTION_INTERRUPTED || !task->pending_review ||
       !task->review_checkpoint) return SALTS_EINVAL;
@@ -500,6 +471,7 @@ int turbo_agent_router_task_wait(turbo_agent_router_task_t *task, uint64_t timeo
 int turbo_agent_router_task_cancel(turbo_agent_router_task_t *task, turbo_cancel_reason_t reason) {
   turbo_agent_execution_status_t status;
   if (!task) return SALTS_EINVAL;
+  if (task->group) return SALTS_EBUSY;
   if (task->max_model_turns &&
       turbo_agent_execution_get_status(task->execution, &status) == SALTS_OK &&
       status == TURBO_AGENT_EXECUTION_INTERRUPTED && task->pending_review) {
@@ -509,7 +481,7 @@ int turbo_agent_router_task_cancel(turbo_agent_router_task_t *task, turbo_cancel
   return turbo_agent_execution_cancel(task->execution, reason);
 }
 
-int turbo_agent_router_task_poll(turbo_agent_router_task_t *task, uint64_t now_ms) {
+int turbo_agent_router_task_poll_internal(turbo_agent_router_task_t *task, uint64_t now_ms) {
   int rc;
   if (!task || now_ms < task->observed_ms || now_ms > UINT64_C(9007199254740991)) return SALTS_EINVAL;
   task->observed_ms = now_ms;
@@ -519,6 +491,11 @@ int turbo_agent_router_task_poll(turbo_agent_router_task_t *task, uint64_t now_m
   task->unresponsive = 1;
   rc = turbo_agent_execution_cancel(task->execution, TURBO_CANCEL_PARENT);
   return rc == SALTS_OK || rc == SALTS_EALREADY ? SALTS_ECANCELED : rc;
+}
+
+int turbo_agent_router_task_poll(turbo_agent_router_task_t *task, uint64_t now_ms) {
+  if (task && task->group) return SALTS_EBUSY;
+  return turbo_agent_router_task_poll_internal(task, now_ms);
 }
 
 int turbo_agent_router_task_heartbeat(turbo_agent_router_task_t *task, uint64_t now_ms) {
@@ -572,10 +549,11 @@ int turbo_agent_router_task_take_result(turbo_agent_router_task_t *task,
   if (out_summary) *out_summary = NULL;
   if (out_state) *out_state = NULL;
   if (!task || !out_summary || !out_state) return SALTS_EINVAL;
+  if (task->group) return SALTS_EBUSY;
   if (task->taken) return SALTS_EALREADY;
   if (turbo_agent_execution_wait(task->execution, 0) != SALTS_OK) return SALTS_EBUSY;
   if (task->unresponsive) return SALTS_ECANCELED;
-  if (!router_authority_current(task)) return SALTS_EPERM;
+  if (!turbo_agent_router_authority_current_internal(task)) return SALTS_EPERM;
   rc = turbo_agent_execution_take_result(task->execution, out_summary, out_state);
   if (rc == SALTS_OK) task->taken = 1;
   return rc;
@@ -583,6 +561,7 @@ int turbo_agent_router_task_take_result(turbo_agent_router_task_t *task,
 
 int turbo_agent_router_task_release(turbo_agent_router_task_t *task) {
   if (!task) return SALTS_OK;
+  if (task->group) return SALTS_EBUSY;
   if (turbo_agent_execution_wait(task->execution, 0) != SALTS_OK) return SALTS_EBUSY;
   turbo_agent_execution_release(task->execution);
   turbo_agent_execution_release(task->identity_execution);
@@ -591,6 +570,7 @@ int turbo_agent_router_task_release(turbo_agent_router_task_t *task) {
   if (task->max_model_turns) task->router->tool_lane_busy = 0;
   tstr_free(task->review_checkpoint);
   tstr_free(task->thread_id);
+  tstr_free(task->parent_run_id);
   free(task);
   return SALTS_OK;
 }

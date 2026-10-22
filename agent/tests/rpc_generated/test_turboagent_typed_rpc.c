@@ -696,7 +696,7 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     data_bind_free(contract);
   }
 
-  it("pins a real Plugin DSO Generation from typed mount through Server destruction") {
+  it("pins a real Plugin DSO Generation and rejects its stale ref after reload") {
     static const char schema[] =
         "message AddRequest { @Min(1) uint32 left; uint32 right;"
         " optional uint32 scale default 1; }"
@@ -1130,6 +1130,114 @@ spec("TurboAgent installed DataBind IDL typed RPC Owner") {
     check_true(quiescent);
     check_equal(cmeta_plugin_registry_unload(
         &registry, ref), CMETA_PLUGIN_OK);
+    /* End every borrow of the old DSO before loading its replacement. The
+     * numeric old Ref is kept only as rejected input within this SAME Registry
+     * lifetime; no old descriptor, offer or callable is reused after unload. */
+    manifest = NULL;
+    entry = NULL;
+    offer = NULL;
+    execution.invoke = NULL;
+    {
+      cmeta_plugin_ref replacement = {0};
+      cmeta_plugin_lease refused = {0};
+      chttp_server replacement_server = {0};
+      chttp_server_config replacement_config = agent_http_test_server_config();
+      chttp_server_rpc_config replacement_rpc = rpc_config;
+      chttp_client replacement_client = {0};
+      chttp_client_config replacement_client_config = typed_client_config();
+
+      /* Capacity one forces reuse of the physical slot with a new generation. */
+      check_equal(cmeta_plugin_registry_count(&registry), (size_t)0u);
+      check_equal(cmeta_plugin_registry_load(
+          &registry, TURBOAGENT_RPC_PROVIDER_DSO_PATH, &replacement), CMETA_PLUGIN_OK);
+      check_equal(replacement.slot, ref.slot);
+      check_not_equal(replacement.generation, ref.generation);
+      check_equal(cmeta_plugin_registry_start(
+          &registry, replacement), CMETA_PLUGIN_OK);
+      check_equal(cmeta_plugin_registry_acquire(
+          &registry, ref, &refused, &manifest), CMETA_PLUGIN_STALE);
+      check_null(manifest);
+      check_equal(refused.plugin.slot, (uint32_t)0u);
+      check_equal(refused.plugin.generation, (uint32_t)0u);
+      check_equal(refused.slot, (uint32_t)0u);
+      check_equal(refused.generation, (uint32_t)0u);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, replacement, &lifecycle), CMETA_PLUGIN_OK);
+      check_equal(lifecycle.active_leases, (size_t)0u);
+
+      check_equal(cmeta_plugin_registry_acquire(
+          &registry, replacement, &discovery, &manifest), CMETA_PLUGIN_OK);
+      check_equal(cmeta_plugin_manifest_find_export(
+          manifest, TURBOAGENT_RPC_PROVIDER_DSO_EXPORT, &entry), CMETA_PLUGIN_OK);
+      check_equal(cmeta_plugin_export_require_function(
+          entry, TURBOAGENT_RPC_PROVIDER_DSO_CONTRACT,
+          TURBOAGENT_RPC_PROVIDER_DSO_VERSION, 0u), CMETA_PLUGIN_OK);
+      check_true(cmeta_function_abi_contract_compatible(
+          FunctionAbi(turboagent_rpc_provider_dso_get_offer), entry->value.function.abi));
+      check_true(entry->value.function.invoke(
+          entry->value.function.context, &offer, NULL, 0u));
+      check_not_null(offer);
+      check_true(offer->invoke != NULL);
+      execution.invoke = offer->invoke;
+      atomic_store_explicit(&probe.invoked, 0, memory_order_release);
+      atomic_store_explicit(&probe.enabled, 0, memory_order_release);
+      replacement_rpc.method_capacity = 1u;
+      check_equal(chttp_server_init(
+          &replacement_server, &replacement_config), SALTS_OK);
+      check_equal(chttp_server_rpc_configure(
+          &replacement_server, &replacement_rpc), SALTS_OK);
+
+      /* The CHttp Owner maps failed Plugin acquisition to EBUSY. Use only
+       * currently leased code and host-owned descriptors for this rejection;
+       * failure must neither leak a lease nor consume the one method slot. */
+      mount.plugin_ref = ref;
+      check_equal(chttp_server_rpc_mount(
+          &replacement_server, &mount), SALTS_EBUSY);
+      check_equal(atomic_load_explicit(&probe.invoked, memory_order_acquire), 0);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, replacement, &lifecycle), CMETA_PLUGIN_OK);
+      check_equal(lifecycle.active_leases, (size_t)1u);
+      mount.plugin_ref = replacement;
+      check_equal(chttp_server_rpc_mount(
+          &replacement_server, &mount), SALTS_OK);
+      check_equal(cmeta_plugin_registry_release(
+          &registry, &discovery), CMETA_PLUGIN_OK);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, replacement, &lifecycle), CMETA_PLUGIN_OK);
+      check_equal(lifecycle.active_leases, (size_t)1u);
+      check_equal(chttp_server_start(&replacement_server), SALTS_OK);
+      check_equal(chttp_server_port(&replacement_server, &port), SALTS_OK);
+      check_true(snprintf(uri, sizeof(uri), "tcp://127.0.0.1:%u",
+                          (unsigned int)port) > 0);
+      response.sum = UINT32_C(0xdecafbad);
+      call.request_id = UINT64_C(701);
+      check_equal(chttp_client_init(
+          &replacement_client, &replacement_client_config), SALTS_OK);
+      check_equal(chttp_client_rpc_call(
+          &replacement_client, &call, &outcome, &call_error), SALTS_OK);
+      check_equal(outcome.kind, CHTTP_CLIENT_RPC_SUCCESS);
+      check_equal(response.sum, (uint32_t)11u);
+      check_equal(atomic_load_explicit(&probe.invoked, memory_order_acquire), 1);
+      check_equal(chttp_client_destroy(&replacement_client, TYPED_TIMEOUT_MS), SALTS_OK);
+      check_equal(cmeta_plugin_registry_request_stop(
+          &registry, replacement), CMETA_PLUGIN_OK);
+      check_equal(cmeta_plugin_registry_unload(
+          &registry, replacement), CMETA_PLUGIN_BUSY);
+      check_equal(chttp_server_stop(&replacement_server, TYPED_TIMEOUT_MS), SALTS_OK);
+      check_equal(chttp_server_destroy(&replacement_server), SALTS_OK);
+      check_equal(cmeta_plugin_registry_get_lifecycle(
+          &registry, replacement, &lifecycle), CMETA_PLUGIN_OK);
+      check_equal(lifecycle.active_leases, (size_t)0u);
+      check_equal(cmeta_plugin_registry_poll_quiescent(
+          &registry, replacement, &quiescent), CMETA_PLUGIN_OK);
+      check_true(quiescent);
+      check_equal(cmeta_plugin_registry_unload(
+          &registry, replacement), CMETA_PLUGIN_OK);
+      manifest = NULL;
+      entry = NULL;
+      offer = NULL;
+      execution.invoke = NULL;
+    }
     check_equal(cmeta_plugin_registry_destroy(&registry), CMETA_PLUGIN_OK);
     data_bind_rpc_method_plan_free(plan);
     data_bind_free(contract);

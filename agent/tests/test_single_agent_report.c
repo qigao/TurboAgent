@@ -22,7 +22,7 @@ struct report_fixture_s {
   single_agent_report_config_t config;
   document_render_catalog_t catalog;
   atomic_int tool_calls;
-  int approval, reviews, context_ok, bad_receipt, no_tool, fail_index, proposal_index, revoke;
+  int approval, reviews, context_ok, bad_receipt, no_tool, fail_index, proposal_index, revoke, nul_aggregate;
 };
 
 static char *report_copy(const char *text) {
@@ -54,6 +54,9 @@ static int report_transport(const char *request, char **out, void *user) {
   } else if (model->index == 1) {
     response = "{\"id\":\"review\",\"choices\":[{\"message\":{\"role\":\"assistant\","
         "\"content\":\"Review draft with uncertainty\"},\"finish_reason\":\"stop\"}]}";
+  } else if (model->index == 2 && f->nul_aggregate) {
+    response = "{\"id\":\"plan\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\","
+        "\"content\":[{\"type\":\"output_text\",\"text\":\"draft\\u0000hidden\"}]}]}";
   } else if (model->index == 2) {
     response = "{\"id\":\"plan\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\","
         "\"content\":[{\"type\":\"output_text\",\"text\":\"Synthesize the two drafts using brief\"}]}]}";
@@ -63,6 +66,16 @@ static int report_transport(const char *request, char **out, void *user) {
   }
   *out = report_copy(response);
   return *out ? 0 : -1;
+}
+
+static int report_wait_for_deadline(const char *request, const turbo_cancel_token_t *token,
+    unsigned timeout_ms, unsigned connect_ms, turbo_agent_transport_response_t *response, void *user) {
+  report_model_t *model = user;
+  (void)request; (void)timeout_ms; (void)connect_ms;
+  atomic_fetch_add(&model->calls, 1);
+  if (!token || turbo_cancel_token_wait(token, 5000) != TURBO_CANCEL_WAIT_SIGNALED) return -77;
+  response->transport_status = turbo_cancel_token_check(token);
+  return response->transport_status;
 }
 
 static int report_tool(const json_value_t *args, json_value_t **out, void *user) {
@@ -284,6 +297,37 @@ spec("one Host goal composed from different model workers") {
     f.config.reserved_budget_micros = 39;
     check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOBUFS);
     check_null(delivery); check_equal(phase, "admission");
+    for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
+  }
+
+  it("does not truncate an embedded NUL while handing the aggregate to the tool model") {
+    f.nul_aggregate = 1;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EPROTO);
+    check_null(delivery); check_equal(phase, "aggregation");
+    check_equal(atomic_load(&f.models[3].calls), 0); check_equal(atomic_load(&f.tool_calls), 0);
+  }
+
+  it("cancels and drains actual worker execution at the whole-task deadline without advancing stages") {
+    f.config.timeout_ms = 100;
+    check_equal(turbo_agent_transport_v2_set(f.agents[0], report_wait_for_deadline, &f.models[0], NULL), SALTS_OK);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ETIMEDOUT);
+    check_null(delivery); check_equal(phase, "workers");
+    check_equal(atomic_load(&f.models[2].calls), 0); check_equal(atomic_load(&f.tool_calls), 0);
+  }
+
+  it("rejects overflowing reservation arithmetic before starting a model") {
+    f.config.worker.budget_micros = UINT64_MAX;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ERANGE);
+    check_null(delivery); check_equal(phase, "admission");
+    for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
+  }
+
+  it("rejects an oversized Host context packet before model admission") {
+    tstr brief = tstr_new_len(NULL, TURBO_AGENT_ROUTER_GROUP_MAX_TEXT_BYTES + 1u);
+    check_not_null(brief); memset(brief, 'x', TURBO_AGENT_ROUTER_GROUP_MAX_TEXT_BYTES + 1u);
+    f.config.brief = brief;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOBUFS);
+    check_null(delivery); check_equal(phase, "admission"); tstr_free(brief);
     for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
   }
 }

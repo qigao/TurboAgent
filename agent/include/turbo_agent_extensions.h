@@ -229,6 +229,9 @@ CXX_C_API int turbo_agent_add_action_policy_guardrail(
  * This helper validates that the review is currently approved and that the
  * note's call id, tool name, and arguments JSON match the tool dispatch being
  * considered.
+ * The standard ToolNode consumes a matching Tool review before its dispatch
+ * attempt; a later model turn needs new approval even for identical call text.
+ * This helper alone does not consume or grant authority.
  *
  * @param state Agent state containing the current review gate.
  * @param call_id Tool call id from the pending model tool call.

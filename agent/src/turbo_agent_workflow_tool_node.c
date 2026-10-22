@@ -118,6 +118,7 @@ static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_dat
   size_t index;
   tstr local_turn_key = NULL, scoped_turn_key = NULL;
   int guardrail_rejected = 0;
+  int consume_approval = 0;
   int rc = -1;
 
   if (out_outcome) *out_outcome = TURBO_AGENT_TOOL_CHECK_OK;
@@ -242,12 +243,22 @@ static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_dat
     }
     calls[index].approval_granted = turbo_agent_tool_approval_review_matches(
         ctx->state, calls[index].call_id, calls[index].tool_name, calls[index].arguments_json);
+    if (calls[index].approval_granted) consume_approval = 1;
     turbo_agent_emit_trace(agent, ctx->state, TURBO_AGENT_TRACE_TOOL_DISPATCH,
                            calls[index].tool_name, calls[index].call_id,
                            calls[index].arguments_json, 0);
   }
   turbo_agent_execution_context_set(&saved_context);
 
+  /* Approval authorizes this dispatch attempt only. Capture it in the calls
+   * above, then consume the matching Tool review before callback/Journal entry.
+   * A callback failure or a later model turn with identical call text must not
+   * inherit it. Unrelated workflow-level reviews are left unchanged. */
+  if (consume_approval && turbo_agent_state_clear_review(ctx->state) != 0) {
+    turbo_agent_state_set_model_error(ctx->state, "review", "failed to consume tool approval");
+    rc = SALTS_ENOMEM;
+    goto cleanup;
+  }
   rc = turbo_agent_tool_executor_execute(
       agent->tool_executor, saved_context.runtime,
       saved_context.cancel_token, saved_context.thread_id,

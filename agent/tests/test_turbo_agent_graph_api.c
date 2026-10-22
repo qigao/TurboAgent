@@ -47,6 +47,30 @@ static int approved_action_handler(const json_value_t *args, json_value_t **out_
   return *out_result ? 0 : -1;
 }
 
+typedef struct graph_approval_probe_s {
+  int calls, approved_calls, fail;
+} graph_approval_probe_t;
+
+/* This fixture counts callbacks only; the command text is never executed. */
+static int graph_approval_action(const json_value_t *args, json_value_t **out,
+                                  void *user_data) {
+  graph_approval_probe_t *probe = user_data;
+  (void)args;
+  ++probe->calls;
+  if (turbo_agent_current_tool_approval_granted()) ++probe->approved_calls;
+  *out = NULL;
+  if (probe->fail) return -1;
+  *out = turbo_action_result_create(1, "one approved callback");
+  return *out ? 0 : -1;
+}
+
+static json_value_t *graph_approval_model_event(void) {
+  static const char event[] = "{\"kind\":\"model\",\"output_text\":\"\",\"tool_calls\":[{"
+      "\"call_id\":\"same-call\",\"name\":\"run_command\","
+      "\"arguments\":\"{\\\"command\\\":\\\"git reset --hard HEAD\\\"}\"}]}";
+  return json_parse(event, sizeof(event) - 1);
+}
+
 static char *graph_test_strdup(const char *text) {
   size_t len = strlen(text);
   char *copy = (char *)malloc(len + 1);
@@ -238,6 +262,73 @@ spec("turbo agent graph api") {
     turbo_action_tool_registry_destroy(action_registry);
   }
 
+  for (int callback_fails = 0; callback_fails < 2; ++callback_fails) {
+    it("requires fresh approval when a later turn repeats a call after callback %s",
+        callback_fails ? "failure" : "success") {
+      graph_approval_probe_t probe = {.fail = callback_fails};
+      turbo_action_tool_registry_t *actions = turbo_action_tool_registry_create();
+      turbo_action_tool_definition_t definition = {
+          .name = "run_command", .description = "Count an approved fixture callback",
+          .parameters_json = "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},"
+              "\"required\":[\"command\"]}",
+          .kind = TURBO_ACTION_DANGEROUS, .requires_approval = 1,
+          .handler = graph_approval_action, .user_data = &probe};
+      turbo_tool_registry_t *registry;
+      turbo_agent_config_t config = {0};
+      turbo_agent_policy_t policy = turbo_agent_policy_default();
+      turbo_agent_t *agent;
+      turbo_graph_t *graph = turbo_graph_create("one-dispatch-approval");
+      turbo_graph_exec_ctx_t ctx = {0};
+      json_value_t *state = turbo_agent_state_create(), *events, *event;
+
+      check_not_null(actions); check_not_null(graph); check_not_null(state);
+      check_equal(turbo_action_tool_registry_add(actions, &definition), TURBO_ACTION_TOOL_OK);
+      registry = turbo_action_tool_registry_build_tool_registry_bridge(actions);
+      check_not_null(registry);
+      config.model = "offline-fixture"; config.transport_fn = dummy_transport;
+      config.tool_registry = registry;
+      agent = turbo_agent_create(&config); check_not_null(agent);
+      policy.allow_custom_tools = 1; policy.allow_shell = 1;
+      check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
+      check_equal(turbo_agent_add_action_policy_guardrail(agent, actions, &policy), 0);
+      check_equal(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent), TURBO_GRAPH_EXEC_OK);
+      events = json_object_get(state, "events"); check_not_null(events);
+      event = graph_approval_model_event(); check_not_null(event);
+      json_array_add(events, event);
+      ctx.graph = graph; ctx.state = state; ctx.current_node = "tools";
+      check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+      check_true(ctx.stop != 0); check_equal(probe.calls, 0);
+      check_true(turbo_agent_state_review_required(state));
+      check_equal(turbo_agent_state_set_review_approved(state, 1), 0);
+      ctx.stop = 0; ctx.next_node = NULL;
+      check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+      check_equal(probe.calls, 1); check_equal(probe.approved_calls, 1);
+
+      /* A new model event is a new turn even with byte-identical call id,
+       * canonical name and arguments. The old approval cannot authorize it. */
+      event = graph_approval_model_event(); check_not_null(event);
+      json_array_add(events, event);
+      check_equal(json_array_size(events), 3u);
+      ctx.stop = 0; ctx.next_node = NULL;
+      check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+      check_equal(probe.calls, 1);
+      check_true(ctx.stop != 0);
+      check_true(turbo_agent_state_review_required(state));
+      check_false(turbo_agent_state_review_approved(state));
+      check_equal(json_array_size(events), 3u);
+      check_equal(turbo_agent_state_set_review_approved(state, 1), 0);
+      ctx.stop = 0; ctx.next_node = NULL;
+      check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+      check_equal(probe.calls, 2); check_equal(probe.approved_calls, 2);
+      check_false(turbo_agent_state_review_required(state));
+      check_false(turbo_agent_state_review_approved(state));
+
+      json_free(state);
+      turbo_graph_destroy(graph); turbo_agent_destroy(agent);
+      turbo_tool_registry_destroy(registry); turbo_action_tool_registry_destroy(actions);
+    }
+  }
+
   it("should not reuse an approved review for a different tool call") {
     turbo_action_tool_registry_t *action_registry = turbo_action_tool_registry_create();
     turbo_action_tool_definition_t definition = {
@@ -335,6 +426,49 @@ spec("turbo agent graph api") {
     turbo_agent_destroy(agent);
     turbo_tool_registry_destroy(tool_registry);
     turbo_action_tool_registry_destroy(action_registry);
+  }
+
+  it("preserves an unrelated workflow review when no Tool approval is consumed") {
+    static const char event_text[] = "{\"kind\":\"model\",\"tool_calls\":[{\"call_id\":\"observe-call\","
+        "\"name\":\"observe\",\"arguments\":\"{}\"}]}";
+    graph_approval_probe_t probe = {0};
+    turbo_action_tool_registry_t *actions = turbo_action_tool_registry_create();
+    turbo_action_tool_definition_t definition = {
+        .name = "observe", .description = "Count an observation callback",
+        .parameters_json = "{\"type\":\"object\"}", .kind = TURBO_ACTION_OBSERVE,
+        .handler = graph_approval_action, .user_data = &probe};
+    turbo_tool_registry_t *registry;
+    turbo_agent_config_t config = {0};
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_t *agent;
+    turbo_graph_t *graph = turbo_graph_create("unrelated-workflow-review");
+    turbo_graph_exec_ctx_t ctx = {0};
+    json_value_t *state = turbo_agent_state_create(), *event;
+
+    check_not_null(actions); check_not_null(graph); check_not_null(state);
+    check_equal(turbo_action_tool_registry_add(actions, &definition), TURBO_ACTION_TOOL_OK);
+    registry = turbo_action_tool_registry_build_tool_registry_bridge(actions);
+    check_not_null(registry);
+    config.model = "offline-fixture"; config.transport_fn = dummy_transport;
+    config.tool_registry = registry;
+    agent = turbo_agent_create(&config); check_not_null(agent);
+    policy.allow_custom_tools = 1;
+    check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
+    check_equal(turbo_agent_add_action_policy_guardrail(agent, actions, &policy), 0);
+    check_equal(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent), TURBO_GRAPH_EXEC_OK);
+    check_equal(turbo_agent_state_request_review(state, "workflow-level review"), 0);
+    check_equal(turbo_agent_state_set_review_approved(state, 1), 0);
+    event = json_parse(event_text, sizeof(event_text) - 1); check_not_null(event);
+    json_array_add(json_object_get(state, "events"), event);
+    ctx.graph = graph; ctx.state = state; ctx.current_node = "tools";
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 1); check_equal(probe.approved_calls, 0);
+    check_true(turbo_agent_state_review_approved(state));
+    check_equal(turbo_agent_state_review_note(state), "workflow-level review");
+
+    json_free(state);
+    turbo_graph_destroy(graph); turbo_agent_destroy(agent);
+    turbo_tool_registry_destroy(registry); turbo_action_tool_registry_destroy(actions);
   }
 
   it("should preserve guardrail rejection for knowledge directory action tools") {

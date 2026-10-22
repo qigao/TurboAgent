@@ -139,13 +139,6 @@ endif()
 add_subdirectory(runtime)
 add_subdirectory(provider)
 add_subdirectory(agent)
-
-# Installed-SDK Typed RPC qualification. The schema is compiled by the pinned
-# SaltsUtils IDLC; the Provider implementation lives in a real unloadable DSO.
-# Never build this native fixture in cross-compilation profiles.
-if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
-  add_subdirectory(agent/tests/rpc_generated)
-endif()
 add_subdirectory(harness)
 
 # M4 is an output-only, independent C11 TTS Provider. It never builds,

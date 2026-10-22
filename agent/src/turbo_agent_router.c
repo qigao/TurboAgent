@@ -162,7 +162,7 @@ static int router_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
     return router_loop_halt(ctx, task, "turn_limit");
   if (task->max_model_turns) ++task->model_turns;
   rc = turbo_agent_model_node(ctx, task->endpoint->config.agent);
-  if (rc || !task->max_model_turns || ctx->stop) return rc;
+  if (rc || !task->max_model_turns || ctx->stop || ctx->next_node) return rc;
   if (turbo_agent_state_pending_tool_calls(ctx->state)) {
     /* Reserve the last model turn for consuming the previous tool result. */
     if (task->model_turns >= task->max_model_turns)
@@ -498,9 +498,11 @@ int turbo_agent_router_task_wait(turbo_agent_router_task_t *task, uint64_t timeo
 }
 
 int turbo_agent_router_task_cancel(turbo_agent_router_task_t *task, turbo_cancel_reason_t reason) {
+  turbo_agent_execution_status_t status;
   if (!task) return SALTS_EINVAL;
-  if (task->max_model_turns && turbo_agent_execution_wait(task->execution, 0) == SALTS_OK &&
-      task->pending_review) {
+  if (task->max_model_turns &&
+      turbo_agent_execution_get_status(task->execution, &status) == SALTS_OK &&
+      status == TURBO_AGENT_EXECUTION_INTERRUPTED && task->pending_review) {
     task->review_cancelled = 1;
     return SALTS_OK;
   }
@@ -553,8 +555,9 @@ int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *task, json_
     if (turbo_runtime_json_object_set_int64(view, "max_model_turns", task->max_model_turns) ||
         turbo_runtime_json_object_set_int64(view, "review_resumes", task->review_resumes)) goto failed;
     if (turbo_agent_execution_wait(task->execution, 0) == SALTS_OK &&
-        router_set(view, "approval_pending", json_create_bool(task->pending_review &&
-                                                             !task->review_cancelled))) goto failed;
+        router_set(view, "approval_pending", json_create_bool(
+            status == TURBO_AGENT_EXECUTION_INTERRUPTED && task->pending_review &&
+            !task->review_cancelled))) goto failed;
   }
   *out_view = view;
   return SALTS_OK;

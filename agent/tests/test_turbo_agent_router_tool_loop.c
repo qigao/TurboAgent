@@ -14,7 +14,7 @@ typedef struct loop_fixture_s {
   atomic_int model_calls, tool_calls, entered, open;
   int chat, proposals, multi, malformed, callback_fail, invalid_result;
   int approval, deny, rewrite_args, rewrite_result, host_hooks, context_ok, approved;
-  int saw_result, bad_model;
+  int saw_result, bad_model, fail_followup;
   turbo_agent_t *host;
   turbo_agent_runtime_store_t store;
   turbo_agent_runtime_t *runtime;
@@ -36,6 +36,7 @@ static int loop_transport(const char *request, char **out, void *user) {
   *out = NULL;
   if (!model || strcmp(model, f->chat ? "fast" : "strong")) f->bad_model = 1;
   json_free(body);
+  if (turn > 0 && f->fail_followup) return -77;
   if (turn > 0 && strstr(request, "function_call_output")) f->saw_result = 1;
   if (turn > 0 && f->chat && strstr(request, "\"tool_call_id\"")) f->saw_result = 1;
   atomic_store_explicit(&f->entered, 1, memory_order_release);
@@ -328,6 +329,24 @@ spec("supervised tiered Router tool loop") {
     tstr_free(id); tstr_free(run);
   }
 
+  it("does not report an old approval after a resumed segment fails before terminal metadata capture") {
+    f[0].approval = 1; f[2].fail_followup = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_review(task, pool, 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_inspect(task, &view), SALTS_OK);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "execution_status"), -1),
+                TURBO_AGENT_EXECUTION_FAILED);
+    check_false(json_get_bool(view, "approval_pending", 1));
+    check_equal(turbo_agent_router_task_cancel(task, TURBO_CANCEL_USER), SALTS_EALREADY);
+    check_equal(turbo_agent_router_task_review(task, pool, 1), SALTS_EINVAL);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_null(summary); check_not_null(turbo_agent_state_model_error_detail(state));
+    check_equal(atomic_load(&f[0].tool_calls), 1);
+    check_equal(atomic_load(&f[2].model_calls), 2);
+  }
+
   it("rejects a review without effects or another model turn") {
     f[0].approval = 1;
     check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
@@ -376,6 +395,18 @@ spec("supervised tiered Router tool loop") {
       check_equal(turbo_agent_router_task_review(task, pool, 1), SALTS_EPERM);
       check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_EPERM);
       check_null(summary); check_null(state); check_equal(atomic_load(&f[0].tool_calls), 0);
+    }
+  }
+
+  for (int child = 0; child < 2; ++child) {
+    it("withholds completed tool-loop delivery after quiescent generation invalidation, child=%d", child) {
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      check_equal(atomic_load(&f[0].tool_calls), 1);
+      check_equal(turbo_agent_set_tool_policy(agents[child ? 2 : 0], &grant), 0);
+      check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_EPERM);
+      check_null(summary); check_null(state);
+      check_equal(atomic_load(&f[0].tool_calls), 1);
     }
   }
 

@@ -3,7 +3,7 @@ name: TurboAgent current-main Typed RPC installed final-master canonical-Unicode
 'on':
   pull_request:
     paths:
-      - '.github/workflows/typed-rpc-canonical-rc12-consumer.yml'
+      - '.github/workflows/typed-rpc-final-master-rc12-consumer.yml'
       - 'agent/CMakeLists.txt'
       - 'agent/tests/rpc_generated/**'
   workflow_dispatch:

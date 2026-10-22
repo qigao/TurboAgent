@@ -1019,6 +1019,12 @@ one thinner surface above session:
 It does not invent a second runtime. It only packages one configured session as
 a more obvious `create_agent(...).invoke(...)`-style entrypoint.
 
+The [tiered model Router](docs/tiered-model-router.md) adds explicit planning/execution
+model selection over existing Execution and Runtime owners, with estimated-budget
+admission, Host heartbeat supervision and generation-checked delivery. Its first
+slice runs a single model node and returns tool proposals for separate authorization.
+It does not implement a multi-worker coding loop or durable worker takeover.
+
 For composition inside larger graphs and tool runtimes, `Runtime V2` now also
 adds:
 

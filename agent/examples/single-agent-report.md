@@ -120,6 +120,25 @@ illustrative token estimates, four per-stage budget ceilings of 1,000,000 micro-
 deadline, and one transport attempt. Review these Host settings and configure backend
 output bounds before live use; token estimates do not enforce provider limits.
 
+### Optional Session memory and knowledge
+
+The executable also accepts four trailing arguments: `<knowledge-db> <memory-root>
+<namespace> <key>`. In this mode explicitly configure `REPORT_KNOWLEDGE_QUERY`,
+`REPORT_KNOWLEDGE_KIND` and `REPORT_KNOWLEDGE_URI_PREFIX`. It creates a runtime-only
+context Session over the normal file-memory and SQLite constructors (which can
+initialize directories/schema), selects that exact memory key and up to four scoped
+knowledge matches, then prepares context before any model admission. Required missing
+data, read errors, invalid data or bounds stop the application. No model writes memory
+or chooses another source. The default four-argument invocation is unchanged.
+
+The additive [task-context input API](../docs/task-context-input.md) copies one checked
+user-data packet and passes it unchanged through workers, aggregation and tool input.
+Combined payloads are limited to 1 MiB. The rendering catalog distinguishes the manual
+`brief` packet from the `context` packet, both tagged `host-v1` for this invocation;
+these aliases do not assert document hashes or factual support. Session options can
+select up to eight memory keys and eight knowledge matches in embedding applications.
+No generic Retriever, conversation-history selection or automatic memory write is added.
+
 ## Two application routes
 
 The general Agent route can use this composition for source-based reports and document

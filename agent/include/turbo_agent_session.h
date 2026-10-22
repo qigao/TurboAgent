@@ -826,6 +826,62 @@ turbo_agent_session_create_input_messages_state_with_memory_json_value(
     const turbo_agent_session_t *session, const json_value_t *messages,
     const char *namespace_prefix);
 
+#define TURBO_AGENT_TASK_CONTEXT_ABI_VERSION 1u
+#define TURBO_AGENT_TASK_CONTEXT_MAX_RECORDS 8u
+#define TURBO_AGENT_TASK_CONTEXT_MAX_FIELD_BYTES 1024u
+#define TURBO_AGENT_TASK_CONTEXT_MAX_TEXT_BYTES 65536u
+#define TURBO_AGENT_TASK_CONTEXT_MAX_INPUT_BYTES 1048576u
+
+typedef struct turbo_agent_task_context_options_s {
+  size_t struct_size;
+  unsigned abi_version;
+  const char *memory_namespace;
+  const char *const *memory_keys;
+  size_t memory_key_count;
+  /** Zero disables retrieval; 1..8 selects the Session KnowledgeStore query. */
+  size_t knowledge_limit;
+} turbo_agent_task_context_options_t;
+
+CXX_C_API void turbo_agent_task_context_options_init(turbo_agent_task_context_options_t *options);
+
+/**
+ * Create one owned state containing one user message with a versioned JSON task
+ * context packet. No model/tool execution, policy mutation, memory writes,
+ * Runtime commit, or implicit history/retriever lookup is performed.
+ *
+ * Select up to 8 distinct memory keys in one explicit exact namespace, in caller
+ * order. Read each once through Session memory_get; require the formal context
+ * payload (scope/path/text, optional created_at), with no other/duplicate fields.
+ * This validates original parsed strings before C-string normalization and keeps
+ * namespace/key identity. No list/query fallback or prefix namespace scan occurs.
+ * knowledge_limit > 0 requires the Session's configured KnowledgeStore plus
+ * nonempty query/kind/URI prefix. Query it once; require matches, retain observed
+ * order and document/chunk/URI/kind/title/text identity. Recheck literal URI prefix
+ * and exact kind on every result; the store's SQL LIKE filtering is not authority.
+ * A generic Retriever and configured implicit memory namespace are not used.
+ *
+ * goal and every selected text <= 64 KiB; selectors/identity fields <= 1024 bytes;
+ * serialized packet <= 1 MiB including escaping. Reject rather than truncate.
+ * Data is untrusted user content, never system instructions or Tool Authority.
+ * This is a read observation, not an atomic snapshot across backends, a content
+ * hash/revision/freshness proof, or a store execution-time/memory bound. Stores
+ * may allocate/block before returning. Host authorizes selection, serializes all
+ * Session/backend use and close, and calls only at a quiescent safe point.
+ *
+ * Borrow Session/options/strings only during this synchronous call; returned
+ * state has no store/Session borrow. Publish only after all reads/validation.
+ * Clear out_state on entry; release successful state with json_free(). Returns
+ * OK, EINVAL (configuration/selectors), ENOBUFS (bounds), EIO (selected memory
+ * unavailable/read or knowledge query failure), EPROTO (invalid payload/result),
+ * EPERM (retrieval outside literal filters), ENOENT (no requested knowledge
+ * matches), ENOMEM. Every failure publishes NULL and starts no new work.
+ * Example: init options; set memory_namespace/keys/count and/or knowledge_limit;
+ * create_task_input_state_json_value(session, goal, &options, &state); check rc.
+ */
+CXX_C_API int turbo_agent_session_create_task_input_state_json_value(
+    const turbo_agent_session_t *session, const char *goal,
+    const turbo_agent_task_context_options_t *options, json_value_t **out_state);
+
 /* ── Core graph execution ──────────────────────────────────────────────────── */
 
 /**

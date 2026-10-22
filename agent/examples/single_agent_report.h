@@ -56,6 +56,9 @@ typedef struct single_agent_report_config_s {
   const char *parent_run_id; /* Host-supplied lineage, not a fabricated Runtime run */
   const char *goal;
   const char *brief;
+  /** Optional, paired Host selection; materialized once before any admission. */
+  const turbo_agent_session_t *context_session;
+  const turbo_agent_task_context_options_t *context_options;
   turbo_agent_router_request_t worker, aggregate, execute;
   uint64_t reserved_budget_micros;
   unsigned timeout_ms;
@@ -124,6 +127,20 @@ static int single_agent_report_input(const json_value_t *data, json_value_t **ou
   }
   json_serialize_free(text);
   return rc;
+}
+
+static int single_agent_report_bind_context(json_value_t *input, const json_value_t *context) {
+  const json_value_t *messages, *message;
+  const char *text, *base;
+  if (!context) return SALTS_OK;
+  messages = json_object_get(context, "input");
+  message = json_array_get(messages, 0);
+  text = json_get_string(message, "content");
+  base = json_get_string(json_array_get(json_object_get(input, "input"), 0), "content");
+  if (json_array_size(messages) != 1 || !text || !base) return SALTS_EPROTO;
+  if (strlen(text) > TURBO_AGENT_ROUTER_GROUP_MAX_INPUT_BYTES ||
+      strlen(base) > TURBO_AGENT_ROUTER_GROUP_MAX_INPUT_BYTES - strlen(text)) return SALTS_ENOBUFS;
+  return turbo_agent_state_add_user_message(input, text) ? SALTS_ENOMEM : SALTS_OK;
 }
 
 static int single_agent_report_request(turbo_agent_router_request_t *request,
@@ -220,7 +237,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   turbo_agent_tool_authority_snapshot_t authority;
   turbo_agent_runtime_parent_link_t parent = {0};
   turbo_agent_router_request_t request;
-  json_value_t *data = NULL, *input = NULL, *next = NULL, *summary = NULL, *state = NULL;
+  json_value_t *data = NULL, *input = NULL, *next = NULL, *summary = NULL, *state = NULL, *context = NULL;
   uint64_t deadline, budget;
   int rc = SALTS_EINVAL;
   static const char *threads[] = {"report-worker-a", "report-worker-b"};
@@ -231,6 +248,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
       strlen(config->parent_run_id) > 128 || !config->goal || !config->goal[0] ||
       !config->brief || !config->brief[0] || !config->timeout_ms || config->timeout_ms > 86400000)
     return rc;
+  if (!!config->context_session != !!config->context_options) return rc;
   if (strlen(config->goal) > TURBO_AGENT_ROUTER_GROUP_MAX_TEXT_BYTES ||
       strlen(config->brief) > TURBO_AGENT_ROUTER_GROUP_MAX_TEXT_BYTES) return SALTS_ENOBUFS;
   /* Reserve request ceilings before any worker starts. Estimates are not an
@@ -256,6 +274,13 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
       turbo_runtime_json_object_set_string(data, "source_text", config->brief)) goto done;
   rc = single_agent_report_input(data, &input);
   if (rc) goto done;
+  if (config->context_session) {
+    *out_phase = "context";
+    rc = turbo_agent_session_create_task_input_state_json_value(config->context_session,
+        config->goal, config->context_options, &context);
+    if (!rc) rc = single_agent_report_bind_context(input, context);
+    if (rc) goto done;
+  }
   *out_phase = "workers";
   for (size_t i = 0; i < 2; ++i) {
     request = config->worker; request.role = TURBO_AGENT_ROUTER_EXECUTE;
@@ -275,6 +300,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
     if (rc != SALTS_ETIMEDOUT) break;
   }
   if (!rc) rc = turbo_agent_router_group_build_input(group, config->goal, &next);
+  if (!rc) rc = single_agent_report_bind_context(next, context);
   if (rc) goto done;
   rc = turbo_agent_router_group_release(group);
   if (rc) goto done;
@@ -304,6 +330,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   if (turbo_runtime_json_object_set_string(data, "aggregation_run_id", run) ||
       turbo_runtime_json_object_set_string(data, "aggregation_text", draft)) goto done;
   rc = single_agent_report_input(data, &next);
+  if (!rc) rc = single_agent_report_bind_context(next, context);
   if (rc) goto done;
   rc = turbo_agent_router_task_release(task);
   if (rc) goto done;
@@ -377,7 +404,7 @@ done:
     (void)turbo_agent_router_task_wait(task, TURBO_RUNTIME_WAIT_INFINITE);
     (void)turbo_agent_router_task_release(task);
   }
-  json_free(data); json_free(input); json_free(next); json_free(summary); json_free(state);
+  json_free(data); json_free(input); json_free(next); json_free(summary); json_free(state); json_free(context);
   return rc;
 }
 

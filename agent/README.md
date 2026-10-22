@@ -1031,6 +1031,9 @@ takeover and real-model quality/cost evaluation remain separate acceptance work.
 The [single Agent report example](examples/single-agent-report.md) composes these
 APIs into one Host goal/context, two model drafts, explicit aggregation, canonical
 approval and validated tool-artifact delivery, with offline integration coverage.
+The additive [task context input factory](docs/task-context-input.md) selects exact
+Session memory keys and scoped KnowledgeStore matches into one bounded user-data
+packet; the report example can carry it unchanged through all model stages.
 
 For composition inside larger graphs and tool runtimes, `Runtime V2` now also
 adds:

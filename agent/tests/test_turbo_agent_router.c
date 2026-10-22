@@ -308,6 +308,28 @@ spec("bounded tiered model Router") {
     check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
   }
 
+  it("retains an unresponsive observation across a later Provider error without delivery or failover") {
+    atomic_store(&transport[2].open, 0);
+    transport[2].fail = 1;
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    router_wait_entered(&transport[2]);
+    check_equal(turbo_agent_router_task_inspect(task, &view), SALTS_OK);
+    uint64_t start = (uint64_t)turbo_runtime_json_value_as_int64(json_object_get(view, "heartbeat_mono_ms"), 0);
+    json_free(view); view = NULL;
+    check_equal(turbo_agent_router_task_poll(task, start + request.heartbeat_timeout_ms), SALTS_ECANCELED);
+    atomic_store_explicit(&transport[2].open, 1, memory_order_release);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_ECANCELED);
+    check_null(summary); check_null(state);
+    check_equal(turbo_agent_router_task_inspect(task, &view), SALTS_OK);
+    check_true(json_get_bool(view, "unresponsive", 0));
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "execution_status"), -1),
+                TURBO_AGENT_EXECUTION_FAILED);
+    check_true(turbo_runtime_json_value_as_int64(json_object_get(view, "runtime_result_code"), 0) < 0);
+    check_equal(atomic_load(&transport[1].calls), 0);
+    check_equal(atomic_load(&transport[2].calls), 1);
+  }
+
   for (int deadline = 0; deadline < 2; ++deadline) {
     it("uses existing cooperative cancellation and deadline terminal states, deadline=%d", deadline) {
       check_equal(turbo_agent_transport_v2_set(agents[2], router_fixture_controlled, &transport[2], NULL), SALTS_OK);

@@ -127,8 +127,8 @@ CXX_C_API int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *t
  * Successful execution still does not validate a model's answer.
  * EBUSY before terminal; EALREADY after take; EPERM for stale authority;
  * ECANCELED for an unresponsive child, with NULL outputs on every rejection.
- * Rejected results remain inspectable in the endpoint's existing Runtime by
- * thread/run identity. Policy checks require quiescence. No rejected output is
+ * Inspect committed Runtime evidence by thread/run identity; an early Runtime
+ * failure can precede any run/checkpoint commit. Policy checks require quiescence. No rejected output is
  * delivered and no new attempt starts. Release successful JSON with json_free.
  */
 CXX_C_API int turbo_agent_router_task_take_result(turbo_agent_router_task_t *task,

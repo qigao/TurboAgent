@@ -31,8 +31,8 @@ if(BUILD_TESTS AND ENABLE_CODING_TOOLS)
     CLI_STORAGE_FIXTURE="$<TARGET_FILE:cli_storage_fixture>")
   add_dependencies(test_turbo_cli_storage cli_storage_fixture)
   # This budget covers the entire SQLite/diagram/session suite, not one
-  # operation. Windows CI can exceed 30s while still completing healthy cases;
-  # child-process fixtures retain their separate 5s execution deadlines.
+  # operation. A healthy Windows run reached 29.68s (#180), leaving essentially
+  # no margin at 30s. Child fixtures retain separate 5s execution deadlines.
   if(WIN32)
     set_tests_properties(test_turbo_cli_storage PROPERTIES TIMEOUT 90)
   else()

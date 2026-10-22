@@ -588,6 +588,21 @@ after successful execution and failed result persistence to check that side
 effects are not repeated. These are process/storage tests, not power-loss or
 physical-device durability tests.
 
+The storage CTest budget covers the entire suite: 90s on Windows and 30s on
+other hosts; each storage child process retains its 5s deadline. In [CI #1004](https://github.com/qigao/TurboAgent/actions/runs/39765105887),
+Windows completed all 46 cases/1046 assertions in 29.68s. Five fresh-process
+repetitions on the same runner completed in 21.67–28.05s, with case-body progress
+throughout. The old 30s total budget left only 0.32s at the observed full-suite
+duration. The 90s Windows allowance is bounded and preserves every assertion,
+SQLite FULL synchronization and cleanup checks; it is not a per-operation limit.
+
+Ordinary CI runs the full storage CTest once. Manual `TurboAgent CI` acceptance
+also records five serial repetitions, verbose case times, CTest/JUnit logs,
+wrapper wall times, runner/toolchain context and SDK asset digests in artifact
+`cli-storage-timing-windows`. Investigate any new assertion failure, timeout or
+stalled case from those records (#180); the measured budget does not establish
+the exact historical runner/SQLite wait cause or prove absence of every hang.
+
 ## Optional live model verification
 
 `test_turbo_cli_live` is a separate CTest integration test. It is skipped unless

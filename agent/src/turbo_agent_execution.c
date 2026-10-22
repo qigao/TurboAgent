@@ -567,6 +567,20 @@ int turbo_agent_execution_result_code(const turbo_agent_execution_t *execution,
   return SALTS_OK;
 }
 
+int turbo_agent_execution_peek_result_internal(const turbo_agent_execution_t *execution,
+    const json_value_t **out_summary, const json_value_t **out_state) {
+  int rc = SALTS_OK;
+  if (out_summary) *out_summary = NULL;
+  if (out_state) *out_state = NULL;
+  if (!execution || !out_summary || !out_state) return SALTS_EINVAL;
+  cmeta_mutex_lock((cmeta_mutex_t *)&execution->mutex);
+  if (!turbo_agent_execution_is_terminal(execution->status)) rc = SALTS_EBUSY;
+  else if (execution->result_taken) rc = SALTS_EALREADY;
+  else { *out_summary = execution->summary; *out_state = execution->state; }
+  cmeta_mutex_unlock((cmeta_mutex_t *)&execution->mutex);
+  return rc;
+}
+
 int turbo_agent_execution_take_result(turbo_agent_execution_t *execution,
                                       json_value_t **out_summary, json_value_t **out_state) {
   if (!execution || !out_summary || !out_state) {

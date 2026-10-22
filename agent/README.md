@@ -1024,8 +1024,10 @@ model selection over existing Execution and Runtime owners, with estimated-budge
 admission, Host heartbeat supervision and generation-checked delivery. The original
 single-model path returns proposals for separate authorization. An opt-in bounded
 tool loop now uses Host tool policy/guardrails, checkpoint approval/resume and
-explicit result validation. A shared Host tool lane is serialized; multi-worker
-aggregation and durable worker takeover remain separate acceptance work.
+explicit result validation. A bounded group now supervises independent model workers
+and builds canonical evidence input for a separately Host-selected aggregation model.
+A shared Host tool lane stays serialized; parallel tool execution, durable worker
+takeover and real-model quality/cost evaluation remain separate acceptance work.
 
 For composition inside larger graphs and tool runtimes, `Runtime V2` now also
 adds:

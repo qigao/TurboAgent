@@ -13,9 +13,17 @@ extern "C" {
 #define TURBO_AGENT_ROUTER_MAX_ENDPOINTS 16u
 #define TURBO_AGENT_ROUTER_MAX_MODEL_TURNS 16u
 #define TURBO_AGENT_ROUTER_MAX_REVIEW_RESUMES 32u
+#define TURBO_AGENT_ROUTER_GROUP_MAX_TEXT_BYTES 65536u
+#define TURBO_AGENT_ROUTER_GROUP_MAX_INPUT_BYTES 1048576u
 
 typedef struct turbo_agent_router_s turbo_agent_router_t;
 typedef struct turbo_agent_router_task_s turbo_agent_router_task_t;
+typedef struct turbo_agent_router_group_s turbo_agent_router_group_t;
+
+typedef struct turbo_agent_router_group_result_s {
+  json_value_t *summary;
+  json_value_t *state;
+} turbo_agent_router_group_result_t;
 
 typedef enum turbo_agent_router_role_e {
   TURBO_AGENT_ROUTER_PLAN = 1,
@@ -180,6 +188,93 @@ CXX_C_API int turbo_agent_router_task_take_result(turbo_agent_router_task_t *tas
     json_value_t **out_summary, json_value_t **out_state);
 /** Returns EBUSY until terminal; never detaches live work. NULL is a no-op. */
 CXX_C_API int turbo_agent_router_task_release(turbo_agent_router_task_t *task);
+
+/**
+ * Adopt 2..16 already submitted model-only tasks into one bounded Host group.
+ * This is ownership transfer, not batch admission: the Host submits tasks with
+ * existing submit(), per-request budget/deadline and bounded Executor admission,
+ * and is responsible for every accepted handle if a later submit is rejected.
+ * No worker, queue, retry, endpoint reassignment or Runtime store is created.
+ *
+ * Tasks must be distinct, untaken, ungrouped, on the same Router, with distinct
+ * thread ids and the same parent run id (1..128 bytes). Tool loops are excluded:
+ * the shared authority tool lane stays serial. id uses the same 1..64 ASCII
+ * letter/digit/_/- format as Router endpoint ids. All validation/allocation
+ * precedes transfer. On success tasks[0..count) become NULL; group owns their
+ * graphs/Execution handles through release. On failure every slot is unchanged.
+ * Former aliases return EBUSY for mutation/take/release while adopted; no alias
+ * may be used after group release. Read-only task inspection/wait remains valid.
+ * Returns EINVAL/ENOMEM/EBUSY/EALREADY, with NULL out_group on rejection.
+ * All group APIs and other Host control operations remain serialized.
+ */
+CXX_C_API int turbo_agent_router_group_adopt(const char *id,
+    turbo_agent_router_task_t **tasks, size_t count, turbo_agent_router_group_t **out_group);
+/** Borrow the member's stable task UUID through group release; NULL for invalid index. */
+CXX_C_API const char *turbo_agent_router_group_task_id(
+    const turbo_agent_router_group_t *group, size_t index);
+/** Wait for all members under one total wait budget; no heartbeat/poll thread is installed.
+ * OK means terminal, including failures. timeout_ms follows task_wait(). */
+CXX_C_API int turbo_agent_router_group_wait(turbo_agent_router_group_t *group, uint64_t timeout_ms);
+/**
+ * Observe every member at one monotonic timestamp. The first observed loss,
+ * stale authority, failed/cancelled/timed-out run or unresolved tool proposal
+ * halts aggregation and requests PARENT cancellation of siblings. No result is
+ * fabricated and ownership lasts until actual terminal. Observe at least once
+ * per member's heartbeat interval. Failure is sticky; return its code (EPERM,
+ * ECANCELED, ETIMEDOUT, EIO or EPROTO). Invalid/backward timestamps return EINVAL
+ * without changing members; EALREADY after collection. No automatic fallback or
+ * retry is performed.
+ */
+CXX_C_API int turbo_agent_router_group_poll(turbo_agent_router_group_t *group, uint64_t now_ms);
+/** Poll the entire group first; renew one still-running member only if healthy.
+ * EALREADY for a terminal member; a late heartbeat cannot revive a halted group. */
+CXX_C_API int turbo_agent_router_group_heartbeat(turbo_agent_router_group_t *group,
+    size_t index, uint64_t now_ms);
+/** Request cancellation of every member; aggregation remains halted even after terminal.
+ * OK on first request, EALREADY if already halted/collected; EINVAL for bad reason. */
+CXX_C_API int turbo_agent_router_group_cancel(turbo_agent_router_group_t *group,
+    turbo_cancel_reason_t reason);
+/** Owned diagnostic projection in member order; Runtime remains the run/result owner. */
+CXX_C_API int turbo_agent_router_group_inspect(const turbo_agent_router_group_t *group,
+    json_value_t **out_view);
+/**
+ * Build one owned Session-compatible user input for an explicitly Host-selected
+ * aggregation model. Requires all terminal, successful, current-authority,
+ * responsive members with nonempty model text, no pending tools or failure state.
+ * Metadata and text are read from canonical Execution results, never supplied by
+ * a caller/model as completed-worker assertions. Includes task/endpoint/thread/
+ * Runtime run/checkpoint/parent identities in stable member order.
+ *
+ * host_task and each worker text are at most 64 KiB; serialized evidence is at
+ * most 1 MiB. ENOBUFS rejects excess without truncation. EBUSY before barrier;
+ * EALREADY after a successful build or result collection; other supervision
+ * errors propagate, with NULL output. Failure consumes no results. The derived
+ * input is an immediate data projection, not a stored run/result or an execution
+ * grant. Host instructions/policy and the aggregation model are configured
+ * separately; worker text is untrusted data. No model is called by this API.
+ * Explicitly submit that input through Router and verify the aggregation result.
+ * This validates provenance/completion, not answer quality or task correctness.
+ */
+CXX_C_API int turbo_agent_router_group_build_input(turbo_agent_router_group_t *group,
+    const char *host_task, json_value_t **out_input);
+/**
+ * Move canonical summary/state pairs once, in adoption order, after all terminal
+ * and all authority/loss gates pass. Transfer success is not execution success;
+ * failed runs can have NULL summary and owned failure state. Explicit cancellation
+ * and failed siblings may be collected for Host diagnostics; loss/stale authority
+ * withholds the entire collection. No JSON result copy is retained by the group.
+ *
+ * Caller supplies an empty array with capacity >= member count and frees each
+ * moved JSON with json_free(). out_count is always initialized to zero and then
+ * counts actual transfers, even on error. Normal preflight rejection moves none.
+ * EBUSY before barrier, EALREADY after collection; individual delivery errors
+ * propagate. A previously built aggregation input does not consume these pairs.
+ */
+CXX_C_API int turbo_agent_router_group_take_results(turbo_agent_router_group_t *group,
+    turbo_agent_router_group_result_t *results, size_t capacity, size_t *out_count);
+/** EBUSY until every member is terminal; never partially releases live work.
+ * Releases all adopted tasks and their endpoint reservations. NULL is a no-op. */
+CXX_C_API int turbo_agent_router_group_release(turbo_agent_router_group_t *group);
 
 #ifdef __cplusplus
 }

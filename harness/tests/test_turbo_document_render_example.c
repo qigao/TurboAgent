@@ -153,24 +153,29 @@ spec("document render Host example") {
   }
 
   it("rejects embedded NUL without accepting a truncated source identity or draft") {
-    static const char *const invalid[] = {
-        "{\"title\":\"Report\\u0000hidden\",\"passages\":[{\"text\":\"Draft\",\"source_id\":\"brief\"}]}",
-        "{\"title\":\"Report\",\"passages\":[{\"text\":\"Draft\\u0000hidden\",\"source_id\":\"brief\"}]}",
-        "{\"title\":\"Report\",\"passages\":[{\"text\":\"Draft\",\"source_id\":\"brief\\u0000unknown\"}]}"};
+    static const char title[] = "Report\0hidden";
+    static const char text[] = "Draft\0hidden";
+    static const char source_id[] = "brief\0unknown";
+    const struct { const char *key, *bytes; size_t size; } invalid[] = {
+        {"title", title, sizeof(title) - 1}, {"text", text, sizeof(text) - 1},
+        {"source_id", source_id, sizeof(source_id) - 1}};
     document_render_catalog_t catalog = {render_sources, 2};
     turbo_tool_registry_t *registry = turbo_tool_registry_create();
     size_t i;
     check_not_null(registry);
     check_equal(document_render_register(registry, &catalog), TURBO_TOOL_OK);
     for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
-      json_value_t *arguments = json_parse(invalid[i], strlen(invalid[i]));
+      json_value_t *arguments = json_parse(render_arguments, sizeof(render_arguments) - 1);
+      json_value_t *field = json_create_string_n(invalid[i].bytes, invalid[i].size);
+      json_value_t *parent;
       json_value_t *result = NULL;
-      /* A parser may reject this domain input itself. If it preserves NUL,
-       * the tool must reject it before C-string matching or rendering. */
-      if (arguments) {
-        check_not_equal(turbo_tool_registry_execute_json_value(
-                            registry, "document_render", arguments, &result), TURBO_TOOL_OK);
-      }
+      check_not_null(arguments);
+      check_not_null(field);
+      check_true(json_string_len(field) > strlen(json_string(field)));
+      parent = i == 0 ? arguments : json_array_get(json_object_get(arguments, "passages"), 0);
+      check_equal(turbo_runtime_json_object_set(parent, invalid[i].key, field), TURBO_RUNTIME_JSON_OK);
+      check_not_equal(turbo_tool_registry_execute_json_value(
+                          registry, "document_render", arguments, &result), TURBO_TOOL_OK);
       check_null(result);
       json_free(arguments);
     }

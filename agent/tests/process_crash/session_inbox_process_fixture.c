@@ -252,7 +252,7 @@ static int exercise(fixture_t *f, const char *mode) {
     f->read_fault = !strcmp(mode, "owner_error") ? 1 : !strcmp(mode, "owner_foreign") ? 2 :
         !strcmp(mode, "owner_state_error") ? 3 : 4;
     operation = configure(f);
-    REQUIRE(operation == (f->read_fault == 2 ? SALTS_EPROTO : SALTS_EIO));
+    REQUIRE(operation == ((f->read_fault == 2 || f->read_fault == 3) ? SALTS_EPROTO : SALTS_EIO));
     REQUIRE(!f->run_lists && (f->read_fault == 4 || f->owner_reads > 0));
     f->read_fault = 0;
     REQUIRE(!f->model_calls);

@@ -172,6 +172,7 @@ spec("supervised tiered Router tool loop") {
   static turbo_agent_router_task_t *task;
   static cmeta_threadpool_t *pool;
   static json_value_t *input, *summary, *state, *view;
+  static turbo_agent_runtime_t *audit_runtime;
 
   before_each() {
     static const char *capabilities[] = {"custom_tools"};
@@ -244,6 +245,7 @@ spec("supervised tiered Router tool loop") {
     input = turbo_agent_session_create_input_state_json_value("Execute one approved Host operation");
     check_not_null(input);
     task = NULL; summary = state = view = NULL;
+    audit_runtime = NULL;
   }
   after_each() {
     for (int i = 0; i < 3; ++i) atomic_store_explicit(&f[i].open, 1, memory_order_release);
@@ -258,6 +260,7 @@ spec("supervised tiered Router tool loop") {
     for (int i = 0; i < 3; ++i) turbo_agent_destroy(agents[i]);
     turbo_tool_registry_destroy(tools);
     json_free(input); json_free(summary); json_free(state); json_free(view);
+    turbo_agent_runtime_destroy(audit_runtime);
   }
 
   for (int provider = 0; provider < 2; ++provider) {
@@ -327,6 +330,37 @@ spec("supervised tiered Router tool loop") {
     check_equal(turbo_agent_router_task_take_result(task, &s2, &v2), SALTS_EALREADY);
     check_null(s2); check_null(v2);
     tstr_free(id); tstr_free(run);
+  }
+
+  it("persists approval and resumed segment identities without making a stored observation an execution grant") {
+    turbo_agent_runtime_store_t audit_store = turbo_agent_runtime_store_memory_create();
+    audit_runtime = turbo_agent_runtime_create(&audit_store); check_not_null(audit_runtime);
+    f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_record_observation(task, audit_runtime, "approval"), SALTS_OK);
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "approval", &view), SALTS_OK);
+    check_true(json_get_bool(view, "approval_pending", 0));
+    check_equal(json_get_string(view, "runtime_status"), "interrupted");
+    check_equal(json_get_string(view, "task_id"), json_get_string(view, "execution_id"));
+    tstr run = tstr_dup(json_get_string(view, "runtime_run_id")); check_not_null(run);
+    check_equal(turbo_runtime_json_object_set(view, "approval_pending", json_create_bool(0)), 0);
+    check_equal(atomic_load(&f[0].tool_calls), 0); check_equal(atomic_load(&f[2].model_calls), 1);
+    json_free(view); view = NULL;
+    check_equal(turbo_agent_router_task_review(task, pool, 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_record_observation(task, audit_runtime, "resumed"), SALTS_OK);
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "resumed", &view), SALTS_OK);
+    check_false(json_get_bool(view, "approval_pending", 1));
+    check_equal(json_get_string(view, "task_id"), turbo_agent_router_task_id(task));
+    check_true(strcmp(json_get_string(view, "task_id"), json_get_string(view, "execution_id")) != 0);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "review_resumes"), -1), 1);
+    check_equal(json_get_string(view, "runtime_run_id"), run);
+    check_equal(json_get_string(view, "runtime_status"), "completed");
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(view, "runtime_checkpoint_id"), json_get_string(summary, "checkpoint_id"));
+    check_equal(atomic_load(&f[0].tool_calls), 1); check_equal(atomic_load(&f[2].model_calls), 2);
+    tstr_free(run);
   }
 
   it("does not report an old approval after a resumed segment fails before terminal metadata capture") {

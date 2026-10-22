@@ -68,8 +68,10 @@ same clock in production. Tests can advance heartbeat observations without sleep
 Use `task_inspect()` for the selected route, stable execution/thread ids, actual
 Execution status/result code, observed elapsed time and liveness facts. Poll timestamps
 determine observed elapsed time, not a separately measured provider latency. These
-observations are not durable; a Host needing a durable supervision audit must record
-them through its existing audit integration. Runtime remains the source of run evidence.
+inspect views are not durable. The Host can explicitly
+[record immutable supervision observations](router-supervision-observations.md)
+through its existing Runtime Store, or use its own audit integration. Runtime
+remains the source of run evidence; an observation does not authorize recovery.
 
 Take summary/state once per Execution segment after terminal and verify Execution status, its underlying
 `runtime_result_code`, the summary when present, and the task's domain result.

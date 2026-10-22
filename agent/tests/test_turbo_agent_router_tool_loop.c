@@ -358,7 +358,10 @@ spec("supervised tiered Router tool loop") {
     check_equal(json_get_string(view, "runtime_run_id"), run);
     check_equal(json_get_string(view, "runtime_status"), "completed");
     check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
-    check_equal(json_get_string(view, "runtime_checkpoint_id"), json_get_string(summary, "checkpoint_id"));
+    check_equal(json_type(json_object_get(view, "runtime_checkpoint_id")), json_type(json_object_get(summary, "checkpoint_id")));
+    if (json_get_string(summary, "checkpoint_id"))
+      check_equal(json_get_string(view, "runtime_checkpoint_id"), json_get_string(summary, "checkpoint_id"));
+    else check_true(json_is_null(json_object_get(view, "runtime_checkpoint_id")));
     check_equal(atomic_load(&f[0].tool_calls), 1); check_equal(atomic_load(&f[2].model_calls), 2);
     tstr_free(run);
   }

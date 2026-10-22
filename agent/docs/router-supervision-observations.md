@@ -70,6 +70,8 @@ even if execution completes while the observation is being built. Terminal resul
 metadata is borrowed only during synchronous projection, before take_result(). Saving
 after transfer returns EALREADY. No prompt, model answer, tool arguments/output,
 checkpoint state, raw pointer, policy grant or recovery handle enters the record.
+A completed run can have a run id and a null checkpoint id; observations preserve
+that canonical absence rather than inventing a checkpoint for reconciliation.
 
 Loss is a separate sticky observation from actual terminal status. A blocked callback
 can remain running after loss/cancellation; recording it cannot free its reservation.

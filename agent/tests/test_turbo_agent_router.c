@@ -519,7 +519,10 @@ spec("bounded tiered model Router") {
     check_equal(turbo_agent_router_load_observation(audit_runtime, "terminal", &view), SALTS_OK);
     check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
     check_equal(json_get_string(view, "runtime_run_id"), json_get_string(summary, "run_id"));
-    check_equal(json_get_string(view, "runtime_checkpoint_id"), json_get_string(summary, "checkpoint_id"));
+    check_equal(json_type(json_object_get(view, "runtime_checkpoint_id")), json_type(json_object_get(summary, "checkpoint_id")));
+    if (json_get_string(summary, "checkpoint_id"))
+      check_equal(json_get_string(view, "runtime_checkpoint_id"), json_get_string(summary, "checkpoint_id"));
+    else check_true(json_is_null(json_object_get(view, "runtime_checkpoint_id")));
     check_equal(json_get_string(view, "runtime_status"), "completed");
     check_equal(turbo_agent_state_last_output_text(state), "draft");
     check_equal(audit.creates, 3); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
@@ -713,7 +716,10 @@ spec("bounded tiered model Router") {
     check_equal(json_get_string(view, "runtime_status"), "completed");
     check_equal(turbo_agent_runtime_get_run(runtimes[1], json_get_string(view, "runtime_run_id"), &summary), 0);
     check_equal(json_get_string(summary, "id"), json_get_string(view, "runtime_run_id"));
-    check_equal(json_get_string(summary, "latest_checkpoint_id"), json_get_string(view, "runtime_checkpoint_id"));
+    check_equal(json_type(json_object_get(summary, "latest_checkpoint_id")), json_type(json_object_get(view, "runtime_checkpoint_id")));
+    if (json_get_string(summary, "latest_checkpoint_id"))
+      check_equal(json_get_string(summary, "latest_checkpoint_id"), json_get_string(view, "runtime_checkpoint_id"));
+    else check_true(json_is_null(json_object_get(view, "runtime_checkpoint_id")));
     check_equal(json_get_string(summary, "parent_agent_run_id"), "parent-run");
     turbo_agent_runtime_destroy(audit_runtime); audit_runtime = NULL;
     check_equal(json_get_string(view, "endpoint"), "fast");

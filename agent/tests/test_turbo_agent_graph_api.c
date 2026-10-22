@@ -7,6 +7,9 @@
 #include "turbo_agent_policy.h"
 #include "turbo_agent_state.h"
 #include "turbo_tool_registry.h"
+#include "turbo_runtime_store.h"
+#include "../src/turbo_agent_runtime_internal.h"
+#include "../src/turbo_agent_workflow_graph_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,6 +80,200 @@ static char *graph_test_strdup(const char *text) {
   check_not_null(copy);
   memcpy(copy, text, len + 1);
   return copy;
+}
+
+typedef struct graph_result_probe_s {
+  const char *output;
+  const char *replacement;
+  int calls;
+} graph_result_probe_t;
+
+static turbo_tool_status_t graph_result_handler(const char *args,
+    const turbo_tool_execution_context_t *context, char **out, void *user) {
+  graph_result_probe_t *probe = user;
+  (void)args; (void)context;
+  ++probe->calls;
+  *out = probe->output ? graph_test_strdup(probe->output) : NULL;
+  return TURBO_TOOL_OK;
+}
+
+static int graph_result_contract(turbo_tool_registry_t *registry,
+    graph_result_probe_t *probe, const char *schema, int strict) {
+  turbo_tool_definition_v6_t definition = {0};
+  definition.struct_size = sizeof(definition);
+  definition.abi_version = TURBO_TOOL_DEFINITION_V6_ABI_VERSION;
+  definition.definition.name = "repo.result";
+  definition.definition.description = "Result delivery fixture";
+  definition.definition.parameters_json = "{\"type\":\"object\"}";
+  definition.definition.user_data = probe;
+  definition.context_handler = graph_result_handler;
+  definition.execution_policy.idempotency = TURBO_TOOL_IDEMPOTENCY_READ_ONLY;
+  definition.result_schema_json = schema;
+  definition.strict_result = strict;
+  definition.effect_flags = TURBO_TOOL_EFFECT_READ;
+  return turbo_tool_registry_add_v6(registry, &definition);
+}
+
+static int graph_result_rewrite(turbo_agent_t *agent, json_value_t *state,
+    const char *id, const char *name, const char *args, char **out,
+    turbo_tool_status_t status, void *user) {
+  graph_result_probe_t *probe = user;
+  (void)agent; (void)state; (void)id; (void)name; (void)args; (void)status;
+  if (probe->replacement) {
+    char *copy = graph_test_strdup(probe->replacement);
+    free(*out); *out = copy;
+  }
+  return 0;
+}
+
+static const char *graph_result_delivered(const json_value_t *state) {
+  const json_value_t *events = json_object_get(state, "events");
+  const json_value_t *event = json_array_get(events, json_array_size(events) - 1);
+  return json_get_string(json_array_get(json_object_get(event, "outputs"), 0), "output");
+}
+
+spec("ToolNode strict result delivery and Journal replay") {
+  static const char schema[] = "{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"]}";
+  static const char event[] = "{\"kind\":\"model\",\"tool_calls\":[{\"call_id\":\"result-call\",\"name\":\"repo_result\",\"arguments\":\"{}\"}]}";
+  static graph_result_probe_t probe;
+  static turbo_tool_registry_t *registry;
+  static turbo_agent_t *agent;
+  static turbo_graph_t *graph;
+  static turbo_agent_runtime_t *runtime;
+  static json_value_t *state, *replay, *records;
+  static turbo_graph_exec_ctx_t ctx;
+  static turbo_agent_execution_context_t saved;
+
+  before_each() {
+    turbo_agent_config_t config = {0};
+    turbo_agent_policy_t policy = turbo_agent_policy_default();
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_execution_context_t context = {0};
+    turbo_agent_middleware_t middleware = {.after_tool = graph_result_rewrite, .user_data = &probe};
+    probe = (graph_result_probe_t){.output = "{\"ok\":true}"};
+    turbo_agent_execution_context_get(&saved);
+    runtime = turbo_agent_runtime_create(&store); check_not_null(runtime);
+    registry = turbo_tool_registry_create(); check_not_null(registry);
+    check_equal(graph_result_contract(registry, &probe, schema, 1), TURBO_TOOL_OK);
+    config.model = "offline"; config.transport_fn = dummy_transport;
+    config.tool_registry = registry;
+    agent = turbo_agent_create(&config); check_not_null(agent);
+    policy.allow_custom_tools = 1;
+    check_equal(turbo_agent_set_tool_policy(agent, &policy), 0);
+    check_equal(turbo_agent_add_middleware(agent, &middleware), 0);
+    graph = turbo_graph_create("result-contract"); check_not_null(graph);
+    check_equal(turbo_graph_add_node(graph, "tools", turbo_agent_tool_node, agent), TURBO_GRAPH_EXEC_OK);
+    state = turbo_agent_state_create(); check_not_null(state);
+    json_array_add(json_object_get(state, "events"), json_parse(event, sizeof(event) - 1));
+    replay = json_clone(state); check_not_null(replay);
+    ctx = (turbo_graph_exec_ctx_t){.graph = graph, .current_node = "tools", .state = state};
+    context.thread_id = "result-thread"; context.run_id = "result-run"; context.runtime = runtime;
+    turbo_agent_execution_context_set(&context);
+  }
+  after_each() {
+    turbo_agent_execution_context_set(&saved);
+    json_free(state); json_free(replay); json_free(records);
+    state = replay = records = NULL;
+    turbo_graph_destroy(graph); graph = NULL;
+    turbo_agent_destroy(agent); agent = NULL;
+    turbo_tool_registry_destroy(registry); registry = NULL;
+    turbo_agent_runtime_destroy(runtime); runtime = NULL;
+  }
+
+  struct { const char *name, *output; } invalid[] = {
+      {"wrong type", "{\"ok\":\"private-invalid-result\"}"},
+      {"malformed JSON", "private-invalid-result"},
+      {"missing output", NULL},
+      {"extra strict field", "{\"ok\":true,\"extra\":\"private-invalid-result\"}"}};
+  for (int checked = 0; checked < 2; ++checked) {
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+      it("withholds %s on %s dispatch and replay without repeating the callback",
+          invalid[i].name, checked ? "checked" : "ordinary") {
+        int outcome = -1;
+        probe.output = invalid[i].output;
+        for (int delivery = 0; delivery < 2; ++delivery) {
+          ctx.state = delivery ? replay : state;
+          if (checked) {
+            check_equal(turbo_agent_tool_node_checked(&ctx, agent, &outcome), 0);
+            check_equal(outcome, TURBO_AGENT_TOOL_CHECK_INVALID_RESULT);
+          } else check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+          check_equal(probe.calls, 1);
+          check_equal(turbo_agent_state_guardrail_rejection_phase(ctx.state), "tool_result");
+          check_equal(turbo_agent_state_guardrail_rejection_reason(ctx.state), "tool_result_contract_invalid");
+          const char *delivered = graph_result_delivered(ctx.state);
+          check_not_null(delivered);
+          check_not_null(strstr(delivered, "tool_result_contract_invalid"));
+          check_null(strstr(delivered, "private-invalid-result"));
+        }
+        check_equal(turbo_agent_runtime_store_list_json(runtime, "agent_tool_journal",
+            "call_id", "result-call", &records), 0);
+        check_equal(json_array_size(records), 1);
+        const json_value_t *record = json_array_get(records, 0);
+        check_equal(json_get_string(record, "phase"), "committed");
+        check_equal(json_get_int(record, "status", -99), TURBO_TOOL_OK);
+        if (probe.output) check_equal(json_get_string(record, "output"), probe.output);
+      }
+    }
+    it("delivers a valid strict result unchanged on %s dispatch and replay",
+        checked ? "checked" : "ordinary") {
+      for (int delivery = 0; delivery < 2; ++delivery) {
+        int outcome = -1;
+        ctx.state = delivery ? replay : state;
+        if (checked) {
+          check_equal(turbo_agent_tool_node_checked(&ctx, agent, &outcome), 0);
+          check_equal(outcome, TURBO_AGENT_TOOL_CHECK_OK);
+        } else check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+        check_equal(graph_result_delivered(ctx.state), probe.output);
+        check_equal(probe.calls, 1);
+      }
+    }
+  }
+  it("validates middleware-transformed replay text instead of trusting a prior valid callback") {
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(graph_result_delivered(state), probe.output);
+    probe.replacement = "{\"ok\":\"private-invalid-result\"}";
+    ctx.state = replay;
+    check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+    check_equal(probe.calls, 1);
+    check_not_null(strstr(graph_result_delivered(replay), "tool_result_contract_invalid"));
+    check_null(strstr(graph_result_delivered(replay), "private-invalid-result"));
+  }
+  it("leaves direct trusted Host RuntimeTools invocation unchanged") {
+    char *output = NULL;
+    probe.output = "{\"ok\":\"private-invalid-result\"}";
+    check_equal(turbo_tool_registry_execute(registry, "repo_result", "{}", &output), TURBO_TOOL_OK);
+    check_equal(output, probe.output);
+    free(output);
+    check_equal(probe.calls, 1);
+  }
+  for (int missing = 0; missing < 2; ++missing) {
+    it("rejects %s without converting presentation failure into another callback",
+        missing ? "missing output under a permissive object contract" : "unsupported result schema semantics") {
+      check_equal(turbo_tool_registry_remove(registry, "repo.result"), TURBO_TOOL_OK);
+      check_equal(graph_result_contract(registry, &probe, missing ? "{\"type\":\"object\"}" :
+          "{\"type\":\"object\",\"patternProperties\":{\".*\":{\"type\":\"boolean\"}}}", 1), TURBO_TOOL_OK);
+      if (missing) probe.output = NULL;
+      for (int delivery = 0; delivery < 2; ++delivery) {
+        ctx.state = delivery ? replay : state;
+        check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+        check_not_null(strstr(graph_result_delivered(ctx.state), "tool_result_contract_invalid"));
+        check_equal(probe.calls, 1);
+      }
+    }
+  }
+  for (int declared = 0; declared < 2; ++declared) {
+    it("preserves ordinary %s result delivery", declared ? "non-strict" : "opaque") {
+      check_equal(turbo_tool_registry_remove(registry, "repo.result"), TURBO_TOOL_OK);
+      check_equal(graph_result_contract(registry, &probe, declared ? schema : NULL, 0), TURBO_TOOL_OK);
+      probe.output = "legacy plain text";
+      for (int delivery = 0; delivery < 2; ++delivery) {
+        ctx.state = delivery ? replay : state;
+        check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+        check_equal(graph_result_delivered(ctx.state), probe.output);
+        check_equal(probe.calls, 1);
+      }
+    }
+  }
 }
 
 static char *graph_test_temp_dir(void) {

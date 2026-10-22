@@ -283,6 +283,7 @@ static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_dat
     turbo_agent_execution_context_t tool_context = saved_context;
     char *guardrail_reason = NULL;
     json_value_t *output_item;
+    int output_missing = calls[index].output == NULL;
     tool_context.tool_call_id = calls[index].call_id;
     tool_context.tool_name = calls[index].tool_name;
     turbo_agent_execution_context_set(&tool_context);
@@ -330,18 +331,46 @@ static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_dat
       calls[index].output = guardrail_output;
       calls[index].status = TURBO_TOOL_ERROR;
     }
-    if (out_outcome) {
-      if (calls[index].status != TURBO_TOOL_OK) {
-        if (*out_outcome == TURBO_AGENT_TOOL_CHECK_OK)
-          *out_outcome = TURBO_AGENT_TOOL_CHECK_FAILED;
-      } else {
+    if (calls[index].status != TURBO_TOOL_OK) {
+      if (out_outcome && *out_outcome == TURBO_AGENT_TOOL_CHECK_OK)
+        *out_outcome = TURBO_AGENT_TOOL_CHECK_FAILED;
+    } else {
+      const char *schema_text = NULL;
+      const json_value_t *schema = NULL;
+      int strict_result = 0;
+      int contract_rc = turbo_tool_registry_get_result_contract(agent->tool_registry,
+          calls[index].tool_name, &schema_text, &schema, &strict_result);
+      /* Ordinary loops opt in for declared strict results. Checked Router
+       * calls still require a result contract. Validate the final text after
+       * Host hooks on fresh dispatch AND Journal replay, before trace/model
+       * delivery. The Journal remains the original callback outcome; rejecting
+       * its presentation must never erase it or redispatch its side effects. */
+      if (out_outcome || strict_result || contract_rc != TURBO_TOOL_OK) {
         json_value_t *result = calls[index].output
             ? json_parse(calls[index].output, strlen(calls[index].output)) : NULL;
-        if (!result || turbo_tool_schema_validate_result_json_value(
-                agent->tool_registry, calls[index].tool_name, result, NULL, 0) !=
-                    TURBO_TOOL_SCHEMA_VALID)
-          *out_outcome = TURBO_AGENT_TOOL_CHECK_INVALID_RESULT;
+        int valid = !output_missing && result && contract_rc == TURBO_TOOL_OK &&
+            turbo_tool_schema_validate_result_json_value(agent->tool_registry,
+                calls[index].tool_name, result, NULL, 0) == TURBO_TOOL_SCHEMA_VALID;
         json_free(result);
+        if (!valid) {
+          char *error = turbo_agent_format_tool_error(
+              calls[index].tool_name, "tool_result_contract_invalid");
+          if (out_outcome) *out_outcome = TURBO_AGENT_TOOL_CHECK_INVALID_RESULT;
+          if (!error) {
+            turbo_agent_state_set_model_error(ctx->state, "tool",
+                                              "failed to format tool result contract error");
+            rc = -1;
+            goto cleanup;
+          }
+          free(calls[index].output);
+          calls[index].output = error;
+          calls[index].status = TURBO_TOOL_ERROR;
+          guardrail_rejected = 1;
+          turbo_agent_state_set_guardrail_rejection(
+              ctx->state, "tool_result", "tool_result_contract_invalid");
+          turbo_agent_emit_trace(agent, ctx->state, TURBO_AGENT_TRACE_GUARDRAIL_REJECTED,
+              "tool_result", "tool_result_contract_invalid", calls[index].tool_name, -1);
+        }
       }
     }
     turbo_agent_emit_trace(agent, ctx->state, TURBO_AGENT_TRACE_TOOL_RESULT, calls[index].tool_name,

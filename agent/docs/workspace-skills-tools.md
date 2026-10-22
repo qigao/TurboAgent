@@ -150,6 +150,16 @@ The workspace tests cover both modes, FTS/context propagation, replanning and
 persisted-history continuation; live tests cover skill adherence under all three
 choices and coding repair through loop and engineering execution.
 
+## Bounded document rendering example
+
+The [document rendering Host example](../examples/document-render.md) registers
+one native tool with a canonical input/result contract and a Host-selected source
+catalog. Its Skill selects the registered tool and requires an explicit
+`runtime_tools` grant. It produces in-memory Markdown; source identity checks do
+not establish factual support. No file writer, shell or general-mode default
+tool is added. Offline Harness tests exercise the tool's compiled Inspect path
+separately from the example's explicitly checked direct Host call.
+
 ## WasmToolPack composition
 
 `turbo_wasm_tool_pack_t` is an optional host-owned source registry for resident

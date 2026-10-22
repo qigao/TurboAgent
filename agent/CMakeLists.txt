@@ -32,6 +32,12 @@ if(BUILD_EXAMPLES)
 endif()
 
 if(BUILD_TESTS)
+  # Compile the documented Host example in normal test builds as well.
+  if(NOT BUILD_EXAMPLES)
+    add_executable(workspace_document_render examples/workspace_document_render.c)
+    target_link_libraries(workspace_document_render PRIVATE TurboAgent::Agent)
+    set_target_properties(workspace_document_render PROPERTIES FOLDER "Agent/examples")
+  endif()
   file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "tests/test_*.c")
   cmake_add_test(SOURCES ${TEST_SOURCES}
     LIBS TurboAgent::Agent Salts::TinyTest

@@ -1,0 +1,110 @@
+# Tool Journal process-crash regression
+
+The existing Tool Journal tests close/reopen SQLite owners and inject storage errors.
+The native `test_tool_journal_crash_*` CTests additionally terminate a real process
+without cleanup at eight actual Executor/SQLite/tool/delivery boundaries. Independent
+processes then reopen the database and verify stored evidence, current authorization,
+identity rejection, explicit recovery and another replay.
+
+This is a bounded sequential Direct ToolExecutor slice of
+[#74](https://github.com/qigao/TurboAgent/issues/74), supporting
+[#213](https://github.com/qigao/TurboAgent/issues/213)'s recovery acceptance work.
+It does not modify production execution, add automatic recovery or complete either gate.
+
+## Native fixture and independent evidence
+
+CTest runs a CMake process driver which requires exit **86** from the crash worker.
+An unrelated failure, loader error, timeout, missing cut or successful return fails
+the case. It does not use WILL_FAIL or parse a success marker. All state/result/effect
+assertions execute in the C fixture against actual Runtime Store/ToolExecutor APIs;
+CMake only launches processes, checks exact exit codes and bounds execution time.
+The fixture needs a custom C main instead of a generated TinyTest main so each
+subprocess can select its mode and intentionally skip all cleanup. The existing
+unit/integration TinyTest suites remain enabled and unchanged.
+
+Each case creates fresh private databases in the CTest build tree, including spaces
+in the path. Normal verification processes close all owners. The crash worker uses
+C11 `_Exit(86)`, skipping Runtime/Executor/SQLite destructors and exit handlers; it is
+not owner destruction followed by reopen inside the same process. The driver waits
+for that process to exit before starting a new one. Each child has a ten-second bound;
+each case has a ninety-second CTest timeout. Only its newly created case directory is
+removed on success; failures retain database evidence and print its exact location.
+
+The registered context Tool has explicit SEQUENTIAL execution, NONE idempotency,
+known WRITE effect, `custom_tools` capability, strict argument/result contracts and
+stable thread/run/turn/call identities. Its callback commits an increment to a separate
+SQLite **effect counter**, then returns JSON and independently captured detail. A
+separate delivery counter changes only after the Host explicitly receives and validates
+a successful result. These two counters are test oracles, not a replacement result
+store, recovery ledger or production delivery protocol. The original Tool Journal
+remains the only saved tool output/detail owner.
+
+The Journal backend is the real bounded SQLite Runtime Store. A thin test adapter
+calls the real put, or terminates immediately before/after it at the chosen phase.
+The effect cut terminates inside the actual callback after its independent commit.
+The delivery cut terminates after Executor return and result validation, before the
+Host's delivery receipt. Typed get statuses are preserved; execution checks that
+neither a compatibility list nor an alternative backend was used.
+
+## Expected cut states
+
+| Cut | Journal after crash | Effect count | Explicit same-identity recovery |
+| --- | --- | ---: | --- |
+| before planned write | absent | 0 | Admit one call, commit its result. |
+| after planned write | planned | 0 | Invoke once, commit its result. |
+| before started write | planned | 0 | Invoke once, commit its result. |
+| after started write | started | 0 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
+| after effect commit | started | 1 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
+| before committed write | started | 1 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
+| after committed write | committed | 1 | Replay canonical output/detail; no callback. |
+| before Host delivery | committed | 1 | Replay canonical output/detail; no callback. |
+
+Every crash leaves delivery count zero. A started record remains uncertain even at
+the deliberately chosen cut where this fixture knows the effect count is zero:
+the production Journal cannot infer that fact and must not automatically redispatch.
+Unknown outcomes remain started through repeated restart attempts, with no saved
+output/detail invented. For known results, the explicit recovery Host validates the
+strict result and detail before one receipt; the next verification replay intentionally
+does not perform another delivery. This does not claim exactly-once external delivery.
+
+Before any authorized recovery, a new process installs a denied Host policy and
+attempts the same identity. It must receive no output/detail, enter no callback and
+perform no Journal read/write/list; the durable phase/effect/delivery evidence stays
+unchanged. When a record exists, another process changes valid arguments and then
+the thread identity. Both attempts must return EPROTO without callback, output,
+overwrite or compatibility query. This checks current admission before both new
+execution and committed-result replay; persisted records cannot grant authority.
+
+The verifier reads actual Journal phase, identity, result/status and detail, alongside
+the independent effect/delivery counts. Replayed results must satisfy the current
+registry's strict result contract. It never infers success from process return alone,
+a model statement, an absent Session event or an observation saved by the Router.
+No historical authority snapshot or generation counter is restored as a grant in
+another process; the Host explicitly supplies current policy for each operation.
+Policy replacement remains quiescent and no callback-time setter is introduced.
+
+## Scope and reproduction
+
+The process fixture is built under the existing BUILD_TESTS/native configuration and
+excluded from cross compilation. Normal CI still configures/builds the full graph
+and executes CTest. Workflows, presets, dependency pins, public ABI, Journal schema,
+identity hashing and product scheduling/ownership are unchanged. Example focused runs
+after the usual native configure/build are:
+
+```sh
+ctest --preset ci-linux-release -R '^test_tool_journal_crash_' --output-on-failure
+ctest --preset ci-windows-release -R '^test_tool_journal_crash_' --output-on-failure
+```
+
+Qualify only the exact commits/platforms where these CTests actually ran. A macOS or
+Android SDK build with tests disabled does not qualify process-crash behavior there.
+These are abrupt process exits after/before completed record operations, not OS kill
+at arbitrary instructions, power loss, partial-sector writes, mid-SQLite-transaction
+crashes or allocator failure injection. They do not establish durable Router admission,
+remote lease takeover, concurrent same-identity admission, nested/forked ownership,
+parallel tools, compiled typed-Inspect recovery, Wasm/MCP/Praktor behavior or all-platform
+effect conformance. Those remain #74/#213 acceptance work. Unknown effects continue
+to require explicit reconciliation; no globally exactly-once effect guarantee is made.
+
+Rollback only removes these native test registrations/fixtures; production behavior
+and existing persistent records are unchanged.

@@ -50,5 +50,6 @@ if(BUILD_TESTS)
   # separate Provider DSO. Keep it out of cross-compilation profiles.
   if(NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(tests/rpc_generated)
+    add_subdirectory(tests/process_crash)
   endif()
 endif()

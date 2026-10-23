@@ -20,8 +20,46 @@ static int valid_text(const char *text, size_t length) {
   return 1;
 }
 
+static int same_record_string(const json_value_t *left, const json_value_t *right,
+                              const char *key) {
+  const json_value_t *left_value = json_object_get(left, key);
+  const json_value_t *right_value = json_object_get(right, key);
+  size_t length;
+  if (json_type(left_value) != JSON_STRING || json_type(right_value) != JSON_STRING)
+    return 0;
+  length = json_string_len(left_value);
+  return length == json_string_len(right_value) &&
+         memcmp(json_string(left_value), json_string(right_value), length) == 0;
+}
+
+static int admitted_claim_valid(const json_value_t *claim, const json_value_t *journal) {
+  static const char *identity[] = {"journal_id", "thread_id", "run_id", "call_id",
+                                   "turn_key", "tool_name", "arguments_hash"};
+  const json_value_t *phase = json_object_get(claim, "phase");
+  const json_value_t *updated = json_object_get(claim, "updated_at");
+  if (json_type(claim) != JSON_OBJECT ||
+      turbo_runtime_json_value_as_int64(json_object_get(claim, "schema_version"), -1) !=
+          TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION ||
+      json_type(phase) != JSON_STRING || json_string_len(phase) != sizeof("admitted") - 1 ||
+      memcmp(json_string(phase), "admitted", sizeof("admitted") - 1) != 0 ||
+      json_type(updated) != JSON_STRING ||
+      !valid_text(json_string(updated), json_string_len(updated)) ||
+      turbo_runtime_json_value_as_int64(json_object_get(claim, "status"), INT64_MAX) !=
+          TURBO_TOOL_OK ||
+      turbo_runtime_json_value_as_int64(json_object_get(claim, "execution_mode"), INT64_MIN) !=
+          turbo_runtime_json_value_as_int64(json_object_get(journal, "execution_mode"), INT64_MAX) ||
+      turbo_runtime_json_value_as_int64(json_object_get(claim, "idempotency"), INT64_MIN) !=
+          turbo_runtime_json_value_as_int64(json_object_get(journal, "idempotency"), INT64_MAX) ||
+      json_object_get(claim, "output") || json_object_get(claim, "detail"))
+    return 0;
+  for (size_t i = 0; i < sizeof(identity) / sizeof(identity[0]); ++i)
+    if (!same_record_string(claim, journal, identity[i])) return 0;
+  return 1;
+}
+
 static int add_journal(json_value_t *view, const json_value_t *record,
-    const char *requested, const char *thread_id, const char *run_node_id) {
+    const json_value_t *claim, const char *requested, const char *thread_id,
+    const char *run_node_id) {
   json_value_t *nodes, *node, *edges, *edge;
   tstr node_id = NULL, label = NULL, stored_run = NULL;
   int64_t status, mode, idempotency;
@@ -52,8 +90,10 @@ static int add_journal(json_value_t *view, const json_value_t *record,
   if (!stored_run) return SALTS_ENOMEM;
   if (strcmp(stored_run, run_node_id)) { rc = SALTS_EPROTO; goto done; }
   node_id = tstr_format("journal:{}", requested);
-  label = !strcmp(stored_phase, "started")
-      ? tstr_format("{}: started (current journal; side effects unknown)", stored_tool_name)
+  if (claim && !admitted_claim_valid(claim, record)) { rc = SALTS_EPROTO; goto done; }
+  label = (!strcmp(stored_phase, "started") || claim)
+      ? tstr_format("{}: {} (current journal; side effects unknown)", stored_tool_name,
+                    stored_phase)
       : tstr_format("{}: {} (current journal; recorded status {})", stored_tool_name, stored_phase, status);
   if (!node_id || !label) { rc = SALTS_ENOMEM; goto done; }
   rc = turbo_diagram_add_node(view, node_id, label);
@@ -69,7 +109,19 @@ static int add_journal(json_value_t *view, const json_value_t *record,
       turbo_runtime_json_object_set_int64(node, "schema_version", TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION) != 0 ||
       turbo_runtime_json_object_set_int64(node, "status", status) != 0 ||
       turbo_runtime_json_object_set_int64(node, "execution_mode", mode) != 0 ||
-      turbo_runtime_json_object_set_int64(node, "idempotency", idempotency) != 0) { rc = SALTS_ENOMEM; goto done; }
+      turbo_runtime_json_object_set_int64(node, "idempotency", idempotency) != 0 ||
+      turbo_runtime_json_object_set_string(
+          node, "effect_status", !strcmp(stored_phase, "committed")
+                                     ? "recorded_outcome"
+                                     : (!strcmp(stored_phase, "started") || claim)
+                                           ? "unknown_side_effect"
+                                           : "not_admitted") != 0 ||
+      (!strcmp(stored_phase, "planned") &&
+       turbo_runtime_json_object_set_string(node, "admission_fence",
+                                            claim ? "present" : "absent") != 0)) {
+    rc = SALTS_ENOMEM;
+    goto done;
+  }
   rc = turbo_diagram_add_edge(view, run_node_id, node_id, "same run (current journal)");
   if (rc != SALTS_OK) goto done;
   edges = json_object_get(view, "edges"); edge = json_array_get(edges, json_array_size(edges) - 1);
@@ -291,7 +343,7 @@ int turbo_agent_thread_tool_diagram(turbo_agent_runtime_t *runtime,
 int turbo_agent_thread_tool_diagram_ex(turbo_agent_runtime_t *runtime,
     const char *thread_id, const char *const *journal_ids, size_t journal_count,
     unsigned flags, json_value_t **out_view) {
-  json_value_t *view = NULL, *record = NULL, *head = NULL;
+  json_value_t *view = NULL, *record = NULL, *claim = NULL, *head = NULL;
   const char *run_node_id;
   int rc;
   if (out_view) *out_view = NULL;
@@ -323,8 +375,18 @@ int turbo_agent_thread_tool_diagram_ex(turbo_agent_runtime_t *runtime,
   for (size_t i = 0; i < journal_count; ++i) {
     rc = turbo_agent_runtime_store_get_json_status(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION, journal_ids[i], &record);
     if (rc != SALTS_OK) goto done;
-    rc = add_journal(view, record, journal_ids[i], thread_id, run_node_id);
+    {
+      const json_value_t *phase = json_object_get(record, "phase");
+      if (json_type(phase) == JSON_STRING && json_string_len(phase) == sizeof("planned") - 1 &&
+          memcmp(json_string(phase), "planned", sizeof("planned") - 1) == 0) {
+        rc = turbo_agent_runtime_store_get_json_status(
+            runtime, TURBO_AGENT_TOOL_CLAIM_COLLECTION, journal_ids[i], &claim);
+        if (rc != SALTS_OK && rc != SALTS_ENOENT) goto done;
+      }
+    }
+    rc = add_journal(view, record, claim, journal_ids[i], thread_id, run_node_id);
     json_free(record); record = NULL;
+    json_free(claim); claim = NULL;
     if (rc != SALTS_OK) goto done;
     if (head) {
       json_value_t *nodes = json_object_get(view, "nodes");
@@ -339,6 +401,6 @@ int turbo_agent_thread_tool_diagram_ex(turbo_agent_runtime_t *runtime,
   }
   *out_view = view; view = NULL;
 done:
-  json_free(record); json_free(view); json_free(head);
+  json_free(record); json_free(claim); json_free(view); json_free(head);
   return rc;
 }

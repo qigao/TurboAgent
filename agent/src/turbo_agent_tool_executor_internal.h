@@ -41,8 +41,10 @@ CXX_C_API void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *ex
  * dispatch and commit; each caller owns its call buffers and keeps the shared
  * registry/policy immutable until all callers drain. Existing outcome replay
  * preserves durable status; successful model delivery cancellation is checked
- * by ToolNode. This does not provide concurrent Agent/Router operation or
- * cross-executor/Runtime/process atomic effect admission. */
+ * by ToolNode. Stores with atomic create_if_absent additionally fence automatic
+ * effect admission across executor/Runtime owners sharing that backend's atomic
+ * scope. Other stores retain only the per-executor guarantee. This does not add
+ * concurrent Agent/Router operation or any broader backend synchronization. */
 CXX_C_API int turbo_agent_tool_executor_execute(
     turbo_agent_tool_executor_t *executor, turbo_agent_runtime_t *runtime,
     const turbo_cancel_token_t *cancel_token, const char *thread_id, const char *run_id,

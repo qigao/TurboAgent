@@ -17,8 +17,12 @@ extern "C" {
  * Journal nodes use journal:<id>, collection=agent_tool_journal, record_id,
  * copied identity/hash/phase/status/policy/timestamp and freshness=current_record.
  * Edges mean same_run (thread/run identity only), never checkpoint inclusion,
- * plan-step identity, tool success or execution order. Started side effects
- * remain unknown. Stored hashes are not recomputed or authenticated.
+ * plan-step identity, tool success or execution order. effect_status is
+ * recorded_outcome, unknown_side_effect, or not_admitted. A selected planned
+ * Journal also reads its optional agent_tool_claims record: an exact admitted
+ * identity makes effects unknown; absence means not admitted; malformed,
+ * mismatched or unclassified claim reads fail closed. Started effects remain
+ * unknown without a claim read. Stored hashes are not recomputed or authenticated.
  * No arguments/output/detail payload is exported; backend get loads the record.
  *
  * Borrow inputs for this synchronous call. Caller keeps runtime/store alive and

@@ -618,6 +618,12 @@ progress callback 的 payload 必须受单事件大小和频率限制；callback
 - 连续 `PARALLEL_SAFE` 调用可成组并行；`SEQUENTIAL` 按顺序执行；`EXCLUSIVE` 等待此前任务完成并阻止后续任务启动。
 - 完成顺序可以不同，但写回模型的 tool result 顺序必须与原始 tool call 顺序一致。
 - executor 只在所有已启动任务进入终态后释放 batch 存储。
+- 同一 executor 的独立 batch 仍串行，但 owner gate 只在更新 active 状态时持有 mutex，
+  不在 callback 期间持有等待 mutex。已经进入排队且携带 cancel token 的调用以不超过
+  25ms 的 wait slice 检查取消及绝对 monotonic deadline；命中后在 Journal admission 和
+  callback 前返回对应的 CANCELLED/DEADLINE_EXCEEDED。无 token 的兼容调用仍等待前一
+  batch 完成，已经进入的同步 native callback 也仍只支持 cooperative cancellation；
+  `queue_capacity` 只约束 batch 内 worker pool，不构成跨 batch 的持久队列。
 
 ### 8.5 idempotency 与未知副作用
 
@@ -709,7 +715,9 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
 因单记录或数据库总容量超额时的零 callback、数据库满的 admitted fence 不会进入效果，
 以及 COMMITTED 因单记录或数据库总容量超额后的重启 UNKNOWN/no-retry。相邻
 `test_turbo_agent_tool_executor` 保留
-历史 SHA-256 golden framing 检查；`test_turbo_cli_tool_cancel` 覆盖真实进程取消后的
+历史 SHA-256 golden framing 检查，并用一个被阻塞的 owner batch 验证后续 batch 在
+取消或 deadline 时可在 owner 释放前终止、且不进入第二个 callback；
+`test_turbo_cli_tool_cancel` 覆盖真实进程取消后的
 checkpoint 恢复。`test_turbo_agent_tool_claim` 强制两个独立 executor/Runtime handle 同时
 读取缺失或 PLANNED 身份，验证原子身份发布、冲突拒绝和单次 callback；它还注入双调用
 batch 的首个 COMMITTED 写失败，验证 UNKNOWN/COMMITTED 的整批恢复均不重复 callback，

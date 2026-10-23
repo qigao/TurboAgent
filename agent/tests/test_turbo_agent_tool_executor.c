@@ -12,6 +12,7 @@
 #include <salts/clock.h>
 
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -86,6 +87,56 @@ static char *tool_executor_strdup(const char *text) {
   char *copy = (char *)malloc(length);
   if (copy) memcpy(copy, text, length);
   return copy;
+}
+
+typedef struct tool_executor_queue_probe_s {
+  atomic_int calls;
+  atomic_int entered;
+  atomic_int release;
+} tool_executor_queue_probe_t;
+
+static int tool_executor_queue_handler(const char *arguments_json,
+                                       char **out_output, void *user_data) {
+  tool_executor_queue_probe_t *probe = user_data;
+  int call_index = atomic_fetch_add_explicit(&probe->calls, 1,
+                                              memory_order_acq_rel);
+  if (call_index == 0) {
+    atomic_store_explicit(&probe->entered, 1, memory_order_release);
+    while (!atomic_load_explicit(&probe->release, memory_order_acquire))
+      cmeta_thread_yield();
+  }
+  *out_output = tool_executor_strdup(arguments_json);
+  return *out_output ? 0 : -1;
+}
+
+typedef struct tool_executor_queue_caller_s {
+  turbo_agent_tool_executor_t *executor;
+  const turbo_cancel_token_t *cancel_token;
+  const turbo_tool_registry_t *registry;
+  const turbo_agent_policy_t *policy;
+  turbo_agent_tool_execution_t *call;
+  atomic_int started;
+  atomic_int done;
+  int rc;
+} tool_executor_queue_caller_t;
+
+static void tool_executor_queue_execute(void *user_data) {
+  tool_executor_queue_caller_t *caller = user_data;
+  atomic_store_explicit(&caller->started, 1, memory_order_release);
+  caller->rc = turbo_agent_tool_executor_execute(
+      caller->executor, NULL, caller->cancel_token, NULL, NULL, NULL, NULL,
+      caller->registry, caller->policy, caller->call, 1);
+  atomic_store_explicit(&caller->done, 1, memory_order_release);
+}
+
+static int tool_executor_wait_atomic(atomic_int *value, int expected,
+                                     uint64_t timeout_ms) {
+  uint64_t deadline = cmeta_monotonic_ms() + timeout_ms;
+  while (atomic_load_explicit(value, memory_order_acquire) != expected) {
+    if (cmeta_monotonic_ms() >= deadline) return 0;
+    cmeta_sleep_ms(1);
+  }
+  return 1;
 }
 
 static int tool_executor_probe_handler(const char *arguments_json, char **out_output,
@@ -665,6 +716,98 @@ spec("turbo agent tool executor") {
     turbo_agent_tool_executor_destroy(executor);
     turbo_tool_registry_destroy(registry);
     cmeta_mutex_destroy(&probe.mutex);
+  }
+
+  for (int deadline_case = 0; deadline_case < 2; ++deadline_case) {
+    it("should stop a queued batch on %s before Journal admission",
+       deadline_case ? "deadline" : "cancellation") {
+      turbo_agent_policy_t host_policy = tool_executor_legacy_grant();
+      tool_executor_queue_probe_t probe;
+      turbo_tool_registry_t *registry = turbo_tool_registry_create();
+      turbo_tool_definition_t definition = {
+          "queue-probe", "Queue probe",
+          "{\"type\":\"object\",\"additionalProperties\":true}",
+          NULL, 1, tool_executor_queue_handler, NULL, &probe, NULL};
+      turbo_agent_tool_executor_t *executor = NULL;
+      turbo_cancel_source_config_t cancel_config = {0};
+      turbo_cancel_source_t *source = NULL;
+      turbo_cancel_token_t *token = NULL;
+      turbo_agent_tool_execution_t owner = {
+          "queue-owner", "queue-probe", "{\"owner\":1}",
+          {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+      turbo_agent_tool_execution_t queued = {
+          "queue-waiter", "queue-probe", "{\"owner\":2}",
+          {TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE}};
+      tool_executor_queue_caller_t callers[2] = {0};
+      cmeta_thread_t threads[2] = {0};
+      int queued_done_before_release;
+
+      atomic_init(&probe.calls, 0);
+      atomic_init(&probe.entered, 0);
+      atomic_init(&probe.release, 0);
+      owner.turn_key = "turn";
+      queued.turn_key = "turn";
+      check_not_null(registry);
+      check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);
+      check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+
+      callers[0].executor = executor;
+      callers[0].registry = registry;
+      callers[0].policy = &host_policy;
+      callers[0].call = &owner;
+      atomic_init(&callers[0].started, 0);
+      atomic_init(&callers[0].done, 0);
+      check_equal(cmeta_thread_create(&threads[0], tool_executor_queue_execute,
+                                      &callers[0]), SALTS_OK);
+      check_true(tool_executor_wait_atomic(&probe.entered, 1, 2000));
+
+      if (deadline_case) {
+        cancel_config.struct_size = sizeof(cancel_config);
+        cancel_config.abi_version = TURBO_RUNTIME_CONTROL_ABI_VERSION;
+        cancel_config.deadline_mono_ms = cmeta_monotonic_ms() + 100;
+        check_equal(turbo_cancel_source_create(&cancel_config, &source), SALTS_OK);
+      } else {
+        check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+      }
+      check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+      callers[1].executor = executor;
+      callers[1].cancel_token = token;
+      callers[1].registry = registry;
+      callers[1].policy = &host_policy;
+      callers[1].call = &queued;
+      atomic_init(&callers[1].started, 0);
+      atomic_init(&callers[1].done, 0);
+      check_equal(cmeta_thread_create(&threads[1], tool_executor_queue_execute,
+                                      &callers[1]), SALTS_OK);
+      check_true(tool_executor_wait_atomic(&callers[1].started, 1, 2000));
+      if (!deadline_case) {
+        cmeta_sleep_ms(10);
+        check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
+      }
+      queued_done_before_release =
+          tool_executor_wait_atomic(&callers[1].done, 1, 2000);
+      atomic_store_explicit(&probe.release, 1, memory_order_release);
+      check_equal(cmeta_thread_join(&threads[0]), SALTS_OK);
+      check_equal(cmeta_thread_join(&threads[1]), SALTS_OK);
+
+      check_true(queued_done_before_release);
+      check_equal(callers[0].rc, SALTS_OK);
+      check_equal(callers[1].rc, SALTS_OK);
+      check_equal(atomic_load_explicit(&probe.calls, memory_order_acquire), 1);
+      check_equal(owner.status, TURBO_TOOL_OK);
+      check_not_null(owner.output);
+      check_equal(queued.status, deadline_case ? TURBO_TOOL_DEADLINE_EXCEEDED
+                                               : TURBO_TOOL_CANCELLED);
+      check_false(queued.replayed);
+      check_null(queued.output);
+
+      free(owner.output);
+      free(queued.output);
+      turbo_cancel_token_release(token);
+      turbo_cancel_source_destroy(source);
+      turbo_agent_tool_executor_destroy(executor);
+      turbo_tool_registry_destroy(registry);
+    }
   }
 
   it("should not retry a callback after a started journal loses its commit") {

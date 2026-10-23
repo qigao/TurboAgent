@@ -209,8 +209,8 @@ spec("ToolExecutor effect identity admission and replay") {
           check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
         }
         /* Freeze registry/policy and keep independent call buffers alive until
-         * both callers join. This exercises the existing executor mutex only;
-         * it does not exercise concurrent Agent/Router or policy mutation. */
+         * both callers join. This exercises the executor owner gate only; it
+         * does not exercise concurrent Agent/Router or policy mutation. */
         for (size_t i = 0; i < 2; ++i) {
           callers[i].executor = executor;
           callers[i].runtime = runtime;
@@ -228,9 +228,13 @@ spec("ToolExecutor effect identity admission and replay") {
         check_true(identity_wait(&callers[1].entered, 1, IDENTITY_GATE_TIMEOUT_MS));
         if (cancelled)
           check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
-        /* Observe the waiter while the first callback is gated, rather than
-         * relying on a sleep to create overlapping caller lifetimes. */
-        check_false(identity_wait(&callers[1].done, 1, IDENTITY_WAITER_OBSERVATION_MS));
+        /* A cancellable waiter must terminate before the owner is released.
+         * Other callers remain serialized until the first callback drains. */
+        if (cancelled)
+          check_true(identity_wait(&callers[1].done, 1, IDENTITY_GATE_TIMEOUT_MS));
+        else
+          check_false(identity_wait(&callers[1].done, 1,
+                                    IDENTITY_WAITER_OBSERVATION_MS));
         check_equal(atomic_load(&probe.callbacks), 1);
         check_equal(atomic_load(&probe.journal_writes), 2);
         atomic_store(&probe.release_callback, 1);
@@ -244,10 +248,13 @@ spec("ToolExecutor effect identity admission and replay") {
         check_false(calls[0].replayed);
         if (unknown) check_null(calls[0].output);
         else check_equal(calls[0].output, "{}");
-        if (conflict || distinct || denied) {
+        if (cancelled) {
+          check_false(calls[1].replayed);
+          check_equal(calls[1].status, TURBO_TOOL_CANCELLED);
+          check_null(calls[1].output);
+        } else if (conflict || distinct || denied) {
           check_equal(calls[1].replayed, denied);
           check_null(calls[1].output);
-          if (distinct) check_equal(calls[1].status, TURBO_TOOL_CANCELLED);
           if (denied) {
             check_equal(calls[1].status, TURBO_TOOL_ERROR);
             check_equal(calls[1].policy_reason, "custom_tools_disabled");
@@ -262,10 +269,12 @@ spec("ToolExecutor effect identity admission and replay") {
           }
         }
         check_equal(atomic_load(&probe.callbacks), 1);
-        check_equal(atomic_load(&probe.journal_writes), distinct ? 4 : 3);
+        check_equal(atomic_load(&probe.journal_writes),
+                    cancelled ? 3 : (distinct ? 4 : 3));
         check_equal(turbo_agent_runtime_store_list_json(runtime, identity_collection,
             NULL, NULL, &records), SALTS_OK);
-        check_equal(json_array_size(records), distinct ? 2 : 1);
+        check_equal(json_array_size(records),
+                    cancelled ? 1 : (distinct ? 2 : 1));
         for (size_t i = 0; i < json_array_size(records); ++i) {
           const json_value_t *record = json_array_get(records, i);
           if (strcmp(json_get_string(record, "call_id"), "shared") == 0) {

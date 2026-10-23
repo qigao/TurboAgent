@@ -44,7 +44,10 @@ CXX_C_API void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *ex
  * by ToolNode. Stores with atomic create_if_absent additionally fence automatic
  * effect admission across executor/Runtime owners sharing that backend's atomic
  * scope. Other stores retain only the per-executor guarantee. This does not add
- * concurrent Agent/Router operation or any broader backend synchronization. */
+ * concurrent Agent/Router operation or any broader backend synchronization.
+ * Queue time behind another batch is part of the supplied cancel/deadline
+ * context: a queued caller can finish CANCELLED/DEADLINE_EXCEEDED before Journal
+ * admission. An in-flight callback remains cooperatively cancellable only. */
 CXX_C_API int turbo_agent_tool_executor_execute(
     turbo_agent_tool_executor_t *executor, turbo_agent_runtime_t *runtime,
     const turbo_cancel_token_t *cancel_token, const char *thread_id, const char *run_id,

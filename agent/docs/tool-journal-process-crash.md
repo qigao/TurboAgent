@@ -145,5 +145,7 @@ fit, the callback returns a result, and the COMMITTED write exceeds either
 retains STARTED plus the admitted fence, and after a close/reopen returns the same UNKNOWN
 without a second callback. It does not truncate or invent a committed result. The
 database-full cases use SQLite's transactional rollback and do not qualify rollback-journal
-disk exhaustion. Journal entry eviction/retention, bounded waits and the remaining backend
-matrix stay open.
+disk exhaustion. The adjacent Executor regression qualifies cancel/deadline while one batch
+is queued behind another: the queued call terminates before Journal admission and before the
+owner is released. Token-free waiting, interruption of an already-entered native callback,
+Journal entry eviction/retention and the remaining backend matrix stay open.

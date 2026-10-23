@@ -734,10 +734,15 @@ Runtime publication is checkpoint first, then the run referencing
 it, summary construction, and finally the thread-head snapshot. A failure can
 leave an unreferenced checkpoint; it must not publish a run
 that points at an unwritten checkpoint. Tool journal writes remain
-`planned -> started -> committed`: external side effects occur after committed
-`started`, and a surviving `started` record yields unknown-side-effect status
-rather than automatic execution. This does not provide exactly-once shell
-execution or guarantee a checkpoint immediately before every side effect.
+`planned -> started -> committed`. On backends with atomic create-if-absent, a
+separate durable `agent_tool_claims` admitted fence sits between planned and
+started: external side effects occur only after that fence and after the started
+record is committed.
+A surviving fence yields unknown-side-effect status even when a crash left the
+main Journal at planned. This provides one automatic backend admission per identity
+under that backend's atomic scope; it does not provide exactly-once shell effects or
+guarantee a checkpoint immediately before every side effect. Backends without the
+atomic primitive retain only the older single-executor compatibility path.
 
 The additive `store_get_json_status` API preserves callback errors; the old getter
 retains its 0/-1 contract and the callback struct ABI is unchanged. Builtin get

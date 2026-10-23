@@ -2,14 +2,15 @@
 
 The existing Tool Journal tests close/reopen SQLite owners and inject storage errors.
 The native `test_tool_journal_crash_*` CTests additionally terminate a real process
-without cleanup at eight actual Executor/SQLite/tool/delivery boundaries. Independent
+without cleanup at ten actual Executor/SQLite/tool/delivery boundaries. Independent
 processes then reopen the database and verify stored evidence, current authorization,
 identity rejection, explicit recovery and another replay.
 
 This is a bounded sequential Direct ToolExecutor slice of
 [#74](https://github.com/qigao/TurboAgent/issues/74), supporting
 [#213](https://github.com/qigao/TurboAgent/issues/213)'s recovery acceptance work.
-It does not modify production execution, add automatic recovery or complete either gate.
+The production slice adds an atomic backend-entry fence; it does not add automatic
+UNKNOWN recovery or complete either issue gate.
 
 ## Native fixture and independent evidence
 
@@ -40,7 +41,8 @@ store, recovery ledger or production delivery protocol. The original Tool Journa
 remains the only saved tool output/detail owner.
 
 The Journal backend is the real bounded SQLite Runtime Store. A thin test adapter
-calls the real put, or terminates immediately before/after it at the chosen phase.
+calls the real put/create-if-absent, or terminates immediately before/after it at the
+chosen phase.
 The effect cut terminates inside the actual callback after its independent commit.
 The delivery cut terminates after Executor return and result validation, before the
 Host's delivery receipt. Typed get statuses are preserved; execution checks that
@@ -48,22 +50,24 @@ neither a compatibility list nor an alternative backend was used.
 
 ## Expected cut states
 
-| Cut | Journal after crash | Effect count | Explicit same-identity recovery |
-| --- | --- | ---: | --- |
-| before planned write | absent | 0 | Admit one call, commit its result. |
-| after planned write | planned | 0 | Invoke once, commit its result. |
-| before started write | planned | 0 | Invoke once, commit its result. |
-| after started write | started | 0 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
-| after effect commit | started | 1 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
-| before committed write | started | 1 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
-| after committed write | committed | 1 | Replay canonical output/detail; no callback. |
-| before Host delivery | committed | 1 | Replay canonical output/detail; no callback. |
+| Cut | Main Journal | Admitted fence | Effect count | Explicit same-identity recovery |
+| --- | --- | --- | ---: | --- |
+| before planned write | absent | absent | 0 | Admit one call, commit its result. |
+| after planned write | planned | absent | 0 | Invoke once, commit its result. |
+| before admitted fence | planned | absent | 0 | Invoke once, commit its result. |
+| after admitted fence | planned | present | 0 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
+| before started write | planned | present | 0 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
+| after started write | started | present | 0 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
+| after effect commit | started | present | 1 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
+| before committed write | started | present | 1 | UNKNOWN_SIDE_EFFECT; no callback/result/delivery. |
+| after committed write | committed | present | 1 | Replay canonical output/detail; no callback. |
+| before Host delivery | committed | present | 1 | Replay canonical output/detail; no callback. |
 
-Every crash leaves delivery count zero. A started record remains uncertain even at
-the deliberately chosen cut where this fixture knows the effect count is zero:
-the production Journal cannot infer that fact and must not automatically redispatch.
-Unknown outcomes remain started through repeated restart attempts, with no saved
-output/detail invented. For known results, the explicit recovery Host validates the
+Every crash leaves delivery count zero. An admitted fence remains uncertain even at
+the deliberately chosen cuts where this fixture knows the effect count is zero:
+production cannot infer that fact and must not automatically redispatch. Unknown
+outcomes preserve the main phase and admitted fence through repeated restart attempts,
+with no saved output/detail invented. For known results, the explicit recovery Host validates the
 strict result and detail before one receipt; the next verification replay intentionally
 does not perform another delivery. This does not claim exactly-once external delivery.
 
@@ -87,8 +91,10 @@ Policy replacement remains quiescent and no callback-time setter is introduced.
 
 The process fixture is built under the existing BUILD_TESTS/native configuration and
 excluded from cross compilation. Normal CI still configures/builds the full graph
-and executes CTest. Workflows, presets, dependency pins, public ABI, Journal schema,
-identity hashing and product scheduling/ownership are unchanged. Example focused runs
+and executes CTest. Workflows, presets, dependency pins, public ABI, main Journal schema,
+identity hashing and product scheduling/ownership are unchanged. The auxiliary
+`agent_tool_claims` collection contains only the versioned identity/strategy and
+`phase=admitted`; it is not a result or authority store. Example focused runs
 after the usual native configure/build are:
 
 ```sh
@@ -101,10 +107,13 @@ Android SDK build with tests disabled does not qualify process-crash behavior th
 These are abrupt process exits after/before completed record operations, not OS kill
 at arbitrary instructions, power loss, partial-sector writes, mid-SQLite-transaction
 crashes or allocator failure injection. They do not establish durable Router admission,
-remote lease takeover, concurrent same-identity admission, nested/forked ownership,
+remote lease takeover, concurrently open SQLite owners, nested/forked ownership,
 parallel tools, compiled typed-Inspect recovery, Wasm/MCP/Praktor behavior or all-platform
 effect conformance. Those remain #74/#213 acceptance work. Unknown effects continue
 to require explicit reconciliation; no globally exactly-once effect guarantee is made.
 
-Rollback only removes these native test registrations/fixtures; production behavior
-and existing persistent records are unchanged.
+The adjacent `test_turbo_agent_tool_claim` also forces two independent executor/Runtime
+handles over one serialized atomic test backend to read the same missing or PLANNED
+identity concurrently. It requires one callback, an EPROTO loser for conflicting fresh
+arguments, and an intact committed winner. This is bounded by the backend primitive;
+the legacy file/custom fallback does not gain a cross-owner guarantee.

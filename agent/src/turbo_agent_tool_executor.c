@@ -157,16 +157,16 @@ static char *turbo_agent_tool_journal_id(const char *run_id, const char *turn_ke
   return journal_id;
 }
 
-static int turbo_agent_tool_journal_write(turbo_agent_runtime_t *runtime, const char *journal_id,
-                                          const char *thread_id, const char *run_id,
-                                          const turbo_agent_tool_execution_t *call,
-                                          const char *phase) {
+static int turbo_agent_tool_journal_record(const char *journal_id, const char *thread_id,
+                                           const char *run_id,
+                                           const turbo_agent_tool_execution_t *call,
+                                           const char *phase, json_value_t **out_record) {
   json_value_t *record;
   char *arguments_hash;
   char timestamp[32];
   int rc = SALTS_ENOMEM;
-  if (!runtime) return SALTS_OK;
-  if (!journal_id || !thread_id || !run_id || !call || !phase ||
+  if (out_record) *out_record = NULL;
+  if (!journal_id || !thread_id || !run_id || !call || !phase || !out_record ||
       turbo_agent_runtime_make_timestamp(timestamp, sizeof(timestamp)) != 0)
     return SALTS_EINVAL;
   arguments_hash = turbo_agent_tool_sha256_parts(call->tool_name, call->arguments_json);
@@ -197,12 +197,43 @@ static int turbo_agent_tool_journal_write(turbo_agent_runtime_t *runtime, const 
         turbo_runtime_json_object_set_string(record, "output", call->output) != 0) ||
        (call->detail && turbo_runtime_json_object_set_clone(record, "detail", call->detail) != 0)))
     goto cleanup;
-  rc = turbo_agent_runtime_store_put_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION, journal_id,
-                                          record) == 0
-           ? SALTS_OK
-           : SALTS_EIO;
+  *out_record = record;
+  record = NULL;
+  rc = SALTS_OK;
 cleanup:
   free(arguments_hash);
+  turbo_runtime_json_destroy(record);
+  return rc;
+}
+
+static int turbo_agent_tool_journal_write(turbo_agent_runtime_t *runtime, const char *journal_id,
+                                          const char *thread_id, const char *run_id,
+                                          const turbo_agent_tool_execution_t *call,
+                                          const char *phase) {
+  json_value_t *record = NULL;
+  int rc;
+  if (!runtime) return SALTS_OK;
+  rc = turbo_agent_tool_journal_record(journal_id, thread_id, run_id, call, phase, &record);
+  if (rc == SALTS_OK)
+    rc = turbo_agent_runtime_store_put_json(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
+                                            journal_id, record) == 0
+             ? SALTS_OK
+             : SALTS_EIO;
+  turbo_runtime_json_destroy(record);
+  return rc;
+}
+
+static int turbo_agent_tool_journal_create(turbo_agent_runtime_t *runtime,
+                                           const char *collection, const char *journal_id,
+                                           const char *thread_id, const char *run_id,
+                                           const turbo_agent_tool_execution_t *call,
+                                           const char *phase) {
+  json_value_t *record = NULL;
+  int rc;
+  if (!runtime) return SALTS_OK;
+  rc = turbo_agent_tool_journal_record(journal_id, thread_id, run_id, call, phase, &record);
+  if (rc == SALTS_OK)
+    rc = turbo_agent_runtime_store_create_json_if_absent(runtime, collection, journal_id, record);
   turbo_runtime_json_destroy(record);
   return rc;
 }
@@ -341,9 +372,25 @@ static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executo
   }
   if (rc == SALTS_ENOENT) {
     call->status = TURBO_TOOL_OK;
-    rc = turbo_agent_tool_journal_write(runtime, journal_id, thread_id, run_id, call, "planned");
-    free(journal_id);
-    return rc;
+    rc = turbo_agent_tool_journal_create(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
+                                         journal_id, thread_id, run_id, call, "planned");
+    if (rc == SALTS_ENOTSUP) {
+      rc = turbo_agent_tool_journal_write(runtime, journal_id, thread_id, run_id, call,
+                                          "planned");
+      free(journal_id);
+      return rc;
+    }
+    if (rc == SALTS_OK) {
+      free(journal_id);
+      return SALTS_OK;
+    }
+    if (rc != SALTS_EALREADY) {
+      free(journal_id);
+      return rc;
+    }
+    /* Another owner published the same identity after our initial read. Load
+     * and validate its record instead of overwriting it. */
+    rc = turbo_agent_tool_journal_load(runtime, journal_id, thread_id, run_id, call, &record);
   }
   free(journal_id);
   if (rc != SALTS_OK) return rc;
@@ -403,6 +450,8 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
   turbo_agent_execution_context_t saved = {0};
   turbo_tool_status_t cancel_status;
   char *journal_id = NULL;
+  int claim_rc = SALTS_ENOTSUP;
+  int has_durable_claim = 0;
   if (!task || !task->call || task->call->replayed) return;
   turbo_agent_execution_context_get(&saved);
   turbo_agent_execution_context_set(&task->context);
@@ -415,10 +464,44 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
   if (task->runtime) {
     journal_id = turbo_agent_tool_journal_id(task->context.run_id, task->call->turn_key,
                                              task->call->call_id);
-    if (!journal_id ||
-        turbo_agent_tool_journal_write(task->runtime, journal_id, task->context.thread_id,
-                                       task->context.run_id, task->call, "started") != SALTS_OK) {
-      task->call->status = TURBO_TOOL_ERROR;
+    if (!journal_id) {
+      task->call->status = TURBO_TOOL_OUT_OF_MEMORY;
+      goto cleanup;
+    }
+    claim_rc = turbo_agent_tool_journal_create(
+        task->runtime, TURBO_AGENT_TOOL_CLAIM_COLLECTION, journal_id,
+        task->context.thread_id, task->context.run_id, task->call, "admitted");
+    if (claim_rc == SALTS_EALREADY) {
+      /* A durable backend-entry fence may race the main Journal transition.
+       * Reuse a committed/started outcome when visible; a still-planned record
+       * is conservatively UNKNOWN because the winning owner may enter later. */
+      int replay_rc = turbo_agent_tool_prepare_journal(
+          task->executor, task->runtime, task->context.thread_id,
+          task->context.run_id, task->call);
+      if (replay_rc != SALTS_OK || !task->call->replayed) {
+        free(task->call->output);
+        task->call->output = NULL;
+        turbo_runtime_json_destroy(task->call->detail);
+        task->call->detail = NULL;
+        task->call->status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+        task->call->replayed = 1;
+      }
+      goto cleanup;
+    }
+    if (claim_rc != SALTS_OK && claim_rc != SALTS_ENOTSUP) {
+      /* A backend error may follow a committed create. Never risk a second
+       * automatic effect admission when the fence result is uncertain. */
+      task->call->status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+      task->call->replayed = 1;
+      goto cleanup;
+    }
+    has_durable_claim = claim_rc == SALTS_OK;
+    if (turbo_agent_tool_journal_write(task->runtime, journal_id,
+                                       task->context.thread_id, task->context.run_id,
+                                       task->call, "started") != SALTS_OK) {
+      task->call->status = has_durable_claim ? TURBO_TOOL_UNKNOWN_SIDE_EFFECT
+                                             : TURBO_TOOL_ERROR;
+      if (has_durable_claim) task->call->replayed = 1;
       goto cleanup;
     }
   }

@@ -3,6 +3,7 @@
 #include "turbo_tool.h"
 
 #define TURBO_AGENT_TOOL_JOURNAL_COLLECTION "agent_tool_journal"
+#define TURBO_AGENT_TOOL_CLAIM_COLLECTION "agent_tool_claims"
 #define TURBO_AGENT_TOOL_JOURNAL_SCHEMA_VERSION 1
 
 static inline int turbo_agent_tool_journal_status_valid(int64_t status) {

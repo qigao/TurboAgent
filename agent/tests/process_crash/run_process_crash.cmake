@@ -1,6 +1,6 @@
 if(NOT DEFINED WORKER OR NOT EXISTS "${WORKER}" OR
    NOT DEFINED ROOT OR NOT IS_ABSOLUTE "${ROOT}" OR
-   NOT CUT MATCHES "^(before_planned|after_planned|before_started|after_started|after_effect|before_committed|after_committed|before_delivery)$")
+   NOT CUT MATCHES "^(before_planned|after_planned|before_admitted|after_admitted|before_started|after_started|after_effect|before_committed|after_committed|before_delivery)$")
   message(FATAL_ERROR "Invalid process-crash test configuration")
 endif()
 

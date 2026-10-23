@@ -12,14 +12,19 @@ enum { FIXTURE_FAILURE = 2, FIXTURE_CRASH = 86 };
 
 typedef struct crash_case_s {
   const char *name, *phase;
-  int effects, unknown;
+  int claim, effects, unknown;
 } crash_case_t;
 
 static const crash_case_t cases[] = {
-  {"before_planned", NULL, 0, 0}, {"after_planned", "planned", 0, 0},
-  {"before_started", "planned", 0, 0}, {"after_started", "started", 0, 1},
-  {"after_effect", "started", 1, 1}, {"before_committed", "started", 1, 1},
-  {"after_committed", "committed", 1, 0}, {"before_delivery", "committed", 1, 0}
+  {"before_planned", NULL, 0, 0, 0}, {"after_planned", "planned", 0, 0, 0},
+  {"before_admitted", "planned", 0, 0, 0},
+  {"after_admitted", "planned", 1, 0, 1},
+  {"before_started", "planned", 1, 0, 1},
+  {"after_started", "started", 1, 0, 1},
+  {"after_effect", "started", 1, 1, 1},
+  {"before_committed", "started", 1, 1, 1},
+  {"after_committed", "committed", 1, 1, 0},
+  {"before_delivery", "committed", 1, 1, 0}
 };
 
 typedef struct crash_fixture_s {
@@ -93,6 +98,29 @@ static int fixture_put(void *user, const char *collection, const char *id, const
   return rc;
 }
 
+static int fixture_create(void *user, const char *collection, const char *id,
+                          const char *text) {
+  crash_fixture_t *f = user;
+  json_value_t *record = NULL;
+  const char *phase = NULL;
+  int before = 0, after = 0, rc;
+  if (!strcmp(collection, TURBO_AGENT_TOOL_JOURNAL_COLLECTION) ||
+      !strcmp(collection, TURBO_AGENT_TOOL_CLAIM_COLLECTION)) {
+    record = json_parse(text, strlen(text));
+    phase = json_get_string(record, "phase");
+    if (!phase) { json_free(record); return SALTS_EPROTO; }
+    before = (!strcmp(f->cut->name, "before_planned") && !strcmp(phase, "planned")) ||
+        (!strcmp(f->cut->name, "before_admitted") && !strcmp(phase, "admitted"));
+    after = (!strcmp(f->cut->name, "after_planned") && !strcmp(phase, "planned")) ||
+        (!strcmp(f->cut->name, "after_admitted") && !strcmp(phase, "admitted"));
+  }
+  if (f->inject && before) _Exit(FIXTURE_CRASH);
+  rc = f->inner.create_if_absent(f->inner.user_data, collection, id, text);
+  if (!rc && f->inject && after) _Exit(FIXTURE_CRASH);
+  json_free(record);
+  return rc;
+}
+
 static int fixture_get(void *user, const char *collection, const char *id, char **out) {
   crash_fixture_t *f = user; ++f->gets;
   return f->inner.get(f->inner.user_data, collection, id, out);
@@ -151,7 +179,8 @@ static int fixture_open(crash_fixture_t *f, const char *directory, int create) {
   config.max_record_bytes = config.max_list_bytes = 16384; config.max_list_records = 8;
   rc = turbo_runtime_store_sqlite_open(&config, &f->inner);
   if (rc) goto done;
-  callbacks = (turbo_agent_runtime_store_t){fixture_put, fixture_get, fixture_list, f, fixture_store_free};
+  callbacks = (turbo_agent_runtime_store_t){fixture_put, fixture_get, fixture_list, f,
+                                            fixture_store_free, fixture_create};
   f->journal = turbo_agent_runtime_create(&callbacks);
   if (!f->journal) { rc = SALTS_ENOMEM; goto done; }
   config.path = oracle_path;
@@ -215,8 +244,9 @@ static int result_valid(crash_fixture_t *f, const char *output, const json_value
   return valid;
 }
 
-static int expect_evidence(crash_fixture_t *f, const char *phase, int effects, int deliveries) {
-  json_value_t *records = NULL;
+static int expect_evidence(crash_fixture_t *f, const char *phase, int claim, int effects,
+                           int deliveries) {
+  json_value_t *records = NULL, *claims = NULL;
   const json_value_t *record;
   int effect_count = -1, delivery_count = -1, valid;
   REQUIRE(!counter_get(f->oracle, "effect", &effect_count) && effect_count == effects);
@@ -234,7 +264,20 @@ static int expect_evidence(crash_fixture_t *f, const char *phase, int effects, i
       valid = valid && result_valid(f, json_get_string(record, "output"), json_object_get(record, "detail"));
     else valid = valid && !json_object_get(record, "output") && !json_object_get(record, "detail");
   }
+  REQUIRE(valid);
   json_free(records);
+  records = NULL;
+  REQUIRE(!turbo_agent_runtime_store_list_json(f->journal, TURBO_AGENT_TOOL_CLAIM_COLLECTION,
+                                                NULL, NULL, &claims));
+  valid = claims && json_type(claims) == JSON_ARRAY &&
+      json_array_size(claims) == (claim ? 1u : 0u);
+  record = json_array_get(claims, 0);
+  if (valid && claim)
+    valid = text_is(record, "phase", "admitted") &&
+        text_is(record, "thread_id", "crash-thread") &&
+        text_is(record, "run_id", "crash-run") && text_is(record, "turn_key", "turn") &&
+        text_is(record, "call_id", "call") && text_is(record, "tool_name", "probe");
+  json_free(claims);
   REQUIRE(valid);
   return 0;
 }
@@ -244,14 +287,15 @@ static int exercise(crash_fixture_t *f, const char *mode) {
   int rc = FIXTURE_FAILURE, operation = 0, delivery;
   if (!strcmp(mode, "init")) {
     REQUIRE(!counter_put(f->oracle, "effect", 0) && !counter_put(f->oracle, "delivery", 0));
-    return expect_evidence(f, NULL, 0, 0);
+    return expect_evidence(f, NULL, 0, 0, 0);
   }
-  if (!strcmp(mode, "inspect")) return expect_evidence(f, f->cut->phase, f->cut->effects, 0);
+  if (!strcmp(mode, "inspect"))
+    return expect_evidence(f, f->cut->phase, f->cut->claim, f->cut->effects, 0);
   if (!strcmp(mode, "denied")) {
     operation = execute(f, &call, "crash-thread", 0);
     if (!operation && call.status == TURBO_TOOL_ERROR && call.policy_reason && !call.output && !call.detail &&
         !f->callbacks && !f->gets && !f->puts && !f->lists)
-      rc = expect_evidence(f, f->cut->phase, f->cut->effects, 0);
+      rc = expect_evidence(f, f->cut->phase, f->cut->claim, f->cut->effects, 0);
   } else if (!strcmp(mode, "mismatch")) {
     call.arguments_json = "{\"value\":2}";
     operation = execute(f, &call, "crash-thread", 1);
@@ -259,7 +303,7 @@ static int exercise(crash_fixture_t *f, const char *mode) {
     call_clear(&call); call = fixture_call();
     operation = execute(f, &call, "foreign-thread", 1);
     if (operation == SALTS_EPROTO && !call.output && !call.detail && !f->callbacks && !f->puts && !f->lists)
-      rc = expect_evidence(f, f->cut->phase, f->cut->effects, 0);
+      rc = expect_evidence(f, f->cut->phase, f->cut->claim, f->cut->effects, 0);
   } else if (!strcmp(mode, "crash") || !strcmp(mode, "recover") || !strcmp(mode, "replay")) {
     int replay = !strcmp(mode, "replay");
     f->inject = !strcmp(mode, "crash");
@@ -267,7 +311,8 @@ static int exercise(crash_fixture_t *f, const char *mode) {
     if (operation || f->bad_context || f->lists) goto done;
     if (f->cut->unknown && !f->inject) {
       if (call.status == TURBO_TOOL_UNKNOWN_SIDE_EFFECT && call.replayed && !call.output && !call.detail &&
-          !f->callbacks && !f->puts) rc = expect_evidence(f, "started", f->cut->effects, 0);
+          !f->callbacks && !f->puts)
+        rc = expect_evidence(f, f->cut->phase, f->cut->claim, f->cut->effects, 0);
     } else {
       int entered = f->inject || (!replay && (!f->cut->phase || !strcmp(f->cut->phase, "planned")));
       if (call.status != TURBO_TOOL_OK || f->callbacks != entered || call.replayed != !entered ||
@@ -275,7 +320,7 @@ static int exercise(crash_fixture_t *f, const char *mode) {
       if (f->inject && !strcmp(f->cut->name, "before_delivery")) _Exit(FIXTURE_CRASH);
       if (f->inject) goto done; /* A selected cut must terminate, never return success. */
       if (!replay && counter_add(f->oracle, "delivery", &delivery)) goto done;
-      rc = expect_evidence(f, "committed", 1, 1);
+      rc = expect_evidence(f, "committed", 1, 1, 1);
     }
   }
 done:

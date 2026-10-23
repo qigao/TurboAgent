@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include "../src/turbo_agent_tool_journal_internal.h"
 #include "turbo_agent_evidence_diagram.h"
 #include "turbo_tool.h"
 #include <fmt.h>
@@ -6,7 +7,7 @@
 
 typedef struct evidence_store_s {
   turbo_agent_runtime_store_t inner;
-  int writes, lists, journal_error;
+  int writes, lists, journal_error, claim_error;
 } evidence_store_t;
 
 static int evidence_put(void *user, const char *collection, const char *id, const char *text) {
@@ -18,6 +19,10 @@ static int evidence_get(void *user, const char *collection, const char *id, char
   evidence_store_t *store = user;
   if (store->journal_error && !strcmp(collection, "agent_tool_journal")) {
     *out = NULL; return store->journal_error;
+  }
+  if (store->claim_error && !strcmp(collection, TURBO_AGENT_TOOL_CLAIM_COLLECTION)) {
+    *out = NULL;
+    return store->claim_error;
   }
   return store->inner.get(store->inner.user_data, collection, id, out);
 }
@@ -41,6 +46,21 @@ static json_value_t *journal_record(const char *id) {
   json_value_t *record = json_parse(text, sizeof(text) - 1);
   if (record && turbo_runtime_json_object_set_string(record, "journal_id", id) != 0) {
     json_free(record); return NULL;
+  }
+  return record;
+}
+
+static json_value_t *planned_record(const char *id, const char *phase) {
+  static const char text[] = "{\"schema_version\":1,\"thread_id\":\"t\",\"run_id\":\"r\","
+      "\"call_id\":\"call\",\"turn_key\":\"turn\",\"tool_name\":\"fs.read\","
+      "\"arguments_hash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\","
+      "\"status\":0,\"execution_mode\":0,\"idempotency\":0,"
+      "\"updated_at\":\"2026-10-11T00:00:00Z\"}";
+  json_value_t *record = json_parse(text, sizeof(text) - 1);
+  if (record && (turbo_runtime_json_object_set_string(record, "journal_id", id) != 0 ||
+                 turbo_runtime_json_object_set_string(record, "phase", phase) != 0)) {
+    json_free(record);
+    return NULL;
   }
   return record;
 }
@@ -123,6 +143,55 @@ spec("Selected tool journal evidence diagrams") {
     check_equal(turbo_diagram_mermaid(focused, &text), SALTS_OK);
     check_contains(text, "current journal observations (focused)");
     check_contains(text, "same run (current journal)");
+  }
+  it("projects an admitted planned record as unknown and rejects a mismatched fence") {
+    const char *ids[] = {"j1"};
+    const json_value_t *node;
+    json_free(record);
+    record = planned_record("j1", "planned");
+    check_not_null(record);
+    check_equal(turbo_agent_runtime_store_put_json(
+                    runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION, "j1", record),
+                SALTS_OK);
+    check_equal(turbo_agent_thread_tool_diagram(runtime, "t", ids, 1, &view), SALTS_OK);
+    node = evidence_node(view, "journal:j1");
+    check_not_null(node);
+    check_equal(json_get_string(node, "effect_status"), "not_admitted");
+    check_equal(json_get_string(node, "admission_fence"), "absent");
+    json_free(view);
+    view = NULL;
+
+    fresh = planned_record("j1", "admitted");
+    check_not_null(fresh);
+    check_equal(turbo_agent_runtime_store_put_json(
+                    runtime, TURBO_AGENT_TOOL_CLAIM_COLLECTION, "j1", fresh),
+                SALTS_OK);
+    check_equal(turbo_agent_thread_tool_diagram(runtime, "t", ids, 1, &view), SALTS_OK);
+    node = evidence_node(view, "journal:j1");
+    check_not_null(node);
+    check_equal(json_get_string(node, "effect_status"), "unknown_side_effect");
+    check_equal(json_get_string(node, "admission_fence"), "present");
+    serialized = json_serialize(view, NULL);
+    check_not_null(serialized);
+    check_contains(serialized, "side effects unknown");
+    json_free(view);
+    view = NULL;
+    json_serialize_free(serialized);
+    serialized = NULL;
+
+    check_equal(turbo_runtime_json_object_set_string(fresh, "call_id", "other"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(
+                    runtime, TURBO_AGENT_TOOL_CLAIM_COLLECTION, "j1", fresh),
+                SALTS_OK);
+    check_equal(turbo_agent_thread_tool_diagram(runtime, "t", ids, 1, &view), SALTS_EPROTO);
+    check_null(view);
+    check_equal(turbo_runtime_json_object_set_string(fresh, "call_id", "call"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(
+                    runtime, TURBO_AGENT_TOOL_CLAIM_COLLECTION, "j1", fresh),
+                SALTS_OK);
+    store.claim_error = SALTS_EIO;
+    check_equal(turbo_agent_thread_tool_diagram(runtime, "t", ids, 1, &view), SALTS_EIO);
+    check_null(view);
   }
   it("deduplicates a published request and retains independent evidence without exporting payloads") {
     const char *ids[] = {"j1", "j2"};

@@ -630,9 +630,9 @@ key 使用稳定 lineage：
 执行日志状态：
 
 ```text
-PLANNED -> STARTED -> COMMITTED
-                |
-                +-- crash/forced stop --> UNKNOWN
+PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
+                       |              |
+                       +-- crash -----+--> UNKNOWN
 ```
 
 - COMMITTED 结果可安全重放，不重新执行工具。
@@ -643,9 +643,18 @@ PLANNED -> STARTED -> COMMITTED
 当前 journal 写入/恢复协议：
 
 - executor 在临时、独占的 JSON record 中检查所有必需字段和 detail 复制/插入，
-  完整构造成功后才交给 RuntimeStore。store 在同步 put 中借用序列化文本；临时树
-  在成功或失败后均由 executor 释放。沿用每 runtime 的 callback 锁和 batch 调度，
-  不新增共享状态或队列。
+  完整构造成功后才交给 RuntimeStore。store 在同步 put/create-if-absent 中借用序列化
+  文本；临时树在成功或失败后均由 executor 释放。
+- 支持原子 create-if-absent 的 RuntimeStore 先原子发布主 Journal 的 PLANNED 身份，
+  再在 `agent_tool_claims/<journal_id>` 原子创建同身份、`phase=admitted` 的持久进入栅栏。
+  两个独立 executor 即使同时读取“缺失”或同一 PLANNED，也只有栅栏赢家可写 STARTED
+  并进入 callback；PLANNED 身份冲突在 callback 前返回 EPROTO，不能覆盖赢家。
+- 栅栏前崩溃仍可从 PLANNED 恢复。栅栏成功后，无论主 Journal 已到 STARTED，还是仍因
+  崩溃停在 PLANNED，恢复都返回 UNKNOWN_SIDE_EFFECT 且不自动重试。原子创建返回错误
+  也可能已提交，因此同样按 UNKNOWN 处理。已有 COMMITTED 仍从主 Journal 重放。
+- 不支持 create-if-absent 的旧/custom/file backend 保留既有单 executor 兼容路径，不能
+  据此声称跨 executor/process 的唯一准入。该保证只属于声明并实现该原子的 backend；
+  没有新增进程内全局锁、租约、超时接管或自动 UNKNOWN 重试。
 - 恢复先按存储主键 get，再校验内部 journal_id。原先按内部 journal_id list 的方案
   会把该字段损坏的记录当成不存在，因此不再作为已有记录的读取入口。旧 get ABI
   不能区分缺失与 I/O 错误；保留 filtered list 作为缺失判定，只有 get 失败且 list
@@ -658,10 +667,12 @@ PLANNED -> STARTED -> COMMITTED
   返回 `TURBO_TOOL_OUTPUT_LIMIT`、空 output 和 replayed 标记，不再次调用工具，
   不重写已提交结果；提高上限后仍可恢复原结果。完整 detail 继续作为独立宿主数据
   复制，不受模型 output 上限影响。这不是 store 读取/JSON 解析的总内存配额。
-- PLANNED 写入失败会终止 batch；STARTED 写入失败不调用该工具；调用后的 COMMITTED
-  写入失败返回 UNKNOWN_SIDE_EFFECT。若 store 保留 STARTED，恢复只报告未知副作用。
-  backend 的原子替换和 crash durability 仍由 backend 契约决定，不能由这些检查推导。
-- 保留 journal schema version 1、字段名和 SHA-256 framing；无需迁移或修改有效旧记录。
+- PLANNED 写入失败会终止 batch；无持久栅栏的 STARTED 写入失败不调用该工具。栅栏已经
+  提交后 STARTED 写入失败，以及调用后的 COMMITTED 写入失败，均返回
+  UNKNOWN_SIDE_EFFECT。backend 的 crash durability 仍由 backend 契约决定。
+- 主 Journal 保留 schema version 1、字段名和 SHA-256 framing；无需迁移或修改有效旧
+  记录。辅助 claim record 复用完整身份/策略字段并使用 `phase=admitted`，不保存 output、
+  detail、运行时指针或权限授予；它随 store 容量长期保留，不能作为成功或当前权限证据。
   新校验拒绝错误类型/未知状态，不再把它们解释成默认工具结果。回滚只涉及 executor
   的校验与构造代码，但会恢复原先对损坏记录和超限输出的宽松处理。
 
@@ -669,8 +680,11 @@ PLANNED -> STARTED -> COMMITTED
 失败，检查 batch 内无额外 callback、原记录未被覆盖、有效状态/detail 可恢复、
 缩小再提高输出上限不会丢失持久结果。相邻 `test_turbo_agent_tool_executor` 保留
 历史 SHA-256 golden framing 检查；`test_turbo_cli_tool_cancel` 覆盖真实进程取消后的
-checkpoint 恢复。可通过 `ctest --preset win-release-user -R tool_journal --output-on-failure`
-运行本组。JSON 分配失败路径已检查返回值，但未做 allocator 故障注入。
+checkpoint 恢复。`test_turbo_agent_tool_claim` 强制两个独立 executor/Runtime handle 同时
+读取缺失或 PLANNED 身份，验证原子身份发布、冲突拒绝和单次 callback。进程测试另覆盖
+admitted 写入前后共十个崩溃点。可通过
+`ctest --preset win-release-user -R 'tool_(claim|journal)' --output-on-failure` 运行本组。
+JSON 分配失败路径已检查返回值，但未做 allocator 故障注入。
 
 ### 8.6 工具结果进入会话的提交边界
 

@@ -18,7 +18,45 @@ typedef struct planner_tool_test_state_s {
   int saw_tool_schema;
   int saw_tool_result;
   int collision_case;
+  turbo_agent_runtime_store_t inner;
+  size_t journal_reads;
+  size_t journal_writes;
+  size_t failed_commits;
+  int fail_commits;
 } planner_tool_test_state_t;
+
+static int planner_journal_put(void *user, const char *collection, const char *id,
+                                const char *text) {
+  planner_tool_test_state_t *state = user;
+  if (!strcmp(collection, "agent_tool_journal")) {
+    json_value_t *record = json_parse(text, strlen(text));
+    const char *phase = json_get_string(record, "phase");
+    int fail = state->fail_commits && phase && !strcmp(phase, "committed");
+    ++state->journal_writes;
+    json_free(record);
+    if (fail) { ++state->failed_commits; return SALTS_EIO; }
+  }
+  return state->inner.put(state->inner.user_data, collection, id, text);
+}
+
+static int planner_journal_get(void *user, const char *collection, const char *id, char **out) {
+  planner_tool_test_state_t *state = user;
+  if (!strcmp(collection, "agent_tool_journal")) ++state->journal_reads;
+  return state->inner.get(state->inner.user_data, collection, id, out);
+}
+
+static int planner_journal_list(void *user, const char *collection, const char *key,
+                                 const char *value, char **out) {
+  planner_tool_test_state_t *state = user;
+  if (!strcmp(collection, "agent_tool_journal")) ++state->journal_reads;
+  return state->inner.list(state->inner.user_data, collection, key, value, out);
+}
+
+static void planner_journal_destroy(void *user) {
+  planner_tool_test_state_t *state = user;
+  if (state->inner.user_data_free) state->inner.user_data_free(state->inner.user_data);
+  state->inner = (turbo_agent_runtime_store_t){0};
+}
 
 static int planner_tool_test_copy(const char *source, char **out_copy) {
   size_t size;
@@ -203,6 +241,26 @@ static int planner_host_admit_fixture_tool(turbo_agent_app_t *app) {
       turbo_agent_session_agent(turbo_agent_app_session(app)), &grant);
 }
 
+static int planner_result_outputs(const json_value_t *state, const char *reason) {
+  /* Nested tool results are mirrored into the root event stream. Inspect that
+   * aggregate once, rather than counting the owning/mirrored streams twice. */
+  const json_value_t *events = json_object_get(state, "events");
+  int count = 0;
+  for (size_t i = 0; i < json_array_size(events); ++i) {
+    const json_value_t *event = json_array_get(events, i);
+    const char *kind = json_get_string(event, "kind");
+    if (!kind || strcmp(kind, "tool_results")) continue;
+    const json_value_t *outputs = json_object_get(event, "outputs");
+    for (size_t j = 0; j < json_array_size(outputs); ++j) {
+      const char *output = json_get_string(json_array_get(outputs, j), "output");
+      if (!output || (reason ? !strstr(output, reason) : strcmp(output, "{\"context\":\"ready\"}")))
+        return -1;
+      ++count;
+    }
+  }
+  return count;
+}
+
 spec("planner step tool journal identity") {
   static planner_tool_test_state_t state;
   static turbo_tool_registry_t *registry;
@@ -210,6 +268,9 @@ spec("planner step tool journal identity") {
   static json_value_t *summary, *journals, *result_state, *diagram;
   static char *text;
   static tstr checkpoint;
+  static tstr parent_run, fork_run;
+  static json_value_t *parent_journals, *fork_journals, *persisted;
+  static char *expected_record, *actual_record, *head_run;
   before_each() {
     turbo_tool_definition_t definition = {0};
     turbo_agent_session_config_t session = {0};
@@ -224,7 +285,11 @@ spec("planner step tool journal identity") {
     session.agent_config.transport_fn = repeated_step_tool_transport;
     session.agent_config.transport_user_data = &state;
     session.agent_config.tool_registry = registry;
-    session.runtime_store = turbo_agent_runtime_store_memory_create();
+    state.inner = turbo_agent_runtime_store_memory_create();
+    check_not_null(state.inner.put);
+    session.runtime_store = (turbo_agent_runtime_store_t){.put = planner_journal_put,
+        .get = planner_journal_get, .list = planner_journal_list, .user_data = &state,
+        .user_data_free = planner_journal_destroy};
     session.workflow_kind = TURBO_AGENT_SESSION_WORKFLOW_ENGINEERING;
     config.session_config = &session;
     app = turbo_agent_app_create(&config); check_not_null(app);
@@ -236,7 +301,16 @@ spec("planner step tool journal identity") {
     json_free(result_state); result_state = NULL;
     json_free(diagram); diagram = NULL;
     tstr_free(checkpoint); checkpoint = NULL;
+    tstr_free(parent_run); parent_run = NULL;
+    tstr_free(fork_run); fork_run = NULL;
+    json_free(parent_journals); parent_journals = NULL;
+    json_free(fork_journals); fork_journals = NULL;
+    json_free(persisted); persisted = NULL;
+    json_serialize_free(expected_record); expected_record = NULL;
+    json_serialize_free(actual_record); actual_record = NULL;
+    free(head_run); head_run = NULL;
     turbo_agent_app_destroy(app); app = NULL;
+    planner_journal_destroy(&state);
     turbo_tool_registry_destroy(registry); registry = NULL;
     state = (planner_tool_test_state_t){0};
   }
@@ -322,6 +396,142 @@ spec("planner step tool journal identity") {
         const json_value_t *origin = json_object_get(json_array_get(versions, n), "plan_step_origin");
         check_equal(json_get_int(origin, "plan_version", -1), 0);
         check_equal(json_get_int(origin, "step_index", -1), (int)n);
+      }
+    }
+  }
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    const char *outcomes[] = {"committed outcomes", "failed commits", "denied current authority"};
+    for (size_t outcome = 0; outcome < sizeof(outcomes) / sizeof(outcomes[0]); ++outcome) {
+      it("isolates real checkpoint resume and explicit fork for %s with %s",
+          cases[i].name, outcomes[outcome]) {
+        const char *interrupts[] = {i == 0 || i == 2 ? "tools" : "planner.tools"};
+        const size_t paused_models = i == 0 || i == 2 ? 2 : 1;
+        const int unknown = outcome == 1, denied = outcome == 2;
+        turbo_graph_run_options_t options = {.interrupt_before_nodes = interrupts,
+            .interrupt_before_count = 1};
+        turbo_agent_app_exec_options_t resume = {0};
+        turbo_agent_runtime_t *runtime = turbo_agent_session_runtime(turbo_agent_app_session(app));
+        state.collision_case = (int)i;
+        check_equal(turbo_agent_app_start_text(app, "explicit lineage test", &options,
+            &summary, &result_state), 0);
+        check_equal(json_get_string(summary, "status"), "interrupted");
+        check_equal(json_get_string(summary, "pending_node"), interrupts[0]);
+        check_equal(state.transport_calls, paused_models);
+        check_equal(state.tool_calls, 0u);
+        parent_run = tstr_dup(json_get_string(summary, "run_id")); check_not_null(parent_run);
+        checkpoint = tstr_dup(json_get_string(summary, "checkpoint_id")); check_not_null(checkpoint);
+        resume.scope = TURBO_SESSION_SCOPE_CHECKPOINT;
+        resume.input_kind = TURBO_SESSION_INPUT_OVERRIDE;
+        resume.checkpoint_id = checkpoint;
+        for (int replay = 0; replay < 2; ++replay) {
+          state.transport_calls = paused_models;
+          state.fail_commits = unknown && !replay;
+          json_free(summary); summary = NULL;
+          json_free(result_state); result_state = NULL;
+          check_equal(turbo_agent_app_resume_preset(app, TURBO_AGENT_SESSION_WORKFLOW_ENGINEERING,
+              NULL, NULL, &resume, NULL, NULL, &summary, &result_state), 0);
+          check_equal(json_get_string(summary, "status"), "completed");
+          check_equal(json_get_string(summary, "run_id"), parent_run);
+          check_equal(state.transport_calls, cases[i].models);
+          check_equal(state.tool_calls, 2u);
+          check_equal(state.journal_writes, 6u);
+          check_equal(state.failed_commits, unknown ? 2u : 0u);
+          check_equal(planner_result_outputs(result_state,
+              unknown ? "tool_side_effect_unknown" : NULL), 2);
+          if (!replay) {
+            check_equal(turbo_agent_runtime_store_list_json(runtime, "agent_tool_journal",
+                "run_id", parent_run, &parent_journals), SALTS_OK);
+            check_equal(json_array_size(parent_journals), 2u);
+          }
+        }
+        state.fail_commits = 0;
+        if (denied) {
+          turbo_agent_policy_t policy = turbo_agent_policy_default();
+          /* All synchronous callbacks have returned. Replace authority only
+           * here at the quiescent Host boundary, never in a callback. */
+          check_equal(turbo_agent_set_tool_policy(
+              turbo_agent_session_agent(turbo_agent_app_session(app)), &policy), 0);
+          state.transport_calls = paused_models;
+          state.journal_reads = 0;
+          json_free(summary); summary = NULL;
+          json_free(result_state); result_state = NULL;
+          check_equal(turbo_agent_app_resume_preset(app, TURBO_AGENT_SESSION_WORKFLOW_ENGINEERING,
+              NULL, NULL, &resume, NULL, NULL, &summary, &result_state), 0);
+          check_equal(state.tool_calls, 2u);
+          check_equal(state.journal_writes, 6u);
+          check_equal(state.journal_reads, 0u);
+          check_equal(planner_result_outputs(result_state, "custom_tools_disabled"), 2);
+        }
+        state.transport_calls = paused_models;
+        state.journal_reads = 0;
+        json_free(summary); summary = NULL;
+        json_free(result_state); result_state = NULL;
+        /* This is an explicit Host fork with a new Run, not automatic retry
+         * or reconciliation of any UNKNOWN effect in the parent Run. */
+        check_equal(turbo_agent_app_fork_preset(app, TURBO_AGENT_SESSION_WORKFLOW_ENGINEERING,
+            NULL, NULL, &resume, NULL, NULL, &summary, &result_state), 0);
+        check_equal(json_get_string(summary, "status"), "completed");
+        fork_run = tstr_dup(json_get_string(summary, "run_id")); check_not_null(fork_run);
+        check_not_equal(fork_run, parent_run);
+        check_equal(state.tool_calls, denied ? 2u : 4u);
+        check_equal(state.journal_writes, denied ? 6u : 12u);
+        if (denied) check_equal(state.journal_reads, 0u);
+        check_equal(planner_result_outputs(result_state, denied ? "custom_tools_disabled" : NULL), 2);
+        check_equal(turbo_agent_runtime_get_run(runtime, fork_run, &persisted), 0);
+        check_equal(json_get_string(persisted, "parent_run_id"), parent_run);
+        check_equal(json_get_string(persisted, "forked_from_checkpoint_id"), checkpoint);
+        json_free(persisted); persisted = NULL;
+        check_equal(turbo_agent_runtime_thread_head_run_id_for_thread(runtime,
+            turbo_agent_app_thread_id(app), &head_run), 0);
+        check_equal(head_run, fork_run);
+        free(head_run); head_run = NULL;
+        check_equal(turbo_agent_runtime_store_list_json(runtime, "agent_tool_journal",
+            "run_id", fork_run, &fork_journals), SALTS_OK);
+        check_equal(json_array_size(fork_journals), denied ? 0u : 2u);
+        for (size_t c = 0; c < json_array_size(fork_journals); ++c) {
+          const json_value_t *child = json_array_get(fork_journals, c);
+          size_t matches = 0;
+          check_equal(json_get_string(child, "phase"), "committed");
+          check_equal(json_get_string(child, "run_id"), fork_run);
+          for (size_t p = 0; p < json_array_size(parent_journals); ++p) {
+            const json_value_t *parent = json_array_get(parent_journals, p);
+            if (strcmp(json_get_string(parent, "turn_key"), json_get_string(child, "turn_key")))
+              continue;
+            ++matches;
+            check_equal(json_get_string(child, "call_id"), json_get_string(parent, "call_id"));
+            check_equal(json_get_string(child, "arguments_hash"), json_get_string(parent, "arguments_hash"));
+            check_not_equal(json_get_string(child, "journal_id"), json_get_string(parent, "journal_id"));
+            check_equal(json_get_string(child, "thread_id"), json_get_string(parent, "thread_id"));
+          }
+          check_equal(matches, 1u);
+        }
+        /* Publishing a fork must not redirect an explicit original-checkpoint
+         * resume to the thread's newer Run or change the original Journal. */
+        if (denied) check_equal(planner_host_admit_fixture_tool(app), 0);
+        state.transport_calls = paused_models;
+        json_free(summary); summary = NULL;
+        json_free(result_state); result_state = NULL;
+        check_equal(turbo_agent_app_resume_preset(app, TURBO_AGENT_SESSION_WORKFLOW_ENGINEERING,
+            NULL, NULL, &resume, NULL, NULL, &summary, &result_state), 0);
+        check_equal(json_get_string(summary, "run_id"), parent_run);
+        check_equal(state.tool_calls, denied ? 2u : 4u);
+        check_equal(state.journal_writes, denied ? 6u : 12u);
+        check_equal(planner_result_outputs(result_state,
+            unknown ? "tool_side_effect_unknown" : NULL), 2);
+        for (size_t p = 0; p < json_array_size(parent_journals); ++p) {
+          const json_value_t *parent = json_array_get(parent_journals, p);
+          const char *turn = json_get_string(parent, "turn_key");
+          check_true(!strcmp(turn, cases[i].first) || !strcmp(turn, cases[i].second));
+          check_equal(json_get_string(parent, "phase"), unknown ? "started" : "committed");
+          check_equal(turbo_agent_runtime_store_get_json(runtime, "agent_tool_journal",
+              json_get_string(parent, "journal_id"), &persisted), SALTS_OK);
+          expected_record = json_serialize(parent, NULL); check_not_null(expected_record);
+          actual_record = json_serialize(persisted, NULL); check_not_null(actual_record);
+          check_equal(actual_record, expected_record);
+          json_serialize_free(expected_record); expected_record = NULL;
+          json_serialize_free(actual_record); actual_record = NULL;
+          json_free(persisted); persisted = NULL;
+        }
       }
     }
   }

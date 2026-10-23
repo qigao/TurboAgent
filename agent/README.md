@@ -1006,6 +1006,16 @@ This prevents two steps that reuse a model call ID from replaying each other's
 results. Ordinary top-level tool-loop identities and journal JSON schema remain
 unchanged. Checkpoint replay regenerates the same scoped identities.
 
+The engineering-preset checkpoint regressions cover distinct executor steps,
+planner/executor domains and planner/executor replans through real App/Session
+resume and fork APIs. Resuming the original checkpoint keeps its Run and replays
+committed results or preserves `started/UNKNOWN`, including after a newer fork
+becomes the thread head. An explicit Host fork creates a new Run and separately
+admits its calls under current authority; it does not reconcile the parent's
+unknown effects. Quiescent revocation blocks nested replay/fork before Journal
+payload reads, writes or callbacks. These are serialized memory-store workflow
+tests, not cross-owner admission or nested/forked process-crash qualification.
+
 If a scoped record is absent but its old unscoped key exists, automatic nested
 continuation fails rather than guessing its owner or repeating side effects.
 No old records are migrated or rewritten. Existing scoped records retain normal

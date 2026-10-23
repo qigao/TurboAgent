@@ -187,14 +187,15 @@ spec("ToolExecutor effect identity admission and replay") {
   for (int parallel = 0; parallel < 2; ++parallel) {
     const char *outcomes[] = {"committed replay", "canonical alias replay", "changed arguments",
         "changed tool", "failed commit", "cancelled replay waiter", "cancelled unknown waiter",
-        "cancelled distinct call", "denied replay waiter"};
+        "cancelled distinct call", "denied replay waiter", "deadline distinct call"};
     for (size_t variant = 0; variant < sizeof(outcomes) / sizeof(outcomes[0]); ++variant) {
       it("serializes two callers on one owned executor for %s (%s)",
           outcomes[variant], parallel ? "parallel" : "sequential") {
         const int unknown = variant == 4 || variant == 6;
         const int conflict = variant == 2 || variant == 3;
-        const int cancelled = variant >= 5 && variant <= 7;
-        const int distinct = variant == 7;
+        const int deadline = variant == 9;
+        const int cancelled = (variant >= 5 && variant <= 7) || deadline;
+        const int distinct = variant == 7 || deadline;
         const int denied = variant == 8;
         calls[0] = identity_call("turn", "shared");
         calls[1] = identity_call("turn", distinct ? "distinct" : "shared");
@@ -205,7 +206,15 @@ spec("ToolExecutor effect identity admission and replay") {
         atomic_store(&probe.hold_callback, 1);
         atomic_store(&probe.fail_commit_once, unknown);
         if (cancelled) {
-          check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+          if (deadline) {
+            turbo_cancel_source_config_t cancel_config = {0};
+            cancel_config.struct_size = sizeof(cancel_config);
+            cancel_config.abi_version = TURBO_RUNTIME_CONTROL_ABI_VERSION;
+            cancel_config.deadline_mono_ms = cmeta_monotonic_ms() + 100;
+            check_equal(turbo_cancel_source_create(&cancel_config, &source), SALTS_OK);
+          } else {
+            check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+          }
           check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
         }
         /* Freeze registry/policy and keep independent call buffers alive until
@@ -226,7 +235,7 @@ spec("ToolExecutor effect identity admission and replay") {
         check_equal(cmeta_thread_create(&threads[1], identity_execute, &callers[1]), SALTS_OK);
         ++started;
         check_true(identity_wait(&callers[1].entered, 1, IDENTITY_GATE_TIMEOUT_MS));
-        if (cancelled)
+        if (cancelled && !deadline)
           check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
         /* A cancellable waiter must terminate before the owner is released.
          * Other callers remain serialized until the first callback drains. */
@@ -250,7 +259,8 @@ spec("ToolExecutor effect identity admission and replay") {
         else check_equal(calls[0].output, "{}");
         if (cancelled) {
           check_false(calls[1].replayed);
-          check_equal(calls[1].status, TURBO_TOOL_CANCELLED);
+          check_equal(calls[1].status, deadline ? TURBO_TOOL_DEADLINE_EXCEEDED
+                                                : TURBO_TOOL_CANCELLED);
           check_null(calls[1].output);
         } else if (conflict || distinct || denied) {
           check_equal(calls[1].replayed, denied);

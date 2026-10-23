@@ -524,6 +524,15 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
         !calls[index].arguments_json ||
         strlen(calls[index].arguments_json) > executor->config.max_arguments_bytes)
       return SALTS_EMSGSIZE;
+    /* run_id is shared by this batch; turn_key + call_id completes the effect
+     * identity. Reject collisions before any Journal preparation or callback,
+     * even for denied/replayed entries or dispatch without a Runtime. Tool
+     * names, aliases and arguments cannot distinguish the same effect key. */
+    for (size_t previous = 0; previous < index; ++previous) {
+      if (strcmp(calls[previous].turn_key, calls[index].turn_key) == 0 &&
+          strcmp(calls[previous].call_id, calls[index].call_id) == 0)
+        return SALTS_EPROTO;
+    }
   }
   cmeta_mutex_lock(&executor->batch_mutex);
   /* The executor is also called directly by trusted host code. Never trust

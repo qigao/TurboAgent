@@ -107,7 +107,7 @@ Android SDK build with tests disabled does not qualify process-crash behavior th
 These are abrupt process exits after/before completed record operations, not OS kill
 at arbitrary instructions, power loss, partial-sector writes, mid-SQLite-transaction
 crashes or allocator failure injection. They do not establish durable Router admission,
-remote lease takeover, concurrently open SQLite owners, nested/forked ownership,
+remote lease takeover, concurrently open SQLite owners, arbitrary nested/forked execution,
 parallel tools, compiled typed-Inspect recovery, Wasm/MCP/Praktor behavior or all-platform
 effect conformance. Those remain #74/#213 acceptance work. Unknown effects continue
 to require explicit reconciliation; no globally exactly-once effect guarantee is made.
@@ -119,5 +119,8 @@ arguments, and an intact committed winner. Its interrupted two-call batch inject
 failed first terminal commit, then requires whole-batch recovery to retain that
 identity as unknown, replay the second committed identity and invoke neither callback
 again. Batch planning is not a multi-record transaction and does not infer a business
-dependency between distinct identities. This is bounded by the backend primitive; the
+dependency between distinct identities. The same regression composes the atomic fence
+with nested identity: two owners in one Run/turn/call admit one callback, while parent
+and explicit-fork Run IDs keep otherwise identical nested calls independent and replay
+each lineage without another callback. This is bounded by the backend primitive; the
 legacy file/custom fallback does not gain a cross-owner guarantee.

@@ -111,6 +111,8 @@ typedef struct tool_claim_caller_s {
   turbo_agent_runtime_t *runtime;
   const turbo_tool_registry_t *registry;
   const turbo_agent_policy_t *policy;
+  const char *thread_id;
+  const char *run_id;
   turbo_agent_tool_execution_t call;
   int rc;
 } tool_claim_caller_t;
@@ -118,12 +120,14 @@ typedef struct tool_claim_caller_s {
 static void tool_claim_execute(void *user) {
   tool_claim_caller_t *caller = user;
   caller->rc = turbo_agent_tool_executor_execute(
-      caller->executor, caller->runtime, NULL, "thread", "run", NULL, NULL,
-      caller->registry, caller->policy, &caller->call, 1);
+      caller->executor, caller->runtime, NULL,
+      caller->thread_id ? caller->thread_id : "thread",
+      caller->run_id ? caller->run_id : "run", NULL, NULL, caller->registry,
+      caller->policy, &caller->call, 1);
 }
 
 spec("Tool Journal atomic backend-entry admission") {
-  it("fences independent owners and replays interrupted distinct-identity batches") {
+  it("fences independent owners across interrupted batches and lineage") {
     tool_claim_store_t store = {0};
     turbo_agent_runtime_store_t callbacks = {0};
     turbo_agent_runtime_t *runtimes[2] = {0};
@@ -302,6 +306,109 @@ spec("Tool Journal atomic backend-entry admission") {
       json_free(replay[0].detail);
       json_free(replay[1].detail);
     }
+
+    /* Independent owners must share the admission fence inside one nested
+     * Run scope. An explicit fork has a different Run identity, so the same
+     * nested turn/call is a separate effect and must not collide with its
+     * parent. Replaying either lineage must remain callback-free. */
+    for (size_t i = 0; i < 2; ++i) {
+      free(callers[i].call.output);
+      json_free(callers[i].call.detail);
+      callers[i].thread_id = "lineage-thread";
+      callers[i].run_id = "nested-parent-run";
+      callers[i].call = tool_claim_call("nested-shared", "{}");
+      callers[i].call.turn_key = "executor:0:0";
+      callers[i].call.legacy_turn_key = "0";
+      callers[i].rc = SALTS_OK;
+      threads[i] = NULL;
+    }
+    atomic_store_explicit(&store.journal_reads, 0, memory_order_release);
+    for (size_t i = 0; i < 2; ++i)
+      check_equal(cmeta_thread_create(&threads[i], tool_claim_execute,
+                                      &callers[i]),
+                  SALTS_OK);
+    for (size_t i = 0; i < 2; ++i)
+      check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+    check_equal(callers[0].rc, SALTS_OK);
+    check_equal(callers[1].rc, SALTS_OK);
+    check_equal(atomic_load(&store.callbacks), 5);
+    check_equal(callers[0].call.replayed + callers[1].call.replayed, 1);
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtimes[0], TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
+                    "call_id", "nested-shared", &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 1);
+    check_equal(json_get_string(json_array_get(records, 0), "run_id"),
+                "nested-parent-run");
+    check_equal(json_get_string(json_array_get(records, 0), "turn_key"),
+                "executor:0:0");
+    json_free(records);
+    records = NULL;
+
+    for (size_t i = 0; i < 2; ++i) {
+      free(callers[i].call.output);
+      json_free(callers[i].call.detail);
+      callers[i].run_id = i == 0 ? "fork-parent-run" : "fork-child-run";
+      callers[i].call = tool_claim_call("fork-shared", "{}");
+      callers[i].call.turn_key = "executor:0:1";
+      callers[i].call.legacy_turn_key = "0";
+      callers[i].rc = SALTS_OK;
+      threads[i] = NULL;
+    }
+    atomic_store_explicit(&store.journal_reads, 0, memory_order_release);
+    for (size_t i = 0; i < 2; ++i)
+      check_equal(cmeta_thread_create(&threads[i], tool_claim_execute,
+                                      &callers[i]),
+                  SALTS_OK);
+    for (size_t i = 0; i < 2; ++i)
+      check_equal(cmeta_thread_join(&threads[i]), SALTS_OK);
+    check_equal(callers[0].rc, SALTS_OK);
+    check_equal(callers[1].rc, SALTS_OK);
+    check_equal(atomic_load(&store.callbacks), 7);
+    check_false(callers[0].call.replayed);
+    check_false(callers[1].call.replayed);
+    check_equal(callers[0].call.status, TURBO_TOOL_OK);
+    check_equal(callers[1].call.status, TURBO_TOOL_OK);
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtimes[0], TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
+                    "call_id", "fork-shared", &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 2);
+    {
+      int saw_parent = 0;
+      int saw_child = 0;
+      const char *journal_ids[2] = {0};
+      for (size_t i = 0; i < 2; ++i) {
+        const json_value_t *entry = json_array_get(records, i);
+        const char *entry_run = json_get_string(entry, "run_id");
+        journal_ids[i] = json_get_string(entry, "journal_id");
+        saw_parent += entry_run && !strcmp(entry_run, "fork-parent-run");
+        saw_child += entry_run && !strcmp(entry_run, "fork-child-run");
+      }
+      check_equal(saw_parent, 1);
+      check_equal(saw_child, 1);
+      check_not_null(journal_ids[0]);
+      check_not_null(journal_ids[1]);
+      check_true(strcmp(journal_ids[0], journal_ids[1]) != 0);
+    }
+    json_free(records);
+    records = NULL;
+    for (size_t i = 0; i < 2; ++i) {
+      turbo_agent_tool_execution_t replay = tool_claim_call("fork-shared", "{}");
+      replay.turn_key = "executor:0:1";
+      replay.legacy_turn_key = "0";
+      check_equal(turbo_agent_tool_executor_execute(
+                      executors[1 - i], runtimes[1 - i], NULL,
+                      "lineage-thread", callers[i].run_id, NULL, NULL, registry,
+                      &policy, &replay, 1),
+                  SALTS_OK);
+      check_true(replay.replayed);
+      check_equal(replay.status, TURBO_TOOL_OK);
+      check_equal(replay.output, "ok");
+      free(replay.output);
+      json_free(replay.detail);
+    }
+    check_equal(atomic_load(&store.callbacks), 7);
 
     free(seed.output);
     turbo_cancel_token_release(token);

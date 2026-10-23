@@ -14,7 +14,7 @@ typedef struct nested_approval_probe_s {
   turbo_agent_runtime_store_t inner;
   json_value_t *root, *child;
   int calls, approved_calls, writes, live_grant_observed;
-  int fail_callback, fail_commit, monitor, rewrite, last_value;
+  int fail_callback, fail_commit, monitor, rewrite, last_value, fail_before;
 } nested_approval_probe_t;
 
 static void nested_approval_observe(nested_approval_probe_t *probe) {
@@ -62,6 +62,7 @@ static int nested_approval_rewrite(turbo_agent_t *agent, json_value_t *state,
   nested_approval_probe_t *probe = user;
   tstr replacement;
   (void)agent; (void)state; (void)id; (void)name;
+  if (probe->fail_before) return -1;
   if (!probe->rewrite) return 0;
   replacement = tstr_dup("{\"value\":2}");
   if (!replacement) return -1;
@@ -218,6 +219,26 @@ spec("nested Tool approval consumption") {
           check_false(turbo_agent_state_review_approved(probe.root));
           check_false(turbo_agent_state_review_approved(probe.child));
         }
+      }
+    }
+    it("rejects a copied child approval after Host revokes its parent (%s)", planner ? "planner" : "executor") {
+      probe.child = nested_approval_child(probe.root, planner); check_not_null(probe.child);
+      check_equal(nested_approval_model(probe.child, 0), 0);
+      check_equal(nested_approval_dispatch(&ctx, agent, planner), 0);
+      check_true(ctx.stop);
+      check_equal(turbo_agent_state_set_review_approved(probe.root, 1), 0);
+      probe.fail_before = 1;
+      check_not_equal(nested_approval_dispatch(&ctx, agent, planner), 0);
+      check_true(turbo_agent_state_review_approved(probe.child));
+      check_equal(probe.calls, 0); check_equal(probe.writes, 0);
+      /* No execution is active while the Host changes this review decision. */
+      check_equal(turbo_agent_state_set_review_approved(probe.root, 0), 0);
+      probe.fail_before = 0;
+      for (int retry = 0; retry < 2; ++retry) {
+        int rc = nested_approval_dispatch(&ctx, agent, planner);
+        check_equal(probe.calls, 0); check_equal(probe.writes, 0);
+        check_not_equal(rc, 0);
+        check_false(turbo_agent_state_review_approved(probe.root));
       }
     }
     it("requires approval for final middleware arguments (%s)", planner ? "planner" : "executor") {

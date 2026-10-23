@@ -256,19 +256,27 @@ static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_dat
    * A callback failure or a later model turn with identical call text must not
    * inherit it. Unrelated workflow-level reviews are left unchanged. */
   if (consume_approval && parent_review_state) {
+    int parent_matches = 0;
     for (index = 0; index < count; ++index) {
       if (calls[index].approval_granted && turbo_agent_tool_approval_review_matches(
               parent_review_state, calls[index].call_id, calls[index].tool_name,
               calls[index].arguments_json)) {
-        /* Nested guards use a copied review. Consume its parent owner at the
-         * same final-arguments boundary, not after callbacks/hooks return. */
-        if (turbo_agent_state_clear_review(parent_review_state) != 0) {
-          turbo_agent_state_set_model_error(ctx->state, "review", "failed to consume parent tool approval");
-          rc = SALTS_ENOMEM;
-          goto cleanup;
-        }
+        parent_matches = 1;
         break;
       }
+    }
+    /* A child copy left by a failed pre-dispatch hook is not independent
+     * authority. Reject a missing, changed or unconfirmable parent grant. */
+    if (!parent_matches) {
+      turbo_agent_state_set_model_error(ctx->state, "review", "parent tool approval unavailable");
+      rc = SALTS_EPERM;
+      goto cleanup;
+    }
+    /* Consume both owners here, not after callbacks/hooks return. */
+    if (turbo_agent_state_clear_review(parent_review_state) != 0) {
+      turbo_agent_state_set_model_error(ctx->state, "review", "failed to consume parent tool approval");
+      rc = SALTS_ENOMEM;
+      goto cleanup;
     }
   }
   if (consume_approval && turbo_agent_state_clear_review(ctx->state) != 0) {

@@ -32,7 +32,7 @@ jobs:
       CMAKE_BUILD_PARALLEL_LEVEL: 2
       TURBOSCRIPT_CANDIDATE_RUN: "39915402939"
       TURBOSCRIPT_CANDIDATE_SOURCE: "e5aef22c630a1019be6de1c7b095794f1ba30128"
-      SALTS_RELEASE_TAG: "v2.3.0-rc.16"
+      SALTS_RELEASE_TAG: "v2.3.0-rc.17"
       SALTS_UTILS_RELEASE_TAG: "v4.3.0-rc.11"
       CHTTP_RELEASE_TAG: "v2.1.0-rc.6"
       TURBOSCRIPT_RELEASE_TAG: "v3.0.10"
@@ -64,7 +64,7 @@ jobs:
           root="$RUNNER_TEMP/ta-turboscript-136-consumer"
           mkdir -p "$root/download" "$root/sdk"
 
-          # The candidate SDK's own manifest records Salts rc.16, SaltsUtils rc.11,
+          # The candidate SDK's own manifest records Salts rc.17, SaltsUtils rc.11,
           # and CHttp rc.6. Pin these published tags explicitly instead of inheriting
           # current-main defaults (which may advance independently).
           # This artifact is produced by the exact, independently validated
@@ -81,7 +81,7 @@ jobs:
           grep -Fx "commit=$TURBOSCRIPT_CANDIDATE_SOURCE" \
             "$candidate/turboscript-sdk-manifest.txt"
           grep -Fx "version=3.0.11-ci.343.1" "$candidate/turboscript-sdk-manifest.txt"
-          for pair in "salts_release=2.3.0-rc.16" \
+          for pair in "salts_release=2.3.0-rc.17" \
                       "salts_utils_release=4.3.0-rc.11" \
                       "chttp_release=2.1.0-rc.6"; do
             grep -Fx "$pair" "$candidate/turboscript-sdk-manifest.txt"

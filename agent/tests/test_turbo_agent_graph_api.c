@@ -8,10 +8,12 @@
 #include "turbo_agent_state.h"
 #include "turbo_tool_registry.h"
 #include "turbo_runtime_store.h"
+#include "turbo_runtime_control.h"
 #include "../src/turbo_agent_runtime_internal.h"
 #include "../src/turbo_agent_workflow_graph_internal.h"
 
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -86,7 +88,22 @@ typedef struct graph_result_probe_s {
   const char *output;
   const char *replacement;
   int calls;
+  turbo_tool_status_t status;
+  turbo_cancel_source_t *cancel_source;
+  atomic_uint_fast64_t now;
+  int stop_after_hook;
 } graph_result_probe_t;
+
+static uint64_t graph_result_clock(void *user) {
+  graph_result_probe_t *probe = user;
+  return atomic_load_explicit(&probe->now, memory_order_relaxed);
+}
+
+static void graph_result_stop(graph_result_probe_t *probe, int deadline) {
+  if (deadline) atomic_store_explicit(&probe->now, 200, memory_order_relaxed);
+  else if (turbo_cancel_source_reason(probe->cancel_source) == TURBO_CANCEL_NONE)
+    check_equal(turbo_cancel_source_cancel(probe->cancel_source, TURBO_CANCEL_USER), SALTS_OK);
+}
 
 static turbo_tool_status_t graph_result_handler(const char *args,
     const turbo_tool_execution_context_t *context, char **out, void *user) {
@@ -94,7 +111,7 @@ static turbo_tool_status_t graph_result_handler(const char *args,
   (void)args; (void)context;
   ++probe->calls;
   *out = probe->output ? graph_test_strdup(probe->output) : NULL;
-  return TURBO_TOOL_OK;
+  return probe->status;
 }
 
 static int graph_result_contract(turbo_tool_registry_t *registry,
@@ -123,6 +140,7 @@ static int graph_result_rewrite(turbo_agent_t *agent, json_value_t *state,
     char *copy = graph_test_strdup(probe->replacement);
     free(*out); *out = copy;
   }
+  if (probe->stop_after_hook) graph_result_stop(probe, probe->stop_after_hook == 2);
   return 0;
 }
 
@@ -143,6 +161,8 @@ spec("ToolNode strict result delivery and Journal replay") {
   static json_value_t *state, *replay, *records;
   static turbo_graph_exec_ctx_t ctx;
   static turbo_agent_execution_context_t saved;
+  static turbo_cancel_source_t *cancel_source;
+  static turbo_cancel_token_t *cancel_token;
 
   before_each() {
     turbo_agent_config_t config = {0};
@@ -150,8 +170,15 @@ spec("ToolNode strict result delivery and Journal replay") {
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     turbo_agent_execution_context_t context = {0};
     turbo_agent_middleware_t middleware = {.after_tool = graph_result_rewrite, .user_data = &probe};
+    turbo_cancel_source_config_t control = {.struct_size = sizeof(control),
+        .abi_version = TURBO_RUNTIME_CONTROL_ABI_VERSION, .deadline_mono_ms = 200,
+        .monotonic_ms = graph_result_clock, .clock_user_data = &probe};
     probe = (graph_result_probe_t){.output = "{\"ok\":true}"};
+    atomic_init(&probe.now, 100);
     turbo_agent_execution_context_get(&saved);
+    check_equal(turbo_cancel_source_create(&control, &cancel_source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(cancel_source, &cancel_token), SALTS_OK);
+    probe.cancel_source = cancel_source;
     runtime = turbo_agent_runtime_create(&store); check_not_null(runtime);
     registry = turbo_tool_registry_create(); check_not_null(registry);
     check_equal(graph_result_contract(registry, &probe, schema, 1), TURBO_TOOL_OK);
@@ -168,6 +195,7 @@ spec("ToolNode strict result delivery and Journal replay") {
     replay = json_clone(state); check_not_null(replay);
     ctx = (turbo_graph_exec_ctx_t){.graph = graph, .current_node = "tools", .state = state};
     context.thread_id = "result-thread"; context.run_id = "result-run"; context.runtime = runtime;
+    context.cancel_token = cancel_token;
     turbo_agent_execution_context_set(&context);
   }
   after_each() {
@@ -178,6 +206,8 @@ spec("ToolNode strict result delivery and Journal replay") {
     turbo_agent_destroy(agent); agent = NULL;
     turbo_tool_registry_destroy(registry); registry = NULL;
     turbo_agent_runtime_destroy(runtime); runtime = NULL;
+    turbo_cancel_token_release(cancel_token); cancel_token = NULL;
+    turbo_cancel_source_destroy(cancel_source); cancel_source = NULL;
   }
 
   struct { const char *name, *output; } invalid[] = {
@@ -271,6 +301,66 @@ spec("ToolNode strict result delivery and Journal replay") {
         check_equal(turbo_agent_tool_node(&ctx, agent), 0);
         check_equal(graph_result_delivered(ctx.state), probe.output);
         check_equal(probe.calls, 1);
+      }
+    }
+  }
+  for (int checked = 0; checked < 2; ++checked) {
+    for (int deadline = 0; deadline < 2; ++deadline) {
+      for (int late = 0; late < 2; ++late) {
+        it("withholds %s on %s %s delivery and keeps the committed callback result",
+            deadline ? "expired output" : "cancelled output", checked ? "checked" : "ordinary",
+            late ? "post-hook" : "replay") {
+          int outcome = -1;
+          const char *reason = deadline ? "tool_deadline_exceeded" : "tool_cancelled";
+          if (late) probe.stop_after_hook = deadline ? 2 : 1;
+          else {
+            check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+            check_equal(graph_result_delivered(state), probe.output);
+            graph_result_stop(&probe, deadline);
+          }
+          ctx.state = late ? state : replay;
+          if (checked) {
+            check_equal(turbo_agent_tool_node_checked(&ctx, agent, &outcome), 0);
+            check_equal(outcome, TURBO_AGENT_TOOL_CHECK_FAILED);
+          } else check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+          check_equal(probe.calls, 1);
+          check_equal(turbo_agent_state_guardrail_rejection_phase(ctx.state), "tool_result");
+          check_equal(turbo_agent_state_guardrail_rejection_reason(ctx.state), reason);
+          const char *delivered = graph_result_delivered(ctx.state);
+          check_not_null(delivered); check_not_null(strstr(delivered, reason));
+          check_null(strstr(delivered, probe.output));
+          check_equal(turbo_agent_runtime_store_list_json(runtime, "agent_tool_journal",
+              "call_id", "result-call", &records), 0);
+          check_equal(json_array_size(records), 1);
+          const json_value_t *record = json_array_get(records, 0);
+          check_equal(json_get_string(record, "phase"), "committed");
+          check_equal(json_get_int(record, "status", -99), TURBO_TOOL_OK);
+          check_equal(json_get_string(record, "output"), probe.output);
+          check_equal(turbo_cancel_token_check(cancel_token), deadline ? SALTS_ETIMEDOUT : SALTS_ECANCELED);
+        }
+      }
+      it("preserves unknown effects after %s on %s dispatch and replay",
+          deadline ? "expiry" : "cancellation", checked ? "checked" : "ordinary") {
+        probe.status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+        probe.output = NULL;
+        probe.stop_after_hook = deadline ? 2 : 1;
+        for (int delivery = 0; delivery < 2; ++delivery) {
+          int outcome = -1;
+          ctx.state = delivery ? replay : state;
+          if (checked) {
+            check_equal(turbo_agent_tool_node_checked(&ctx, agent, &outcome), 0);
+            check_equal(outcome, TURBO_AGENT_TOOL_CHECK_FAILED);
+          } else check_equal(turbo_agent_tool_node(&ctx, agent), 0);
+          const char *delivered = graph_result_delivered(ctx.state);
+          check_not_null(delivered); check_not_null(strstr(delivered, "tool_side_effect_unknown"));
+          check_null(strstr(delivered, "tool_cancelled"));
+          check_null(strstr(delivered, "tool_deadline_exceeded"));
+          check_equal(probe.calls, 1);
+        }
+        check_equal(turbo_agent_runtime_store_list_json(runtime, "agent_tool_journal",
+            "call_id", "result-call", &records), 0);
+        check_equal(json_array_size(records), 1);
+        check_equal(json_get_int(json_array_get(records, 0), "status", -99), TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
       }
     }
   }

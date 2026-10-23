@@ -48,6 +48,15 @@ the callback's committed Journal outcome. It neither rolls back the callback nor
 downgrades an already-unknown side effect into a confirmed cancellation. The gate
 is a cooperative boundary check, not an interrupt for a blocking Host callback.
 
+Tool approval identity compares full decoded JSON field lengths and bytes,
+including the review kind, call ID, canonical tool name and final arguments text.
+An embedded NUL cannot turn a different approved value into a matching prefix.
+Imported outer review notes containing NUL are unavailable through the C-string
+getter, so nested state propagation cannot silently copy just their valid prefix.
+Valid Unicode, JSON escape text, field order and unrelated Host metadata remain
+compatible. This validates an existing Host decision; it does not grant approval
+to model-originating state or provide durable approval epochs.
+
 The [Session Inbox process-crash regressions](docs/session-inbox-process-crash.md)
 check durable input application separately from workflow completion and delivery,
 including a later Run that publishes a different thread head.

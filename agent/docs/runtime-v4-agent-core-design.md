@@ -673,11 +673,15 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
   STARTED 与 admitted fence 保留，本次及重启恢复均返回 UNKNOWN_SIDE_EFFECT，不能自动
   重试。
 - bounded SQLite Store 的 `max_database_bytes` 还约束主数据库总页数（不含 rollback
-  journal）。当 PLANNED、admitted 与 STARTED 已持久化、callback 已产生外部效果，而包含
-  output/detail 的 COMMITTED 更新因数据库满返回 `SALTS_ENOSPC` 时，SQLite 回滚该更新，
-  Executor 保留 STARTED 与 admitted fence，本次及重启恢复均返回 UNKNOWN_SIDE_EFFECT，
-  不截断、虚构或自动重试结果。该验证不提供 Journal 条目级驱逐/保留策略，也不覆盖
-  rollback journal 磁盘耗尽、等待/队列或 result-state 总量。
+  journal）。数据库在 PLANNED 创建时已满会返回 `SALTS_ENOSPC`，不留下记录也不调用
+  callback；PLANNED 已提交、但 admitted fence 创建因数据库满失败时，只保留
+  planned/no-claim，callback 仍为零。后者的当前调用保守返回 UNKNOWN_SIDE_EFFECT；只有 Host
+  明确提高容量并重新提交同一身份后，持久的 no-claim 证据才允许一次新的 admission，不能
+  在当前调用内隐式重试。当 PLANNED、admitted 与 STARTED 已持久化、callback 已产生外部
+  效果，而包含 output/detail 的 COMMITTED 更新因数据库满返回 `SALTS_ENOSPC` 时，SQLite
+  回滚该更新，Executor 保留 STARTED 与 admitted fence，本次及重启恢复均返回
+  UNKNOWN_SIDE_EFFECT，不截断、虚构或自动重试结果。该验证不提供 Journal 条目级驱逐/
+  保留策略，也不覆盖 rollback journal 磁盘耗尽、等待/队列或 result-state 总量。
 - PLANNED 写入失败会终止 batch；无持久栅栏的 STARTED 写入失败不调用该工具。栅栏已经
   提交后 STARTED 写入失败，以及调用后的 COMMITTED 写入失败，均返回
   UNKNOWN_SIDE_EFFECT。backend 的 crash durability 仍由 backend 契约决定。
@@ -699,8 +703,8 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
 正式回归 `test_turbo_agent_tool_journal` 注入损坏记录及 store get/list/三阶段 put
 失败，检查 batch 内无额外 callback、原记录未被覆盖、有效状态/detail 可恢复、
 缩小再提高输出上限不会丢失持久结果；它还用真实 bounded SQLite 检查 PLANNED
-单记录超额的零 callback，以及 COMMITTED 因单记录或数据库总容量超额后的重启
-UNKNOWN/no-retry。相邻
+因单记录或数据库总容量超额时的零 callback、数据库满的 admitted fence 不会进入效果，
+以及 COMMITTED 因单记录或数据库总容量超额后的重启 UNKNOWN/no-retry。相邻
 `test_turbo_agent_tool_executor` 保留
 历史 SHA-256 golden framing 检查；`test_turbo_cli_tool_cancel` 覆盖真实进程取消后的
 checkpoint 恢复。`test_turbo_agent_tool_claim` 强制两个独立 executor/Runtime handle 同时

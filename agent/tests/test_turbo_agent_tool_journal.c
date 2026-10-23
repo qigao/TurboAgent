@@ -222,6 +222,7 @@ spec("bounded SQLite tool journal recovery") {
   static turbo_runtime_sqlite_config_t sqlite_config;
   static turbo_agent_tool_executor_config_t executor_config;
   static char *directory;
+  static char *large_call_id;
   static tstr path;
   static json_value_t *records;
 
@@ -268,6 +269,8 @@ spec("bounded SQLite tool journal recovery") {
     replay = (turbo_agent_tool_execution_t){0};
     json_free(records);
     records = NULL;
+    free(large_call_id);
+    large_call_id = NULL;
     tstr_free(path);
     path = NULL;
     if (directory) tt_remove_tree(directory);
@@ -296,6 +299,99 @@ spec("bounded SQLite tool journal recovery") {
                     runtime, "agent_tool_claims", NULL, NULL, &records),
                 SALTS_OK);
     check_equal(json_array_size(records), 0);
+  }
+
+  it("rejects a database-full planned record before callback admission") {
+    sqlite_config.max_record_bytes = 256 * 1024;
+    sqlite_config.max_database_bytes = 65536;
+    large_call_id = malloc(96 * 1024 + 1);
+    check_not_null(large_call_id);
+    memset(large_call_id, 'p', 96 * 1024);
+    large_call_id[96 * 1024] = '\0';
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_tool_executor_create(&executor_config, &executor), SALTS_OK);
+    first = journal_call(large_call_id);
+    first.tool_name = "bounded-probe";
+    check_equal(journal_execute(executor, runtime, registry, &first, 1), SALTS_ENOSPC);
+    check_equal(probe.calls, 0);
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, journal_collection, NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 0);
+    json_free(records);
+    records = NULL;
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, "agent_tool_claims", NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 0);
+  }
+
+  it("keeps a database-full admission fence before effect and retries only after quota increases") {
+    sqlite_config.max_record_bytes = 256 * 1024;
+    sqlite_config.max_database_bytes = 65536;
+    large_call_id = malloc(32 * 1024 + 1);
+    check_not_null(large_call_id);
+    memset(large_call_id, 'a', 32 * 1024);
+    large_call_id[32 * 1024] = '\0';
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_tool_executor_create(&executor_config, &executor), SALTS_OK);
+    first = journal_call(large_call_id);
+    first.tool_name = "bounded-probe";
+    check_equal(journal_execute(executor, runtime, registry, &first, 1), SALTS_OK);
+    check_equal(probe.calls, 0);
+    check_true(first.replayed);
+    check_equal(first.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, journal_collection, NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 1);
+    check_equal(json_get_string(json_array_get(records, 0), "phase"), "planned");
+    json_free(records);
+    records = NULL;
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, "agent_tool_claims", NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 0);
+    json_free(records);
+    records = NULL;
+
+    turbo_agent_tool_executor_destroy(executor);
+    executor = NULL;
+    turbo_agent_runtime_destroy(runtime);
+    runtime = NULL;
+    sqlite_config.create_if_missing = 0;
+    sqlite_config.max_database_bytes = 256 * 1024;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_tool_executor_create(&executor_config, &executor), SALTS_OK);
+    replay = journal_call(large_call_id);
+    replay.tool_name = "bounded-probe";
+    check_equal(journal_execute(executor, runtime, registry, &replay, 1), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_false(replay.replayed);
+    check_equal(replay.status, TURBO_TOOL_OK);
+    check_not_null(replay.output);
+    check_equal(strlen(replay.output), 0);
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, journal_collection, NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 1);
+    check_equal(json_get_string(json_array_get(records, 0), "phase"), "committed");
+    json_free(records);
+    records = NULL;
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, "agent_tool_claims", NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 1);
+    check_equal(json_get_string(json_array_get(records, 0), "phase"), "admitted");
   }
 
   it("keeps an over-quota committed result unknown across reopen without retry") {

@@ -41,13 +41,6 @@ or redispatch the callback. Replay rechecks current Host policy and validates th
 result again; it cannot turn a prior successful callback into proof of a valid
 result. This shared Agent-loop gate does not establish full backend parity (#73).
 
-Successful ToolNode output also rechecks the current cancellation token/deadline
-after Host hooks and before model-facing delivery, including committed replay.
-Late cancellation or expiry returns a fixed stopped-result error while retaining
-the callback's committed Journal outcome. It neither rolls back the callback nor
-downgrades an already-unknown side effect into a confirmed cancellation. The gate
-is a cooperative boundary check, not an interrupt for a blocking Host callback.
-
 Tool approval identity compares full decoded JSON field lengths and bytes,
 including the review kind, call ID, canonical tool name and final arguments text.
 An embedded NUL cannot turn a different approved value into a matching prefix.
@@ -56,6 +49,13 @@ getter, so nested state propagation cannot silently copy just their valid prefix
 Valid Unicode, JSON escape text, field order and unrelated Host metadata remain
 compatible. This validates an existing Host decision; it does not grant approval
 to model-originating state or provide durable approval epochs.
+
+Successful ToolNode output also rechecks the current cancellation token/deadline
+after Host hooks and before model-facing delivery, including committed replay.
+Late cancellation or expiry returns a fixed stopped-result error while retaining
+the callback's committed Journal outcome. It neither rolls back the callback nor
+downgrades an already-unknown side effect into a confirmed cancellation. The gate
+is a cooperative boundary check, not an interrupt for a blocking Host callback.
 
 The [Session Inbox process-crash regressions](docs/session-inbox-process-crash.md)
 check durable input application separately from workflow completion and delivery,

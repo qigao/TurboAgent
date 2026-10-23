@@ -107,7 +107,8 @@ static int turbo_agent_tool_calls_preflight(const turbo_tool_registry_t *registr
 }
 
 static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_data,
-                                     const char *scope, int *out_outcome) {
+                                     const char *scope, json_value_t *parent_review_state,
+                                     int *out_outcome) {
   turbo_agent_t *agent = (turbo_agent_t *)user_data;
   const json_value_t *tool_calls;
   turbo_agent_tool_execution_t *calls = NULL;
@@ -254,6 +255,30 @@ static int turbo_agent_tool_node_run(turbo_graph_exec_ctx_t *ctx, void *user_dat
    * above, then consume the matching Tool review before callback/Journal entry.
    * A callback failure or a later model turn with identical call text must not
    * inherit it. Unrelated workflow-level reviews are left unchanged. */
+  if (consume_approval && parent_review_state) {
+    int parent_matches = 0;
+    for (index = 0; index < count; ++index) {
+      if (calls[index].approval_granted && turbo_agent_tool_approval_review_matches(
+              parent_review_state, calls[index].call_id, calls[index].tool_name,
+              calls[index].arguments_json)) {
+        parent_matches = 1;
+        break;
+      }
+    }
+    /* A child copy left by a failed pre-dispatch hook is not independent
+     * authority. Reject a missing, changed or unconfirmable parent grant. */
+    if (!parent_matches) {
+      turbo_agent_state_set_model_error(ctx->state, "review", "parent tool approval unavailable");
+      rc = SALTS_EPERM;
+      goto cleanup;
+    }
+    /* Consume both owners here, not after callbacks/hooks return. */
+    if (turbo_agent_state_clear_review(parent_review_state) != 0) {
+      turbo_agent_state_set_model_error(ctx->state, "review", "failed to consume parent tool approval");
+      rc = SALTS_ENOMEM;
+      goto cleanup;
+    }
+  }
   if (consume_approval && turbo_agent_state_clear_review(ctx->state) != 0) {
     turbo_agent_state_set_model_error(ctx->state, "review", "failed to consume tool approval");
     rc = SALTS_ENOMEM;
@@ -435,16 +460,16 @@ cleanup:
 }
 
 int turbo_agent_tool_node_scoped(turbo_graph_exec_ctx_t *ctx, void *user_data,
-                                 const char *scope) {
-  return turbo_agent_tool_node_run(ctx, user_data, scope, NULL);
+                                 const char *scope, json_value_t *parent_review_state) {
+  return turbo_agent_tool_node_run(ctx, user_data, scope, parent_review_state, NULL);
 }
 
 int turbo_agent_tool_node_checked(turbo_graph_exec_ctx_t *ctx, void *agent,
                                   int *out_outcome) {
   if (!out_outcome) return SALTS_EINVAL;
-  return turbo_agent_tool_node_run(ctx, agent, NULL, out_outcome);
+  return turbo_agent_tool_node_run(ctx, agent, NULL, NULL, out_outcome);
 }
 
 int turbo_agent_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
-  return turbo_agent_tool_node_scoped(ctx, user_data, NULL);
+  return turbo_agent_tool_node_scoped(ctx, user_data, NULL, NULL);
 }

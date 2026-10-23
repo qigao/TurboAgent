@@ -213,7 +213,7 @@ static int turbo_agent_nested_tool_node(turbo_graph_exec_ctx_t *ctx, turbo_agent
 
   journal_scope = tstr_format("{}:{}", journal_domain, json_array_size(versions) - 1);
   if (!journal_scope) return -1;
-  rc = turbo_agent_tool_node_scoped(&temp_ctx, agent, journal_scope);
+  rc = turbo_agent_tool_node_scoped(&temp_ctx, agent, journal_scope, ctx->state);
   tstr_free(journal_scope);
   if (temp_ctx.stop) {
     const char *note = turbo_agent_state_review_note(nested_state);
@@ -271,7 +271,7 @@ int turbo_agent_planner_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data) 
   if (!planner_state) {
     /* Initial planning uses the root event stream before a replanner substate
      * exists. Give that producer its own identity, separate from root tool loops. */
-    return turbo_agent_tool_node_scoped(ctx, agent, "planner:root");
+    return turbo_agent_tool_node_scoped(ctx, agent, "planner:root", NULL);
   }
 
   return turbo_agent_nested_tool_node(ctx, agent, planner_state, "planner_event_versions",

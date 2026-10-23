@@ -68,6 +68,16 @@ the callback's committed Journal outcome. It neither rolls back the callback nor
 downgrades an already-unknown side effect into a confirmed cancellation. The gate
 is a cooperative boundary check, not an interrupt for a blocking Host callback.
 
+Nested planner/executor Tool approval is consumed in both the dispatch substate
+and its matching parent review before Journal writes or callback entry. The
+match uses the canonical tool, call ID and final middleware-transformed arguments.
+A later turn or substate version requires a new Host decision even after callback
+or commit failure; the copied child review cannot keep the parent grant reusable.
+The parent grant must still match at dispatch: a child copy left after a failed
+pre-dispatch hook cannot authorize execution after the Host revokes its parent.
+Unrelated workflow-level reviews remain intact. This is the synchronous nested
+ToolNode boundary, not a durable approval identity or a concurrent revocation lease.
+
 The [Session Inbox process-crash regressions](docs/session-inbox-process-crash.md)
 check durable input application separately from workflow completion and delivery,
 including a later Run that publishes a different thread head.

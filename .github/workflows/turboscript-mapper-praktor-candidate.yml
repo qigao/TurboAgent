@@ -1,0 +1,205 @@
+name: TurboAgent PraktorTools current-master-equivalent TurboScript candidate and real DSO (#129)
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/turboscript-mapper-praktor-candidate.yml'
+      - 'praktor_tools/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+concurrency:
+  group: ta-praktor-mapper-owner-136-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-source-candidate-consumer:
+    if: >-
+      github.repository == 'qigao/TurboAgent' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.head.ref == 'test/turboscript-3.0.11-praktor-consumer-136' &&
+        github.event.pull_request.head.repo.full_name == 'qigao/TurboAgent') ||
+       (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/test/turboscript-3.0.11-praktor-consumer-136'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      TURBOSCRIPT_CANDIDATE_RUN: "39915402939"
+      TURBOSCRIPT_CANDIDATE_SOURCE: "e5aef22c630a1019be6de1c7b095794f1ba30128"
+      SALTS_RELEASE_TAG: "v2.3.0-rc.16"
+      SALTS_UTILS_RELEASE_TAG: "v4.3.0-rc.11"
+      CHTTP_RELEASE_TAG: "v2.1.0-rc.6"
+      TURBOSCRIPT_RELEASE_TAG: "v3.0.10"
+      PRAKTOR_RELEASE_TAG: "v0.4.8"
+      TURBOWASM_RELEASE_TAG: "v0.2.1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
+        with:
+          mode: read
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+      - name: Prepare exact Linux native linker and SDK tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build nasm binutils unzip
+      - name: Restore immutable published dependency SDK graph
+        shell: bash
+        run: bash cmake/ci/restore-native-sdk.sh linux-x64 1 1
+
+      - name: Select separate candidate TurboScript SDK (never rewrite official release bytes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/ta-turboscript-136-consumer"
+          mkdir -p "$root/download" "$root/sdk"
+
+          # The candidate SDK's own manifest records Salts rc.16, SaltsUtils rc.11,
+          # and CHttp rc.6. Pin these published tags explicitly instead of inheriting
+          # current-main defaults (which may advance independently).
+          # This artifact is produced by the exact, independently validated
+          # TurboScript source tree validated in PR #135 and merged to master; it is NOT a published NuGet package.
+          gh run download "$TURBOSCRIPT_CANDIDATE_RUN" \
+            --repo qigao/TurboScript --name turboscript-sdk-linux-x64 \
+            --dir "$root/download"
+          archive="$root/download/turboscript-linux-x64.tar.gz"
+          test -s "$archive"
+          tar -xzf "$archive" -C "$root/sdk"
+          candidate="$root/sdk/linux-x64"
+          test -f "$candidate/lib/cmake/TurboScript/TurboScriptConfig.cmake"
+          test -f "$candidate/turboscript-sdk-manifest.txt"
+          grep -Fx "commit=$TURBOSCRIPT_CANDIDATE_SOURCE" \
+            "$candidate/turboscript-sdk-manifest.txt"
+          grep -Fx "version=3.0.11-ci.343.1" "$candidate/turboscript-sdk-manifest.txt"
+          for pair in "salts_release=2.3.0-rc.16" \
+                      "salts_utils_release=4.3.0-rc.11" \
+                      "chttp_release=2.1.0-rc.6"; do
+            grep -Fx "$pair" "$candidate/turboscript-sdk-manifest.txt"
+          done
+          mapper="$candidate/bin/plugins/mapper.so"
+          test -f "$mapper"
+          nm -D --undefined-only "$mapper" \
+            | tee "$root/mapper-undefined-symbols.txt"
+          if nm -D --undefined-only "$mapper" \
+               | grep -Eq '[[:space:]]U[[:space:]]+hash_bytes(@|$)'; then
+            echo 'Candidate Mapper still imports hidden Salts CSTL hash_bytes' >&2
+            exit 1
+          fi
+          sha256sum "$archive" "$mapper" | tee "$root/candidate-sha256.txt"
+          {
+            echo "TURBOSCRIPT_ROOT=$candidate"
+            echo "TURBOSCRIPT_CANDIDATE_PREFIX=$candidate"
+          } >> "$GITHUB_ENV"
+          {
+            echo "turboagent_source=${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "candidate_turboscript_source=$TURBOSCRIPT_CANDIDATE_SOURCE"
+            echo "candidate_turboscript_run=$TURBOSCRIPT_CANDIDATE_RUN"
+            echo "candidate_turboscript_version=3.0.11-ci.343.1"
+            echo "qualification=SOURCE_CANDIDATE_NOT_RELEASED_NUGET"
+            echo "official_turboscript_3.0.10_binaries_unchanged=true"
+          } | tee "$root/provenance.txt"
+
+      - name: Configure exact candidate SDK in clean standalone prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ci-linux-release
+          grep -F "$TURBOSCRIPT_CANDIDATE_PREFIX" \
+            build/ci-linux-release/CMakeCache.txt
+
+      - name: Audit newly compiled TurboAgent DSO imports before executable link
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/ta-turboscript-136-consumer"
+          cmake --build --preset ci-linux-release --target praktor_tools agent_compiler
+          echo '=== actual linker command: praktor_tools ==='
+          ninja -C build/ci-linux-release -t commands praktor_tools \
+            | grep -F -- '-o bin/libpraktor_tools.so' | tail -1 \
+            | tee "$root/praktor-tools-actual-link.txt"
+          echo '=== actual static archive ownership in resulting image ==='
+          nm -a build/ci-linux-release/bin/libpraktor_tools.so \
+            | grep -E 'hash_bytes|hash_map_raw_init' \
+            | tee "$root/praktor-tools-complete-symbols.txt" || true
+          echo '=== symbol visibility ==='
+          readelf -Ws build/ci-linux-release/bin/libpraktor_tools.so \
+            | grep -E 'hash_bytes|hash_map_raw_init' \
+            | tee "$root/praktor-tools-hash-readelf.txt" || true
+          echo '=== linked native library imports ==='
+          readelf -d build/ci-linux-release/bin/libpraktor_tools.so \
+            | grep -F NEEDED | tee "$root/praktor-tools-needed.txt" || true
+          : > "$root/turboagent-built-dso-undefined-hash.txt"
+          count=0
+          for image in build/ci-linux-release/bin/*.so; do
+            test -f "$image" || continue
+            if nm -D --undefined-only "$image" \
+               | grep -E '[[:space:]]U[[:space:]]+hash_bytes(@|$)' \
+               > "$root/hash-symbol-current.txt"; then
+              count=$((count+1))
+              printf 'DSO=%s\n' "$image" | tee -a "$root/turboagent-built-dso-undefined-hash.txt"
+              cat "$root/hash-symbol-current.txt" \
+                | tee -a "$root/turboagent-built-dso-undefined-hash.txt"
+              readelf -d "$image" > "$root/$(basename "$image").needed.txt"
+              readelf -Ws "$image" > "$root/$(basename "$image").symbols.txt"
+            fi
+          done
+          printf 'newly_built_DSO_unresolved_hash_bytes=%s\n' "$count" \
+            | tee "$root/newly-built-image-summary.txt"
+          # A source-built DSO borrowing hidden CSTL code is itself a
+          # release blocker, even when an upstream Mapper has been fixed.
+          test "$count" -eq 0
+
+      - name: Link and execute real PraktorTools tests with candidate Mapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build --preset ci-linux-release --target test_turbo_praktor_inline_plan test_turbo_praktor_tool_pack
+          # The exact installed Praktor / CHttp package DSOs must be supplied
+          # from their verified SDK roots; ELF RUNPATH is not transitive.
+          export LD_LIBRARY_PATH="$CHTTP_ROOT/lib:$PRAKTOR_ROOT/lib:$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$TURBOSCRIPT_ROOT/lib:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          root="$RUNNER_TEMP/ta-turboscript-136-consumer"
+          for executable in test_turbo_praktor_inline_plan test_turbo_praktor_tool_pack; do
+            ldd "build/ci-linux-release/bin/$executable" | tee "$root/$executable.ldd.txt"
+            if grep -Fq 'not found' "$root/$executable.ldd.txt"; then
+              echo "Unresolved exact installed SDK DSO for $executable" >&2
+              exit 1
+            fi
+            grep -F "$CHTTP_ROOT/lib/libchttp_s3.so" "$root/$executable.ldd.txt"
+          done
+          ctest --test-dir build/ci-linux-release -R '^test_turbo_praktor_(inline_plan|tool_pack)$' --no-tests=error --output-on-failure --timeout 120
+
+      - name: Preserve executable link and candidate binary proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/ta-turboscript-136-consumer"
+          mkdir -p "$root"
+          if test -f build/ci-linux-release/build.ninja; then
+            ninja -C build/ci-linux-release -t commands \
+              > "$root/all-native-link-commands.txt"
+            grep -E '(test_turbo_praktor_inline_plan|test_turbo_praktor_tool_pack)' \
+              "$root/all-native-link-commands.txt" > "$root/praktor-link-commands.txt" || true
+          fi
+          if test -d build/ci-linux-release/Testing; then
+            cp -r build/ci-linux-release/Testing "$root/" || true
+          fi
+
+      - name: Upload candidate vs official SDK provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turboagent-praktor-turboscript-candidate-linux
+          retention-days: 14
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/ta-turboscript-136-consumer/

@@ -15,12 +15,29 @@ typedef struct tool_claim_store_s {
   atomic_int callbacks;
   atomic_int gate_journal_reads;
   atomic_int journal_reads;
+  atomic_int fail_batch_first_commit_once;
 } tool_claim_store_t;
 
 static int tool_claim_put(void *user, const char *collection, const char *id,
                           const char *record) {
   tool_claim_store_t *store = user;
+  json_value_t *value = NULL;
   int rc;
+  if (!strcmp(collection, TURBO_AGENT_TOOL_JOURNAL_COLLECTION)) {
+    const char *phase;
+    const char *call_id;
+    value = json_parse(record, strlen(record));
+    phase = value ? json_get_string(value, "phase") : NULL;
+    call_id = value ? json_get_string(value, "call_id") : NULL;
+    if (phase && call_id && !strcmp(phase, "committed") &&
+        !strcmp(call_id, "batch-first") &&
+        atomic_exchange_explicit(&store->fail_batch_first_commit_once, 0,
+                                 memory_order_acq_rel)) {
+      json_free(value);
+      return SALTS_EIO;
+    }
+    json_free(value);
+  }
   cmeta_mutex_lock(&store->mutex);
   rc = store->inner.put(store->inner.user_data, collection, id, record);
   cmeta_mutex_unlock(&store->mutex);
@@ -106,7 +123,7 @@ static void tool_claim_execute(void *user) {
 }
 
 spec("Tool Journal atomic backend-entry admission") {
-  it("admits one automatic effect across independent executor recovery races") {
+  it("fences independent owners and replays interrupted distinct-identity batches") {
     tool_claim_store_t store = {0};
     turbo_agent_runtime_store_t callbacks = {0};
     turbo_agent_runtime_t *runtimes[2] = {0};
@@ -129,6 +146,7 @@ spec("Tool Journal atomic backend-entry admission") {
     atomic_init(&store.callbacks, 0);
     atomic_init(&store.gate_journal_reads, 0);
     atomic_init(&store.journal_reads, 0);
+    atomic_init(&store.fail_batch_first_commit_once, 0);
     callbacks.put = tool_claim_put;
     callbacks.get = tool_claim_get;
     callbacks.list = tool_claim_list;
@@ -241,6 +259,50 @@ spec("Tool Journal atomic backend-entry admission") {
     check_equal(json_array_size(records), 2);
 
     json_free(records);
+    records = NULL;
+
+    /* A failed terminal commit makes only that identity unknown. The next
+     * already-planned sequential identity may finish, and replaying the whole
+     * interrupted batch must recover both records without another callback. */
+    {
+      turbo_agent_tool_execution_t batch[2] = {
+          tool_claim_call("batch-first", "{}"),
+          tool_claim_call("batch-second", "{}")};
+      turbo_agent_tool_execution_t replay[2] = {
+          tool_claim_call("batch-first", "{}"),
+          tool_claim_call("batch-second", "{}")};
+      atomic_store_explicit(&store.fail_batch_first_commit_once, 1,
+                            memory_order_release);
+      check_equal(turbo_agent_tool_executor_execute(
+                      executors[0], runtimes[0], NULL, "thread", "run", NULL,
+                      NULL, registry, &policy, batch, 2),
+                  SALTS_OK);
+      check_equal(atomic_load(&store.callbacks), 4);
+      check_equal(batch[0].status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      check_false(batch[0].replayed);
+      check_equal(batch[1].status, TURBO_TOOL_OK);
+      check_false(batch[1].replayed);
+      check_equal(turbo_agent_tool_executor_execute(
+                      executors[1], runtimes[1], NULL, "thread", "run", NULL,
+                      NULL, registry, &policy, replay, 2),
+                  SALTS_OK);
+      check_equal(atomic_load(&store.callbacks), 4);
+      check_equal(replay[0].status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      check_true(replay[0].replayed);
+      check_null(replay[0].output);
+      check_equal(replay[1].status, TURBO_TOOL_OK);
+      check_true(replay[1].replayed);
+      check_equal(replay[1].output, "ok");
+      free(batch[0].output);
+      free(batch[1].output);
+      free(replay[0].output);
+      free(replay[1].output);
+      json_free(batch[0].detail);
+      json_free(batch[1].detail);
+      json_free(replay[0].detail);
+      json_free(replay[1].detail);
+    }
+
     free(seed.output);
     turbo_cancel_token_release(token);
     turbo_cancel_source_destroy(source);

@@ -139,6 +139,16 @@ class TransportTests(unittest.TestCase):
                 package(destination)
         pkg.NugetFeed(Client()).package(IDENTITY, VERSION, self.nupkg)
 
+    def test_windows_powershell_requires_pinned_archive_digest_before_execution(self):
+        def release(client, repository, tag, asset, destination):
+            self.assertEqual((repository, tag, asset), ("PowerShell/PowerShell", "v7.6.6", "PowerShell-7.6.6-win-x64.zip"))
+            Path(destination).write_bytes(b"wrong binary")
+        with patch.object(pkg, "release_asset", side_effect=release), patch.object(pkg.subprocess, "check_output") as execute:
+            with self.assertRaisesRegex(ValueError, "archive digest mismatch"):
+                pkg.restore_windows_powershell(object(), self.root / "powershell")
+            execute.assert_not_called()
+        self.assertFalse((self.root / "powershell/package").exists())
+
     def test_missing_exact_cache_package_propagates_failure(self):
         class Feed:
             def package(self, *args):

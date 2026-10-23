@@ -449,6 +449,12 @@ preset/toolchain in a separate configure-only directory. The internal
 tool computes ABIs and writes `--x-write-nuget-packages-config`. No port is built
 in this phase. Windows runs both phases through `run-vsdevcmd.cmd` so the
 compiler owner is unchanged; Android retains its NDK chainload and host triplet.
+Windows also restores portable PowerShell 7.6.6 from its exact official GitHub
+Release through curl, verifies the executable version and records its SHA-256.
+The shared cache warm run 38989476938 used this version; vcpkg includes the
+PowerShell version in every Windows ABI, so the hosted runner's 7.6.7 produces
+different package references even with the same pinned compiler/triplet. Upgrade
+this tool only together with published matching shared-cache entries.
 
 curl downloads those exact package references. Admission verifies the nuspec
 identity/version and CONTROL package/triplet/ABI, rejects unsafe archive entries,

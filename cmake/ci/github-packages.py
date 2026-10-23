@@ -67,7 +67,7 @@ def sha256(path):
 
 
 def release_asset(client, repository, tag, asset, destination):
-    if not re.fullmatch(r"qigao/[A-Za-z0-9_.-]+", repository):
+    if not re.fullmatch(r"(?:qigao/[A-Za-z0-9_.-]+|PowerShell/PowerShell)", repository):
         raise ValueError("invalid release repository")
     if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?", tag):
         raise ValueError("an exact release tag is required")
@@ -221,6 +221,30 @@ def restore_re2c(feed, destination):
         output.write(f"{(root / 'bin').as_posix()}\n")
 
 
+def restore_windows_powershell(client, destination):
+    # Shared cache warm run 38989476938 used runner image 20261007.264.1.
+    # vcpkg includes PowerShell's version in every Windows port ABI; the newer
+    # hosted image's 7.6.7 cannot consume the packages built with 7.6.6.
+    version = "7.6.6"
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    archive = destination / "powershell.zip"
+    release_asset(client, "PowerShell/PowerShell", f"v{version}",
+                  f"PowerShell-{version}-win-x64.zip", archive)
+    expected_digest = "02fe458be20493fbdf43f61ea20610b811ee6c738ab1676c61b9cfcd1a33c860"
+    if sha256(archive) != expected_digest:
+        raise ValueError("pinned Windows cache PowerShell archive digest mismatch")
+    extract_package(archive, destination / "package")
+    root = destination / "package"
+    actual = subprocess.check_output([str(root / "pwsh.exe"), "-NoLogo", "-NoProfile",
+                                      "-Command", "$PSVersionTable.PSVersion.ToString()"], text=True).strip()
+    if actual != version:
+        raise ValueError("Windows cache PowerShell version mismatch")
+    with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
+        output.write(root.as_posix() + "\n")
+    print(f"Windows cache PowerShell={version} sha256={sha256(archive)}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -232,14 +256,18 @@ def main():
     cache.add_argument("destination")
     re2c = commands.add_parser("re2c")
     re2c.add_argument("destination")
+    powershell = commands.add_parser("windows-powershell")
+    powershell.add_argument("destination")
     args = parser.parse_args()
     client = Curl()
     if args.command == "release":
         release_asset(client, args.repository, args.tag, args.asset, args.destination)
     elif args.command == "cache":
         restore_cache(NugetFeed(client), args.config, args.destination)
-    else:
+    elif args.command == "re2c":
         restore_re2c(NugetFeed(client), args.destination)
+    else:
+        restore_windows_powershell(client, args.destination)
 
 
 if __name__ == "__main__":

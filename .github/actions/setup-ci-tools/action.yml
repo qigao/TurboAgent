@@ -16,6 +16,12 @@ runs:
     - name: Bootstrap canonical vcpkg without NuGet
       shell: bash
       run: python cmake/ci/setup-ci-tools.py build/ci-vcpkg-infrastructure
+    - name: Restore PowerShell matching the published Windows cache ABI
+      if: runner.os == 'Windows'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python cmake/ci/github-packages.py windows-powershell "$RUNNER_TEMP/qigao-cache-powershell"
     - name: Download re2c from GitHub Packages with curl
       shell: bash
       env:

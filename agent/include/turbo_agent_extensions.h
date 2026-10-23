@@ -235,7 +235,8 @@ CXX_C_API int turbo_agent_add_action_policy_guardrail(
  * The workflow tool node stores approval requests as structured review notes.
  * This helper validates that the review is currently approved and that the
  * note's call id, tool name, and arguments JSON match the tool dispatch being
- * considered.
+ * considered. Matching uses the full decoded JSON string length and bytes;
+ * embedded NUL suffixes cannot authorize a matching C-string prefix.
  * The standard ToolNode consumes a matching Tool review before its dispatch
  * attempt; a later model turn needs new approval even for identical call text.
  * This helper alone does not consume or grant authority.

@@ -17,16 +17,23 @@ typedef struct {
   turbo_agent_policy_t policy;
 } turbo_agent_action_policy_guardrail_t;
 
+static int turbo_agent_approval_field_matches(const json_value_t *note, const char *key,
+                                              const char *expected) {
+  const json_value_t *value = json_object_get(note, key);
+  const char *text = value ? json_string(value) : NULL;
+  size_t length = strlen(expected);
+  /* JSON strings are length-bearing. An embedded NUL must not turn a
+   * different approved identity into an equal C-string prefix. */
+  return text && json_type(value) == JSON_STRING && json_string_len(value) == length &&
+      memcmp(text, expected, length) == 0;
+}
+
 CXX_C_API int turbo_agent_tool_approval_review_matches(const json_value_t *state,
                                                        const char *call_id,
                                                        const char *tool_name,
                                                        const char *arguments_json) {
   const char *note;
   json_value_t *note_json = NULL;
-  const char *kind;
-  const char *approved_call_id;
-  const char *approved_tool_name;
-  const char *approved_arguments;
   int matched = 0;
 
   if (!state || !call_id || !tool_name || !arguments_json ||
@@ -38,20 +45,16 @@ CXX_C_API int turbo_agent_tool_approval_review_matches(const json_value_t *state
   if (!note || note[0] == '\0') {
     return 0;
   }
-  if (((note_json = json_parse((const char *)((const uint8_t *)note), (strlen(note)))) ? 0 : -1) != 0 || !note_json ||
-      json_type(note_json) != JSON_OBJECT) {
+  note_json = json_parse(note, strlen(note));
+  if (!note_json || json_type(note_json) != JSON_OBJECT) {
     json_free(note_json); note_json = NULL;
     return 0;
   }
 
-  kind = json_get_string(note_json, "kind");
-  approved_call_id = json_get_string(note_json, "call_id");
-  approved_tool_name = json_get_string(note_json, "tool_name");
-  approved_arguments = json_get_string(note_json, "arguments");
-  matched = kind && strcmp(kind, "tool_approval") == 0 && approved_call_id &&
-                    strcmp(approved_call_id, call_id) == 0 && approved_tool_name &&
-                    strcmp(approved_tool_name, tool_name) == 0 && approved_arguments &&
-                    strcmp(approved_arguments, arguments_json) == 0;
+  matched = turbo_agent_approval_field_matches(note_json, "kind", "tool_approval") &&
+      turbo_agent_approval_field_matches(note_json, "call_id", call_id) &&
+      turbo_agent_approval_field_matches(note_json, "tool_name", tool_name) &&
+      turbo_agent_approval_field_matches(note_json, "arguments", arguments_json);
   json_free(note_json); note_json = NULL;
   return matched ? 1 : 0;
 }

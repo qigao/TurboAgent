@@ -569,7 +569,13 @@ int turbo_agent_state_review_approved_impl(const json_value_t *state) {
 }
 
 const char *turbo_agent_state_review_note_impl(const json_value_t *state) {
-  return turbo_agent_state_current_version_string_field(state, "review_versions", "note");
+  const json_value_t *review =
+      turbo_agent_state_get_current_object_version_const(state, "review_versions");
+  const json_value_t *value = review ? json_object_get(review, "note") : NULL;
+  const char *text = value ? json_string(value) : NULL;
+  /* Review notes cross C-string copy/parse boundaries, including nested state
+   * propagation. Never expose only the valid prefix of an imported JSON note. */
+  return text && json_string_len(value) == strlen(text) ? text : NULL;
 }
 
 static json_value_t *turbo_agent_state_supervisor_version_local(

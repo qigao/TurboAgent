@@ -453,7 +453,8 @@ CXX_C_API int turbo_agent_state_review_approved(const json_value_t *state);
 /**
  * @brief Return the current review note text.
  * @param state Agent state.
- * @return Pointer owned by state, or NULL.
+ * @return Pointer owned by state, or NULL for an absent/non-string note or an
+ * imported JSON note containing an embedded NUL. No truncated prefix is returned.
  */
 CXX_C_API const char *turbo_agent_state_review_note(const json_value_t *state);
 

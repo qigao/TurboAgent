@@ -667,6 +667,12 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
   返回 `TURBO_TOOL_OUTPUT_LIMIT`、空 output 和 replayed 标记，不再次调用工具，
   不重写已提交结果；提高上限后仍可恢复原结果。完整 detail 继续作为独立宿主数据
   复制，不受模型 output 上限影响。这不是 store 读取/JSON 解析的总内存配额。
+- bounded SQLite Store 的 `max_record_bytes` 约束完整 Journal/claim 序列化记录。PLANNED
+  身份超过配额时返回 `SALTS_ENOSPC`，不创建记录也不进入 callback。callback 已产生外部
+  效果、但包含 output/detail 的 COMMITTED 记录超过配额时，不截断结果或声称成功；原有
+  STARTED 与 admitted fence 保留，本次及重启恢复均返回 UNKNOWN_SIDE_EFFECT，不能自动
+  重试。该行为只限定单记录容量，不是 Journal 条目数、总数据库、等待或 result-state
+  总量的完整验收。
 - PLANNED 写入失败会终止 batch；无持久栅栏的 STARTED 写入失败不调用该工具。栅栏已经
   提交后 STARTED 写入失败，以及调用后的 COMMITTED 写入失败，均返回
   UNKNOWN_SIDE_EFFECT。backend 的 crash durability 仍由 backend 契约决定。
@@ -687,7 +693,9 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
 
 正式回归 `test_turbo_agent_tool_journal` 注入损坏记录及 store get/list/三阶段 put
 失败，检查 batch 内无额外 callback、原记录未被覆盖、有效状态/detail 可恢复、
-缩小再提高输出上限不会丢失持久结果。相邻 `test_turbo_agent_tool_executor` 保留
+缩小再提高输出上限不会丢失持久结果；它还用真实 bounded SQLite 检查 PLANNED
+超额的零 callback 及 COMMITTED 超额后的重启 UNKNOWN/no-retry。相邻
+`test_turbo_agent_tool_executor` 保留
 历史 SHA-256 golden framing 检查；`test_turbo_cli_tool_cancel` 覆盖真实进程取消后的
 checkpoint 恢复。`test_turbo_agent_tool_claim` 强制两个独立 executor/Runtime handle 同时
 读取缺失或 PLANNED 身份，验证原子身份发布、冲突拒绝和单次 callback；它还注入双调用

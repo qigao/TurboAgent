@@ -76,6 +76,26 @@ static turbo_tool_status_t journal_invoke(const char *arguments,
   return TURBO_TOOL_OK;
 }
 
+typedef struct bounded_journal_probe_s {
+  int calls;
+  size_t output_bytes;
+} bounded_journal_probe_t;
+
+static turbo_tool_status_t bounded_journal_invoke(
+    const char *arguments, const turbo_tool_execution_context_t *context,
+    char **out, void *user) {
+  bounded_journal_probe_t *probe = user;
+  (void)arguments;
+  (void)context;
+  *out = NULL;
+  ++probe->calls;
+  *out = malloc(probe->output_bytes + 1);
+  if (!*out) return TURBO_TOOL_OUT_OF_MEMORY;
+  memset(*out, 'x', probe->output_bytes);
+  (*out)[probe->output_bytes] = '\0';
+  return TURBO_TOOL_OK;
+}
+
 static turbo_agent_tool_execution_t journal_call(const char *id) {
   turbo_agent_tool_execution_t call = {0};
   call.call_id = id;
@@ -189,6 +209,143 @@ spec("durable tool journal across SQLite reopen") {
         check_equal(json_get_string(second.detail, "host"), "retained detail");
       }
     }
+  }
+}
+
+spec("bounded SQLite tool journal recovery") {
+  static bounded_journal_probe_t probe;
+  static turbo_agent_runtime_store_t store;
+  static turbo_agent_runtime_t *runtime;
+  static turbo_tool_registry_t *registry;
+  static turbo_agent_tool_executor_t *executor;
+  static turbo_agent_tool_execution_t first, replay;
+  static turbo_runtime_sqlite_config_t sqlite_config;
+  static turbo_agent_tool_executor_config_t executor_config;
+  static char *directory;
+  static tstr path;
+  static json_value_t *records;
+
+  before_each() {
+    turbo_tool_definition_v4_t definition = {0};
+    directory = tt_make_temp_dir("turbo-journal-limit");
+    check_not_null(directory);
+    path = tstr_format("{}/journal.db", directory);
+    check_not_null(path);
+    turbo_runtime_sqlite_config_init(&sqlite_config);
+    sqlite_config.path = path;
+    probe = (bounded_journal_probe_t){0};
+    store = (turbo_agent_runtime_store_t){0};
+    registry = turbo_tool_registry_create();
+    check_not_null(registry);
+    definition.struct_size = sizeof(definition);
+    definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
+    definition.definition.name = "bounded-probe";
+    definition.definition.description = "Bounded Journal probe";
+    definition.definition.parameters_json = "{\"type\":\"object\"}";
+    definition.definition.user_data = &probe;
+    definition.execution_policy = (turbo_tool_execution_policy_t){
+        TURBO_TOOL_EXECUTION_SEQUENTIAL, TURBO_TOOL_IDEMPOTENCY_NONE};
+    definition.context_handler = bounded_journal_invoke;
+    check_equal(turbo_tool_registry_add_v4(registry, &definition), TURBO_TOOL_OK);
+    turbo_agent_tool_executor_config_init(&executor_config);
+    executor_config.max_output_bytes = 4096;
+  }
+
+  after_each() {
+    turbo_agent_tool_executor_destroy(executor);
+    executor = NULL;
+    turbo_tool_registry_destroy(registry);
+    registry = NULL;
+    turbo_agent_runtime_destroy(runtime);
+    runtime = NULL;
+    if (store.user_data_free) store.user_data_free(store.user_data);
+    store = (turbo_agent_runtime_store_t){0};
+    free(first.output);
+    json_free(first.detail);
+    first = (turbo_agent_tool_execution_t){0};
+    free(replay.output);
+    json_free(replay.detail);
+    replay = (turbo_agent_tool_execution_t){0};
+    json_free(records);
+    records = NULL;
+    tstr_free(path);
+    path = NULL;
+    if (directory) tt_remove_tree(directory);
+    free(directory);
+    directory = NULL;
+  }
+
+  it("rejects an over-quota planned record before callback admission") {
+    sqlite_config.max_record_bytes = 2;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_tool_executor_create(&executor_config, &executor), SALTS_OK);
+    first = journal_call("planned-quota");
+    first.tool_name = "bounded-probe";
+    check_equal(journal_execute(executor, runtime, registry, &first, 1), SALTS_ENOSPC);
+    check_equal(probe.calls, 0);
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, journal_collection, NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 0);
+    json_free(records);
+    records = NULL;
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, "agent_tool_claims", NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 0);
+  }
+
+  it("keeps an over-quota committed result unknown across reopen without retry") {
+    sqlite_config.max_record_bytes = 1024;
+    probe.output_bytes = 2048;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_tool_executor_create(&executor_config, &executor), SALTS_OK);
+    first = journal_call("commit-quota");
+    first.tool_name = "bounded-probe";
+    check_equal(journal_execute(executor, runtime, registry, &first, 1), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(first.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_false(first.replayed);
+    check_null(first.output);
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, journal_collection, NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 1);
+    check_equal(json_get_string(json_array_get(records, 0), "phase"), "started");
+    check_null(json_object_get(json_array_get(records, 0), "output"));
+    json_free(records);
+    records = NULL;
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, "agent_tool_claims", NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 1);
+    check_equal(json_get_string(json_array_get(records, 0), "phase"), "admitted");
+    json_free(records);
+    records = NULL;
+
+    turbo_agent_tool_executor_destroy(executor);
+    executor = NULL;
+    turbo_agent_runtime_destroy(runtime);
+    runtime = NULL;
+    sqlite_config.create_if_missing = 0;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_tool_executor_create(&executor_config, &executor), SALTS_OK);
+    replay = journal_call("commit-quota");
+    replay.tool_name = "bounded-probe";
+    check_equal(journal_execute(executor, runtime, registry, &replay, 1), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_true(replay.replayed);
+    check_equal(replay.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_null(replay.output);
   }
 }
 

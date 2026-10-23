@@ -22,9 +22,11 @@ CXX_C_API turbo_graph_exec_status_t turbo_agent_workflow_add_edge(
     turbo_graph_t *graph, const char *from_node_name, const char *to_node_name,
     turbo_graph_edge_predicate_fn predicate, void *user_data);
 CXX_C_API int turbo_agent_planner_tool_node(turbo_graph_exec_ctx_t *ctx, void *user_data);
-/* scope is a synchronous borrow identifying one owned planner/executor version. */
+/* scope identifies one owned planner/executor version. parent_review_state is
+ * an optional distinct parent whose matching Tool approval must be consumed
+ * before Journal/callback entry. Both are borrowed for synchronous dispatch. */
 CXX_C_API int turbo_agent_tool_node_scoped(turbo_graph_exec_ctx_t *ctx, void *user_data,
-                                          const char *scope);
+                                          const char *scope, json_value_t *parent_review_state);
 /* Opt-in supervised dispatch: preserve generic ToolNode behavior, but report
  * callback/guardrail failure and validate post-middleware results explicitly. */
 enum { TURBO_AGENT_TOOL_CHECK_OK, TURBO_AGENT_TOOL_CHECK_FAILED,

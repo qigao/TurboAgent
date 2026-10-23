@@ -127,9 +127,10 @@ legacy file/custom fallback does not gain a cross-owner guarantee.
 
 The adjacent Journal suite also runs the Executor over the real bounded SQLite Store.
 An over-quota PLANNED record returns `SALTS_ENOSPC` before any callback and leaves both
-Journal and claim collections empty. In the terminal case, PLANNED, admitted and STARTED
-fit, the callback returns a result larger than `max_record_bytes`, and the COMMITTED write
-fails. The Executor reports UNKNOWN, retains STARTED plus the admitted fence, and after a
-close/reopen returns the same UNKNOWN without a second callback. It does not truncate or
-invent a committed result. This qualifies the per-record boundary only; total Journal
-retention, database exhaustion, bounded waits and the remaining backend matrix stay open.
+Journal and claim collections empty. In terminal cases, PLANNED, admitted and STARTED fit,
+the callback returns a result, and the COMMITTED write exceeds either `max_record_bytes`
+or the main database `max_database_bytes`. The Executor reports UNKNOWN, retains STARTED
+plus the admitted fence, and after a close/reopen returns the same UNKNOWN without a second
+callback. It does not truncate or invent a committed result. The database-full case uses
+SQLite's transactional rollback and does not qualify rollback-journal disk exhaustion.
+Journal entry eviction/retention, bounded waits and the remaining backend matrix stay open.

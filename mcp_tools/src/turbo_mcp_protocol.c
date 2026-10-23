@@ -449,7 +449,8 @@ static int turbo_mcp_response_matches(const json_value_t *root, uint64_t request
   if (!root || json_type(root) != JSON_OBJECT) return 0;
   version = json_get_string(root, "jsonrpc");
   id = json_object_get(root, "id");
-  if (!version || strcmp(version, "2.0") != 0 || !id ||
+  if (!version || json_string_len(json_object_get(root, "jsonrpc")) != 3 ||
+      strcmp(version, "2.0") != 0 || !id ||
       json_type(id) != JSON_NUMBER) {
     return 0;
   }
@@ -576,6 +577,7 @@ turbo_tool_status_t turbo_mcp_client_request(
   size_t index;
   turbo_mcp_transport_response_t response;
   turbo_tool_status_t status = TURBO_TOOL_ERROR;
+  int transport_entered = 0;
 
   if (!out_result) {
     json_free(params); params = NULL;
@@ -672,6 +674,7 @@ turbo_tool_status_t turbo_mcp_client_request(
   }
 
   memset(&response, 0, sizeof(response));
+  transport_entered = 1;
   if (client->transport_post(client->transport_user_data, client->endpoint, headers,
                              header_count, (const uint8_t *)request_json, request_json_len,
                              &response) != 0) {
@@ -697,6 +700,14 @@ turbo_tool_status_t turbo_mcp_client_request(
   if (response.release) response.release(response.release_context);
 
 cleanup:
+  /* The transport contract cannot prove that a failed tools/call had no
+   * remote effect. Preserve that uncertainty, including unusable responses;
+   * local preparation failures and tools/list retain their typed statuses. */
+  if (transport_entered && !strcmp(method, "tools/call") && status != TURBO_TOOL_OK) {
+    json_free(*out_result);
+    *out_result = NULL;
+    status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+  }
   free(headers);
   tstr_free(method_header);
   tstr_free(name_value);

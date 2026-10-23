@@ -347,6 +347,58 @@ spec("bounded SQLite tool journal recovery") {
     check_equal(replay.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
     check_null(replay.output);
   }
+
+  it("keeps a database-full committed result unknown across reopen without retry") {
+    sqlite_config.max_record_bytes = 256 * 1024;
+    sqlite_config.max_database_bytes = 65536;
+    executor_config.max_output_bytes = 256 * 1024;
+    probe.output_bytes = 128 * 1024;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_tool_executor_create(&executor_config, &executor), SALTS_OK);
+    first = journal_call("commit-database-full");
+    first.tool_name = "bounded-probe";
+    check_equal(journal_execute(executor, runtime, registry, &first, 1), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(first.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_false(first.replayed);
+    check_null(first.output);
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, journal_collection, NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 1);
+    check_equal(json_get_string(json_array_get(records, 0), "phase"), "started");
+    check_null(json_object_get(json_array_get(records, 0), "output"));
+    json_free(records);
+    records = NULL;
+    check_equal(turbo_agent_runtime_store_list_json(
+                    runtime, "agent_tool_claims", NULL, NULL, &records),
+                SALTS_OK);
+    check_equal(json_array_size(records), 1);
+    check_equal(json_get_string(json_array_get(records, 0), "phase"), "admitted");
+    json_free(records);
+    records = NULL;
+
+    turbo_agent_tool_executor_destroy(executor);
+    executor = NULL;
+    turbo_agent_runtime_destroy(runtime);
+    runtime = NULL;
+    sqlite_config.create_if_missing = 0;
+    check_equal(turbo_runtime_store_sqlite_open(&sqlite_config, &store), SALTS_OK);
+    runtime = turbo_agent_runtime_create(&store);
+    check_not_null(runtime);
+    store = (turbo_agent_runtime_store_t){0};
+    check_equal(turbo_agent_tool_executor_create(&executor_config, &executor), SALTS_OK);
+    replay = journal_call("commit-database-full");
+    replay.tool_name = "bounded-probe";
+    check_equal(journal_execute(executor, runtime, registry, &replay, 1), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_true(replay.replayed);
+    check_equal(replay.status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+    check_null(replay.output);
+  }
 }
 
 spec("tool journal admission and persistence failures") {

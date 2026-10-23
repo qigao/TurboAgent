@@ -5,6 +5,8 @@ name: TurboAgent Speech Capture Salts native Windows SDK link (#134)
     paths:
       - 'speech_input/**'
       - 'CMakeLists.txt'
+      - 'cmake/ci/**'
+      - '.github/actions/setup-ci-tools/**'
       - '.github/workflows/speech-capture-native-sdk.yml'
   workflow_dispatch:
 
@@ -19,15 +21,15 @@ jobs:
     timeout-minutes: 90
     env:
       GH_TOKEN: ${{ github.token }}
+      SALTS_RELEASE_TAG: v2.3.0-rc.17
+      SALTS_UTILS_RELEASE_TAG: v4.3.0-rc.11
+      CHTTP_RELEASE_TAG: v2.1.0-rc.6
       CMAKE_BUILD_PARALLEL_LEVEL: 2
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
-        with:
-          mode: read
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+      - uses: ./.github/actions/setup-ci-tools
       - name: Find exact Visual Studio C11 toolchain
         shell: pwsh
         run: |
@@ -37,23 +39,25 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
             throw 'Required MSVC toolchain not found'
           }
-          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          "VSDEVCMD_BAT=$vs\Common7\Tools\VsDevCmd.bat" >> $env:GITHUB_ENV
           foreach ($name in @('VCPKG_ROOT','VCPKG_CACHE_REPOSITORY_ROOT','RE2C_ROOT')) {
             $path = [Environment]::GetEnvironmentVariable($name)
             if ([string]::IsNullOrWhiteSpace($path)) { throw "$name required" }
             "$name=$($path.Replace('\','/'))" >> $env:GITHUB_ENV
           }
       - name: Restore official native Salts/SaltsUtils/CHttp Windows SDKs
-        shell: pwsh
-        run: ./cmake/ci/restore-native-sdk.ps1 -Rid windows-x64
+        shell: bash
+        run: bash cmake/ci/restore-native-sdk.sh windows-x64 0 0
       - name: Require actual installed Salts::Capture native target and compile adapter
         shell: cmd
         run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --preset ci-windows-release -DENABLE_SPEECH_INPUT=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DENABLE_SPEECH_CAPTURE_NATIVE=ON -DENABLE_WASM_TOOLS=OFF -DENABLE_PRAKTOR_TOOLS=OFF -DENABLE_CODING_TOOLS=OFF -DENABLE_CODEX_BRIDGE=OFF -DENABLE_MCP_TOOLS=OFF -DBUILD_TESTS=ON
+          call cmake\ci\run-vsdevcmd.cmd python cmake/ci/restore-vcpkg-cache.py ci-windows-release
           if errorlevel 1 exit /b 1
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake --build --preset ci-windows-release --target turbo_agent_speech_capture_salts test_turbo_agent_speech_capture_bridge
+          call cmake\ci\run-vsdevcmd.cmd cmake --preset ci-windows-release -DVCPKG_INSTALL_OPTIONS=--only-binarycaching -DENABLE_SPEECH_INPUT=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DENABLE_SPEECH_CAPTURE_NATIVE=ON -DENABLE_WASM_TOOLS=OFF -DENABLE_PRAKTOR_TOOLS=OFF -DENABLE_CODING_TOOLS=OFF -DENABLE_CODEX_BRIDGE=OFF -DENABLE_MCP_TOOLS=OFF -DBUILD_TESTS=ON
           if errorlevel 1 exit /b 1
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && ctest --test-dir build/ci-windows-release -C Release --no-tests=error -R "^turbo_agent_speech_capture_bridge_core$" --output-on-failure --timeout 30
+          call cmake\ci\run-vsdevcmd.cmd cmake --build --preset ci-windows-release
+          if errorlevel 1 exit /b 1
+          call cmake\ci\run-vsdevcmd.cmd ctest --test-dir build/ci-windows-release -C Release --no-tests=error -R "^turbo_agent_speech_capture_bridge_core$" --output-on-failure --timeout 30
       - name: Require feature/owner metadata without starting a microphone
         shell: pwsh
         run: |

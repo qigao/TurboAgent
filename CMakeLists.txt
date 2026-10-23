@@ -12,6 +12,15 @@ project(
   VERSION 1.2.0
   LANGUAGES C CXX)
 
+# Internal configure-only phase: let the real preset/toolchain compute ABIs
+# before downloading cache entries. The normal configure still defines the full graph.
+if(TURBOAGENT_CACHE_PREFLIGHT)
+  if(NOT "--dry-run" IN_LIST VCPKG_INSTALL_OPTIONS)
+    message(FATAL_ERROR "Cache preflight requires vcpkg --dry-run")
+  endif()
+  return()
+endif()
+
 # Project configuration - output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

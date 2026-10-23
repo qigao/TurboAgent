@@ -39,6 +39,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test curl package transport offline
+        run: |
+          cmake -S cmake/ci/tests -B build/ci-transport-tests
+          ctest --test-dir build/ci-transport-tests --output-on-failure --no-tests=error
+
       - id: version
         shell: bash
         run: |
@@ -102,11 +107,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
-        with:
-          mode: read
-
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+      - uses: ./.github/actions/setup-ci-tools
 
       - name: Prepare Linux toolchain
         if: runner.os == 'Linux'
@@ -158,12 +159,20 @@ jobs:
         shell: bash
         env:
           SDK_PRESET: ${{ matrix.preset }}
-        run: cmake --preset "$SDK_PRESET"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python cmake/ci/restore-vcpkg-cache.py "$SDK_PRESET"
+          cmake --preset "$SDK_PRESET" -DVCPKG_INSTALL_OPTIONS=--only-binarycaching
 
       - name: Configure on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call cmake\ci\run-vsdevcmd.cmd cmake --preset ci-windows-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          call cmake\ci\run-vsdevcmd.cmd python cmake/ci/restore-vcpkg-cache.py ci-windows-release
+          if errorlevel 1 exit /b 1
+          call cmake\ci\run-vsdevcmd.cmd cmake --preset ci-windows-release -DVCPKG_INSTALL_OPTIONS=--only-binarycaching
 
       - name: Build on Unix
         if: runner.os != 'Windows'
@@ -391,15 +400,12 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Configure GitHub Packages source
+      - name: Configure offline NuGet packaging
         shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           config="$RUNNER_TEMP/nuget.config"
           printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
-          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text --configfile "$config"
           echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
 
       - name: Create NuGet package

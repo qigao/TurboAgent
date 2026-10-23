@@ -21,8 +21,8 @@ CLI's runtime environment rather than copying DLLs into TurboAgent.
 
 Copy `.env.example` to `.env`, or add the example's non-secret keys to an
 existing `.env`. Keep credentials in the ignored `.env` or the parent process.
-`GITHUB_TOKEN` needs `read:packages` for the shared NuGet feed; `gh` uses
-`GH_TOKEN`, then `GITHUB_TOKEN`, or its existing login for GitHub Release access.
+`GITHUB_TOKEN` needs `read:packages` for the shared NuGet feed; `cmake/ci/restore-native-sdk.sh` uses curl with
+`GH_TOKEN`, then `GITHUB_TOKEN`, for GitHub Release access.
 Do not print credentials or enable verbose environment dumps.
 
 Use literal, absolute, forward-slash paths. Praktor's dotenv parser does not
@@ -49,7 +49,7 @@ On Linux, typical existing roots are `PKG_ROOT=/opt`, `VCPKG_ROOT=/opt/vcpkg`
 and `VCPKG_CACHE_REPOSITORY_ROOT=/home/your-user/.cache/qigao/vcpkg-cache`.
 macOS uses its own installed host paths. Neither OS consumes Windows paths.
 Both need the host compiler, re2c and the NuGet runtime required by the shared
-cache setup. SDK restoration on every host needs `gh`, `jq` and `unzip`;
+cache setup. SDK restoration on every host needs Python 3.9+, `curl`, `jq` and `unzip`;
 Windows uses Git Bash and its `cygpath` path converter. Install `jq` on its
 inherited `PATH` and set `BASH_EXECUTABLE` as shown in `.env.example`.
 
@@ -431,3 +431,36 @@ to `build/sdk/windows-x64`. The first SDK attempt stopped during SaltsUtils
 download with a TLS transport error, before CMake configuration; one retry
 completed the full workflow. `git diff --check` passed. Non-Windows builds and
 GitHub Actions execution were not run for this policy separation.
+
+## CI downloads without Mono
+
+The local `setup-ci-tools` action checks out the shared cache infrastructure at
+an exact commit and consumes its tool/scripts identities, contract hash,
+overlays and canonical materialization paths. It does not run the shared
+NuGet/Mono setup action. `github-packages.py` uses curl for GitHub Packages
+NuGet V3 downloads and published SDK Release assets. re2c retains latest-stable
+selection; its resolved version and SHA-256 are logged. SDK Release tags remain
+pinned in the workflows; published status, exact asset name, GitHub asset digest
+when supplied, and the existing SDK provenance inventory are checked.
+
+Before the normal configure, `restore-vcpkg-cache.py <ci-preset>` runs the real
+preset/toolchain in a separate configure-only directory. The internal
+`TURBOAGENT_CACHE_PREFLIGHT` switch requires vcpkg `--dry-run`; the pinned vcpkg
+tool computes ABIs and writes `--x-write-nuget-packages-config`. No port is built
+in this phase. Windows runs both phases through `run-vsdevcmd.cmd` so the
+compiler owner is unchanged; Android retains its NDK chainload and host triplet.
+
+curl downloads those exact package references. Admission verifies the nuspec
+identity/version and CONTROL package/triplet/ABI, rejects unsafe archive entries,
+and copies the payload into vcpkg's native files-cache ZIP layout, removing only
+the NuGet envelope. The normal configure uses `--only-binarycaching` and a
+read-only files provider. Missing packages, invalid payloads or compiler ABI
+mismatches fail the job; no source-build fallback or guessed ABI is used. The
+normal configure and build still cover the complete configured graph.
+
+Credentials travel to curl on stdin and are never persisted in a NuGet config.
+Redirects require HTTPS and do not forward credentials to a different host.
+.NET is used only to create the final native package; its zero-PackageReference
+project restores with an empty package-source list. Offline transport admission
+tests run through CTest from `cmake/ci/tests`; native and installed/final-package
+consumer checks remain in their existing build/test phases.

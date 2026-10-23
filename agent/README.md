@@ -30,6 +30,18 @@ effect identity. The same rule applies without a Runtime. Distinct turns/calls
 remain independent; later serialized batches may replay committed outcomes.
 This batch check adds no cross-executor/process claim or policy synchronization.
 
+The existing mutex on one owned ToolExecutor serializes separate callers through
+Journal lookup, callback completion and commit. With a shared Runtime and frozen
+registry/policy, a same-identity waiter replays the committed outcome; conflicting
+arguments/tools fail closed, and a failed commit leaves `started/UNKNOWN` without
+another callback. Each caller's admitted policy is checked before replay, so a
+denied caller receives no prior successful output. A cancelled distinct call stops
+before callback entry and keeps its planned record. Replaying an existing outcome
+preserves its durable status,
+including UNKNOWN; the ToolNode delivery gate below checks cancellation before
+publishing successful output. These tests do not establish concurrent Agent or
+Router operation, policy mutation, or claims across executors/Runtime owners/processes.
+
 The native [Tool Journal process-crash regressions](docs/tool-journal-process-crash.md)
 exercise abrupt exit/restart at planned, started, effect, commit and pre-delivery
 boundaries, retaining unknown effects for explicit reconciliation.

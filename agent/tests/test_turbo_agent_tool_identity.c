@@ -54,7 +54,9 @@ static turbo_tool_status_t identity_invoke(const char *arguments,
   identity_probe_t *probe = user;
   size_t bytes = strlen(arguments) + 1;
   (void)context;
-  atomic_fetch_add_explicit(&probe->callbacks, 1, memory_order_relaxed);
+  /* Publish callback entry after the preceding planned/started writes, so the
+   * observing caller has an explicit happens-before edge for its gate checks. */
+  atomic_fetch_add_explicit(&probe->callbacks, 1, memory_order_release);
   if (atomic_load(&probe->hold_callback) &&
       !identity_wait(&probe->release_callback, 1, IDENTITY_GATE_TIMEOUT_MS)) {
     atomic_store(&probe->gate_timed_out, 1);

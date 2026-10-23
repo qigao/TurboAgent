@@ -37,8 +37,8 @@ arguments/tools fail closed, and a failed commit leaves `started/UNKNOWN` withou
 another callback. Each caller's admitted policy is checked before replay, so a
 denied caller receives no prior successful output. A cancelled distinct call stops
 before callback entry and keeps its planned record. Replaying an existing outcome
-preserves its durable status,
-including UNKNOWN; the ToolNode delivery gate below checks cancellation before
+preserves its durable status, including UNKNOWN; the ToolNode delivery gate below
+checks cancellation before
 publishing successful output. These tests do not establish concurrent Agent or
 Router operation, policy mutation, or claims across executors/Runtime owners/processes.
 

@@ -22,6 +22,14 @@ desktop, server, and embedded-friendly native builds:
 - bounded tool executor with versioned execution policy and durable journal
 - configurable provider retry metadata and exact usage records
 
+ToolExecutor rejects a batch containing repeated `turn_key + call_id` pairs
+within its shared Run before any callback or Journal write, including an earlier
+unrelated call in that batch. Changing arguments, tool names/aliases, an item's
+admission result or its caller-supplied replay flag does not create another
+effect identity. The same rule applies without a Runtime. Distinct turns/calls
+remain independent; later serialized batches may replay committed outcomes.
+This batch check adds no cross-executor/process claim or policy synchronization.
+
 The native [Tool Journal process-crash regressions](docs/tool-journal-process-crash.md)
 exercise abrupt exit/restart at planned, started, effect, commit and pre-delivery
 boundaries, retaining unknown effects for explicit reconciliation.

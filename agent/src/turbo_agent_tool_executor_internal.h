@@ -34,6 +34,11 @@ typedef struct turbo_agent_tool_execution_s {
 CXX_C_API int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *config,
                                                turbo_agent_tool_executor_t **out_executor);
 CXX_C_API void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *executor);
+/* All turn_key/call_id pairs must be unique within the batch's shared Run.
+ * A collision returns SALTS_EPROTO before any callback or Journal write, also
+ * without a Runtime and when an entry was already denied or marked replayed.
+ * Separate serialized batches retain normal committed-result replay. This does
+ * not provide cross-executor/Runtime/process atomic effect admission. */
 CXX_C_API int turbo_agent_tool_executor_execute(
     turbo_agent_tool_executor_t *executor, turbo_agent_runtime_t *runtime,
     const turbo_cancel_token_t *cancel_token, const char *thread_id, const char *run_id,

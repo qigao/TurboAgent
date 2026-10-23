@@ -115,5 +115,9 @@ to require explicit reconciliation; no globally exactly-once effect guarantee is
 The adjacent `test_turbo_agent_tool_claim` also forces two independent executor/Runtime
 handles over one serialized atomic test backend to read the same missing or PLANNED
 identity concurrently. It requires one callback, an EPROTO loser for conflicting fresh
-arguments, and an intact committed winner. This is bounded by the backend primitive;
-the legacy file/custom fallback does not gain a cross-owner guarantee.
+arguments, and an intact committed winner. Its interrupted two-call batch injects a
+failed first terminal commit, then requires whole-batch recovery to retain that
+identity as unknown, replay the second committed identity and invoke neither callback
+again. Batch planning is not a multi-record transaction and does not infer a business
+dependency between distinct identities. This is bounded by the backend primitive; the
+legacy file/custom fallback does not gain a cross-owner guarantee.

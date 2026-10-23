@@ -125,6 +125,14 @@ and explicit-fork Run IDs keep otherwise identical nested calls independent and 
 each lineage without another callback. This is bounded by the backend primitive; the
 legacy file/custom fallback does not gain a cross-owner guarantee.
 
+The Journal suite separately exercises the real legacy file Store, whose callback table has
+no `create_if_absent`. For both root and nested identities, a committed result survives a
+close/reopen and replays without another callback. If the callback completed but the
+COMMITTED write failed, the persisted STARTED record reopens as UNKNOWN and still does not
+dispatch again. No admitted claim is created. This qualifies only single-owner lifecycle
+recovery; the file backend still provides no cross-owner/process admission, atomic replace,
+or crash-durability guarantee.
+
 The adjacent Journal suite also runs the Executor over the real bounded SQLite Store.
 An over-quota or database-full PLANNED record returns `SALTS_ENOSPC` before any callback and
 leaves both Journal and claim collections empty. If PLANNED fits but the admitted-fence

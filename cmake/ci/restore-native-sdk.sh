@@ -76,20 +76,10 @@ restore_sdk() {
   local dir="$sdk_root/$name"
   local asset
   local nupkg
-  local published
   local digest
 
   if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
     echo "invalid exact release tag for $repo: '$tag'" >&2
-    return 1
-  fi
-  if ! published="$(gh api "repos/$repo/releases/tags/$tag" \
-      --jq 'if (.draft == false and .published_at != null) then "yes" else "no" end')"; then
-    echo "published Release Tag not found: $repo@$tag" >&2
-    return 1
-  fi
-  if [[ "$published" != "yes" ]]; then
-    echo "release is draft or unpublished: $repo@$tag" >&2
     return 1
   fi
 
@@ -102,8 +92,8 @@ restore_sdk() {
   fi
   rm -rf -- "$dir" || return 1
   mkdir -p "$dir/download" "$dir/package" || return 1
-  gh release download "$tag" --repo "$repo" --pattern "$asset" \
-    --dir "$dir/download" --clobber || return 1
+  python "$repository_root/cmake/ci/github-packages.py" release \
+    "$repo" "$tag" "$asset" "$dir/download/$asset" || return 1
 
   nupkg="$dir/download/$asset"
   if [[ ! -f "$nupkg" ]]; then

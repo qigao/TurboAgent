@@ -5,6 +5,8 @@ name: TurboAgent SpeechInput opt-in installed SDK C11/C++17 (#134)
     paths:
       - 'speech_input/**'
       - 'CMakeLists.txt'
+      - 'cmake/ci/**'
+      - '.github/actions/setup-ci-tools/**'
       - '.github/workflows/speech-input-installed-sdk.yml'
   workflow_dispatch:
 
@@ -19,16 +21,16 @@ jobs:
     timeout-minutes: 90
     env:
       GH_TOKEN: ${{ github.token }}
+      SALTS_RELEASE_TAG: v2.3.0-rc.17
+      SALTS_UTILS_RELEASE_TAG: v4.3.0-rc.11
+      CHTTP_RELEASE_TAG: v2.1.0-rc.6
       CMAKE_BUILD_PARALLEL_LEVEL: '2'
       TA_SPEECH_INSTALLED: /tmp/ta-speech-m1-sdk
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@0dc254695917bc180504d916240292e9096e9da5
-        with:
-          mode: read
-      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@0dc254695917bc180504d916240292e9096e9da5
+      - uses: ./.github/actions/setup-ci-tools
       - name: Install exact native Linux tools
         shell: bash
         run: |
@@ -44,7 +46,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake --preset ci-linux-release \
+          python cmake/ci/restore-vcpkg-cache.py ci-linux-release
+          cmake --preset ci-linux-release -DVCPKG_INSTALL_OPTIONS=--only-binarycaching \
             -DENABLE_SPEECH_INPUT=ON \
             -DENABLE_PRAKTOR_TOOLS=OFF -DENABLE_WASM_TOOLS=OFF \
             -DENABLE_CODING_TOOLS=OFF -DENABLE_CODEX_BRIDGE=OFF \
@@ -100,6 +103,9 @@ jobs:
           add_executable(speech_cpp17 cpp17.cpp)
           target_link_libraries(speech_c11 PRIVATE TurboAgent::SpeechInput)
           target_link_libraries(speech_cpp17 PRIVATE TurboAgent::SpeechInput)
+          enable_testing()
+          add_test(NAME installed_speech_c11 COMMAND speech_c11)
+          add_test(NAME installed_speech_cpp17 COMMAND speech_cpp17)
           CMAKE
           cmake -S "$root" -B "$root/build" -G Ninja \
             "-DCMAKE_TOOLCHAIN_FILE=$QIGAO_VCPKG_TOOLCHAIN_FILE" \
@@ -107,8 +113,7 @@ jobs:
             "-DVCPKG_INSTALLED_DIR=$GITHUB_WORKSPACE/vcpkg_installed/ci-linux-release" \
             "-DCMAKE_PREFIX_PATH=$TA_SPEECH_INSTALLED;$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT;$GITHUB_WORKSPACE/vcpkg_installed/ci-linux-release/x64-linux"
           cmake --build "$root/build" --parallel 2
-          "$root/build/speech_c11"
-          "$root/build/speech_cpp17"
+          ctest --test-dir "$root/build" --no-tests=error --output-on-failure
           echo "PASS: installed TurboAgent::SpeechInput C11/C++17 with no source-tree target" \
             | tee "$RUNNER_TEMP/ta-speech-m1-consumer.txt"
       - name: Preserve installed consumer provenance

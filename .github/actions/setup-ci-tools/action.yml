@@ -1,0 +1,29 @@
+name: Set up curl-based CI tools
+description: Use the canonical vcpkg contract and curl package downloads without Mono or NuGet restore.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Check out pinned shared cache contract
+      uses: actions/checkout@v4
+      with:
+        repository: qigao/vcpkg-cache
+        ref: 2e214ae44a3e3244eded5db6361194576356fc9e
+        path: build/ci-vcpkg-infrastructure
+        persist-credentials: false
+    - name: Bootstrap canonical vcpkg without NuGet
+      shell: bash
+      run: python cmake/ci/setup-ci-tools.py build/ci-vcpkg-infrastructure
+    - name: Restore PowerShell matching the published Windows cache ABI
+      if: runner.os == 'Windows'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python cmake/ci/github-packages.py windows-powershell "$RUNNER_TEMP/qigao-cache-powershell"
+    - name: Download re2c from GitHub Packages with curl
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python cmake/ci/github-packages.py re2c "$RUNNER_TEMP/qigao-re2c-binary"

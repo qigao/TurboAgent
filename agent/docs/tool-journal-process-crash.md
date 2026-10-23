@@ -124,3 +124,12 @@ with nested identity: two owners in one Run/turn/call admit one callback, while 
 and explicit-fork Run IDs keep otherwise identical nested calls independent and replay
 each lineage without another callback. This is bounded by the backend primitive; the
 legacy file/custom fallback does not gain a cross-owner guarantee.
+
+The adjacent Journal suite also runs the Executor over the real bounded SQLite Store.
+An over-quota PLANNED record returns `SALTS_ENOSPC` before any callback and leaves both
+Journal and claim collections empty. In the terminal case, PLANNED, admitted and STARTED
+fit, the callback returns a result larger than `max_record_bytes`, and the COMMITTED write
+fails. The Executor reports UNKNOWN, retains STARTED plus the admitted fence, and after a
+close/reopen returns the same UNKNOWN without a second callback. It does not truncate or
+invent a committed result. This qualifies the per-record boundary only; total Journal
+retention, database exhaustion, bounded waits and the remaining backend matrix stay open.

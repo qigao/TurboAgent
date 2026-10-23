@@ -8,6 +8,7 @@
 #include <string.h>
 #include <tstr.h>
 #include <cstl/vec.h>
+#include <salts/clock.h>
 
 static const char *const turbo_mcp_tool_required_capabilities[] = {"runtime_tools", "network"};
 
@@ -200,10 +201,20 @@ static int turbo_mcp_header_name_unique(const vec_t *headers, const char *name) 
   return 1;
 }
 
+static const char *turbo_mcp_json_c_string(const json_value_t *object, const char *key) {
+  const json_value_t *value = object ? json_object_get(object, key) : NULL;
+  const char *text;
+  if (!value || json_type(value) != JSON_STRING || !(text = json_string(value)) ||
+      json_string_len(value) != strlen(text)) {
+    return NULL;
+  }
+  return text;
+}
+
 static int turbo_mcp_collect_header(turbo_mcp_tool_binding_t *tool,
                                     const vec_t *path, const json_value_t *schema) {
-  const char *name = json_get_string(schema, "x-mcp-header");
-  const char *type = json_get_string(schema, "type");
+  const char *name = turbo_mcp_json_c_string(schema, "x-mcp-header");
+  const char *type = turbo_mcp_json_c_string(schema, "type");
   turbo_mcp_header_binding_t binding;
   size_t index;
   if (!name || !turbo_mcp_header_name_valid(name) ||
@@ -274,7 +285,8 @@ static int turbo_mcp_scan_schema(const json_value_t *node, int reachable,
       json_value_t *child = json_object_value(properties, index);
       const char *popped = NULL;
       int status;
-      if (!key || vec_push(path, &key) != STL_OK) return -1;
+      if (!key || strlen(key) != json_object_key_len(properties, index)) return 1;
+      if (vec_push(path, &key) != STL_OK) return -1;
       status = turbo_mcp_scan_schema(child, 1, path, tool, depth + 1);
       (void)vec_pop(path, &popped);
       if (status != 0) return status;
@@ -285,6 +297,7 @@ static int turbo_mcp_scan_schema(const json_value_t *node, int reachable,
     const char *key = json_object_key(node, index);
     json_value_t *child = json_object_value(node, index);
     int status;
+    if (!key || strlen(key) != json_object_key_len(node, index)) return 1;
     if (key && reachable && !strcmp(key, "properties")) continue;
     status = turbo_mcp_scan_schema(child, 0, path, tool, depth + 1);
     if (status != 0) return status;
@@ -367,8 +380,19 @@ static tstr turbo_mcp_parameter_header(const turbo_mcp_header_binding_t *header,
   return result;
 }
 
-static int turbo_mcp_tool_invoke(const json_value_t *arguments,
-                                 json_value_t **out_result, void *user_data) {
+static turbo_tool_status_t turbo_mcp_context_status(const turbo_tool_execution_context_t *context) {
+  if (!context) return TURBO_TOOL_OK;
+  if (context->cancel_token) {
+    int rc = turbo_cancel_token_check(context->cancel_token);
+    if (rc != SALTS_OK) return rc == SALTS_ETIMEDOUT ? TURBO_TOOL_DEADLINE_EXCEEDED
+        : rc == SALTS_ECANCELED ? TURBO_TOOL_CANCELLED : TURBO_TOOL_ERROR;
+  }
+  return context->deadline_mono_ms && cmeta_monotonic_ms() >= context->deadline_mono_ms
+      ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_OK;
+}
+
+static turbo_tool_status_t turbo_mcp_tool_invoke_context(const json_value_t *arguments,
+    const turbo_tool_execution_context_t *context, json_value_t **out_result, void *user_data) {
   turbo_mcp_tool_binding_t *binding = (turbo_mcp_tool_binding_t *)user_data;
   json_value_t *params = NULL;
   json_value_t *arguments_copy = NULL;
@@ -377,12 +401,14 @@ static int turbo_mcp_tool_invoke(const json_value_t *arguments,
   size_t index;
   turbo_tool_status_t status;
 
-  if (!binding || !binding->pack || !out_result ||
-      (arguments && json_type(arguments) != JSON_OBJECT) ||
-      vec_init_bytes(&headers, sizeof(tstr), _Alignof(tstr), SIZE_MAX) != STL_OK) {
-    return -1;
-  }
+  if (!out_result) return TURBO_TOOL_INVALID_ARGUMENT;
   *out_result = NULL;
+  if (!binding || !binding->pack || (arguments && json_type(arguments) != JSON_OBJECT))
+    return TURBO_TOOL_INVALID_ARGUMENT;
+  status = turbo_mcp_context_status(context);
+  if (status != TURBO_TOOL_OK) return status;
+  if (vec_init_bytes(&headers, sizeof(tstr), _Alignof(tstr), SIZE_MAX) != STL_OK)
+    return TURBO_TOOL_OUT_OF_MEMORY;
   for (index = 0; index < vec_size(&binding->headers); ++index) {
     const turbo_mcp_header_binding_t *header =
         (const turbo_mcp_header_binding_t *)vec_at_const(&binding->headers, index);
@@ -417,6 +443,10 @@ static int turbo_mcp_tool_invoke(const json_value_t *arguments,
     goto cleanup;
   }
   arguments_copy = NULL;
+  /* A stop can arrive during local argument/header preparation. This is a
+   * cooperative pre-transport check, not a lease or an in-flight interrupt. */
+  status = turbo_mcp_context_status(context);
+  if (status != TURBO_TOOL_OK) goto cleanup;
   status = turbo_mcp_client_request(
       binding->pack->client, "tools/call", binding->remote_name, params,
       (const char *const *)vec_data(&headers), vec_size(&headers), out_result);
@@ -430,7 +460,41 @@ cleanup:
     if (header) tstr_free(*header);
   }
   vec_destroy(&headers);
-  return status == TURBO_TOOL_OK ? 0 : -1;
+  return status;
+}
+
+static int turbo_mcp_tool_invoke(const json_value_t *arguments,
+    json_value_t **out_result, void *user_data) {
+  return turbo_mcp_tool_invoke_context(arguments, NULL, out_result, user_data) == TURBO_TOOL_OK ? 0 : -1;
+}
+
+static turbo_tool_status_t turbo_mcp_tool_invoke_text_context(const char *arguments_json,
+    const turbo_tool_execution_context_t *context, char **out_output, void *user_data) {
+  json_value_t *arguments = NULL, *result = NULL;
+  turbo_tool_status_t status;
+  if (!out_output) return TURBO_TOOL_INVALID_ARGUMENT;
+  *out_output = NULL;
+  status = turbo_mcp_context_status(context);
+  if (status != TURBO_TOOL_OK) return status;
+  if (!arguments_json) return TURBO_TOOL_INVALID_ARGUMENT;
+  arguments = json_parse(arguments_json, strlen(arguments_json));
+  if (!arguments || json_type(arguments) != JSON_OBJECT) {
+    json_free(arguments); return TURBO_TOOL_INVALID_ARGUMENT;
+  }
+  status = turbo_mcp_tool_invoke_context(arguments, context, &result, user_data);
+  json_free(arguments);
+  if (status == TURBO_TOOL_OK) {
+    /* RuntimeTools text callbacks transfer malloc-owned output. */
+    *out_output = json_serialize(result, NULL);
+    if (!*out_output) status = TURBO_TOOL_OUT_OF_MEMORY;
+  }
+  json_free(result);
+  return status;
+}
+
+static int turbo_mcp_tool_invoke_text(const char *arguments_json,
+    char **out_output, void *user_data) {
+  return turbo_mcp_tool_invoke_text_context(arguments_json, NULL, out_output, user_data) == TURBO_TOOL_OK ? 0 : -1;
 }
 
 static turbo_tool_status_t turbo_mcp_register_remote_tool(
@@ -440,19 +504,19 @@ static turbo_tool_status_t turbo_mcp_register_remote_tool(
   const char *description;
   json_value_t *schema;
   turbo_mcp_tool_binding_t *binding = NULL;
-  turbo_tool_definition_v3_t definition;
+  turbo_tool_definition_v4_t definition;
   vec_t path = {0};
   tstr local_name = NULL;
   int schema_status;
   turbo_tool_status_t status;
 
   if (!remote_tool || json_type(remote_tool) != JSON_OBJECT ||
-      !(remote_name = json_get_string(remote_tool, "name")) || !remote_name[0] ||
+      !(remote_name = turbo_mcp_json_c_string(remote_tool, "name")) || !remote_name[0] ||
       !(schema = json_object_get(remote_tool, "inputSchema")) ||
       json_type(schema) != JSON_OBJECT) {
     return TURBO_TOOL_ERROR;
   }
-  description = json_get_string(remote_tool, "description");
+  description = turbo_mcp_json_c_string(remote_tool, "description");
   binding = (turbo_mcp_tool_binding_t *)calloc(1, sizeof(*binding));
   if (!binding || vec_init_bytes(&binding->headers, sizeof(turbo_mcp_header_binding_t), _Alignof(turbo_mcp_header_binding_t), SIZE_MAX) != STL_OK ||
       vec_init_bytes(&path, sizeof(const char *), _Alignof(const char *), SIZE_MAX) != STL_OK) {
@@ -490,20 +554,23 @@ static turbo_tool_status_t turbo_mcp_register_remote_tool(
 
   memset(&definition, 0, sizeof(definition));
   definition.struct_size = sizeof(definition);
-  definition.abi_version = TURBO_TOOL_DEFINITION_V3_ABI_VERSION;
+  definition.abi_version = TURBO_TOOL_DEFINITION_V4_ABI_VERSION;
   definition.definition.name = local_name;
   definition.definition.description = description && description[0]
                                           ? description
                                           : "Tool discovered from an MCP server";
   definition.definition.parameters_schema = schema;
+  definition.definition.handler = turbo_mcp_tool_invoke_text;
   definition.definition.json_value_handler = turbo_mcp_tool_invoke;
+  definition.context_handler = turbo_mcp_tool_invoke_text_context;
+  definition.json_value_context_handler = turbo_mcp_tool_invoke_context;
   definition.definition.user_data = binding;
   definition.definition.user_data_free = turbo_mcp_tool_binding_destroy;
   definition.execution_policy = pack->execution_policy;
   definition.required_capabilities = turbo_mcp_tool_required_capabilities;
   definition.required_capability_count = sizeof(turbo_mcp_tool_required_capabilities) /
                                          sizeof(turbo_mcp_tool_required_capabilities[0]);
-  status = turbo_tool_registry_add_v3(registry, &definition);
+  status = turbo_tool_registry_add_v4(registry, &definition);
   if (status != TURBO_TOOL_OK) turbo_mcp_tool_binding_destroy(binding);
   tstr_free(local_name);
   return status;
@@ -526,6 +593,7 @@ turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack) {
     json_value_t *tools;
     const char *result_type;
     const char *next_cursor;
+    const json_value_t *next_cursor_value;
     size_t index;
     if (cursor) cursor_value = json_create_string(cursor);
     if (!params || (cursor && (!cursor_value || !json_object_add_checked(
@@ -539,7 +607,7 @@ turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack) {
                                       &result);
     if (status != TURBO_TOOL_OK) goto fail;
     if (!result || json_type(result) != JSON_OBJECT ||
-        !(result_type = json_get_string(result, "resultType")) ||
+        !(result_type = turbo_mcp_json_c_string(result, "resultType")) ||
         strcmp(result_type, "complete") != 0 ||
         !(tools = json_object_get(result, "tools")) ||
         json_type(tools) != JSON_ARRAY) {
@@ -560,7 +628,14 @@ turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack) {
         goto fail;
       }
     }
-    next_cursor = json_get_string(result, "nextCursor");
+    next_cursor_value = json_object_get(result, "nextCursor");
+    next_cursor = turbo_mcp_json_c_string(result, "nextCursor");
+    if (next_cursor_value && !json_is_null(next_cursor_value) && !next_cursor) {
+      json_free(result); result = NULL;
+      turbo_mcp_client_set_error(pack->client, "invalid MCP tools/list cursor");
+      status = TURBO_TOOL_ERROR;
+      goto fail;
+    }
     if (!next_cursor || !next_cursor[0]) {
       json_free(result); result = NULL;
       turbo_tool_registry_destroy(pack->registry);

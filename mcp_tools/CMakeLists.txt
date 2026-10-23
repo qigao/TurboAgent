@@ -36,4 +36,5 @@ if(BUILD_TESTS)
     include
     FOLDER
     "MCP Tools/tests")
+  target_link_libraries(test_turbo_mcp_agent_control PRIVATE TurboAgent::Agent)
 endif()

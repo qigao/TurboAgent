@@ -31,6 +31,7 @@ typedef struct turbo_mcp_transport_response_s {
  * Optional host transport adapter, primarily for centrally managed OAuth,
  * proxies, observability, and deterministic tests. Request views are borrowed
  * only for the call. A successful callback returns zero and fills response.
+ * A nonzero return does not prove that the request had no remote effect.
  */
 typedef int (*turbo_mcp_transport_post_fn)(
     void *user_data, const char *endpoint, const char *const *headers,
@@ -78,13 +79,27 @@ CXX_C_API void turbo_mcp_tool_pack_destroy(turbo_mcp_tool_pack_t *pack);
  * Discover every tools/list page and atomically replace the current registry.
  * Invalid x-mcp-header tool definitions are excluded; other protocol errors
  * leave the existing registry unchanged.
+ * Decoded catalog strings used as C identities or schema paths must not
+ * contain embedded NUL bytes. Malformed mandatory fields fail refresh;
+ * malformed header/schema fields exclude that tool. A malformed optional
+ * description uses the existing default description.
  *
  * This is a single-owner control-plane operation. Do not refresh concurrently
  * with registry projection or execution.
  */
 CXX_C_API turbo_tool_status_t turbo_mcp_tool_pack_refresh(turbo_mcp_tool_pack_t *pack);
 
-/** Borrowed registry; it remains valid until the next refresh or destruction. */
+/**
+ * Borrowed registry; valid until the next refresh or destruction.
+ * Text and JSON context callbacks cooperatively reject already-stopped tokens
+ * or expired deadlines before calling the MCP protocol layer. This does not
+ * interrupt a transport already in progress or add an in-flight timeout bound.
+ * Contextual callbacks retain typed statuses; legacy callbacks retain their
+ * zero/nonzero error convention.
+ * A tools/call protocol failure after transport entry returns
+ * TURBO_TOOL_UNKNOWN_SIDE_EFFECT through contextual callbacks, with no output.
+ * Local preparation failures retain their typed status. Discovery is unchanged.
+ */
 CXX_C_API turbo_tool_registry_t *turbo_mcp_tool_pack_registry(turbo_mcp_tool_pack_t *pack);
 
 CXX_C_API size_t turbo_mcp_tool_pack_tool_count(const turbo_mcp_tool_pack_t *pack);

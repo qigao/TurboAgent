@@ -654,7 +654,10 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
   也可能已提交，因此同样按 UNKNOWN 处理。已有 COMMITTED 仍从主 Journal 重放。
 - 不支持 create-if-absent 的旧/custom/file backend 保留既有单 executor 兼容路径，不能
   据此声称跨 executor/process 的唯一准入。该保证只属于声明并实现该原子的 backend；
-  没有新增进程内全局锁、租约、超时接管或自动 UNKNOWN 重试。
+  没有新增进程内全局锁、租约、超时接管或自动 UNKNOWN 重试。真实 file Store 回归覆盖
+  root/nested 身份在关闭并重新打开后的单 owner 恢复：COMMITTED 结果直接重放；callback
+  已执行但 COMMITTED 写失败时保留 STARTED，并在重启后返回 UNKNOWN，二者都不能再次调用
+  callback。file Store 不产生 admitted claim，该回归不提升其跨 owner/process 保证。
 - 恢复先按存储主键 get，再校验内部 journal_id。原先按内部 journal_id list 的方案
   会把该字段损坏的记录当成不存在，因此不再作为已有记录的读取入口。旧 get ABI
   不能区分缺失与 I/O 错误；保留 filtered list 作为缺失判定，只有 get 失败且 list

@@ -680,6 +680,10 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
   之后用完整批次恢复时，UNKNOWN 和 COMMITTED 分别从各自 Journal 重放，不能再次进入
   callback。该行为不推导调用间业务依赖，也不提供批次级回滚；需要全有或全无的 Host
   操作必须封装成单个具有自身事务协议的工具。
+- 跨 executor 的 admission fence 保留完整的 Run/turn/call 作用域。同一嵌套 Run 中相同
+  `turn_key + call_id` 的 owner 竞争同一栅栏；显式 fork 使用新 Run，因此相同嵌套
+  turn/call 是新的 effect 身份，不能与 parent 错误冲突。两条 lineage 的重放仍分别读取
+  自己的 Journal。该规则不从 `legacy_turn_key` 猜测或迁移旧作用域。
 
 正式回归 `test_turbo_agent_tool_journal` 注入损坏记录及 store get/list/三阶段 put
 失败，检查 batch 内无额外 callback、原记录未被覆盖、有效状态/detail 可恢复、
@@ -687,7 +691,8 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
 历史 SHA-256 golden framing 检查；`test_turbo_cli_tool_cancel` 覆盖真实进程取消后的
 checkpoint 恢复。`test_turbo_agent_tool_claim` 强制两个独立 executor/Runtime handle 同时
 读取缺失或 PLANNED 身份，验证原子身份发布、冲突拒绝和单次 callback；它还注入双调用
-batch 的首个 COMMITTED 写失败，验证 UNKNOWN/COMMITTED 的整批恢复均不重复 callback。
+batch 的首个 COMMITTED 写失败，验证 UNKNOWN/COMMITTED 的整批恢复均不重复 callback，
+并组合覆盖同一嵌套作用域的跨 owner 栅栏及 parent/fork 的独立 Run 身份。
 进程测试另覆盖 admitted 写入前后共十个崩溃点。可通过
 `ctest --preset win-release-user -R 'tool_(claim|journal)' --output-on-failure` 运行本组。
 JSON 分配失败路径已检查返回值，但未做 allocator 故障注入。

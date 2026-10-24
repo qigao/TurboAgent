@@ -3,7 +3,7 @@
 
 #include <sqlite3.h>
 
-enum { VFS_MAIN = 0, VFS_JOURNAL = 1, VFS_WRITE = 0, VFS_SYNC = 1 };
+enum { VFS_MAIN = 0, VFS_JOURNAL = 1, VFS_WRITE = 0, VFS_SYNC = 1, VFS_INVALIDATE = 2 };
 enum {
   VFS_FAIL_BEFORE = 0, VFS_FAIL_AFTER, VFS_PARTIAL_ERROR,
   VFS_EXIT_BEFORE, VFS_EXIT_AFTER, VFS_PARTIAL_EXIT
@@ -13,7 +13,7 @@ typedef struct sqlite_fault_stats_s {
   int target_opens, live_files, failures, error, flags;
   int writes_after_fault, syncs_after_fault;
   int main_writes, main_syncs;
-  int mode, native_completed, native_bytes, changed_bytes, readback_bytes;
+  int mode, native_completed, native_bytes, changed_bytes, readback_bytes, header_invalidated;
   sqlite3_int64 offset;
   sqlite3_int64 native_offset;
   int bytes;

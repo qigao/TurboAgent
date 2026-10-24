@@ -186,3 +186,15 @@ cuts. Fresh owners retain the prior Journal phase and admitted fence, report
 UNKNOWN without another subject callback, and admit an independent healthy
 identity. These are controlled process cuts with the OS/cache still running,
 not power-loss or arbitrary device-torn-write qualification.
+
+Eight additional VFS cases bracket the real journal-header invalidation commit
+point with reported I/O errors and exact process exits, increasing the group to
+44. Initial zero headers are excluded by requiring prior valid native journal
+magic. Before invalidation, the original planned/started phase must be restored;
+after it, the STARTED/COMMITTED transaction remains present. In particular, an
+initial UNKNOWN after an actually committed COMMITTED write must not downgrade
+the canonical record: subsequent owners replay its original success/output with
+zero additional subject callbacks and no Journal rewrite. Raw pre-recovery
+header inspection and observed first-Store recovery I/O distinguish the two sides.
+This selector qualifies the current exclusive Store's retained-header commit
+style; delete/truncate styles and device power loss remain separate gates.

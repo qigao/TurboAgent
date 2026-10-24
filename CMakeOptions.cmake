@@ -18,6 +18,7 @@ cmake_dependent_option(
 
 option(BUILD_EXAMPLES "Build example programs" ON)
 option(BUILD_TESTS "Build test suite" ${BUILD_TESTS_DEFAULT})
+option(TURBOAGENT_SQLITE_VFS_CONFORMANCE "Build native SQLite VFS recovery tests without the full suite" OFF)
 option(ENABLE_CODING_TOOLS "Build the bounded coding tool pack" ON)
 option(ENABLE_CODEX_BRIDGE "Build the Codex App Server client bridge" ON)
 option(ENABLE_MCP_TOOLS "Build the MCP tool pack" ON)

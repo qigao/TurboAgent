@@ -223,6 +223,11 @@ jobs:
           SDK_PRESET: ${{ matrix.preset }}
         run: ctest --preset "$SDK_PRESET"
 
+      - name: Test SQLite VFS recovery on macOS
+        if: matrix.rid == 'macos-arm64'
+        shell: bash
+        run: ctest --preset ci-macos-sqlite-vfs --verbose --no-tests=error
+
       # Manual Release-Tag qualification is strictly an installed-package
       # consumer test. Prove CMake consumed the published .nupkg identified
       # by the tag and digest, never a source-SHA candidate or stale cache.

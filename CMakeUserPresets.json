@@ -253,6 +253,12 @@
         {"name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user"},
         {"name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user"},
         {"name": "ci-windows-release", "inherits": "base-test", "configurePreset": "ci-windows-release"},
-        {"name": "ci-linux-release", "inherits": "base-test", "configurePreset": "ci-linux-release"}
+        {"name": "ci-linux-release", "inherits": "base-test", "configurePreset": "ci-linux-release"},
+        {
+            "name": "ci-macos-sqlite-vfs",
+            "inherits": "base-test",
+            "configurePreset": "ci-macos-release",
+            "filter": {"include": {"label": "sqlite-vfs"}}
+        }
     ]
 }

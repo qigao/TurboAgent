@@ -174,10 +174,10 @@ static int router_host_tool_acquire(turbo_agent_router_task_t *task) {
       router->tool_active = 1;
       break;
     }
-    atomic_store_explicit(&task->tool_waiting, 1, memory_order_release);
+    task->tool_waiting = 1;
     (void)cmeta_cond_timedwait(&router->tool_changed, &router->tool_mutex, UINT64_C(25000000));
   }
-  atomic_store_explicit(&task->tool_waiting, 0, memory_order_release);
+  task->tool_waiting = 0;
   cmeta_mutex_unlock(&router->tool_mutex);
   return rc;
 }
@@ -377,7 +377,6 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   if (UINT64_MAX - now < request->timeout_ms) return SALTS_ERANGE;
   task = calloc(1, sizeof(*task));
   if (!task) return SALTS_ENOMEM;
-  atomic_init(&task->tool_waiting, 0);
   task->router = router;
   task->endpoint = selected;
   task->parent_authority = parent;
@@ -572,7 +571,7 @@ int turbo_agent_router_task_heartbeat(turbo_agent_router_task_t *task, uint64_t 
 int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *task, json_value_t **out_view) {
   turbo_agent_execution_status_t status;
   json_value_t *view;
-  int operation_rc;
+  int operation_rc, host_tool_waiting;
   if (!out_view) return SALTS_EINVAL;
   *out_view = NULL;
   if (!task || turbo_agent_execution_get_status(task->execution, &status) != SALTS_OK)
@@ -592,9 +591,11 @@ int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *task, json_
     if (turbo_runtime_json_object_set_int64(view, "runtime_result_code", operation_rc)) goto failed;
   } else if (router_set(view, "runtime_result_code", json_create_null())) goto failed;
   if (task->max_model_turns) {
+    cmeta_mutex_lock(&task->router->tool_mutex);
+    host_tool_waiting = task->tool_waiting;
+    cmeta_mutex_unlock(&task->router->tool_mutex);
     if (turbo_runtime_json_object_set_int64(view, "max_model_turns", task->max_model_turns) ||
-        router_set(view, "host_tool_waiting", json_create_bool(
-            atomic_load_explicit(&task->tool_waiting, memory_order_acquire))) ||
+        router_set(view, "host_tool_waiting", json_create_bool(host_tool_waiting)) ||
         turbo_runtime_json_object_set_int64(view, "review_resumes", task->review_resumes)) goto failed;
     if (turbo_agent_execution_wait(task->execution, 0) == SALTS_OK &&
         router_set(view, "approval_pending", json_create_bool(

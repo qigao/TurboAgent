@@ -2,7 +2,6 @@
 #define TURBO_AGENT_ROUTER_INTERNAL_H
 
 #include "turbo_agent_router.h"
-#include <stdatomic.h>
 #include <tstr.h>
 
 typedef struct router_endpoint_s {
@@ -30,7 +29,7 @@ struct turbo_agent_router_task_s {
   uint64_t deadline_ms;
   unsigned max_model_turns, model_turns, review_resumes;
   int pending_review, review_cancelled;
-  atomic_int tool_waiting;
+  int tool_waiting; /* guarded by router->tool_mutex */
   turbo_agent_tool_authority_snapshot_t parent_authority, child_authority;
   tstr thread_id, parent_run_id;
   uint64_t started_ms, observed_ms, heartbeat_ms, estimated_micros;

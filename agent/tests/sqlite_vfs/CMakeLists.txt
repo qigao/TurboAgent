@@ -19,3 +19,16 @@ foreach(phase IN ITEMS started committed)
       TIMEOUT 90 LABELS "agent;recovery;process;sqlite-vfs")
   endforeach()
 endforeach()
+
+foreach(phase IN ITEMS started committed)
+  foreach(recovery IN ITEMS write_before write_after sync_before sync_after partial_then_sync write_error sync_error)
+    add_test(NAME test_sqlite_vfs_recovery_${phase}_${recovery}
+      COMMAND "${CMAKE_COMMAND}"
+        "-DWORKER=$<TARGET_FILE:tool_journal_vfs_fixture>"
+        "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/recovery_cases"
+        "-DPHASE=${phase}" "-DFAULT=crash_database_sync_after" "-DRECOVERY_FAULT=${recovery}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_vfs.cmake")
+    set_tests_properties(test_sqlite_vfs_recovery_${phase}_${recovery} PROPERTIES
+      TIMEOUT 90 LABELS "agent;recovery;process;sqlite-vfs;sqlite-recovery-restart")
+  endforeach()
+endforeach()

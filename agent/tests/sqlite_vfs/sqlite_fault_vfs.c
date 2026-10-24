@@ -27,7 +27,9 @@ static int matches(fault_file_t *file, int operation) {
 
 static int select_fault(fault_file_t *file, int operation, int bytes, sqlite3_int64 offset) {
   if (!matches(file, operation)) return 0;
-  fault.armed = 0; /* Restore native I/O before SQLite attempts rollback. */
+  /* Ordinary faults permit rollback; recovery-open error cases keep the
+   * selected operation failing until every connection/file has closed. */
+  if (fault.mode != VFS_PERSISTENT_ERROR) fault.armed = 0;
   ++fault.stats.failures;
   fault.stats.error = fault.error;
   fault.stats.flags = file->flags;

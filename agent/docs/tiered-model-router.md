@@ -178,13 +178,37 @@ current segment. Retaining the first Execution keeps that id alive without creat
 another result owner. Derived approval checkpoint identity is copied before terminal
 publication; Runtime owns the actual state and records throughout.
 
-One authority tool lane is held through task release. A retained loop excludes all
-other Router tasks, and a loop cannot start while any model task is retained. This
-bounded serial choice preserves Host hooks, executor and single-writer store ownership;
-it does not add concurrent policy reads/writes, parallel Host dispatch or a second
-scheduler. To enable those later requires explicit ownership of shared hook state,
-policy snapshots/locks and their lifetimes, store concurrency, approval identity and
-callback cancellation. Generation alone provides none of that synchronization.
+By default one authority tool lane is held through task release. A retained loop
+excludes all other Router tasks, and a loop cannot start while any model task is
+retained. Existing callers keep this behavior.
+
+For independently progressing tasks, call
+`turbo_agent_router_set_tool_task_limit(router, limit)` while no task is retained.
+The bound is 1..16, further limited by distinct endpoint owners and the existing
+bounded Execution pool. A limit greater than one permits parallel model calls,
+separate approval pauses and model-only tasks alongside tool loops. Every retained
+tool task counts toward the limit until release, including terminal/paused tasks.
+Rejected Execution admission restores only that endpoint/count; no retry occurs.
+
+One Router-owned synchronization gate covers the **entire shared Host ToolNode**:
+before/after middleware and guardrails, approval consumption, Journal admission and
+replay, callback/drain, result validation and trace delivery. Model calls and persisted
+approval waits hold no gate. Shared Host callbacks stay serial; this mode provides
+concurrent task progress, not parallel effects on one authority Agent. Separate
+endpoint Runtime/stores still have exactly one execution owner. The Router does not
+add a scheduler, persistent queue, cross-store transaction or FIFO/fairness promise.
+
+A waiting task checks its original Execution cancellation/deadline at bounded wait
+intervals, before entering Host hooks or the Journal. `task_inspect()` exposes the
+current `host_tool_waiting` diagnostic. Cancelling/expiring one waiter does not stop
+the owner or release its endpoint early; an in-flight callback must still drain.
+Approvals use each task's canonical Runtime checkpoint even when different tasks
+propose identical call ids and arguments. Approving/rejecting one grants nothing to
+another. Host APIs remain serialized and are not reentrant from callbacks. Keep the
+authority Agent, hooks, registry and their dependencies exclusively owned by this
+Router; external users/other Routers are outside the gate. Freeze configuration and
+keep policy replacement quiescent across all running/queued segments and callbacks.
+Generation remains an invalidation token, not permission for concurrent mutation.
 
 Rollback is to keep using `submit()`; existing callers, struct layouts and registrations
 are unchanged. `test_turbo_agent_router_tool_loop` exercises real Runtime/Execution,
@@ -192,8 +216,12 @@ Host ToolNode/Journal and offline Responses/compatible-Chat providers: successfu
 loops, approval/resume/rejection, argument and call-id binding, quiescent generation
 invalidation, child/Host permission, replay result validation, unknown effects,
 result middleware, turn bounds, bounded queue rejection and liveness/deadline gates.
-No paid-model quality, durable supervision, remote loss recovery or multi-worker
-acceptance claim is made; #213 remains open for those remaining gates.
+Opt-in task-concurrency cases additionally cover overlapping model entry, independent
+identical-call approvals, dispatch-hook serialization, cancelled/timed-out/lost Host
+waiters, model progress behind a blocked callback, authority invalidation, rejected
+admission rollback and failure release. No paid-model quality, durable task admission,
+remote loss recovery or parallel shared-Host effect claim is made; #213 remains open
+for those remaining gates.
 
 ## Bounded worker groups and explicit aggregation
 

@@ -43,6 +43,8 @@ int turbo_agent_router_destroy(turbo_agent_router_t *router) {
   for (i = 0; i < router->count; ++i)
     if (router->endpoints[i].busy) return SALTS_EBUSY;
   for (i = 0; i < router->count; ++i) tstr_free(router->endpoints[i].id);
+  cmeta_cond_destroy(&router->tool_changed);
+  cmeta_mutex_destroy(&router->tool_mutex);
   free(router);
   return SALTS_OK;
 }
@@ -75,6 +77,9 @@ int turbo_agent_router_create(const turbo_agent_router_config_t *config,
   router = calloc(1, sizeof(*router));
   if (!router) return SALTS_ENOMEM;
   router->authority_agent = config->authority_agent;
+  router->tool_task_limit = 1;
+  cmeta_mutex_init(&router->tool_mutex);
+  cmeta_cond_init(&router->tool_changed);
   router->count = config->endpoint_count;
   for (i = 0; i < router->count; ++i) {
     router->endpoints[i].config = config->endpoints[i];
@@ -86,6 +91,15 @@ int turbo_agent_router_create(const turbo_agent_router_config_t *config,
     router->endpoints[i].config.id = router->endpoints[i].id;
   }
   *out_router = router;
+  return SALTS_OK;
+}
+
+int turbo_agent_router_set_tool_task_limit(turbo_agent_router_t *router, unsigned limit) {
+  size_t i;
+  if (!router || !limit || limit > TURBO_AGENT_ROUTER_MAX_ENDPOINTS) return SALTS_EINVAL;
+  for (i = 0; i < router->count; ++i)
+    if (router->endpoints[i].busy) return SALTS_EBUSY;
+  router->tool_task_limit = limit;
   return SALTS_OK;
 }
 
@@ -143,6 +157,40 @@ static int router_model_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   return router_loop_record(task, ctx->state, "completed");
 }
 
+/* The Host's entire ToolNode (hooks, approval, Journal, callback and output
+ * checks) has one owner. Approval checkpoints and model calls hold no lane.
+ * Waiters remain bounded by accepted endpoint handles and use their original
+ * Execution cancellation/deadline, before any Host hook or Journal admission. */
+static int router_host_tool_acquire(turbo_agent_router_task_t *task) {
+  turbo_agent_router_t *router = task->router;
+  turbo_agent_execution_context_t context = {0};
+  int rc;
+  turbo_agent_execution_context_get(&context);
+  cmeta_mutex_lock(&router->tool_mutex);
+  for (;;) {
+    rc = context.cancel_token ? turbo_cancel_token_check(context.cancel_token) : SALTS_OK;
+    if (rc != SALTS_OK) break;
+    if (!router->tool_active) {
+      router->tool_active = 1;
+      break;
+    }
+    atomic_store_explicit(&task->tool_waiting, 1, memory_order_release);
+    (void)cmeta_cond_timedwait(&router->tool_changed, &router->tool_mutex, UINT64_C(25000000));
+  }
+  atomic_store_explicit(&task->tool_waiting, 0, memory_order_release);
+  cmeta_mutex_unlock(&router->tool_mutex);
+  return rc;
+}
+
+static void router_host_tool_release(turbo_agent_router_t *router) {
+  cmeta_mutex_lock(&router->tool_mutex);
+  router->tool_active = 0;
+  /* Every waiter rechecks control before ownership. Broadcast avoids handing
+   * the only wake-up to a cancelled task while another waiter stays asleep. */
+  cmeta_cond_broadcast(&router->tool_changed);
+  cmeta_mutex_unlock(&router->tool_mutex);
+}
+
 static int router_tools_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
   turbo_agent_router_task_t *task = user_data;
   turbo_agent_t *child = task->endpoint->config.agent;
@@ -166,7 +214,19 @@ static int router_tools_node(turbo_graph_exec_ctx_t *ctx, void *user_data) {
       turbo_tool_registry_get_effects(child->tool_registry, canonical, &effects) != TURBO_TOOL_OK ||
       !effects || (effects & TURBO_TOOL_EFFECT_UNKNOWN))
     return router_loop_halt(ctx, task, "tool_contract_required");
-  rc = turbo_agent_tool_node_checked(ctx, task->router->authority_agent, &outcome);
+  rc = router_host_tool_acquire(task);
+  if (rc == SALTS_ECANCELED || rc == SALTS_ETIMEDOUT) {
+    if (router_loop_record(task, ctx->state, rc == SALTS_ETIMEDOUT
+        ? "host_tool_deadline" : "host_tool_cancelled")) return SALTS_ENOMEM;
+    /* Let the controlled graph publish its canonical cancelled/deadline
+     * checkpoint at this same node; returning a node error loses that status. */
+    turbo_graph_ctx_set_next(ctx, ctx->current_node);
+    return SALTS_OK;
+  }
+  if (rc) return rc;
+  if (!turbo_agent_router_authority_current_internal(task)) rc = SALTS_EPERM;
+  else rc = turbo_agent_tool_node_checked(ctx, task->router->authority_agent, &outcome);
+  router_host_tool_release(task->router);
   if (rc) return rc;
   if (ctx->stop && turbo_agent_state_review_required(ctx->state))
     return router_loop_record(task, ctx->state, "approval_pending");
@@ -273,13 +333,15 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
       !turbo_agent_router_id_valid_internal(request->thread_id) || !request->parent_link ||
       !request->parent_link->parent_agent_run_id || !request->parent_link->parent_agent_run_id[0] ||
       !input || json_type(input) != JSON_OBJECT) return SALTS_EINVAL;
-  if (router->tool_lane_busy) return SALTS_EBUSY;
+  if (router->tool_task_limit == 1 && router->tool_task_count) return SALTS_EBUSY;
   if (max_model_turns) {
     if (max_model_turns < 2 || max_model_turns > TURBO_AGENT_ROUTER_MAX_MODEL_TURNS ||
         request->role != TURBO_AGENT_ROUTER_EXECUTE ||
         !(request->required_capabilities & TURBO_AGENT_ROUTER_TOOL_PROPOSALS)) return SALTS_EINVAL;
-    for (i = 0; i < router->count; ++i)
-      if (router->endpoints[i].busy) return SALTS_EBUSY;
+    if (router->tool_task_count >= router->tool_task_limit) return SALTS_EBUSY;
+    if (router->tool_task_limit == 1)
+      for (i = 0; i < router->count; ++i)
+        if (router->endpoints[i].busy) return SALTS_EBUSY;
     for (i = 0; i < router->authority_agent->guardrail_count; ++i)
       if (router->authority_agent->guardrails[i].before_tool) guarded = 1;
     if (!guarded || !router->authority_agent->tool_registry ||
@@ -315,6 +377,7 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   if (UINT64_MAX - now < request->timeout_ms) return SALTS_ERANGE;
   task = calloc(1, sizeof(*task));
   if (!task) return SALTS_ENOMEM;
+  atomic_init(&task->tool_waiting, 0);
   task->router = router;
   task->endpoint = selected;
   task->parent_authority = parent;
@@ -357,12 +420,12 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   options.abi_version = TURBO_AGENT_EXECUTION_ABI_VERSION;
   options.deadline_mono_ms = task->deadline_ms;
   selected->busy = 1;
-  router->tool_lane_busy = max_model_turns != 0;
+  if (max_model_turns) ++router->tool_task_count;
   rc = turbo_agent_execution_start_internal(executor, selected->config.runtime, task->graph, state,
       &graph_options, &runtime_options, &options, &hooks, &task->execution);
   if (rc != SALTS_OK) {
     selected->busy = 0;
-    router->tool_lane_busy = 0;
+    if (max_model_turns) --router->tool_task_count;
     goto rejected;
   }
   json_free(state);
@@ -530,6 +593,8 @@ int turbo_agent_router_task_inspect(const turbo_agent_router_task_t *task, json_
   } else if (router_set(view, "runtime_result_code", json_create_null())) goto failed;
   if (task->max_model_turns) {
     if (turbo_runtime_json_object_set_int64(view, "max_model_turns", task->max_model_turns) ||
+        router_set(view, "host_tool_waiting", json_create_bool(
+            atomic_load_explicit(&task->tool_waiting, memory_order_acquire))) ||
         turbo_runtime_json_object_set_int64(view, "review_resumes", task->review_resumes)) goto failed;
     if (turbo_agent_execution_wait(task->execution, 0) == SALTS_OK &&
         router_set(view, "approval_pending", json_create_bool(
@@ -567,7 +632,7 @@ int turbo_agent_router_task_release(turbo_agent_router_task_t *task) {
   turbo_agent_execution_release(task->identity_execution);
   turbo_graph_destroy(task->graph);
   task->endpoint->busy = 0;
-  if (task->max_model_turns) task->router->tool_lane_busy = 0;
+  if (task->max_model_turns) --task->router->tool_task_count;
   tstr_free(task->review_checkpoint);
   tstr_free(task->thread_id);
   tstr_free(task->parent_run_id);

@@ -12,6 +12,7 @@
 
 typedef struct loop_fixture_s {
   atomic_int model_calls, tool_calls, entered, open;
+  atomic_int before_calls, after_calls, thread_calls[2];
   int chat, proposals, multi, malformed, callback_fail, invalid_result;
   int approval, deny, rewrite_args, rewrite_result, host_hooks, context_ok, approved;
   int saw_result, bad_model, fail_followup;
@@ -68,12 +69,19 @@ static turbo_tool_status_t loop_tool(const char *args, const turbo_tool_executio
   json_value_t *value = json_parse(args, strlen(args));
   atomic_fetch_add(&f->tool_calls, 1);
   f->context_ok = ctx && ctx->cancel_token && ctx->deadline_mono_ms && ctx->run_id &&
-      ctx->thread_id && strcmp(ctx->thread_id, "loop-thread") == 0 && ctx->tool_call_id &&
+      ctx->thread_id && (!strcmp(ctx->thread_id, "loop-thread") ||
+                        !strcmp(ctx->thread_id, "loop-other")) && ctx->tool_call_id &&
       strcmp(ctx->tool_call_id, "call-1") == 0 && value &&
       turbo_runtime_json_value_as_int64(json_object_get(value, "value"), 0) ==
           (f->rewrite_args ? 8 : 7);
   json_free(value);
   f->approved = turbo_agent_current_tool_approval_granted();
+  if (ctx && ctx->thread_id)
+    atomic_fetch_add(&f->thread_calls[!strcmp(ctx->thread_id, "loop-other")], 1);
+  atomic_store_explicit(&f->entered, 1, memory_order_release);
+  uint64_t end = cmeta_monotonic_ms() + 3000;
+  while (!atomic_load_explicit(&f->open, memory_order_acquire) && cmeta_monotonic_ms() < end)
+    cmeta_thread_yield();
   *out = loop_copy(f->invalid_result ? "{\"ok\":\"wrong\"}" : "{\"ok\":true}");
   return f->callback_fail ? TURBO_TOOL_ERROR : TURBO_TOOL_OK;
 }
@@ -94,6 +102,7 @@ static int loop_before_tool(turbo_agent_t *agent, json_value_t *state, const cha
     const char *name, char **args, void *user) {
   loop_fixture_t *f = user;
   (void)agent; (void)state; (void)id; (void)name;
+  atomic_fetch_add(&f->before_calls, 1);
   if (f->rewrite_args) {
     tstr replacement = tstr_dup("{\"value\":8}");
     if (!replacement) return -1;
@@ -106,6 +115,7 @@ static int loop_after_tool(turbo_agent_t *agent, json_value_t *state, const char
     const char *name, const char *args, char **out, turbo_tool_status_t status, void *user) {
   loop_fixture_t *f = user;
   (void)agent; (void)state; (void)id; (void)name; (void)args; (void)status;
+  atomic_fetch_add(&f->after_calls, 1);
   if (f->rewrite_result) {
     char *replacement = loop_copy("not json");
     if (!replacement) return -1;
@@ -158,6 +168,27 @@ static json_value_t *loop_journal(loop_fixture_t *f) {
   return records;
 }
 
+static void loop_wait_host_lane(turbo_agent_router_task_t *task) {
+  uint64_t end = cmeta_monotonic_ms() + 2000;
+  int waiting = 0;
+  do {
+    json_value_t *view = NULL;
+    check_equal(turbo_agent_router_task_inspect(task, &view), SALTS_OK);
+    waiting = json_get_bool(view, "host_tool_waiting", 0);
+    json_free(view);
+    if (!waiting) cmeta_thread_yield();
+  } while (!waiting && cmeta_monotonic_ms() < end);
+  check_true(waiting);
+}
+
+static cmeta_threadpool_t *loop_parallel_pool(cmeta_threadpool_t *old) {
+  cmeta_threadpool_config_t config = {.num_threads = 2, .queue_capacity = 2};
+  cmeta_threadpool_destroy(old);
+  cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&config);
+  check_not_null(pool);
+  return pool;
+}
+
 spec("supervised tiered Router tool loop") {
   static loop_fixture_t f[3];
   static turbo_agent_t *agents[3];
@@ -169,7 +200,7 @@ spec("supervised tiered Router tool loop") {
   static turbo_agent_policy_t grant;
   static turbo_tool_registry_t *tools;
   static turbo_agent_router_t *router;
-  static turbo_agent_router_task_t *task;
+  static turbo_agent_router_task_t *task, *other;
   static cmeta_threadpool_t *pool;
   static json_value_t *input, *summary, *state, *view;
   static turbo_agent_runtime_t *audit_runtime;
@@ -184,6 +215,8 @@ spec("supervised tiered Router tool loop") {
       memset(&f[i], 0, sizeof(f[i]));
       atomic_init(&f[i].model_calls, 0); atomic_init(&f[i].tool_calls, 0);
       atomic_init(&f[i].entered, 0); atomic_init(&f[i].open, 1);
+      atomic_init(&f[i].before_calls, 0); atomic_init(&f[i].after_calls, 0);
+      atomic_init(&f[i].thread_calls[0], 0); atomic_init(&f[i].thread_calls[1], 0);
       f[i].chat = i == 2;
       f[i].proposals = 1;
     }
@@ -244,11 +277,16 @@ spec("supervised tiered Router tool loop") {
     pool = cmeta_threadpool_create_with_config(&pool_config); check_not_null(pool);
     input = turbo_agent_session_create_input_state_json_value("Execute one approved Host operation");
     check_not_null(input);
-    task = NULL; summary = state = view = NULL;
+    task = other = NULL; summary = state = view = NULL;
     audit_runtime = NULL;
   }
   after_each() {
     for (int i = 0; i < 3; ++i) atomic_store_explicit(&f[i].open, 1, memory_order_release);
+    if (other) {
+      turbo_agent_router_task_cancel(other, TURBO_CANCEL_SHUTDOWN);
+      check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+      check_equal(turbo_agent_router_task_release(other), SALTS_OK);
+    }
     if (task) {
       turbo_agent_router_task_cancel(task, TURBO_CANCEL_SHUTDOWN);
       check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
@@ -527,6 +565,205 @@ spec("supervised tiered Router tool loop") {
     check_equal(turbo_agent_router_task_review(task, pool, 1), SALTS_ECANCELED);
     check_equal(turbo_agent_router_task_release(task), SALTS_OK); task = NULL;
     check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+  }
+
+  it("configures bounded tool-task progress only before retaining any task") {
+    check_equal(turbo_agent_router_set_tool_task_limit(NULL, 2), SALTS_EINVAL);
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 0), SALTS_EINVAL);
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 17), SALTS_EINVAL);
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+    f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 1), SALTS_EBUSY);
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_EBUSY);
+    check_equal(turbo_agent_router_task_release(task), SALTS_OK); task = NULL;
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 1), SALTS_OK);
+  }
+
+  it("runs both model owners concurrently before synchronized Host dispatch") {
+    pool = loop_parallel_pool(pool);
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+    atomic_store(&f[1].open, 0); atomic_store(&f[2].open, 0);
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    request.thread_id = "loop-other";
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_OK);
+    loop_entered(&f[1]); loop_entered(&f[2]);
+    check_equal(atomic_load(&f[0].tool_calls), 0);
+    atomic_store(&f[1].open, 1); atomic_store(&f[2].open, 1);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].tool_calls), 2);
+    check_equal(atomic_load(&f[0].thread_calls[0]), 1);
+    check_equal(atomic_load(&f[0].thread_calls[1]), 1);
+    check_true(f[0].context_ok);
+    for (int i = 1; i < 3; ++i) {
+      json_value_t *records = loop_journal(&f[i]);
+      check_equal(json_array_size(records), 1u);
+      check_equal(json_get_string(json_array_get(records, 0), "phase"), "committed");
+      check_equal(json_get_string(json_array_get(records, 0), "thread_id"),
+                  i == 1 ? "loop-other" : "loop-thread");
+      json_free(records);
+    }
+  }
+
+  it("keeps identical call ids and arguments in independent canonical approvals") {
+    pool = loop_parallel_pool(pool);
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+    f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    request.thread_id = "loop-other";
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].tool_calls), 0);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(turbo_runtime_json_object_set(state, "review_approved", json_create_bool(1)), 0);
+    /* Approve the second owner first. Mutating the first result is no grant. */
+    check_equal(turbo_agent_router_task_review(other, pool, 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].thread_calls[0]), 0);
+    check_equal(atomic_load(&f[0].thread_calls[1]), 1);
+    check_true(f[0].approved);
+    check_equal(turbo_agent_router_task_inspect(task, &view), SALTS_OK);
+    check_true(json_get_bool(view, "approval_pending", 0));
+    check_equal(turbo_agent_router_task_review(task, pool, 0), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].tool_calls), 1);
+    json_value_t *records = loop_journal(&f[2]);
+    check_equal(json_array_size(records), 0u); json_free(records);
+    check_equal(turbo_agent_router_task_release(other), SALTS_OK); other = NULL;
+    /* A retained rejected owner does not prevent using the released endpoint. */
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &other), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].tool_calls), 1);
+  }
+
+  for (int stopped = 0; stopped < 3; ++stopped) {
+    it("stops a queued Host dispatch before hooks and Journal admission, cause=%d", stopped) {
+      pool = loop_parallel_pool(pool);
+      check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+      atomic_store(&f[0].open, 0);
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+      loop_entered(&f[0]);
+      request.thread_id = "loop-other";
+      if (stopped == 1) request.timeout_ms = request.heartbeat_timeout_ms = 300;
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_OK);
+      loop_wait_host_lane(other);
+      check_equal(atomic_load(&f[0].before_calls), 1);
+      check_equal(atomic_load(&f[0].after_calls), 0);
+      if (stopped == 0)
+        check_equal(turbo_agent_router_task_cancel(other, TURBO_CANCEL_USER), SALTS_OK);
+      if (stopped == 2)
+        check_equal(turbo_agent_router_task_poll(other, cmeta_monotonic_ms() + 5000), SALTS_ECANCELED);
+      check_equal(turbo_agent_router_task_wait(other, 1500), SALTS_OK);
+      check_equal(turbo_agent_router_task_inspect(other, &view), SALTS_OK);
+      check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "execution_status"), -1),
+                  stopped == 1 ? TURBO_AGENT_EXECUTION_TIMED_OUT : TURBO_AGENT_EXECUTION_CANCELLED);
+      check_false(json_get_bool(view, "host_tool_waiting", 1));
+      check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "runtime_result_code"), -1), SALTS_OK);
+      json_value_t *stopped_summary = NULL, *stopped_state = NULL;
+      check_equal(turbo_agent_router_task_take_result(other, &stopped_summary, &stopped_state),
+                  stopped == 2 ? SALTS_ECANCELED : SALTS_OK);
+      if (stopped != 2) {
+        check_equal(json_get_string(stopped_summary, "status"), stopped == 1 ? "timed_out" : "cancelled");
+        check_equal(json_get_string(json_object_get(stopped_state, "router_tool_loop"), "reason"),
+                    stopped == 1 ? "host_tool_deadline" : "host_tool_cancelled");
+      }
+      json_free(stopped_summary); json_free(stopped_state);
+      check_equal(atomic_load(&f[0].tool_calls), 1);
+      check_equal(atomic_load(&f[0].before_calls), 1);
+      json_value_t *records = loop_journal(&f[1]);
+      check_equal(json_array_size(records), 0u); json_free(records);
+      check_equal(turbo_agent_router_task_release(other), SALTS_OK); other = NULL;
+      /* Even a blocked callback does not prevent an independent model task. */
+      request.timeout_ms = 10000; request.heartbeat_timeout_ms = 5000;
+      check_equal(turbo_agent_router_submit(router, pool, &request, input, &other), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(other, 1000), SALTS_OK);
+      check_equal(atomic_load(&f[0].after_calls), 0);
+      atomic_store(&f[0].open, 1);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      check_equal(atomic_load(&f[0].after_calls), 1);
+    }
+  }
+
+  it("holds Host hooks and output processing in the same dispatch lane as the callback") {
+    pool = loop_parallel_pool(pool);
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+    atomic_store(&f[0].open, 0);
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    loop_entered(&f[0]);
+    request.thread_id = "loop-other";
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_OK);
+    loop_wait_host_lane(other);
+    check_equal(atomic_load(&f[0].before_calls), 1);
+    check_equal(atomic_load(&f[0].tool_calls), 1);
+    check_equal(turbo_agent_router_task_release(task), SALTS_EBUSY);
+    check_equal(turbo_agent_router_destroy(router), SALTS_EBUSY);
+    atomic_store(&f[0].open, 1);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].before_calls), 2);
+    check_equal(atomic_load(&f[0].after_calls), 2);
+    check_equal(atomic_load(&f[0].tool_calls), 2);
+  }
+
+  for (int invalidated = 0; invalidated < 2; ++invalidated) {
+    it("rechecks each authority after independent approval pauses, parent=%d", invalidated) {
+      pool = loop_parallel_pool(pool);
+      check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+      f[0].approval = 1;
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+      request.thread_id = "loop-other";
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+      /* Both segments are terminal: policy replacement is actually quiescent. */
+      check_equal(turbo_agent_set_tool_policy(agents[invalidated ? 0 : 2], &grant), 0);
+      check_equal(turbo_agent_router_task_review(task, pool, 1), SALTS_EPERM);
+      check_equal(turbo_agent_router_task_review(other, pool, 1), invalidated ? SALTS_EPERM : SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+      check_equal(atomic_load(&f[0].thread_calls[0]), 0);
+      check_equal(atomic_load(&f[0].thread_calls[1]), invalidated ? 0 : 1);
+    }
+  }
+
+  it("rolls back only rejected endpoint admission without leaking the tool-task limit") {
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+    atomic_store(&f[0].open, 0);
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    loop_entered(&f[0]);
+    check_equal(cmeta_threadpool_submit(pool, loop_block, &f[1]), SALTS_OK);
+    request.thread_id = "loop-other";
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_ENOBUFS);
+    check_null(other); check_equal(atomic_load(&f[1].model_calls), 0);
+    atomic_store(&f[0].open, 1);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    loop_entered(&f[1]);
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].tool_calls), 2);
+  }
+
+  for (int failure = 0; failure < 3; ++failure) {
+    it("releases dispatch ownership after a Host failure, case=%d", failure) {
+      pool = loop_parallel_pool(pool);
+      check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+      if (failure == 0) f[0].deny = 1;
+      if (failure == 1) f[0].callback_fail = 1;
+      if (failure == 2) f[0].rewrite_result = 1;
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+      request.thread_id = "loop-other";
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+      check_equal(atomic_load(&f[0].before_calls), 2);
+      check_equal(atomic_load(&f[0].tool_calls), failure ? 2 : 0);
+      check_equal(turbo_agent_router_task_take_result(other, &summary, &state), SALTS_OK);
+      check_equal(json_get_string(summary, "status"), "interrupted");
+      check_equal(json_get_string(json_object_get(state, "router_tool_loop"), "reason"),
+                  failure == 2 ? "invalid_tool_result" : "tool_failed");
+    }
   }
 
   for (int contract = 0; contract < 2; ++contract) {

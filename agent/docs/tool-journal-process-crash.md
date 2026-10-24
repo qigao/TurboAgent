@@ -198,3 +198,14 @@ zero additional subject callbacks and no Journal rewrite. Raw pre-recovery
 header inspection and observed first-Store recovery I/O distinguish the two sides.
 This selector qualifies the current exclusive Store's retained-header commit
 style; delete/truncate styles and device power loss remain separate gates.
+
+The group now contains 58 VFS cases, including fourteen that interrupt hot-journal
+recovery itself twice during production Store open. They cover write/sync cuts,
+a changed-byte partial recovery write followed by a sync cut, and persistent
+write/sync errors through failed-open cleanup. Returned errors must clear every
+output Store field and close every VFS file. Before another recovery attempt,
+the original hot-journal magic and full hash must remain intact and independent
+effect counters must be unchanged. A clean Store owner then completes recovery,
+returns the original subject as UNKNOWN without redispatch, admits one healthy
+identity and permits a later owner to replay both. These are controlled recovery
+failures with the OS/cache running, not hardware power-loss qualification.

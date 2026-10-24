@@ -107,14 +107,43 @@ Native disk inspection then verifies phase, status, identity, output and externa
 effect counts. These cases distinguish a lost commit acknowledgement from an
 uncommitted transaction with an unknown effect.
 
+## Interrupting hot-journal recovery itself
+
+Fourteen cases seed a real hot journal by exiting after the original database
+sync, then interrupt production Store open twice in independent processes.
+Per persistence phase, the seven profiles are recovery-write before/after,
+recovery-sync before/after, partial recovery write followed by a sync cut,
+and persistent write/sync errors until failed-open cleanup completes.
+
+The VFS is armed before the production Store opens; no Runtime/Executor or
+helper SQLite connection repairs the primary database first. Exact exit codes,
+recovery-arm markers and native operation/mode markers are required for cuts.
+A partial first attempt can restore all changed bytes, so its second cut occurs
+at sync instead of assuming another changed partial write remains available.
+
+Persistent-error cases require `SALTS_EIO`, every output Store callback/context
+cleared (including preexisting sentinels), all VFS files closed and successful
+VFS removal. The chosen write/sync keeps failing through connection destruction;
+it does not turn into a one-shot success while SQLite cleans up.
+
+After each failed attempt, raw journal magic and its full SHA-256 must match the
+original hot journal. Raw database/journal snapshots are kept on failure. Separate
+processes inspect only the external effect database, requiring unchanged subject
+counts and no healthy effect yet; they cannot repair the primary database.
+After both failures, a clean production Store open must finish recovery. The
+original subject still replays UNKNOWN without another callback, a distinct
+healthy identity commits once, and a final owner replays both. Native inspection
+checks integrity, exact prior phase/admitted fence, identities and effect counts.
+
 ## Running and scope
 
-Normal native `BUILD_TESTS=ON` builds include all 44 CTests with label
+Normal native `BUILD_TESTS=ON` builds include all 58 CTests with label
 `sqlite-vfs`. `TURBOAGENT_SQLITE_VFS_CONFORMANCE=ON` builds only this fixture when
 the full test suite is disabled. The macOS SDK profile uses that option and runs
 `ctest --preset ci-macos-sqlite-vfs --verbose --no-tests=error`; Linux and Windows
 run the cases as part of their full suite. Cross-compiled Android does not run
 this host-native fixture.
+The 14 recovery-restart cases also have label `sqlite-recovery-restart`.
 
 Failures retain their database directory and report the failing stage. Logs
 record the native VFS name, fault count/error/file flags, write offset/length,

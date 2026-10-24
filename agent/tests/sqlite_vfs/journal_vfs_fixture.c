@@ -35,6 +35,17 @@ static const fault_case_t cases[] = {
 };
 static const char result[] = "{\"effect_count\":1}";
 
+typedef struct recovery_case_s { const char *name; int operation, mode; } recovery_case_t;
+static const recovery_case_t recovery_cases[] = {
+  {"write_before", VFS_WRITE, VFS_EXIT_BEFORE},
+  {"write_after", VFS_WRITE, VFS_EXIT_AFTER},
+  {"sync_before", VFS_SYNC, VFS_EXIT_BEFORE},
+  {"sync_after", VFS_SYNC, VFS_EXIT_AFTER},
+  {"partial_then_sync", VFS_WRITE, VFS_PARTIAL_EXIT},
+  {"write_error", VFS_WRITE, VFS_PERSISTENT_ERROR},
+  {"sync_error", VFS_SYNC, VFS_PERSISTENT_ERROR}
+};
+
 static int committed_cut(const fault_case_t *cut) {
   return cut->operation == VFS_INVALIDATE &&
       (cut->mode == VFS_FAIL_AFTER || cut->mode == VFS_EXIT_AFTER);
@@ -224,6 +235,55 @@ static int initialize(const char *directory) {
   return 0;
 }
 
+/* No Runtime, Executor or pre-recovery SQLite helper is created here. The
+ * production Store's initial open itself must hit actual hot-journal I/O. */
+static int interrupt_recovery(const char *directory, const char *phase,
+                              const fault_case_t *seed, const recovery_case_t *recovery) {
+  turbo_runtime_sqlite_config_t config;
+  turbo_agent_runtime_store_t store;
+  sqlite_fault_stats_t stats;
+  tstr path = tstr_format("{}/journal.db", directory);
+  int rc;
+  REQUIRE(path && !strcmp(seed->name, "crash_database_sync_after"));
+  REQUIRE(sqlite_fault_vfs_install(path) == SQLITE_OK);
+  vfs_test_sqlite_config_init(&config); config.path = path; config.create_if_missing = 0;
+  /* Prove failure clears every output field, including preexisting sentinels. */
+  store = (turbo_agent_runtime_store_t){phase_put, phase_get, phase_list, &config, phase_free, phase_create};
+  printf("RECOVERY_ARM phase=%s fault=%s recovery=%s\n", phase, seed->name, recovery->name);
+  sqlite_fault_vfs_arm(VFS_MAIN, recovery->operation,
+      recovery->operation == VFS_WRITE ? SQLITE_IOERR_WRITE : SQLITE_IOERR_FSYNC, recovery->mode);
+  rc = vfs_test_sqlite_store_open(&config, &store);
+  REQUIRE(recovery->mode == VFS_PERSISTENT_ERROR); /* A missed exit is not recovery. */
+  REQUIRE(rc == SALTS_EIO);
+  REQUIRE(!store.put && !store.get && !store.list && !store.user_data &&
+          !store.user_data_free && !store.create_if_absent);
+  stats = sqlite_fault_vfs_stats();
+  REQUIRE(stats.failures >= 1 && stats.mode == VFS_PERSISTENT_ERROR);
+  REQUIRE(stats.flags & SQLITE_OPEN_MAIN_DB);
+  REQUIRE(stats.live_files == 0);
+  printf("RECOVERY_ERROR phase=%s recovery=%s hits=%d status=EIO out_store_clear=1 live_files=0\n",
+         phase, recovery->name, stats.failures);
+  REQUIRE(sqlite_fault_vfs_remove() == SQLITE_OK);
+  tstr_free(path);
+  return 0;
+}
+
+/* Inspect only the independent effect database while the primary journal is
+ * still hot. This must not open or repair the primary SQLite database. */
+static int inspect_recovery_effects(const char *directory, const char *phase, const fault_case_t *seed) {
+  sqlite3 *oracle = NULL;
+  tstr path = tstr_format("{}/external.db", directory);
+  int subject, healthy;
+  REQUIRE(path && !strcmp(seed->name, "crash_database_sync_after"));
+  REQUIRE(sqlite3_open_v2(path, &oracle, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK);
+  REQUIRE(oracle_count(oracle, "subject", &subject) == 0 && subject == (strcmp(phase, "started") ? 1 : 0));
+  REQUIRE(oracle_count(oracle, "healthy", &healthy) == 0 && healthy == 0);
+  REQUIRE(sqlite3_close(oracle) == SQLITE_OK);
+  printf("RECOVERY_EFFECTS phase=%s subject=%d healthy=%d\n", phase, subject, healthy);
+  tstr_free(path);
+  return 0;
+}
+
 static int exercise(const char *directory, const char *phase, const fault_case_t *cut,
                      int inject, int healthy_replayed) {
   fixture_t f = {0};
@@ -378,6 +438,13 @@ int main(int argc, char **argv) {
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
     if (!strcmp(argv[3], cases[i].name)) cut = &cases[i];
   if (!cut) return 2;
+  if (!strncmp(argv[1], "recover_fail_", 13)) {
+    for (size_t i = 0; i < sizeof(recovery_cases) / sizeof(recovery_cases[0]); ++i)
+      if (!strcmp(argv[1] + 13, recovery_cases[i].name))
+        return interrupt_recovery(argv[4], argv[2], cut, &recovery_cases[i]);
+    return 2;
+  }
+  if (!strcmp(argv[1], "recovery_effects")) return inspect_recovery_effects(argv[4], argv[2], cut);
   if (!strcmp(argv[1], "init")) return initialize(argv[4]);
   if (!strcmp(argv[1], "inspect")) return inspect(argv[4], argv[2], cut);
   if (!strcmp(argv[1], "inject") || !strcmp(argv[1], "recover") || !strcmp(argv[1], "replay")) {

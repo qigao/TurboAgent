@@ -39,10 +39,12 @@ static int select_fault(fault_file_t *file, int operation, int bytes, sqlite3_in
 
 static void exit_at_fault(void) {
   printf("VFS_CRASH hit=1 mode=%d kind=%d operation=%d requested_offset=%lld requested_bytes=%d "
-         "native_completed=%d native_offset=%lld native_bytes=%d changed_bytes=%d readback_bytes=%d\n",
+         "native_completed=%d native_offset=%lld native_bytes=%d changed_bytes=%d readback_bytes=%d "
+         "header_invalidated=%d\n",
          fault.mode, fault.kind, fault.operation, (long long)fault.stats.offset,
          fault.stats.bytes, fault.stats.native_completed, (long long)fault.stats.native_offset,
-         fault.stats.native_bytes, fault.stats.changed_bytes, fault.stats.readback_bytes);
+         fault.stats.native_bytes, fault.stats.changed_bytes, fault.stats.readback_bytes,
+         fault.stats.header_invalidated);
   fflush(stdout);
   _Exit(86); /* Exact test cut: no SQLite rollback, close or application cleanup. */
 }
@@ -84,14 +86,24 @@ static int io_read(sqlite3_file *base, void *buffer, int bytes, sqlite3_int64 of
 }
 static int io_write(sqlite3_file *base, const void *buffer, int bytes, sqlite3_int64 offset) {
   fault_file_t *f = file_cast(base);
-  int rc, start = 0, count = bytes, changed = 0;
+  int rc, start = 0, count = bytes, changed = 0, operation = VFS_WRITE;
+  /* The exclusive Store commits by invalidating its retained journal header.
+   * Initial zero headers are not commit points: require valid native magic. */
+  if (matches(f, VFS_INVALIDATE) && offset == 0 && bytes >= 8 &&
+      ((const unsigned char *)buffer)[0] == 0) {
+    static const unsigned char magic[8] = {0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7};
+    unsigned char old[8];
+    rc = f->real->pMethods->xRead(f->real, old, 8, 0);
+    if (rc != SQLITE_OK && rc != SQLITE_IOERR_SHORT_READ) return rc;
+    if (rc == SQLITE_OK && !memcmp(old, magic, sizeof(magic))) operation = VFS_INVALIDATE;
+  }
   int partial = matches(f, VFS_WRITE) &&
       (fault.mode == VFS_PARTIAL_ERROR || fault.mode == VFS_PARTIAL_EXIT);
   if (partial) {
     rc = fragment(f, buffer, bytes, offset, &start, &count, &changed);
     if (rc != SQLITE_OK) return rc;
   }
-  if ((!partial || changed) && select_fault(f, VFS_WRITE, bytes, offset)) {
+  if ((!partial || changed) && select_fault(f, operation, bytes, offset)) {
     if (fault.mode == VFS_EXIT_BEFORE) exit_at_fault();
     if (fault.mode == VFS_FAIL_AFTER || fault.mode == VFS_EXIT_AFTER || partial) {
       rc = f->real->pMethods->xWrite(f->real, (const unsigned char *)buffer + start,
@@ -111,6 +123,7 @@ static int io_write(sqlite3_file *base, const void *buffer, int bytes, sqlite3_i
       fault.stats.native_bytes = count;
       fault.stats.native_offset = offset + start;
       fault.stats.changed_bytes = changed;
+      if (operation == VFS_INVALIDATE) fault.stats.header_invalidated = 1;
     }
     if (fault.mode == VFS_EXIT_AFTER || fault.mode == VFS_PARTIAL_EXIT) exit_at_fault();
     return fault.error;

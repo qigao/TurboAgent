@@ -27,9 +27,21 @@ static const fault_case_t cases[] = {
   {"crash_database_sync_before", VFS_MAIN, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_EXIT_BEFORE},
   {"crash_database_sync_after", VFS_MAIN, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_EXIT_AFTER},
   {"crash_journal_partial", VFS_JOURNAL, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_PARTIAL_EXIT},
-  {"crash_database_partial", VFS_MAIN, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_PARTIAL_EXIT}
+  {"crash_database_partial", VFS_MAIN, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_PARTIAL_EXIT},
+  {"journal_invalidate_before", VFS_JOURNAL, VFS_INVALIDATE, SQLITE_IOERR_WRITE, VFS_FAIL_BEFORE},
+  {"journal_invalidate_after", VFS_JOURNAL, VFS_INVALIDATE, SQLITE_IOERR_WRITE, VFS_FAIL_AFTER},
+  {"crash_journal_invalidate_before", VFS_JOURNAL, VFS_INVALIDATE, SQLITE_IOERR_WRITE, VFS_EXIT_BEFORE},
+  {"crash_journal_invalidate_after", VFS_JOURNAL, VFS_INVALIDATE, SQLITE_IOERR_WRITE, VFS_EXIT_AFTER}
 };
 static const char result[] = "{\"effect_count\":1}";
+
+static int committed_cut(const fault_case_t *cut) {
+  return cut->operation == VFS_INVALIDATE &&
+      (cut->mode == VFS_FAIL_AFTER || cut->mode == VFS_EXIT_AFTER);
+}
+static int replay_unknown(const char *phase, const fault_case_t *cut) {
+  return cut->error && !(committed_cut(cut) && !strcmp(phase, "committed"));
+}
 
 static int failure(const char *expression, int line) {
   fprintf(stderr, "SQLite VFS fixture line %d: %s\n", line, expression);
@@ -186,6 +198,9 @@ static int execute(fixture_t *f, const char *id, int unknown, int replayed) {
   REQUIRE(call.replayed == replayed);
   if (unknown) REQUIRE(!call.output);
   else REQUIRE(call.output && !strcmp(call.output, result));
+  if (f->cut->operation == VFS_INVALIDATE && !strcmp(id, "subject"))
+    printf("BOUNDARY phase=%s fault=%s status=%d replayed=%d output_present=%d\n",
+           f->phase, f->cut->name, (int)call.status, call.replayed, call.output != NULL);
   free(call.output); json_free(call.detail);
   return 0;
 }
@@ -222,12 +237,15 @@ static int exercise(const char *directory, const char *phase, const fault_case_t
   f.cut = cut; f.phase = phase; f.inject = inject;
   REQUIRE(open_fixture(&f, directory) == 0);
   stats = sqlite_fault_vfs_stats();
-  if (!inject && !healthy_replayed && cut->mode >= VFS_EXIT_BEFORE && cut->kind == VFS_MAIN)
+  if (!inject && !healthy_replayed && cut->mode >= VFS_EXIT_BEFORE &&
+      (cut->kind == VFS_MAIN || (cut->operation == VFS_INVALIDATE && cut->mode == VFS_EXIT_BEFORE)))
     REQUIRE(stats.main_writes > 0 && stats.main_syncs > 0);
+  if (!inject && !healthy_replayed && committed_cut(cut))
+    REQUIRE(stats.main_writes == 0 && stats.main_syncs == 0);
   if (!inject && cut->mode >= VFS_EXIT_BEFORE)
     printf("OPEN_RECOVERY phase=%s fault=%s main_writes=%d main_syncs=%d\n",
            phase, cut->name, stats.main_writes, stats.main_syncs);
-  REQUIRE(execute(&f, "subject", cut->error != 0,
+  REQUIRE(execute(&f, "subject", inject ? cut->error != 0 : replay_unknown(phase, cut),
                   inject ? (cut->error != 0 && !strcmp(phase, "started")) : 1) == 0);
   REQUIRE(!inject || cut->mode < VFS_EXIT_BEFORE); /* A missed crash is a failure. */
   REQUIRE(f.calls == (inject ? subject_count : 0));
@@ -249,10 +267,16 @@ static int exercise(const char *directory, const char *phase, const fault_case_t
                 stats.readback_bytes == stats.native_bytes);
       if (cut->mode == VFS_FAIL_AFTER && cut->operation == VFS_WRITE)
         REQUIRE(stats.native_bytes == stats.bytes && stats.readback_bytes == stats.bytes);
+      if (cut->operation == VFS_INVALIDATE)
+        REQUIRE(stats.header_invalidated == committed_cut(cut));
     }
     /* Same-handle retry never repeats the uncertain identity, while a fresh
      * independent identity can still commit after the one-shot I/O error. */
-    REQUIRE(execute(&f, "subject", cut->error != 0, 1) == 0);
+    {
+      int puts_before_replay = f.puts;
+      REQUIRE(execute(&f, "subject", replay_unknown(phase, cut), 1) == 0);
+      REQUIRE(f.puts == puts_before_replay);
+    }
     REQUIRE(f.calls == subject_count);
   }
   REQUIRE(execute(&f, "healthy", 0, healthy_replayed) == 0);
@@ -266,11 +290,12 @@ static int exercise(const char *directory, const char *phase, const fault_case_t
   printf("VFS stage=%s phase=%s fault=%s native=%s hits=%d error=%d file_flags=%d "
          "offset=%lld bytes=%d later_writes=%d later_syncs=%d callbacks_total=%d "
          "subject_callbacks=%d subject_effects=%d native_completed=%d native_bytes=%d "
-         "changed_bytes=%d readback_bytes=%d\n",
+         "changed_bytes=%d readback_bytes=%d header_invalidated=%d\n",
          inject ? "inject" : "restart", phase, cut->name, sqlite_fault_vfs_native_name(),
          stats.failures, stats.error, stats.flags, (long long)stats.offset, stats.bytes,
          stats.writes_after_fault, stats.syncs_after_fault, f.calls, f.subject_calls, subject_count,
-         stats.native_completed, stats.native_bytes, stats.changed_bytes, stats.readback_bytes);
+         stats.native_completed, stats.native_bytes, stats.changed_bytes, stats.readback_bytes,
+         stats.header_invalidated);
   REQUIRE(close_fixture(&f) == SQLITE_OK);
   REQUIRE(sqlite_fault_vfs_stats().live_files == 0);
   REQUIRE(sqlite_fault_vfs_remove() == SQLITE_OK);
@@ -284,7 +309,8 @@ static int inspect(const char *directory, const char *phase, const fault_case_t 
   sqlite3_stmt *stmt = NULL;
   tstr path = tstr_format("{}/journal.db", directory);
   tstr oracle_path = tstr_format("{}/external.db", directory);
-  const char *subject_phase = !cut->error ? "committed" : !strcmp(phase, "started") ? "planned" : "started";
+  const char *subject_phase = !cut->error ? "committed" : committed_cut(cut) ? phase :
+      !strcmp(phase, "started") ? "planned" : "started";
   char ids[2][65] = {{0}}, hashes[2][65] = {{0}};
   int seen[2][2] = {{0}}, baseline = 0, rc, count;
   REQUIRE(path && oracle_path);
@@ -327,7 +353,7 @@ static int inspect(const char *directory, const char *phase, const fault_case_t 
       if (ids[subject][0]) REQUIRE(!strcmp(ids[subject], id) && !strcmp(hashes[subject], hash));
       else { memcpy(ids[subject], id, 65); memcpy(hashes[subject], hash, 65); }
     }
-    if (!claim && (!subject || !cut->error)) REQUIRE(text_is(record, "output", result));
+    if (!claim && (!subject || !strcmp(subject_phase, "committed"))) REQUIRE(text_is(record, "output", result));
     else REQUIRE(!json_object_get(record, "output"));
     json_free(record);
   }

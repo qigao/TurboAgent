@@ -7,7 +7,8 @@ foreach(phase IN ITEMS started committed)
   foreach(fault IN ITEMS none journal_full journal_write journal_sync database_write database_sync
       journal_partial database_partial journal_write_after database_write_after
       journal_sync_after database_sync_after crash_journal_sync_before crash_journal_sync_after
-      crash_database_sync_before crash_database_sync_after crash_journal_partial crash_database_partial)
+      crash_database_sync_before crash_database_sync_after crash_journal_partial crash_database_partial
+      journal_invalidate_before journal_invalidate_after crash_journal_invalidate_before crash_journal_invalidate_after)
     add_test(NAME test_sqlite_vfs_${phase}_${fault}
       COMMAND "${CMAKE_COMMAND}"
         "-DWORKER=$<TARGET_FILE:tool_journal_vfs_fixture>"

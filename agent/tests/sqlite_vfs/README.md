@@ -50,7 +50,7 @@ connection after the one-shot fault, proving that I/O resumed.
 
 ## Partial writes, errors after native success and in-VFS process cuts
 
-The expanded suite has 36 cases (18 per persistence phase): the original six,
+The partial-write/process-cut slice added 36 cases (18 per persistence phase): the original six,
 six new reported-error cases and six process cuts. The new reported errors are
 partial journal/database writes, full journal/database writes followed by an
 error, and successful journal/database syncs followed by an error. A partial
@@ -77,9 +77,39 @@ The recovery process then admits a distinct healthy identity; a second process
 replays both. Independent native read-only inspection verifies old phase,
 admitted fence, integrity and effect counters after each restart.
 
+## Actual transaction commit boundary
+
+Eight further cases bracket journal invalidation with an I/O error or exact
+process exit, before and after each STARTED/COMMITTED transaction. The current
+exclusive Store retains its rollback journal and commits by zeroing its header.
+The VFS distinguishes this from initial header creation by reading and requiring
+the valid eight-byte journal magic before selecting the zero-header write.
+After native success it reads the actual zeroed bytes back. Other commit styles
+(delete or truncate) are not silently treated as covered by this selector.
+
+| Interrupted persistence | Side of invalidation | Actual Journal phase | Subject effects | Restart result |
+| --- | --- | --- | --- | --- |
+| STARTED | Before | `planned` | 0 | UNKNOWN |
+| STARTED | After | `started` | 0 | UNKNOWN |
+| COMMITTED | Before | `started` | 1 | UNKNOWN |
+| COMMITTED | After | `committed` + exact original output | 1 | Exact committed result |
+
+Reported-error cases initially return UNKNOWN and withhold output, even after
+actual commit. UNKNOWN at that caller boundary must not overwrite a canonical
+committed record. Same-handle replay and two independent restarts re-read the
+record; after COMMITTED invalidation they return its original success and output,
+without a subject callback or Journal rewrite. The admitted fence remains intact.
+
+Crash tests independently check the raw pre-recovery journal header: valid magic
+before invalidation, eight zero bytes afterwards. The first production Store
+reopen must perform recovery writes/syncs before the boundary, and none after it.
+Native disk inspection then verifies phase, status, identity, output and external
+effect counts. These cases distinguish a lost commit acknowledgement from an
+uncommitted transaction with an unknown effect.
+
 ## Running and scope
 
-Normal native `BUILD_TESTS=ON` builds include all 36 CTests with label
+Normal native `BUILD_TESTS=ON` builds include all 44 CTests with label
 `sqlite-vfs`. `TURBOAGENT_SQLITE_VFS_CONFORMANCE=ON` builds only this fixture when
 the full test suite is disabled. The macOS SDK profile uses that option and runs
 `ctest --preset ci-macos-sqlite-vfs --verbose --no-tests=error`; Linux and Windows
@@ -93,8 +123,8 @@ post-fault writes/syncs and callback/effect counts.
 This qualifies these reported synchronous I/O errors and controlled partial
 writes/process exits while the OS and its caches remain running. It does not
 simulate device power loss, cache loss/reordering, arbitrary torn-write patterns,
-random kill positions, permanent device failure, WAL or errors after the whole
-transaction has committed. Issue #74 remains open for that wider matrix.
+random kill positions, permanent device failure, WAL or every commit style/I/O
+position. Issue #74 remains open for that wider matrix.
 SQLite interface references: [VFS](https://www.sqlite.org/c3ref/vfs.html),
 [file methods](https://www.sqlite.org/c3ref/io_methods.html),
 [result codes](https://www.sqlite.org/rescode.html).

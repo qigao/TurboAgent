@@ -94,6 +94,27 @@ CXX_C_API int turbo_agent_router_create(const turbo_agent_router_config_t *confi
 CXX_C_API int turbo_agent_router_destroy(turbo_agent_router_t *router);
 
 /**
+ * Opt in to 1..16 retained tool-loop tasks (default 1). The default preserves
+ * exclusive whole-task ownership. With limit > 1, distinct endpoint owners may
+ * run models and wait for separate approvals concurrently; model-only tasks may
+ * coexist. One shared Host ToolNode, including all hooks, Journal access and
+ * callback/result processing, is synchronized per dispatch. Callbacks on this
+ * authority Agent remain serial. This does not make external/shared resources
+ * or other Routers/Agent APIs thread-safe; keep them independently owned.
+ *
+ * Waiting for the Host lane consumes the original deadline/cancellation budget;
+ * a stopped waiter enters no Host hook or Journal. Each admitted task retains
+ * its endpoint and counts toward the limit until task_release(), including a
+ * paused/terminal task. Approvals remain bound to each canonical checkpoint.
+ * No scheduler, FIFO/fairness guarantee, retry or cross-store transaction is
+ * added. The Host serializes all control APIs and keeps policy/registry/hook
+ * replacement quiescent across all running/queued segments and callbacks.
+ * Returns EINVAL for invalid input; EBUSY while any task is retained.
+ */
+CXX_C_API int turbo_agent_router_set_tool_task_limit(turbo_agent_router_t *router,
+                                                    unsigned limit);
+
+/**
  * Select the lowest estimated cost among role/feature/difficulty/token-qualified idle
  * endpoints, breaking ties by configuration order. Requires the authority
  * agent's delegate grant and a child capability mask contained in that grant.
@@ -127,8 +148,10 @@ CXX_C_API int turbo_agent_router_submit(turbo_agent_router_t *router,
  * Admission estimate = per-turn estimate * max_model_turns, including history
  * as estimated by the Host. This is not a hard billing cap. The final turn is
  * reserved for consuming results; a further proposal interrupts before effects.
- * A shared authority tool lane excludes every other Router task until release,
- * including while waiting for approval. Caller input review flags are cleared.
+ * By default a retained loop excludes every other Router task until release,
+ * including while waiting for approval. set_tool_task_limit() can opt in to
+ * concurrent task progress with synchronized Host dispatch and separate review.
+ * Caller input review flags are cleared.
  * Other bounds, ownership, errors and quiescent requirements match submit().
  * Failures/limits interrupt with router_tool_loop.reason and failure state;
  * inspect these even when the Runtime operation itself succeeded.
@@ -249,7 +272,7 @@ CXX_C_API int turbo_agent_router_task_release(turbo_agent_router_task_t *task);
  *
  * Tasks must be distinct, untaken, ungrouped, on the same Router, with distinct
  * thread ids and the same parent run id (1..128 bytes). Tool loops are excluded:
- * the shared authority tool lane stays serial. id uses the same 1..64 ASCII
+ * the Host reviews their checkpoints individually. id uses the same 1..64 ASCII
  * letter/digit/_/- format as Router endpoint ids. All validation/allocation
  * precedes transfer. On success tasks[0..count) become NULL; group owns their
  * graphs/Execution handles through release. On failure every slot is unchanged.

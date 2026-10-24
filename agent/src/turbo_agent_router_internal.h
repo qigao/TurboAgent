@@ -13,7 +13,10 @@ typedef struct router_endpoint_s {
 struct turbo_agent_router_s {
   turbo_agent_t *authority_agent;
   size_t count;
-  int tool_lane_busy;
+  unsigned tool_task_limit, tool_task_count;
+  cmeta_mutex_t tool_mutex;
+  cmeta_cond_t tool_changed;
+  int tool_active;
   router_endpoint_t endpoints[TURBO_AGENT_ROUTER_MAX_ENDPOINTS];
 };
 
@@ -26,6 +29,7 @@ struct turbo_agent_router_task_s {
   uint64_t deadline_ms;
   unsigned max_model_turns, model_turns, review_resumes;
   int pending_review, review_cancelled;
+  int tool_waiting; /* guarded by router->tool_mutex */
   turbo_agent_tool_authority_snapshot_t parent_authority, child_authority;
   tstr thread_id, parent_run_id;
   uint64_t started_ms, observed_ms, heartbeat_ms, estimated_micros;

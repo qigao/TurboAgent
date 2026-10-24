@@ -8,6 +8,7 @@
 #include "turbo_tool_schema.h"
 
 #include <cmeta_crypto.h>
+#include <salts/clock.h>
 #include <salts/thread.h>
 #include <salts/thread_pool.h>
 
@@ -20,11 +21,15 @@
 #define TURBO_AGENT_TOOL_DEFAULT_MAX_BATCH_CALLS 64u
 #define TURBO_AGENT_TOOL_DEFAULT_MAX_ARGUMENT_BYTES (1024u * 1024u)
 #define TURBO_AGENT_TOOL_DEFAULT_MAX_OUTPUT_BYTES (1024u * 1024u)
+#define TURBO_AGENT_TOOL_BATCH_WAIT_SLICE_MS UINT64_C(25)
+#define TURBO_AGENT_TOOL_MILLISECONDS_TO_NANOSECONDS UINT64_C(1000000)
 
 struct turbo_agent_tool_executor_s {
   turbo_agent_tool_executor_config_t config;
   cmeta_threadpool_t *pool;
   cmeta_mutex_t batch_mutex;
+  cmeta_cond_t batch_changed;
+  int batch_active;
   cmeta_mutex_t observation_mutex;
 };
 
@@ -94,7 +99,26 @@ int turbo_agent_tool_executor_create(const turbo_agent_tool_executor_config_t *c
     return SALTS_ENOMEM;
   }
   cmeta_mutex_init(&executor->batch_mutex);
+  if (!executor->batch_mutex) {
+    cmeta_threadpool_destroy(executor->pool);
+    free(executor);
+    return SALTS_ENOMEM;
+  }
+  cmeta_cond_init(&executor->batch_changed);
+  if (!executor->batch_changed) {
+    cmeta_mutex_destroy(&executor->batch_mutex);
+    cmeta_threadpool_destroy(executor->pool);
+    free(executor);
+    return SALTS_ENOMEM;
+  }
   cmeta_mutex_init(&executor->observation_mutex);
+  if (!executor->observation_mutex) {
+    cmeta_cond_destroy(&executor->batch_changed);
+    cmeta_mutex_destroy(&executor->batch_mutex);
+    cmeta_threadpool_destroy(executor->pool);
+    free(executor);
+    return SALTS_ENOMEM;
+  }
   *out_executor = executor;
   return SALTS_OK;
 }
@@ -103,6 +127,7 @@ void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *executor) {
   if (!executor) return;
   cmeta_threadpool_destroy(executor->pool);
   cmeta_mutex_destroy(&executor->observation_mutex);
+  cmeta_cond_destroy(&executor->batch_changed);
   cmeta_mutex_destroy(&executor->batch_mutex);
   free(executor);
 }
@@ -312,6 +337,71 @@ turbo_agent_tool_cancel_status(const turbo_cancel_token_t *cancel_token) {
   rc = turbo_cancel_token_check(cancel_token);
   if (rc == SALTS_OK) return TURBO_TOOL_OK;
   return rc == SALTS_ETIMEDOUT ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
+}
+
+static uint64_t
+turbo_agent_tool_batch_wait_ns(const turbo_cancel_token_t *cancel_token) {
+  uint64_t wait_ms = TURBO_AGENT_TOOL_BATCH_WAIT_SLICE_MS;
+  uint64_t deadline_ms;
+  uint64_t now_ms;
+  uint64_t remaining_ms;
+  if (!cancel_token) return 0;
+  deadline_ms = turbo_cancel_token_deadline_mono_ms(cancel_token);
+  if (!deadline_ms) return wait_ms * TURBO_AGENT_TOOL_MILLISECONDS_TO_NANOSECONDS;
+  now_ms = cmeta_monotonic_ms();
+  if (now_ms >= deadline_ms) return 0;
+  remaining_ms = deadline_ms - now_ms;
+  if (remaining_ms < wait_ms) wait_ms = remaining_ms;
+  return wait_ms * TURBO_AGENT_TOOL_MILLISECONDS_TO_NANOSECONDS;
+}
+
+static turbo_tool_status_t turbo_agent_tool_batch_acquire(
+    turbo_agent_tool_executor_t *executor,
+    const turbo_cancel_token_t *cancel_token) {
+  int waited = 0;
+  cmeta_mutex_lock(&executor->batch_mutex);
+  for (;;) {
+    turbo_tool_status_t status;
+    uint64_t wait_ns;
+    /* Preserve the established uncontended path: a token that was already
+     * stopped still reaches durable planning, then the callback boundary
+     * records cancellation. Only a caller that actually queued can leave the
+     * gate before Journal admission. */
+    if (waited) {
+      status = turbo_agent_tool_cancel_status(cancel_token);
+      if (status != TURBO_TOOL_OK) {
+        /* A cancelled waiter may have consumed the owner's signal after the
+         * gate became idle. Pass that wake-up to the next waiter so a
+         * token-free caller cannot remain asleep with no active owner. */
+        if (!executor->batch_active)
+          cmeta_cond_signal(&executor->batch_changed);
+        cmeta_mutex_unlock(&executor->batch_mutex);
+        return status;
+      }
+    }
+    if (!executor->batch_active) {
+      executor->batch_active = 1;
+      cmeta_mutex_unlock(&executor->batch_mutex);
+      return TURBO_TOOL_OK;
+    }
+    waited = 1;
+    if (!cancel_token) {
+      cmeta_cond_wait(&executor->batch_changed, &executor->batch_mutex);
+      continue;
+    }
+    wait_ns = turbo_agent_tool_batch_wait_ns(cancel_token);
+    if (!wait_ns) continue;
+    (void)cmeta_cond_timedwait(&executor->batch_changed,
+                               &executor->batch_mutex, wait_ns);
+  }
+}
+
+static void turbo_agent_tool_batch_release(
+    turbo_agent_tool_executor_t *executor) {
+  cmeta_mutex_lock(&executor->batch_mutex);
+  executor->batch_active = 0;
+  cmeta_cond_signal(&executor->batch_changed);
+  cmeta_mutex_unlock(&executor->batch_mutex);
 }
 
 /* Check the entire model-originating batch before publishing any Journal record.
@@ -597,6 +687,7 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
                                       const turbo_agent_policy_t *policy,
                                       turbo_agent_tool_execution_t *calls, size_t call_count) {
   turbo_agent_execution_context_t base_context = {0};
+  turbo_tool_status_t queue_status;
   size_t index;
   int rc = SALTS_OK;
   if (!executor || !registry || !calls || call_count == 0 ||
@@ -617,7 +708,13 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
         return SALTS_EPROTO;
     }
   }
-  cmeta_mutex_lock(&executor->batch_mutex);
+  queue_status = turbo_agent_tool_batch_acquire(executor, cancel_token);
+  if (queue_status != TURBO_TOOL_OK) {
+    for (index = 0; index < call_count; ++index) {
+      if (!calls[index].replayed) calls[index].status = queue_status;
+    }
+    return SALTS_OK;
+  }
   /* The executor is also called directly by trusted host code. Never trust
    * a caller-supplied alias or execution policy as the durable identity:
    * RuntimeTools' registered canonical name and policy are authoritative. */
@@ -713,6 +810,6 @@ int turbo_agent_tool_executor_execute(turbo_agent_tool_executor_t *executor,
     }
   }
 cleanup:
-  cmeta_mutex_unlock(&executor->batch_mutex);
+  turbo_agent_tool_batch_release(executor);
   return rc;
 }

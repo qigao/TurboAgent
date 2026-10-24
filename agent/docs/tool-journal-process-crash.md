@@ -152,7 +152,7 @@ Journal entry eviction/retention and the remaining backend matrix stay open.
 
 ## Test-only SQLite VFS I/O failures
 
-`agent/tests/sqlite_vfs` adds twelve independent-process CTests: STARTED and
+`agent/tests/sqlite_vfs` originally added twelve independent-process CTests: STARTED and
 COMMITTED persistence each run a passing control and five one-shot native-file
 failures (rollback-journal write/full/sync and database write/sync). Its phase
 adapter arms a forwarding VFS and always delegates to the real production Store.
@@ -172,6 +172,17 @@ their exact committed result. See [fixture details](../tests/sqlite_vfs/README.m
 Linux and Windows include the cases in the normal suite; the macOS SDK profile
 builds this fixture and runs its dedicated runtime CTest preset. Android remains
 cross-build-only for this fixture. A platform is qualified only after its actual
-VFS cases pass. These reported I/O errors followed by normal close/reopen do not
-qualify arbitrary process kill, power loss, torn/partial writes, permanent disk
-exhaustion or every I/O position. The broader #74 matrix remains open.
+VFS cases pass. The original reported I/O errors followed by normal close/reopen
+did not qualify process interruption or partial writes. Power loss, arbitrary
+device-torn writes, permanent disk exhaustion and the wider #74 matrix remain open.
+
+The VFS suite is extended to 36 cases with changed-byte partial writes,
+errors returned after successful native writes/syncs, and exact in-VFS process
+exits before/after journal/database sync or after a partial write. Selected
+writes are read back through the native file methods. Crash cases capture raw
+pre-recovery database/journal snapshots; the production Store is the first
+SQLite opener and must perform observable recovery writes/syncs for database
+cuts. Fresh owners retain the prior Journal phase and admitted fence, report
+UNKNOWN without another subject callback, and admit an independent healthy
+identity. These are controlled process cuts with the OS/cache still running,
+not power-loss or arbitrary device-torn-write qualification.

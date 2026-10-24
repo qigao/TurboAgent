@@ -1,6 +1,7 @@
 #include "sqlite_fault_vfs.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 typedef struct fault_file_s {
@@ -14,21 +15,58 @@ static struct {
   sqlite3_vfs vfs;
   sqlite3_vfs *native;
   char *path;
-  int installed, armed, kind, operation, error;
+  int installed, armed, kind, operation, error, mode;
   sqlite_fault_stats_t stats;
 } fault;
 
 static fault_file_t *file_cast(sqlite3_file *file) { return (fault_file_t *)file; }
 
-static int inject(fault_file_t *file, int operation, int bytes, sqlite3_int64 offset) {
-  if (!fault.armed || file->kind != fault.kind || operation != fault.operation) return 0;
+static int matches(fault_file_t *file, int operation) {
+  return fault.armed && file->kind == fault.kind && operation == fault.operation;
+}
+
+static int select_fault(fault_file_t *file, int operation, int bytes, sqlite3_int64 offset) {
+  if (!matches(file, operation)) return 0;
   fault.armed = 0; /* Restore native I/O before SQLite attempts rollback. */
   ++fault.stats.failures;
   fault.stats.error = fault.error;
   fault.stats.flags = file->flags;
   fault.stats.bytes = bytes;
   fault.stats.offset = offset;
-  return fault.error;
+  fault.stats.mode = fault.mode;
+  return 1;
+}
+
+static void exit_at_fault(void) {
+  printf("VFS_CRASH hit=1 mode=%d kind=%d operation=%d requested_offset=%lld requested_bytes=%d "
+         "native_completed=%d native_offset=%lld native_bytes=%d changed_bytes=%d readback_bytes=%d\n",
+         fault.mode, fault.kind, fault.operation, (long long)fault.stats.offset,
+         fault.stats.bytes, fault.stats.native_completed, (long long)fault.stats.native_offset,
+         fault.stats.native_bytes, fault.stats.changed_bytes, fault.stats.readback_bytes);
+  fflush(stdout);
+  _Exit(86); /* Exact test cut: no SQLite rollback, close or application cleanup. */
+}
+
+/* Select a half-write containing a changed byte. Unchanged writes are forwarded
+ * and do not consume the fault, avoiding a partial write that changes nothing. */
+static int fragment(fault_file_t *file, const void *buffer, int bytes, sqlite3_int64 offset,
+                    int *start, int *count, int *changed) {
+  unsigned char *old;
+  const unsigned char *next = buffer;
+  int first, rc;
+  *changed = 0;
+  if (bytes < 2) return SQLITE_OK;
+  old = sqlite3_malloc(bytes);
+  if (!old) return SQLITE_NOMEM;
+  rc = file->real->pMethods->xRead(file->real, old, bytes, offset);
+  if (rc != SQLITE_OK && rc != SQLITE_IOERR_SHORT_READ) { sqlite3_free(old); return rc; }
+  for (first = 0; first < bytes && old[first] == next[first]; ++first) {}
+  *count = bytes / 2;
+  *start = first < bytes - *count ? first : bytes - *count;
+  if (first < bytes)
+    for (int i = *start; i < *start + *count; ++i) *changed += old[i] != next[i];
+  sqlite3_free(old);
+  return SQLITE_OK;
 }
 
 static int io_close(sqlite3_file *base) {
@@ -46,18 +84,58 @@ static int io_read(sqlite3_file *base, void *buffer, int bytes, sqlite3_int64 of
 }
 static int io_write(sqlite3_file *base, const void *buffer, int bytes, sqlite3_int64 offset) {
   fault_file_t *f = file_cast(base);
-  int rc = inject(f, VFS_WRITE, bytes, offset);
-  if (rc) return rc;
+  int rc, start = 0, count = bytes, changed = 0;
+  int partial = matches(f, VFS_WRITE) &&
+      (fault.mode == VFS_PARTIAL_ERROR || fault.mode == VFS_PARTIAL_EXIT);
+  if (partial) {
+    rc = fragment(f, buffer, bytes, offset, &start, &count, &changed);
+    if (rc != SQLITE_OK) return rc;
+  }
+  if ((!partial || changed) && select_fault(f, VFS_WRITE, bytes, offset)) {
+    if (fault.mode == VFS_EXIT_BEFORE) exit_at_fault();
+    if (fault.mode == VFS_FAIL_AFTER || fault.mode == VFS_EXIT_AFTER || partial) {
+      rc = f->real->pMethods->xWrite(f->real, (const unsigned char *)buffer + start,
+                                    count, offset + start);
+      if (rc != SQLITE_OK) return rc;
+      {
+        void *readback = sqlite3_malloc(count);
+        if (!readback) return SQLITE_NOMEM;
+        rc = f->real->pMethods->xRead(f->real, readback, count, offset + start);
+        if (rc == SQLITE_OK && memcmp(readback, (const unsigned char *)buffer + start, (size_t)count))
+          rc = SQLITE_IOERR_READ;
+        sqlite3_free(readback);
+        if (rc != SQLITE_OK) return rc;
+      }
+      fault.stats.native_completed = 1;
+      fault.stats.readback_bytes = count;
+      fault.stats.native_bytes = count;
+      fault.stats.native_offset = offset + start;
+      fault.stats.changed_bytes = changed;
+    }
+    if (fault.mode == VFS_EXIT_AFTER || fault.mode == VFS_PARTIAL_EXIT) exit_at_fault();
+    return fault.error;
+  }
   rc = f->real->pMethods->xWrite(f->real, buffer, bytes, offset);
+  if (f->kind == VFS_MAIN && rc == SQLITE_OK) ++fault.stats.main_writes;
   if (f->kind >= 0 && fault.stats.failures && rc == SQLITE_OK)
     ++fault.stats.writes_after_fault;
   return rc;
 }
 static int io_sync(sqlite3_file *base, int flags) {
   fault_file_t *f = file_cast(base);
-  int rc = inject(f, VFS_SYNC, 0, 0);
-  if (rc) return rc;
+  int rc;
+  if (select_fault(f, VFS_SYNC, 0, 0)) {
+    if (fault.mode == VFS_EXIT_BEFORE) exit_at_fault();
+    if (fault.mode == VFS_FAIL_AFTER || fault.mode == VFS_EXIT_AFTER) {
+      rc = f->real->pMethods->xSync(f->real, flags);
+      if (rc != SQLITE_OK) return rc;
+      fault.stats.native_completed = 1;
+    }
+    if (fault.mode == VFS_EXIT_AFTER) exit_at_fault();
+    return fault.error;
+  }
   rc = f->real->pMethods->xSync(f->real, flags);
+  if (f->kind == VFS_MAIN && rc == SQLITE_OK) ++fault.stats.main_syncs;
   if (f->kind >= 0 && fault.stats.failures && rc == SQLITE_OK)
     ++fault.stats.syncs_after_fault;
   return rc;
@@ -262,8 +340,9 @@ int sqlite_fault_vfs_remove(void) {
   return rc;
 }
 const char *sqlite_fault_vfs_native_name(void) { return fault.native->zName; }
-void sqlite_fault_vfs_arm(int kind, int operation, int error) {
-  fault.kind = kind; fault.operation = operation; fault.error = error; fault.armed = 1;
+void sqlite_fault_vfs_arm(int kind, int operation, int error, int mode) {
+  fault.kind = kind; fault.operation = operation; fault.error = error;
+  fault.mode = mode; fault.armed = 1;
 }
 void sqlite_fault_vfs_disarm(void) { fault.armed = 0; }
 sqlite_fault_stats_t sqlite_fault_vfs_stats(void) { return fault.stats; }

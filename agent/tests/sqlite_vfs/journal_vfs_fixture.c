@@ -8,14 +8,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct fault_case_s { const char *name; int kind, operation, error; } fault_case_t;
+typedef struct fault_case_s { const char *name; int kind, operation, error, mode; } fault_case_t;
 static const fault_case_t cases[] = {
-  {"none", -1, -1, 0},
-  {"journal_full", VFS_JOURNAL, VFS_WRITE, SQLITE_FULL},
-  {"journal_write", VFS_JOURNAL, VFS_WRITE, SQLITE_IOERR_WRITE},
-  {"journal_sync", VFS_JOURNAL, VFS_SYNC, SQLITE_IOERR_FSYNC},
-  {"database_write", VFS_MAIN, VFS_WRITE, SQLITE_IOERR_WRITE},
-  {"database_sync", VFS_MAIN, VFS_SYNC, SQLITE_IOERR_FSYNC}
+  {"none", -1, -1, 0, VFS_FAIL_BEFORE},
+  {"journal_full", VFS_JOURNAL, VFS_WRITE, SQLITE_FULL, VFS_FAIL_BEFORE},
+  {"journal_write", VFS_JOURNAL, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_FAIL_BEFORE},
+  {"journal_sync", VFS_JOURNAL, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_FAIL_BEFORE},
+  {"database_write", VFS_MAIN, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_FAIL_BEFORE},
+  {"database_sync", VFS_MAIN, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_FAIL_BEFORE},
+  {"journal_partial", VFS_JOURNAL, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_PARTIAL_ERROR},
+  {"database_partial", VFS_MAIN, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_PARTIAL_ERROR},
+  {"journal_write_after", VFS_JOURNAL, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_FAIL_AFTER},
+  {"database_write_after", VFS_MAIN, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_FAIL_AFTER},
+  {"journal_sync_after", VFS_JOURNAL, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_FAIL_AFTER},
+  {"database_sync_after", VFS_MAIN, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_FAIL_AFTER},
+  {"crash_journal_sync_before", VFS_JOURNAL, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_EXIT_BEFORE},
+  {"crash_journal_sync_after", VFS_JOURNAL, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_EXIT_AFTER},
+  {"crash_database_sync_before", VFS_MAIN, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_EXIT_BEFORE},
+  {"crash_database_sync_after", VFS_MAIN, VFS_SYNC, SQLITE_IOERR_FSYNC, VFS_EXIT_AFTER},
+  {"crash_journal_partial", VFS_JOURNAL, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_PARTIAL_EXIT},
+  {"crash_database_partial", VFS_MAIN, VFS_WRITE, SQLITE_IOERR_WRITE, VFS_PARTIAL_EXIT}
 };
 static const char result[] = "{\"effect_count\":1}";
 
@@ -65,7 +77,9 @@ static int phase_put(void *user, const char *collection, const char *id, const c
   if (selected) {
     f->inject = 0;
     ++f->phase_attempts;
-    if (f->cut->error) sqlite_fault_vfs_arm(f->cut->kind, f->cut->operation, f->cut->error);
+    printf("ARM phase=%s fault=%s\n", f->phase, f->cut->name);
+    if (f->cut->error)
+      sqlite_fault_vfs_arm(f->cut->kind, f->cut->operation, f->cut->error, f->cut->mode);
   }
   /* Never fabricate a Store error. Only the real platform file operation can
    * fail, and this unchanged production Store performs SQLite's rollback. */
@@ -195,7 +209,8 @@ static int initialize(const char *directory) {
   return 0;
 }
 
-static int exercise(const char *directory, const char *phase, const fault_case_t *cut, int inject) {
+static int exercise(const char *directory, const char *phase, const fault_case_t *cut,
+                     int inject, int healthy_replayed) {
   fixture_t f = {0};
   sqlite_fault_stats_t stats;
   tstr path = tstr_format("{}/journal.db", directory);
@@ -206,8 +221,15 @@ static int exercise(const char *directory, const char *phase, const fault_case_t
   tstr_free(path);
   f.cut = cut; f.phase = phase; f.inject = inject;
   REQUIRE(open_fixture(&f, directory) == 0);
+  stats = sqlite_fault_vfs_stats();
+  if (!inject && !healthy_replayed && cut->mode >= VFS_EXIT_BEFORE && cut->kind == VFS_MAIN)
+    REQUIRE(stats.main_writes > 0 && stats.main_syncs > 0);
+  if (!inject && cut->mode >= VFS_EXIT_BEFORE)
+    printf("OPEN_RECOVERY phase=%s fault=%s main_writes=%d main_syncs=%d\n",
+           phase, cut->name, stats.main_writes, stats.main_syncs);
   REQUIRE(execute(&f, "subject", cut->error != 0,
                   inject ? (cut->error != 0 && !strcmp(phase, "started")) : 1) == 0);
+  REQUIRE(!inject || cut->mode < VFS_EXIT_BEFORE); /* A missed crash is a failure. */
   REQUIRE(f.calls == (inject ? subject_count : 0));
   REQUIRE(f.subject_calls == (inject ? subject_count : 0));
   if (inject) {
@@ -220,25 +242,35 @@ static int exercise(const char *directory, const char *phase, const fault_case_t
     if (cut->error) {
       REQUIRE(stats.error == cut->error);
       REQUIRE(stats.flags & (cut->kind == VFS_MAIN ? SQLITE_OPEN_MAIN_DB : SQLITE_OPEN_MAIN_JOURNAL));
+      REQUIRE(stats.mode == cut->mode);
+      REQUIRE(stats.native_completed == (cut->mode != VFS_FAIL_BEFORE));
+      if (cut->mode == VFS_PARTIAL_ERROR)
+        REQUIRE(stats.native_bytes > 0 && stats.native_bytes < stats.bytes && stats.changed_bytes > 0 &&
+                stats.readback_bytes == stats.native_bytes);
+      if (cut->mode == VFS_FAIL_AFTER && cut->operation == VFS_WRITE)
+        REQUIRE(stats.native_bytes == stats.bytes && stats.readback_bytes == stats.bytes);
     }
     /* Same-handle retry never repeats the uncertain identity, while a fresh
      * independent identity can still commit after the one-shot I/O error. */
     REQUIRE(execute(&f, "subject", cut->error != 0, 1) == 0);
     REQUIRE(f.calls == subject_count);
   }
-  REQUIRE(execute(&f, "healthy", 0, inject ? 0 : 1) == 0);
-  REQUIRE(f.calls == (inject ? subject_count + 1 : 0));
-  if (!inject) REQUIRE(f.phase_attempts == 0 && f.puts == 0);
+  REQUIRE(execute(&f, "healthy", 0, healthy_replayed) == 0);
+  REQUIRE(f.calls == (inject ? subject_count : 0) + (healthy_replayed ? 0 : 1));
+  if (!inject) REQUIRE(f.phase_attempts == 0);
+  if (!inject && healthy_replayed) REQUIRE(f.puts == 0);
   REQUIRE(oracle_count(f.oracle, "subject", &count) == 0 && count == subject_count);
   REQUIRE(oracle_count(f.oracle, "healthy", &count) == 0 && count == 1);
   stats = sqlite_fault_vfs_stats();
   if (inject && cut->error) REQUIRE(stats.writes_after_fault > 0 && stats.syncs_after_fault > 0);
   printf("VFS stage=%s phase=%s fault=%s native=%s hits=%d error=%d file_flags=%d "
          "offset=%lld bytes=%d later_writes=%d later_syncs=%d callbacks_total=%d "
-         "subject_callbacks=%d subject_effects=%d\n",
+         "subject_callbacks=%d subject_effects=%d native_completed=%d native_bytes=%d "
+         "changed_bytes=%d readback_bytes=%d\n",
          inject ? "inject" : "restart", phase, cut->name, sqlite_fault_vfs_native_name(),
          stats.failures, stats.error, stats.flags, (long long)stats.offset, stats.bytes,
-         stats.writes_after_fault, stats.syncs_after_fault, f.calls, f.subject_calls, subject_count);
+         stats.writes_after_fault, stats.syncs_after_fault, f.calls, f.subject_calls, subject_count,
+         stats.native_completed, stats.native_bytes, stats.changed_bytes, stats.readback_bytes);
   REQUIRE(close_fixture(&f) == SQLITE_OK);
   REQUIRE(sqlite_fault_vfs_stats().live_files == 0);
   REQUIRE(sqlite_fault_vfs_remove() == SQLITE_OK);
@@ -322,7 +354,10 @@ int main(int argc, char **argv) {
   if (!cut) return 2;
   if (!strcmp(argv[1], "init")) return initialize(argv[4]);
   if (!strcmp(argv[1], "inspect")) return inspect(argv[4], argv[2], cut);
-  if (!strcmp(argv[1], "inject") || !strcmp(argv[1], "recover") || !strcmp(argv[1], "replay"))
-    return exercise(argv[4], argv[2], cut, !strcmp(argv[1], "inject"));
+  if (!strcmp(argv[1], "inject") || !strcmp(argv[1], "recover") || !strcmp(argv[1], "replay")) {
+    int injecting = !strcmp(argv[1], "inject");
+    int first_crash_reopen = !strcmp(argv[1], "recover") && cut->mode >= VFS_EXIT_BEFORE;
+    return exercise(argv[4], argv[2], cut, injecting, !injecting && !first_crash_reopen);
+  }
   return 2;
 }

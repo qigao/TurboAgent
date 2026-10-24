@@ -4,7 +4,10 @@ set_target_properties(tool_journal_vfs_fixture PROPERTIES
   C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "Agent/tests")
 
 foreach(phase IN ITEMS started committed)
-  foreach(fault IN ITEMS none journal_full journal_write journal_sync database_write database_sync)
+  foreach(fault IN ITEMS none journal_full journal_write journal_sync database_write database_sync
+      journal_partial database_partial journal_write_after database_write_after
+      journal_sync_after database_sync_after crash_journal_sync_before crash_journal_sync_after
+      crash_database_sync_before crash_database_sync_after crash_journal_partial crash_database_partial)
     add_test(NAME test_sqlite_vfs_${phase}_${fault}
       COMMAND "${CMAKE_COMMAND}"
         "-DWORKER=$<TARGET_FILE:tool_journal_vfs_fixture>"

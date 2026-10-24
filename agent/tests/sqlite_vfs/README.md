@@ -24,8 +24,8 @@ and one-shot failures of:
 | Main database | `xWrite` | `SQLITE_IOERR_WRITE` |
 | Main database | `xSync` | `SQLITE_IOERR_FSYNC` |
 
-Each failure is returned before the selected native operation. It immediately
-disarms itself, allowing SQLite's actual rollback I/O and later writes/syncs.
+These original failures are returned before the selected native operation. Each
+immediately disarms itself, allowing SQLite's actual rollback I/O and later writes/syncs.
 File flags and the canonical target path restrict injection to this Journal
 database or its rollback journal. The external effect counter uses a separate
 SQLite database opened explicitly through the native VFS.
@@ -44,13 +44,42 @@ initialization, injection, native disk inspection, recovery, inspection, another
 replay, and final inspection. Native inspection bypasses Runtime/Store readers
 and the injected VFS. It checks `integrity_check`, the actual Journal and claim
 identity/phase/output, the untouched sentinel and the independently committed
-effect counters. Both fresh Runtime/Executor owners must return without another
+effect counters. Both fresh Runtime/Executor owners must return without another subject
 callback or Journal rewrite. A distinct identity also commits on the original
 connection after the one-shot fault, proving that I/O resumed.
 
+## Partial writes, errors after native success and in-VFS process cuts
+
+The expanded suite has 36 cases (18 per persistence phase): the original six,
+six new reported-error cases and six process cuts. The new reported errors are
+partial journal/database writes, full journal/database writes followed by an
+error, and successful journal/database syncs followed by an error. A partial
+write changes a contiguous half of the requested bytes containing at least one
+byte different from the old file; identical writes do not consume the fault.
+The actual native file is read back after each selected partial/full write,
+before returning the error or terminating the process. Counts, offsets and
+changed/read-back bytes are recorded; no payload is merely pretended written.
+
+The six cuts terminate with exact `_Exit(86)` before/after the first selected
+journal/database `xSync`, or after a partial journal/database write. The child
+must emit the matching phase/case and VFS-cut markers. A returned I/O error,
+unrelated failure or different exit status cannot satisfy the crash test.
+These cuts skip SQLite rollback and all destructors. They occur before the
+transaction commit point, including after database sync but before journal
+invalidation, so the interrupted transition must roll back.
+
+Before recovery, CMake copies and hashes the database/rollback-journal bytes
+without opening SQLite. No helper repairs the files first: the production Store
+is the first database opener after the cut. For database-write/sync cuts its VFS
+must observe actual main-file recovery writes and syncs during Store open.
+The original subject returns replayed UNKNOWN with zero new subject callbacks.
+The recovery process then admits a distinct healthy identity; a second process
+replays both. Independent native read-only inspection verifies old phase,
+admitted fence, integrity and effect counters after each restart.
+
 ## Running and scope
 
-Normal native `BUILD_TESTS=ON` builds include all 12 CTests with label
+Normal native `BUILD_TESTS=ON` builds include all 36 CTests with label
 `sqlite-vfs`. `TURBOAGENT_SQLITE_VFS_CONFORMANCE=ON` builds only this fixture when
 the full test suite is disabled. The macOS SDK profile uses that option and runs
 `ctest --preset ci-macos-sqlite-vfs --verbose --no-tests=error`; Linux and Windows
@@ -61,10 +90,12 @@ Failures retain their database directory and report the failing stage. Logs
 record the native VFS name, fault count/error/file flags, write offset/length,
 post-fault writes/syncs and callback/effect counts.
 
-This qualifies reported synchronous I/O errors followed by normal close and
-independent reopen. It does not simulate torn writes, partial writes, arbitrary
-process kill, power loss, permanent device failure, WAL, after-success errors,
-or all possible I/O call positions. Issue #74 remains open for that wider matrix.
+This qualifies these reported synchronous I/O errors and controlled partial
+writes/process exits while the OS and its caches remain running. It does not
+simulate device power loss, cache loss/reordering, arbitrary torn-write patterns,
+random kill positions, permanent device failure, WAL or errors after the whole
+transaction has committed. Issue #74 remains open for that wider matrix.
 SQLite interface references: [VFS](https://www.sqlite.org/c3ref/vfs.html),
 [file methods](https://www.sqlite.org/c3ref/io_methods.html),
 [result codes](https://www.sqlite.org/rescode.html).
+Commit/recovery reference: [atomic commit](https://www.sqlite.org/atomiccommit.html).

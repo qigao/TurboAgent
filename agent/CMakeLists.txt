@@ -31,6 +31,10 @@ if(BUILD_EXAMPLES)
   endforeach()
 endif()
 
+if((BUILD_TESTS OR TURBOAGENT_SQLITE_VFS_CONFORMANCE) AND NOT CMAKE_CROSSCOMPILING)
+  add_subdirectory(tests/sqlite_vfs)
+endif()
+
 if(BUILD_TESTS)
   # Compile the documented Host example in normal test builds as well.
   if(NOT BUILD_EXAMPLES)

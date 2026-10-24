@@ -93,7 +93,7 @@
                 "VCPKG_TARGET_TRIPLET": "arm64-osx",
                 "VCPKG_HOST_TRIPLET": "arm64-osx"
             },
-            "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "arm64", "ENABLE_TESTS": false, "BUILD_TESTS": false, "BUILD_TESTING": false }
+            "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "arm64", "ENABLE_TESTS": false, "BUILD_TESTS": false, "BUILD_TESTING": false, "TURBOAGENT_SQLITE_VFS_CONFORMANCE": true }
         },
         {
             "name": "base-ci-android-release",

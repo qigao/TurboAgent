@@ -149,3 +149,29 @@ disk exhaustion. The adjacent Executor regression qualifies cancel/deadline whil
 is queued behind another: the queued call terminates before Journal admission and before the
 owner is released. Token-free waiting, interruption of an already-entered native callback,
 Journal entry eviction/retention and the remaining backend matrix stay open.
+
+## Test-only SQLite VFS I/O failures
+
+`agent/tests/sqlite_vfs` adds twelve independent-process CTests: STARTED and
+COMMITTED persistence each run a passing control and five one-shot native-file
+failures (rollback-journal write/full/sync and database write/sync). Its phase
+adapter arms a forwarding VFS and always delegates to the real production Store.
+The unchanged Store source is compiled into the fixture with renamed entry
+points so that static SQLite registries cannot diverge across a Windows DLL and
+its test executable.
+
+For these injected errors, native read-only inspection after close requires a
+failed STARTED to retain `planned` plus `admitted` and zero original callbacks;
+a failed COMMITTED retains `started` plus `admitted` and one original callback.
+Both replay UNKNOWN after independent restart without another callback. An
+independent identity commits on the original connection after the one-shot fault.
+Disk inspection also checks integrity, full persisted identity, output, an
+untouched sentinel and independently committed effect counts. The controls replay
+their exact committed result. See [fixture details](../tests/sqlite_vfs/README.md).
+
+Linux and Windows include the cases in the normal suite; the macOS SDK profile
+builds this fixture and runs its dedicated runtime CTest preset. Android remains
+cross-build-only for this fixture. A platform is qualified only after its actual
+VFS cases pass. These reported I/O errors followed by normal close/reopen do not
+qualify arbitrary process kill, power loss, torn/partial writes, permanent disk
+exhaustion or every I/O position. The broader #74 matrix remains open.

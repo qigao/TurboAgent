@@ -381,6 +381,18 @@ static int turbo_agent_execution_submit(turbo_agent_execution_kind_t kind,
     turbo_agent_execution_release(execution);
     return SALTS_ERANGE;
   }
+  if (execution->hooks.before_admit) {
+    turbo_agent_execution_before_admit_fn before_admit = execution->hooks.before_admit;
+    void *before_admit_user_data = execution->hooks.before_admit_user_data;
+    execution->hooks.before_admit = NULL;
+    execution->hooks.before_admit_user_data = NULL;
+    rc = before_admit(before_admit_user_data, execution->id);
+    if (rc != SALTS_OK) {
+      turbo_agent_execution_release(execution);
+      turbo_agent_execution_release(execution);
+      return rc;
+    }
+  }
   rc = cmeta_threadpool_try_submit(executor, turbo_agent_execution_worker, execution);
   if (rc != SALTS_OK) {
     turbo_agent_execution_release(execution);

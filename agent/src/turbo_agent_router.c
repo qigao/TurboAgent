@@ -302,12 +302,18 @@ static json_value_t *router_decision(const turbo_agent_router_task_t *task) {
     json_free(view);
     return NULL;
   }
+  if (task->admission_id &&
+      turbo_runtime_json_object_set_string(view, "admission_id", task->admission_id)) {
+    json_free(view);
+    return NULL;
+  }
   return view;
 }
 
 static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *executor,
     const turbo_agent_router_request_t *request, const json_value_t *input,
-    unsigned max_model_turns, turbo_agent_router_task_t **out_task) {
+    unsigned max_model_turns, turbo_agent_runtime_t *host_runtime, const char *admission_id,
+    turbo_agent_router_task_t **out_task) {
   turbo_agent_tool_authority_snapshot_t parent = {0}, child = {0}, selected_child = {0};
   turbo_agent_router_task_t *task;
   turbo_agent_runtime_exec_options_t runtime_options = {0};
@@ -319,6 +325,7 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   size_t i;
   int busy = 0, rc, guarded = 0;
   turbo_agent_execution_hooks_t hooks = {0};
+  router_admission_t admission = {0};
   if (!out_task) return SALTS_EINVAL;
   *out_task = NULL;
   if (!router || !executor || !request || request->struct_size < sizeof(*request) ||
@@ -333,6 +340,11 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
       !turbo_agent_router_id_valid_internal(request->thread_id) || !request->parent_link ||
       !request->parent_link->parent_agent_run_id || !request->parent_link->parent_agent_run_id[0] ||
       !input || json_type(input) != JSON_OBJECT) return SALTS_EINVAL;
+  if (host_runtime || admission_id) {
+    if (!host_runtime || !turbo_agent_router_id_valid_internal(admission_id)) return SALTS_EINVAL;
+    for (i = 0; i < router->count; ++i)
+      if (host_runtime == router->endpoints[i].config.runtime) return SALTS_EINVAL;
+  }
   if (router->tool_task_limit == 1 && router->tool_task_count) return SALTS_EBUSY;
   if (max_model_turns) {
     if (max_model_turns < 2 || max_model_turns > TURBO_AGENT_ROUTER_MAX_MODEL_TURNS ||
@@ -383,6 +395,7 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   task->child_authority = selected_child;
   task->thread_id = tstr_dup(request->thread_id);
   task->parent_run_id = tstr_dup(request->parent_link->parent_agent_run_id);
+  if (admission_id) task->admission_id = tstr_dup(admission_id);
   task->started_ms = task->observed_ms = task->heartbeat_ms = now;
   task->heartbeat_timeout_ms = request->heartbeat_timeout_ms;
   task->estimated_micros = best_cost;
@@ -398,7 +411,8 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   state = json_clone(input);
   decision = router_decision(task);
   rc = SALTS_ENOMEM;
-  if (!task->thread_id || !task->parent_run_id || !task->graph || !state || !decision) goto rejected;
+  if (!task->thread_id || !task->parent_run_id || !task->graph || !state || !decision ||
+      (admission_id && !task->admission_id)) goto rejected;
   if (turbo_runtime_json_object_set(state, "model_route", decision) != TURBO_RUNTIME_JSON_OK)
     goto rejected;
   decision = NULL;
@@ -418,6 +432,13 @@ static int router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *execu
   options.struct_size = sizeof(options);
   options.abi_version = TURBO_AGENT_EXECUTION_ABI_VERSION;
   options.deadline_mono_ms = task->deadline_ms;
+  if (host_runtime) {
+    admission.task = task;
+    admission.host_runtime = host_runtime;
+    admission.parent_link = request->parent_link;
+    hooks.before_admit = turbo_agent_router_admission_write_internal;
+    hooks.before_admit_user_data = &admission;
+  }
   selected->busy = 1;
   if (max_model_turns) ++router->tool_task_count;
   rc = turbo_agent_execution_start_internal(executor, selected->config.runtime, task->graph, state,
@@ -436,6 +457,7 @@ rejected:
   turbo_graph_destroy(task->graph);
   tstr_free(task->thread_id);
   tstr_free(task->parent_run_id);
+  tstr_free(task->admission_id);
   free(task);
   return rc;
 }
@@ -443,7 +465,7 @@ rejected:
 int turbo_agent_router_submit(turbo_agent_router_t *router, cmeta_threadpool_t *executor,
     const turbo_agent_router_request_t *request, const json_value_t *input,
     turbo_agent_router_task_t **out_task) {
-  return router_submit(router, executor, request, input, 0, out_task);
+  return router_submit(router, executor, request, input, 0, NULL, NULL, out_task);
 }
 
 int turbo_agent_router_submit_tool_loop(turbo_agent_router_t *router, cmeta_threadpool_t *executor,
@@ -453,7 +475,19 @@ int turbo_agent_router_submit_tool_loop(turbo_agent_router_t *router, cmeta_thre
     if (out_task) *out_task = NULL;
     return SALTS_EINVAL;
   }
-  return router_submit(router, executor, request, input, max_model_turns, out_task);
+  return router_submit(router, executor, request, input, max_model_turns, NULL, NULL, out_task);
+}
+
+int turbo_agent_router_submit_with_intent(turbo_agent_router_t *router,
+    cmeta_threadpool_t *executor, turbo_agent_runtime_t *host_runtime, const char *admission_id,
+    const turbo_agent_router_request_t *request, const json_value_t *input,
+    unsigned max_model_turns, turbo_agent_router_task_t **out_task) {
+  if (!host_runtime || !admission_id) {
+    if (out_task) *out_task = NULL;
+    return SALTS_EINVAL;
+  }
+  return router_submit(router, executor, request, input, max_model_turns,
+                       host_runtime, admission_id, out_task);
 }
 
 int turbo_agent_router_task_review(turbo_agent_router_task_t *task, cmeta_threadpool_t *executor,
@@ -637,6 +671,7 @@ int turbo_agent_router_task_release(turbo_agent_router_task_t *task) {
   tstr_free(task->review_checkpoint);
   tstr_free(task->thread_id);
   tstr_free(task->parent_run_id);
+  tstr_free(task->admission_id);
   free(task);
   return SALTS_OK;
 }

@@ -717,6 +717,9 @@ PLANNED -- atomic ADMITTED fence --> STARTED -> COMMITTED
 `test_turbo_agent_tool_executor` 保留
 历史 SHA-256 golden framing 检查，并用一个被阻塞的 owner batch 验证后续 batch 在
 取消或 deadline 时可在 owner 释放前终止、且不进入第二个 callback；
+`test_turbo_agent_tool_batch_wakeup` 通过测试专用 condition 调度器运行真实 owner gate，
+强制 owner 唤醒已取消或 deadline 到期的 waiter，验证其退出时把唤醒传给无 token 的
+第三个调用者；移除该传递会触发有界失败，不会让测试永久等待。
 `test_turbo_cli_tool_cancel` 覆盖真实进程取消后的
 checkpoint 恢复。`test_turbo_agent_tool_claim` 强制两个独立 executor/Runtime handle 同时
 读取缺失或 PLANNED 身份，验证原子身份发布、冲突拒绝和单次 callback；它还注入双调用

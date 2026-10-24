@@ -45,6 +45,10 @@ if(BUILD_TESTS)
   cmake_add_test(SOURCES ${TEST_SOURCES}
     LIBS TurboAgent::Agent Salts::TinyTest
     INCLUDES include tests FOLDER "Agent/tests")
+  # The wakeup regression compiles the real executor with a test-only condition
+  # scheduler; its private crypto includes are supplied by the canonical SDK.
+  target_link_libraries(test_turbo_agent_tool_batch_wakeup PRIVATE Salts::CMeta)
+  set_tests_properties(test_turbo_agent_tool_batch_wakeup PROPERTIES TIMEOUT 15)
 
   # Real installed-SDK Typed RPC fixture: generated C11 client/server plus a
   # separate Provider DSO. Keep it out of cross-compilation profiles.

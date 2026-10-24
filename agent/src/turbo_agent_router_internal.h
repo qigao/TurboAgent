@@ -31,7 +31,7 @@ struct turbo_agent_router_task_s {
   int pending_review, review_cancelled;
   int tool_waiting; /* guarded by router->tool_mutex */
   turbo_agent_tool_authority_snapshot_t parent_authority, child_authority;
-  tstr thread_id, parent_run_id;
+  tstr thread_id, parent_run_id, admission_id;
   uint64_t started_ms, observed_ms, heartbeat_ms, estimated_micros;
   uint64_t budget_micros;
   unsigned heartbeat_timeout_ms, difficulty, input_tokens, output_tokens, required_capabilities;
@@ -39,6 +39,14 @@ struct turbo_agent_router_task_s {
   int unresponsive, taken;
   turbo_agent_router_group_t *group;
 };
+
+typedef struct router_admission_s {
+  const turbo_agent_router_task_t *task;
+  turbo_agent_runtime_t *host_runtime;
+  const turbo_agent_runtime_parent_link_t *parent_link;
+} router_admission_t;
+
+int turbo_agent_router_admission_write_internal(void *user_data, const char *execution_id);
 
 int turbo_agent_router_id_valid_internal(const char *text);
 int turbo_agent_router_authority_current_internal(const turbo_agent_router_task_t *task);

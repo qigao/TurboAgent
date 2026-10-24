@@ -12,10 +12,18 @@ typedef int (*turbo_agent_execution_complete_fn)(void *user_data, turbo_graph_t 
 typedef void (*turbo_agent_execution_terminal_fn)(void *user_data,
                                                   turbo_agent_execution_t *execution);
 
+/* Synchronous caller-side gate after all Execution allocation/identity setup,
+ * before pool admission. The id is borrowed only for this call. Error prevents
+ * enqueue. The hook/user pointer is cleared before invocation, never retained
+ * by the worker. A successful gate is not acknowledgement of pool admission. */
+typedef int (*turbo_agent_execution_before_admit_fn)(void *user_data, const char *execution_id);
+
 typedef struct turbo_agent_execution_hooks_s {
   turbo_agent_execution_complete_fn complete;
   turbo_agent_execution_terminal_fn terminal;
   void *user_data;
+  turbo_agent_execution_before_admit_fn before_admit;
+  void *before_admit_user_data;
 } turbo_agent_execution_hooks_t;
 
 /* Synchronous terminal-result inspection by an exclusive Host owner. Borrowed

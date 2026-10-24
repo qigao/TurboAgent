@@ -404,6 +404,38 @@ spec("supervised tiered Router tool loop") {
     tstr_free(run);
   }
 
+  it("records initial tool-loop intent without retaining its store through approval resumes") {
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    audit_runtime = turbo_agent_runtime_create(&store); check_not_null(audit_runtime);
+    f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "loop-intent",
+        &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "loop-intent", &view), SALTS_OK);
+    check_equal(json_get_string(view, "task_id"), turbo_agent_router_task_id(task));
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "max_model_turns"), 0), 2);
+    check_equal(atomic_load(&f[0].tool_calls), 0);
+    turbo_agent_runtime_destroy(audit_runtime); audit_runtime = NULL;
+    check_equal(turbo_agent_router_task_review(task, pool, 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "completed");
+    check_equal(json_get_string(json_object_get(state, "model_route"), "admission_id"), "loop-intent");
+    check_equal(atomic_load(&f[0].tool_calls), 1); check_true(f[0].approved);
+  }
+
+  it("blocks a recorded tool loop before model, approval hooks or effects without atomic intent support") {
+    turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+    store.create_if_absent = NULL;
+    audit_runtime = turbo_agent_runtime_create(&store); check_not_null(audit_runtime);
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "blocked-loop-intent",
+        &request, input, 2, &task), SALTS_ENOTSUP);
+    check_null(task);
+    check_equal(atomic_load(&f[1].model_calls) + atomic_load(&f[2].model_calls), 0);
+    check_equal(atomic_load(&f[0].tool_calls), 0); check_equal(f[0].host_hooks, 0);
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+  }
+
   it("does not report an old approval after a resumed segment fails before terminal metadata capture") {
     f[0].approval = 1; f[2].fail_followup = 1;
     check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);

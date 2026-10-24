@@ -17,6 +17,8 @@ extern "C" {
 #define TURBO_AGENT_ROUTER_GROUP_MAX_INPUT_BYTES 1048576u
 #define TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION "router_observations"
 #define TURBO_AGENT_ROUTER_OBSERVATION_MAX_BYTES 16384u
+#define TURBO_AGENT_ROUTER_ADMISSION_COLLECTION "router_admission_intents"
+#define TURBO_AGENT_ROUTER_ADMISSION_MAX_BYTES 16384u
 
 typedef struct turbo_agent_router_s turbo_agent_router_t;
 typedef struct turbo_agent_router_task_s turbo_agent_router_task_t;
@@ -160,6 +162,52 @@ CXX_C_API int turbo_agent_router_submit_tool_loop(turbo_agent_router_t *router,
     cmeta_threadpool_t *executor, const turbo_agent_router_request_t *request,
     const json_value_t *input, unsigned max_model_turns,
     turbo_agent_router_task_t **out_task);
+
+/**
+ * Write one immutable admission intent before initial Execution pool admission.
+ * max_model_turns is 0 for submit(), or 2..16 for submit_tool_loop(). Routing,
+ * authority, copies and Execution identity setup precede the write. The exact
+ * selected route, first Execution UUID, request bounds and Host lineage are
+ * atomically created at ADMISSION_COLLECTION/admission_id (1..64 ASCII id).
+ * No prompt, answer, tool payload, policy grant or resumable handle is stored.
+ *
+ * host_runtime must be independent of every endpoint Runtime/store; it is only
+ * borrowed during this synchronous call. Host serializes its use. Requires
+ * atomic create_if_absent (ENOTSUP otherwise); no put/get/list fallback/retry.
+ * Backend errors, including commit followed by lost acknowledgement, prevent
+ * enqueue and propagate unchanged. EALREADY is an id conflict, even for the
+ * same request; it never admits work. Load the same id explicitly to reconcile.
+ *
+ * Pool rejection after a successful write preserves that intent and returns
+ * the pool error with NULL out_task. It consumes the id. After a crash, an
+ * intent alone cannot distinguish before-enqueue, queued, running or completed
+ * work, and its absence is not evidence about work using other ids/APIs. Only
+ * a successful return transfers a live task handle; supervise/drain it normally.
+ * Intent write and queue/Runtime/Journal are not a cross-system transaction.
+ *
+ * Bounds: record <=16 KiB, model/provider/parent tool name <=1024 bytes,
+ * parent ids <=128. Other errors/ownership match ordinary submit(). Durability
+ * follows the backend (SQLite committed records; memory is volatile). Original
+ * deadline includes persistence/queue time. Review resumes are not recorded by
+ * this initial-intent API. This is not a durable queue, complete supervision,
+ * automatic restart/takeover, delivery proof or permission to retry UNKNOWN
+ * effects. Existing observations can explicitly link terminal canonical Runs.
+ */
+CXX_C_API int turbo_agent_router_submit_with_intent(turbo_agent_router_t *router,
+    cmeta_threadpool_t *executor, turbo_agent_runtime_t *host_runtime, const char *admission_id,
+    const turbo_agent_router_request_t *request, const json_value_t *input,
+    unsigned max_model_turns, turbo_agent_router_task_t **out_task);
+
+/**
+ * Load/validate exactly one admission intent by Host id; no Router/Agent is
+ * needed after restart. Returns owned JSON on success and clears out_record on
+ * every error. EPROTO/ENOBUFS reject invalid schema/identity/bounds; backend
+ * errors (including ENOENT) propagate unchanged. Starts no work and grants no
+ * authority. Compare expected route/request/lineage and reconcile canonical
+ * Runtime/Journal evidence explicitly before any new Host decision.
+ */
+CXX_C_API int turbo_agent_router_load_intent(turbo_agent_runtime_t *host_runtime,
+    const char *admission_id, json_value_t **out_record);
 
 /**
  * Review the current terminal approval checkpoint using existing Runtime

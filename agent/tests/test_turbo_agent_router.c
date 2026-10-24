@@ -19,6 +19,11 @@ typedef struct router_transport_s {
 typedef struct router_audit_s {
   turbo_agent_runtime_store_t base;
   int creates, gets, puts, lists, write_error, read_error, error_after_commit;
+  router_transport_t *transport;
+  int calls_at_create;
+  unsigned delay_ms;
+  cmeta_threadpool_t *pool;
+  int64_t submitted_at_create;
 } router_audit_t;
 
 static int router_audit_put(void *user, const char *collection, const char *id, const char *text) {
@@ -37,6 +42,13 @@ static int router_audit_create(void *user, const char *collection, const char *i
   router_audit_t *audit = user;
   int rc;
   ++audit->creates;
+  if (audit->transport) audit->calls_at_create = atomic_load(&audit->transport->calls);
+  if (audit->pool) {
+    cmeta_threadpool_stats_t stats = {0};
+    cmeta_threadpool_get_stats(audit->pool, &stats);
+    audit->submitted_at_create = stats.submitted_tasks;
+  }
+  if (audit->delay_ms) cmeta_sleep_ms(audit->delay_ms);
   if (audit->write_error) return audit->write_error;
   rc = audit->base.create_if_absent(audit->base.user_data, collection, id, text);
   return !rc && audit->error_after_commit ? SALTS_EIO : rc;
@@ -692,6 +704,235 @@ spec("bounded tiered model Router") {
       check_equal(turbo_agent_router_load_observation(audit_runtime, "corrupt", &view), corruption == 7 ? SALTS_ENOBUFS : SALTS_EPROTO);
       check_null(view); check_equal(atomic_load(&transport[2].calls), 1);
     }
+  }
+
+  it("writes selected admission identity before model entry and links it to canonical Runtime state") {
+    audit.transport = &transport[2]; audit.pool = pool;
+    parent.parent_tool_name = "host.delegate"; parent.parent_graph_run_id = "host-graph";
+    parent.call_frame_id = "host-frame";
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "intent",
+        &request, input, 0, &task), SALTS_OK);
+    check_equal(audit.creates, 1); check_equal(audit.calls_at_create, 0);
+    check_equal(audit.submitted_at_create, 0);
+    check_equal(audit.puts, 0); check_equal(audit.gets, 0); check_equal(audit.lists, 0);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "intent", &view), SALTS_OK);
+    check_equal(json_get_string(view, "task_id"), turbo_agent_router_task_id(task));
+    check_equal(json_get_string(view, "endpoint"), "fast");
+    check_equal(json_get_string(view, "model"), "worker");
+    check_equal(json_get_string(view, "semantics"), "pre_dispatch_intent");
+    check_equal(json_get_string(view, "parent_tool_call_id"), "parent-call");
+    check_equal(json_get_string(view, "parent_tool_name"), "host.delegate");
+    check_equal(json_get_string(view, "parent_graph_run_id"), "host-graph");
+    check_equal(json_get_string(view, "call_frame_id"), "host-frame");
+    check_null(json_object_get(view, "prompt")); check_null(json_object_get(view, "result"));
+    check_null(json_object_get(view, "execution_status"));
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(json_object_get(state, "model_route"), "admission_id"), "intent");
+    check_equal(turbo_agent_router_task_record_observation(task, audit_runtime, "too-late"), SALTS_EALREADY);
+    json_value_t *inspection = NULL;
+    check_equal(turbo_agent_router_task_inspect(task, &inspection), SALTS_OK);
+    check_equal(json_get_string(inspection, "admission_id"), "intent"); json_free(inspection);
+    char *text = json_serialize(view, NULL); check_not_null(text);
+    check_null(strstr(text, "perform the Host task")); json_serialize_free(text);
+    check_equal(atomic_load(&transport[2].calls), 1);
+  }
+
+  it("prevents enqueue after an intent write error and restores endpoint ownership") {
+    audit.write_error = SALTS_ENOSPC;
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "failed-intent",
+        &request, input, 0, &task), SALTS_ENOSPC);
+    check_null(task); check_equal(atomic_load(&transport[2].calls), 0);
+    check_equal(audit.creates, 1); check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+    audit.write_error = 0;
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "failed-intent", &view), SALTS_ENOENT);
+    check_null(view);
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "explicit-new-intent",
+        &request, input, 0, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(atomic_load(&transport[2].calls), 1);
+  }
+
+  it("never enqueues on a lost intent acknowledgement or treats a colliding id as success") {
+    audit.error_after_commit = 1;
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "uncertain-intent",
+        &request, input, 0, &task), SALTS_EIO);
+    check_null(task); check_equal(atomic_load(&transport[2].calls), 0);
+    check_equal(audit.creates, 1); check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "uncertain-intent", &view), SALTS_OK);
+    audit.error_after_commit = 0;
+    request.difficulty = 80; request.thread_id = "different-request";
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "uncertain-intent",
+        &request, input, 0, &task), SALTS_EALREADY);
+    check_null(task); check_equal(atomic_load(&transport[1].calls), 0);
+    json_value_t *again = NULL;
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "uncertain-intent", &again), SALTS_OK);
+    check_equal(json_get_string(again, "task_id"), json_get_string(view, "task_id"));
+    check_equal(json_get_string(again, "thread_id"), "child-router");
+    check_equal(json_get_string(again, "endpoint"), "fast"); json_free(again);
+  }
+
+  it("consumes a persisted intent id even when the bounded pool rejects admission") {
+    atomic_store(&transport[0].open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, router_queue_block, &transport[0]), SALTS_OK);
+    router_wait_entered(&transport[0]);
+    check_equal(cmeta_threadpool_try_submit(pool, router_queue_block, &transport[0]), SALTS_OK);
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "queue-rejected",
+        &request, input, 0, &task), SALTS_ENOBUFS);
+    check_null(task); check_equal(atomic_load(&transport[2].calls), 0);
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "queue-rejected", &view), SALTS_OK);
+    atomic_store(&transport[0].open, 1);
+    cmeta_threadpool_destroy(pool);
+    cmeta_threadpool_config_t pc = {.num_threads = 1, .queue_capacity = 1};
+    pool = cmeta_threadpool_create_with_config(&pc); check_not_null(pool);
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "queue-rejected",
+        &request, input, 0, &task), SALTS_EALREADY);
+    check_null(task);
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "new-queue-intent",
+        &request, input, 0, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_true(strcmp(json_get_string(view, "task_id"), turbo_agent_router_task_id(task)) != 0);
+    check_equal(atomic_load(&transport[2].calls), 1);
+  }
+
+  it("rejects unsupported intent persistence without fallback or model entry") {
+    turbo_agent_runtime_destroy(audit_runtime); audit_runtime = router_audit_runtime(&audit, 0);
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "unsupported-intent",
+        &request, input, 0, &task), SALTS_ENOTSUP);
+    check_null(task); check_equal(atomic_load(&transport[2].calls), 0);
+    check_equal(audit.creates, 0); check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+  }
+
+  for (int invalid = 0; invalid < 8; ++invalid) {
+    it("rejects invalid intent admission before touching the Host store, case=%d", invalid) {
+      turbo_agent_runtime_t *host = audit_runtime;
+      const char *id = "invalid-intent";
+      unsigned turns = 0;
+      int expected = SALTS_EINVAL;
+      if (invalid == 0) id = "../escape";
+      if (invalid == 1) id = NULL;
+      if (invalid == 2) host = NULL;
+      if (invalid == 3) host = runtimes[0];
+      if (invalid == 4) host = runtimes[1];
+      if (invalid == 5) turns = 1;
+      if (invalid == 6) { request.budget_micros = 0; expected = SALTS_ENOENT; }
+      if (invalid == 7) {
+        grant.allow_delegate = 0; check_equal(turbo_agent_set_tool_policy(agents[0], &grant), 0);
+        expected = SALTS_EPERM;
+      }
+      check_equal(turbo_agent_router_submit_with_intent(router, pool, host, id,
+          &request, input, turns, &task), expected);
+      check_null(task); check_equal(audit.creates, 0); check_equal(audit.gets, 0);
+      check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+      check_equal(atomic_load(&transport[1].calls) + atomic_load(&transport[2].calls), 0);
+    }
+  }
+
+  it("borrows the intent store only for synchronous admission, not live execution") {
+    atomic_store(&transport[2].open, 0);
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "short-store-lifetime",
+        &request, input, 0, &task), SALTS_OK);
+    router_wait_entered(&transport[2]);
+    turbo_agent_runtime_destroy(audit_runtime); audit_runtime = NULL;
+    atomic_store(&transport[2].open, 1);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "completed");
+  }
+
+  it("includes intent persistence time in the original execution deadline") {
+    request.timeout_ms = request.heartbeat_timeout_ms = 50; audit.delay_ms = 100;
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "expired-intent",
+        &request, input, 0, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "timed_out");
+    check_equal(atomic_load(&transport[2].calls), 0);
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "expired-intent", &view), SALTS_OK);
+  }
+
+  it("preserves intent read errors and clears every rejected output") {
+    view = (json_value_t *)&audit;
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "../invalid", &view), SALTS_EINVAL);
+    check_null(view); check_equal(audit.gets, 0);
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "missing-intent", &view), SALTS_ENOENT);
+    check_null(view); audit.read_error = SALTS_EIO;
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "missing-intent", &view), SALTS_EIO);
+    check_null(view); check_equal(audit.lists, 0); check_equal(audit.puts, 0);
+  }
+
+  for (int corrupt = 0; corrupt < 11; ++corrupt) {
+    it("rejects corrupt or oversized admission metadata without starting work, case=%d", corrupt) {
+      check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "corrupt-intent",
+          &request, input, 0, &task), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      check_equal(turbo_agent_router_load_intent(audit_runtime, "corrupt-intent", &view), SALTS_OK);
+      if (corrupt == 0) check_equal(turbo_runtime_json_object_set_int64(view, "schema_version", 2), 0);
+      if (corrupt == 1) check_equal(turbo_runtime_json_object_set_string(view, "admission_id", "other-id"), 0);
+      if (corrupt == 2) check_equal(turbo_runtime_json_object_set_string(view, "semantics", "completed"), 0);
+      if (corrupt == 3) check_equal(turbo_runtime_json_object_set_int64(view, "estimated_cost_micros", 0), 0);
+      if (corrupt == 4) check_equal(turbo_runtime_json_object_set(view, "difficulty", json_create_number(1.5)), 0);
+      if (corrupt == 5) check_equal(turbo_runtime_json_object_set_int64(view, "deadline_mono_ms", 0), 0);
+      if (corrupt == 6) check_equal(turbo_runtime_json_object_set_int64(view, "max_model_turns", 1), 0);
+      if (corrupt == 7) {
+        const char text[] = "\"p\\u0000q\"";
+        check_equal(turbo_runtime_json_object_set(view, "parent_run_id", json_parse(text, strlen(text))), 0);
+      }
+      if (corrupt == 8) check_equal(turbo_runtime_json_object_set_string(view, "unexpected", "field"), 0);
+      if (corrupt == 9) check_equal(turbo_runtime_json_object_set_string(view, "task_id", "bad/id"), 0);
+      if (corrupt == 10) {
+        char long_model[1026]; memset(long_model, 'x', sizeof(long_model)-1); long_model[1025] = '\0';
+        check_equal(turbo_runtime_json_object_set_string(view, "model", long_model), 0);
+      }
+      check_equal(turbo_agent_runtime_store_put_json(audit_runtime, TURBO_AGENT_ROUTER_ADMISSION_COLLECTION,
+          "corrupt-intent", view), SALTS_OK);
+      json_free(view); view = NULL;
+      check_equal(turbo_agent_router_load_intent(audit_runtime, "corrupt-intent", &view),
+                  corrupt == 10 ? SALTS_ENOBUFS : SALTS_EPROTO);
+      check_null(view); check_equal(atomic_load(&transport[2].calls), 1);
+    }
+  }
+
+  for (int oversized = 0; oversized < 2; ++oversized) {
+    it("bounds admission lineage before atomic creation or execution, field=%d", oversized) {
+      char long_text[1026]; memset(long_text, 'x', sizeof(long_text)-1); long_text[1025] = '\0';
+      if (oversized) parent.parent_tool_name = long_text;
+      else parent.parent_agent_run_id = long_text;
+      check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "too-large-intent",
+          &request, input, 0, &task), SALTS_ENOBUFS);
+      check_null(task); check_equal(audit.creates, 0);
+      check_equal(atomic_load(&transport[2].calls), 0);
+    }
+  }
+
+  it("reopens durable intent and terminal observation without retaining any Router owner") {
+    directory = tt_make_temp_dir("router-intents"); check_not_null(directory);
+    audit_path = tstr_format("{}/host.db", directory); worker_path = tstr_format("{}/worker.db", directory);
+    check_not_null(audit_path); check_not_null(worker_path);
+    turbo_agent_runtime_destroy(audit_runtime); audit_runtime = router_sqlite_runtime(audit_path, 1);
+    check_equal(turbo_agent_router_destroy(router), SALTS_OK); router = NULL;
+    turbo_agent_runtime_destroy(runtimes[1]); runtimes[1] = router_sqlite_runtime(worker_path, 1);
+    endpoints[1].runtime = runtimes[1];
+    check_equal(turbo_agent_router_create(&config, &router), SALTS_OK);
+    check_equal(turbo_agent_router_submit_with_intent(router, pool, audit_runtime, "durable-intent",
+        &request, input, 0, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_record_observation(task, audit_runtime, "terminal-link"), SALTS_OK);
+    check_equal(turbo_agent_router_task_release(task), SALTS_OK); task = NULL;
+    check_equal(turbo_agent_router_destroy(router), SALTS_OK); router = NULL;
+    for (int i = 0; i < 2; ++i) { turbo_agent_runtime_destroy(runtimes[i]); runtimes[i] = NULL; }
+    for (int i = 0; i < 3; ++i) { turbo_agent_destroy(agents[i]); agents[i] = NULL; }
+    turbo_agent_runtime_destroy(audit_runtime);
+    audit_runtime = router_sqlite_runtime(audit_path, 0); runtimes[1] = router_sqlite_runtime(worker_path, 0);
+    check_equal(turbo_agent_router_load_intent(audit_runtime, "durable-intent", &view), SALTS_OK);
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "terminal-link", &state), SALTS_OK);
+    check_equal(json_get_string(view, "task_id"), json_get_string(state, "task_id"));
+    check_equal(turbo_agent_runtime_get_run(runtimes[1], json_get_string(state, "runtime_run_id"), &summary), SALTS_OK);
+    check_equal(json_get_string(summary, "thread_id"), json_get_string(view, "thread_id"));
+    check_equal(json_get_string(summary, "parent_agent_run_id"), json_get_string(view, "parent_run_id"));
+    turbo_agent_runtime_destroy(audit_runtime); audit_runtime = NULL;
+    check_equal(json_get_string(view, "admission_id"), "durable-intent");
   }
 
   it("reopens SQLite observations and reconciles canonical Runtime anchors after every Router owner is destroyed") {

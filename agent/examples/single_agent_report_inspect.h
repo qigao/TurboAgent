@@ -15,8 +15,8 @@ typedef struct single_agent_report_binding_s {
 
 static const char *const report_inspect_suffixes[] = {"worker-a", "worker-b", "fan-in",
     "aggregate", "aggregate-final", "execute", "pending", "review", "execute-final", "ready",
-    "stop", "stop-worker-a", "stop-worker-b", "stop-aggregate", "stop-execute"};
-enum { REPORT_INSPECT_COUNT = 15, REPORT_INSPECT_MAX_BYTES = 384 * 1024 };
+    "stop", "stop-worker-a", "stop-worker-b", "stop-aggregate", "stop-execute", "gate-failure"};
+enum { REPORT_INSPECT_COUNT = 16, REPORT_INSPECT_MAX_BYTES = 384 * 1024 };
 
 static int64_t report_inspect_integer(const json_value_t *v, const char *key) {
   return turbo_runtime_json_value_as_int64(json_object_get(v, key), INT64_MIN);
@@ -83,7 +83,7 @@ static int report_inspect_manifest(const json_value_t *m, const char *id, const 
       !report_inspect_is(m, "semantics", "pre_report_dispatch_manifest") ||
       !report_inspect_is(m, "clock_domain", "origin_process_monotonic") || start < 0 ||
       deadline <= start || deadline > INT64_C(9007199254740991) || deadline - start > 86400000 ||
-      (count != 10 && count != REPORT_INSPECT_COUNT) ||
+      (count != 10 && count != 15 && count != REPORT_INSPECT_COUNT) ||
       !report_inspect_shape(phases, report_inspect_suffixes, count)) return SALTS_EPROTO;
   for (size_t i = 0; i < count; ++i) {
     if (report_inspect_key(id, report_inspect_suffixes[i], key) ||
@@ -213,11 +213,48 @@ static int report_inspect_stop(const json_value_t *stop, json_value_t *const p[]
   return report_inspect_size(stop, 16384);
 }
 
+static int report_inspect_gate_failure(const json_value_t *failure, json_value_t *const p[],
+    const json_value_t *manifest, const char *id, const char *parent) {
+  static const char *const keys[] = {"schema_version", "semantics", "report_id", "parent_run_id",
+      "operation_phase", "gate_id", "gate_return_code", "gate_outcome", "observed_mono_ms",
+      "clock_domain", "acknowledged_gates"};
+  static const char *const phases[] = {"manifest", "workers", "workers", "workers", "aggregation",
+      "aggregation", "execution", "approval", "approval", "delivery", "delivery-audit"};
+  const json_value_t *gates = json_object_get(failure, "acknowledged_gates");
+  int64_t code = report_inspect_integer(failure, "gate_return_code"), observed = report_inspect_integer(failure, "observed_mono_ms");
+  char key[64]; size_t gate, normal = 0;
+  if (!report_inspect_shape(failure, keys, sizeof(keys)/sizeof(keys[0])) ||
+      report_inspect_integer(failure, "schema_version") != 1 ||
+      !report_inspect_is(failure, "semantics", "post_drain_report_gate_failure_observation") ||
+      !report_inspect_is(failure, "report_id", id) || !report_inspect_is(failure, "parent_run_id", parent) ||
+      !report_inspect_is(failure, "clock_domain", "origin_process_monotonic") ||
+      !report_inspect_is(failure, "gate_outcome", "unresolved") || code < INT_MIN || code > INT_MAX || !code ||
+      observed < report_inspect_integer(manifest, "started_mono_ms") || observed > INT64_C(9007199254740991) ||
+      json_type(gates) != JSON_ARRAY) return SALTS_EPROTO;
+  for (gate = 1; gate < 11; ++gate) {
+    if (report_inspect_key(id, single_agent_report_gates[gate], key)) return SALTS_EPROTO;
+    if (report_inspect_is(failure, "gate_id", key)) break;
+  }
+  if (gate == 11 || (!report_inspect_is(failure, "operation_phase", phases[gate]) &&
+      !(gate == 9 && report_inspect_is(failure, "operation_phase", "approval")))) return SALTS_EPROTO;
+  while (normal < 10 && p[normal]) ++normal;
+  /* Only the failed gate may or may not have committed. Its presence does not
+   * resolve acceptance/handoff, and no later gate or operational stop is valid. */
+  if ((normal != gate - 1 && normal != gate) || json_array_size(gates) != gate) return SALTS_EPROTO;
+  for (size_t i = 10; i < 15; ++i) if (p[i]) return SALTS_EPROTO;
+  for (size_t i = 0; i < gate; ++i) {
+    const json_value_t *v = json_array_get(gates, i); const char *s = json_string(v);
+    if (i && report_inspect_key(id, single_agent_report_gates[i], key)) return SALTS_EPROTO;
+    if (!s || strlen(s) != json_string_len(v) || strcmp(s, i ? key : id)) return SALTS_EPROTO;
+  }
+  return report_inspect_size(failure, 16384);
+}
+
 /* All stores/owners are trusted and quiescent throughout this bounded read.
  * ENOENT for an optional phase means missing evidence, not work/effect absence.
  * Any other error, missing referenced anchor or identity mismatch withholds the
  * whole owned output. Reads/allocations precede projection limits; no snapshot
- * transaction across stores is promised. No installed API or schema is added. */
+ * transaction across stores is promised. No installed API is changed. */
 static int single_agent_report_inspect(turbo_agent_runtime_t *host,
     const single_agent_report_binding_t *bindings, size_t count, const char *id,
     const char *parent, json_value_t **out) {
@@ -242,7 +279,8 @@ static int single_agent_report_inspect(turbo_agent_runtime_t *host,
   for (size_t i = 0; i < REPORT_INSPECT_COUNT; ++i) {
     rc = report_inspect_key(id, report_inspect_suffixes[i], key);
     if (rc) goto done;
-    if (i == 10) rc = turbo_agent_runtime_store_get_json_status(host, SINGLE_AGENT_REPORT_STOPS, key, &p[i]);
+    if (i == 15) rc = turbo_agent_runtime_store_get_json_status(host, SINGLE_AGENT_REPORT_GATE_FAILURES, key, &p[i]);
+    else if (i == 10) rc = turbo_agent_runtime_store_get_json_status(host, SINGLE_AGENT_REPORT_STOPS, key, &p[i]);
     else if (i == 9) rc = turbo_agent_runtime_store_get_json_status(host, SINGLE_AGENT_REPORT_READY, key, &p[i]);
     else if (i >= 11 || kinds[i] == 'o') rc = turbo_agent_router_load_observation(host, key, &p[i]);
     else if (kinds[i] == 'i') rc = turbo_agent_router_load_intent(host, key, &p[i]);
@@ -250,7 +288,8 @@ static int single_agent_report_inspect(turbo_agent_runtime_t *host,
     else rc = turbo_agent_router_load_review_intent(host, key, &p[i]);
     if (rc == SALTS_ENOENT) { rc = SALTS_OK; continue; }
     if (rc) goto done;
-    if ((i && i < 10 && !p[i-1]) || (i >= 10 && json_object_size(json_object_get(m, "phase_ids")) != REPORT_INSPECT_COUNT)) { rc = SALTS_EPROTO; goto done; }
+    size_t phases = json_object_size(json_object_get(m, "phase_ids"));
+    if ((i && i < 10 && !p[i-1]) || (i >= 10 && phases < 15) || (i == 15 && phases < 16)) { rc = SALTS_EPROTO; goto done; }
   }
   for (size_t i = 0; i < 4; ++i) {
     const json_value_t *intent = p[intents[i]];
@@ -304,6 +343,7 @@ static int single_agent_report_inspect(turbo_agent_runtime_t *host,
     if ((rc = report_inspect_size(p[9], 16384))) goto done;
   }
   if (p[10] && (rc = report_inspect_stop(p[10], p, m, id, parent))) goto done;
+  if (p[15] && (rc = report_inspect_gate_failure(p[15], p, m, id, parent))) goto done;
   result = json_create_object(); records = json_create_object(); rc = SALTS_ENOMEM;
   if (!result || !records || turbo_runtime_json_object_set_int64(result, "schema_version", 1) ||
       turbo_runtime_json_object_set_string(result, "semantics", "historical_report_trace_inspection") ||

@@ -251,7 +251,8 @@ If any normal persistence gate returns an error, no stop audit is attempted. Thi
 includes admission/review API errors whose public return cannot distinguish a
 pre-write rejection from a committed write with lost acknowledgement. An unacknowledged
 manifest or EALREADY namespace never permits appending a stop to an older report.
-The possible prefix remains for explicit inspection; there is no read/list/put fallback.
+The possible prefix remains for explicit inspection; a separate gate-failure observation
+described below retains the returned error without resolving that prefix. There is no read/list/put fallback.
 Cleanup audit itself stops at its first error or conflicting id, without overwrite,
 retry or further writes. Accepted owners are released even then. Independent terminal
 observations can therefore survive without the report stop row.
@@ -272,6 +273,37 @@ persisted stop phase/code and independent failed-return/model/tool/delivery coun
 The old report id cannot run again; current-policy denial and a distinct healthy report
 are still required. These tests qualify the specified boundaries, not arbitrary crashes,
 complete lifecycle/error coverage, external-effect certainty or delivery recovery.
+
+### Post-drain persistence-gate failures
+
+Once the manifest is acknowledged, a normal gate error triggers one independent atomic
+create in report_gate_failures at demo-gate-failure, after every accepted task is cancelled
+and drained. It records version 1 post_drain_report_gate_failure_observation semantics,
+report/parent identity, original operation phase, exact gate_id, gate_return_code, origin
+monotonic observation time and the acknowledged prefix. The prospective key is reserved
+in the current sixteen-key manifest. No task/result/prompt/tool payload is copied.
+
+gate_outcome is always unresolved: an admission/review error may precede any write, or a
+gate can commit and lose its acknowledgement. The error observation does not acknowledge
+that gate, prove pool acceptance or handoff, or justify reissuing the report. No normal
+gate/stop writes follow the failed gate, and no failed operation is read back, retried or
+overwritten. This separate diagnostic write does not change the original returned error
+or phase. Its own error/conflict/lost acknowledgement is retained in the optional
+gate_audit_attempted/gate_audit_code diagnostics, and the CLI reports both errors.
+There is no retry of the error observation and no recursive error logger.
+
+An unacknowledged/conflicting manifest does not authorize this write; preflight failures
+also have no owned manifest. A crash or storage failure can still leave no error record.
+Presence proves only that this serialized Host reached the post-drain observation after
+the reported error, not that the function returned or an external delivery occurred.
+The normal successful path still has eleven writes. Existing Runtime/Router/Journal
+schemas and installed APIs remain unchanged.
+
+Five additional seven-application process cases cut before/after the error observation,
+after original error return, after its committed write loses acknowledgement, and after
+a gate error with no gate record. Reopened owners and the real CLI check the original
+prefix/error and independent model/tool/error-return/handoff/delivery counters. Both
+ambiguous committed and absent gates remain unresolved; old ids cannot be reissued.
 
 ### Explicit inspection after restart
 
@@ -298,14 +330,16 @@ not discover paths, providers or authority from persisted/model data. Owners mus
 quiescent and store access serialized for the entire call. The CLI uses its fixed original
 draft/review/synthesis/delivery bindings; embedding Hosts supply their actual bindings.
 
-Inspection reads exactly the report manifest and the fifteen known phase keys, including
-the five optional cleanup keys. It accepts both the original ten-key manifest and the
-current fifteen-key version. Current manifest/ready/stop fields, versions, bounded strings,
+Inspection reads exactly the report manifest and the sixteen known phase keys, including
+five optional cleanup keys and the optional gate-failure key. It accepts prior ten- and
+fifteen-key manifests as well as the current sixteen-key version. Current manifest/ready/stop/error fields, versions, bounded strings,
 duplicate fields and references are checked; existing typed Router loaders validate their
 own schemas and limits. Unknown versions/fields and contradictory normal phase prefixes,
 route/task/Execution/thread/parent identities, review checkpoint/segment links and stop
 references fail closed. Standalone terminal cleanup observations can exist without a
-stop row, as after an unacknowledged cleanup write.
+stop row, as after an unacknowledged cleanup write. A gate-failure record must reference
+the exact acknowledged prefix; only its failed gate may be present or absent, with no
+later gate or stop records. An error key absent from an older manifest is rejected.
 
 Referenced canonical Runs/checkpoints are loaded only by their original recorded ids
 from the caller-bound store, checking their identities and parent/thread lineage. There

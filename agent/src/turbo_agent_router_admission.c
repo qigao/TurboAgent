@@ -1,6 +1,7 @@
 #include "turbo_agent_router_internal.h"
 #include "turbo_agent_runtime_internal.h"
 #include "turbo_runtime_segment.h"
+#include "turbo_runtime_history.h"
 
 #include <limits.h>
 #include <string.h>
@@ -113,11 +114,11 @@ static int admission_validate(const json_value_t *record, const char *id) {
   return SALTS_OK;
 }
 
-static int admission_size(const json_value_t *record) {
+static int admission_size(const json_value_t *record, size_t limit) {
   char *text = json_serialize(record, NULL);
   int rc;
   if (!text) return SALTS_ENOMEM;
-  rc = strlen(text) > TURBO_AGENT_ROUTER_ADMISSION_MAX_BYTES ? SALTS_ENOBUFS : SALTS_OK;
+  rc = strlen(text) > limit ? SALTS_ENOBUFS : SALTS_OK;
   json_serialize_free(text);
   return rc;
 }
@@ -164,7 +165,7 @@ int turbo_agent_router_admission_write_internal(void *user_data, const char *exe
       turbo_runtime_json_object_set_int64(record, "started_mono_ms", (int64_t)task->started_ms) ||
       turbo_runtime_json_object_set_int64(record, "deadline_mono_ms", (int64_t)task->deadline_ms)) goto done;
   rc = admission_validate(record, task->admission_id);
-  if (!rc) rc = admission_size(record);
+  if (!rc) rc = admission_size(record, TURBO_AGENT_ROUTER_ADMISSION_MAX_BYTES);
   if (!rc) rc = turbo_agent_runtime_store_create_json_if_absent(admission->host_runtime,
       TURBO_AGENT_ROUTER_ADMISSION_COLLECTION, task->admission_id, record);
 done:
@@ -182,7 +183,168 @@ int turbo_agent_router_load_intent(turbo_agent_runtime_t *host_runtime,
   rc = turbo_agent_runtime_store_get_json_status(host_runtime,
       TURBO_AGENT_ROUTER_ADMISSION_COLLECTION, admission_id, &record);
   if (!rc) rc = admission_validate(record, admission_id);
-  if (!rc) rc = admission_size(record);
+  if (!rc) rc = admission_size(record, TURBO_AGENT_ROUTER_ADMISSION_MAX_BYTES);
+  if (!rc) { *out_record = record; record = NULL; }
+  json_free(record);
+  return rc;
+}
+
+static int review_intent_validate(const json_value_t *record, const char *id) {
+  static const char *fields[] = {
+    "schema_version", "review_id", "semantics", "clock_domain", "recorded_at", "task_id",
+    "execution_id", "previous_execution_id", "admission_id", "endpoint", "model", "provider",
+    "thread_id", "parent_run_id", "source_run_id", "source_checkpoint_id", "decision",
+    "review_segment", "model_turns", "max_model_turns", "started_mono_ms", "requested_mono_ms",
+    "deadline_mono_ms", "heartbeat_timeout_ms"
+  };
+  static const char *ids[] = {"review_id", "task_id", "execution_id", "previous_execution_id", "endpoint", "thread_id"};
+  static const char *numbers[] = {"review_segment", "model_turns", "max_model_turns", "started_mono_ms",
+    "requested_mono_ms", "deadline_mono_ms", "heartbeat_timeout_ms"};
+  uint64_t seen = 0;
+  int64_t segment, turns, maximum, started, requested, deadline, heartbeat;
+  int rc;
+  if (!record || json_type(record) != JSON_OBJECT ||
+      json_object_size(record) != sizeof(fields)/sizeof(fields[0])) return SALTS_EPROTO;
+  for (size_t i = 0; i < json_object_size(record); ++i) {
+    const char *key = json_object_key(record, i);
+    size_t j;
+    if (!key || strlen(key) != json_object_key_len(record, i)) return SALTS_EPROTO;
+    for (j = 0; j < sizeof(fields)/sizeof(fields[0]); ++j)
+      if (!strcmp(key, fields[j])) break;
+    if (j == sizeof(fields)/sizeof(fields[0]) || (seen & (UINT64_C(1) << j))) return SALTS_EPROTO;
+    seen |= UINT64_C(1) << j;
+  }
+  for (size_t i = 0; i < sizeof(ids)/sizeof(ids[0]); ++i) {
+    if ((rc = admission_text(record, ids[i], 64, 0))) return rc;
+    if (!turbo_agent_router_id_valid_internal(json_get_string(record, ids[i]))) return SALTS_EPROTO;
+  }
+  if ((rc = admission_text(record, "admission_id", 64, 1)) ||
+      (rc = admission_text(record, "parent_run_id", 128, 0)) ||
+      (rc = admission_text(record, "source_run_id", 128, 0)) ||
+      (rc = admission_text(record, "source_checkpoint_id", 128, 0)) ||
+      (rc = admission_text(record, "model", 1024, 0)) ||
+      (rc = admission_text(record, "provider", 1024, 0)) ||
+      (rc = admission_text(record, "recorded_at", 31, 0)) ||
+      (rc = admission_text(record, "semantics", 64, 0)) ||
+      (rc = admission_text(record, "clock_domain", 64, 0)) ||
+      (rc = admission_text(record, "decision", 16, 0))) return rc;
+  if ((json_get_string(record, "admission_id") &&
+       !turbo_agent_router_id_valid_internal(json_get_string(record, "admission_id"))) ||
+      admission_integer(record, "schema_version") != 1 ||
+      strcmp(json_get_string(record, "review_id"), id) ||
+      strcmp(json_get_string(record, "semantics"), "pre_review_dispatch_intent") ||
+      strcmp(json_get_string(record, "clock_domain"), "origin_process_monotonic") ||
+      (strcmp(json_get_string(record, "decision"), "approve") &&
+       strcmp(json_get_string(record, "decision"), "reject")) ||
+      !strcmp(json_get_string(record, "execution_id"), json_get_string(record, "previous_execution_id")) ||
+      !strcmp(json_get_string(record, "execution_id"), json_get_string(record, "task_id"))) return SALTS_EPROTO;
+  for (size_t i = 0; i < sizeof(numbers)/sizeof(numbers[0]); ++i) {
+    int64_t n = admission_integer(record, numbers[i]);
+    if (n < 0 || n > ADMISSION_MAX_INTEGER) return SALTS_EPROTO;
+  }
+  segment = admission_integer(record, "review_segment");
+  turns = admission_integer(record, "model_turns"); maximum = admission_integer(record, "max_model_turns");
+  started = admission_integer(record, "started_mono_ms"); requested = admission_integer(record, "requested_mono_ms");
+  deadline = admission_integer(record, "deadline_mono_ms"); heartbeat = admission_integer(record, "heartbeat_timeout_ms");
+  if (segment < 1 || segment > TURBO_AGENT_ROUTER_MAX_REVIEW_RESUMES ||
+      maximum < 2 || maximum > TURBO_AGENT_ROUTER_MAX_MODEL_TURNS || turns < 1 || turns >= maximum ||
+      started > requested || requested >= deadline || deadline - started > 86400000 ||
+      heartbeat < 1 || heartbeat > deadline - started ||
+      ((segment == 1) != (!strcmp(json_get_string(record, "previous_execution_id"), json_get_string(record, "task_id")))))
+    return SALTS_EPROTO;
+  return SALTS_OK;
+}
+
+static int review_source_validate(const router_review_intent_t *intent) {
+  const turbo_agent_router_task_t *task = intent->task;
+  json_value_t *checkpoint = NULL, *run = NULL;
+  const json_value_t *graph_checkpoint;
+  const char *thread_id, *run_id, *parent_checkpoint;
+  size_t seq;
+  int rc;
+  if (!task->review_run_id) return SALTS_EPROTO;
+  rc = turbo_agent_runtime_store_get_json_status(task->endpoint->config.runtime,
+      "checkpoints", intent->checkpoint_id, &checkpoint);
+  if (rc) goto done;
+  if (turbo_runtime_checkpoint_record_read(checkpoint, &thread_id, &run_id,
+          &parent_checkpoint, &seq, &graph_checkpoint)) { rc = SALTS_EPROTO; goto done; }
+  if ((rc = admission_text(checkpoint, "id", 128, 0)) || (rc = admission_text(checkpoint, "thread_id", 64, 0)) ||
+      (rc = admission_text(checkpoint, "run_id", 128, 0)) || (rc = admission_text(checkpoint, "parent_agent_run_id", 128, 0))) goto done;
+  if (strcmp(json_get_string(checkpoint, "id"), intent->checkpoint_id) ||
+      strcmp(thread_id, task->thread_id) || strcmp(run_id, task->review_run_id) ||
+      strcmp(json_get_string(checkpoint, "parent_agent_run_id"), task->parent_run_id)) {
+    rc = SALTS_EPROTO; goto done;
+  }
+  rc = turbo_agent_runtime_store_get_json_status(task->endpoint->config.runtime, "runs", task->review_run_id, &run);
+  if (rc) goto done;
+  if ((rc = admission_text(run, "id", 128, 0)) || (rc = admission_text(run, "thread_id", 64, 0)) ||
+      (rc = admission_text(run, "parent_agent_run_id", 128, 0))) goto done;
+  if (strcmp(json_get_string(run, "id"), task->review_run_id) ||
+      strcmp(json_get_string(run, "thread_id"), task->thread_id) ||
+      strcmp(json_get_string(run, "parent_agent_run_id"), task->parent_run_id)) rc = SALTS_EPROTO;
+done:
+  json_free(checkpoint); json_free(run);
+  return rc;
+}
+
+int turbo_agent_router_review_intent_write_internal(void *user_data, const char *execution_id) {
+  const router_review_intent_t *intent = user_data;
+  const turbo_agent_router_task_t *task = intent->task;
+  const turbo_agent_router_endpoint_t *endpoint = &task->endpoint->config;
+  json_value_t *record;
+  char timestamp[32];
+  int rc;
+  if (task->started_ms > ADMISSION_MAX_INTEGER || intent->requested_ms > ADMISSION_MAX_INTEGER ||
+      task->deadline_ms > ADMISSION_MAX_INTEGER) return SALTS_ENOBUFS;
+  rc = review_source_validate(intent);
+  if (rc) return rc;
+  if (turbo_runtime_record_timestamp(timestamp, sizeof(timestamp))) return SALTS_EIO;
+  record = json_create_object();
+  if (!record) return SALTS_ENOMEM;
+  rc = SALTS_ENOMEM;
+  if (turbo_runtime_json_object_set_int64(record, "schema_version", 1) ||
+      turbo_runtime_json_object_set_string(record, "review_id", intent->id) ||
+      turbo_runtime_json_object_set_string(record, "semantics", "pre_review_dispatch_intent") ||
+      turbo_runtime_json_object_set_string(record, "clock_domain", "origin_process_monotonic") ||
+      turbo_runtime_json_object_set_string(record, "recorded_at", timestamp) ||
+      turbo_runtime_json_object_set_string(record, "task_id", turbo_agent_router_task_id(task)) ||
+      turbo_runtime_json_object_set_string(record, "execution_id", execution_id) ||
+      turbo_runtime_json_object_set_string(record, "previous_execution_id", turbo_agent_execution_id(task->execution)) ||
+      admission_nullable(record, "admission_id", task->admission_id) ||
+      turbo_runtime_json_object_set_string(record, "endpoint", task->endpoint->id) ||
+      turbo_runtime_json_object_set_string(record, "model", endpoint->agent->model) ||
+      turbo_runtime_json_object_set_string(record, "provider", turbo_agent_provider_name(endpoint->agent)) ||
+      turbo_runtime_json_object_set_string(record, "thread_id", task->thread_id) ||
+      turbo_runtime_json_object_set_string(record, "parent_run_id", task->parent_run_id) ||
+      turbo_runtime_json_object_set_string(record, "source_run_id", task->review_run_id) ||
+      turbo_runtime_json_object_set_string(record, "source_checkpoint_id", intent->checkpoint_id) ||
+      turbo_runtime_json_object_set_string(record, "decision", intent->approved ? "approve" : "reject") ||
+      turbo_runtime_json_object_set_int64(record, "review_segment", task->review_resumes + 1) ||
+      turbo_runtime_json_object_set_int64(record, "model_turns", task->model_turns) ||
+      turbo_runtime_json_object_set_int64(record, "max_model_turns", task->max_model_turns) ||
+      turbo_runtime_json_object_set_int64(record, "started_mono_ms", (int64_t)task->started_ms) ||
+      turbo_runtime_json_object_set_int64(record, "requested_mono_ms", (int64_t)intent->requested_ms) ||
+      turbo_runtime_json_object_set_int64(record, "deadline_mono_ms", (int64_t)task->deadline_ms) ||
+      turbo_runtime_json_object_set_int64(record, "heartbeat_timeout_ms", task->heartbeat_timeout_ms)) goto done;
+  rc = review_intent_validate(record, intent->id);
+  if (!rc) rc = admission_size(record, TURBO_AGENT_ROUTER_REVIEW_INTENT_MAX_BYTES);
+  if (!rc) rc = turbo_agent_runtime_store_create_json_if_absent(intent->host_runtime,
+      TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION, intent->id, record);
+done:
+  json_free(record);
+  return rc;
+}
+
+int turbo_agent_router_load_review_intent(turbo_agent_runtime_t *host_runtime,
+    const char *review_id, json_value_t **out_record) {
+  json_value_t *record = NULL;
+  int rc;
+  if (!out_record) return SALTS_EINVAL;
+  *out_record = NULL;
+  if (!host_runtime || !turbo_agent_router_id_valid_internal(review_id)) return SALTS_EINVAL;
+  rc = turbo_agent_runtime_store_get_json_status(host_runtime, TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION, review_id, &record);
+  if (!rc) rc = review_intent_validate(record, review_id);
+  if (!rc) rc = admission_size(record, TURBO_AGENT_ROUTER_REVIEW_INTENT_MAX_BYTES);
   if (!rc) { *out_record = record; record = NULL; }
   json_free(record);
   return rc;

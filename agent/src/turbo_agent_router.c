@@ -248,16 +248,28 @@ static int router_loop_complete(void *user, turbo_graph_t *graph,
   turbo_agent_router_task_t *task = user;
   const char *status = *summary ? json_get_string(*summary, "status") : NULL;
   const char *checkpoint = *summary ? json_get_string(*summary, "checkpoint_id") : NULL;
+  const json_value_t *run = *summary ? json_object_get(*summary, "run_id") : NULL;
   const char *reason = *state ? json_get_string(json_object_get(*state, "router_tool_loop"),
                                                 "reason") : NULL;
-  tstr copy = NULL;
+  tstr copy = NULL, run_copy = NULL;
   int pending = status && strcmp(status, "interrupted") == 0 && reason &&
       strcmp(reason, "approval_pending") == 0 && checkpoint && checkpoint[0] &&
       turbo_agent_state_review_required(*state);
   (void)graph; (void)options; (void)token;
-  if (pending && !(copy = tstr_dup(checkpoint))) return SALTS_ENOMEM;
+  if (pending) {
+    const char *run_id = run ? json_string(run) : NULL;
+    if (!run_id || json_type(run) != JSON_STRING || !run_id[0] ||
+        json_string_len(run) != strlen(run_id) || strlen(run_id) > 128) return SALTS_EPROTO;
+    copy = tstr_dup(checkpoint); run_copy = tstr_dup(run_id);
+    if (!copy || !run_copy) {
+      tstr_free(copy); tstr_free(run_copy);
+      return SALTS_ENOMEM;
+    }
+  }
   tstr_free(task->review_checkpoint);
+  tstr_free(task->review_run_id);
   task->review_checkpoint = copy;
+  task->review_run_id = run_copy;
   task->pending_review = pending;
   return SALTS_OK;
 }
@@ -490,12 +502,13 @@ int turbo_agent_router_submit_with_intent(turbo_agent_router_t *router,
                        host_runtime, admission_id, out_task);
 }
 
-int turbo_agent_router_task_review(turbo_agent_router_task_t *task, cmeta_threadpool_t *executor,
-                                   int approved) {
+static int router_task_review(turbo_agent_router_task_t *task, cmeta_threadpool_t *executor,
+    int approved, turbo_agent_runtime_t *host_runtime, const char *review_id) {
   turbo_agent_runtime_exec_options_t runtime_options = {0};
   turbo_agent_execution_options_t options = {0};
   turbo_graph_run_options_t graph_options = {0};
   turbo_agent_execution_hooks_t hooks = {0};
+  router_review_intent_t intent = {0};
   turbo_agent_execution_t *next = NULL, *old;
   turbo_agent_execution_status_t status;
   json_value_t *command = NULL, *override = NULL;
@@ -504,6 +517,11 @@ int turbo_agent_router_task_review(turbo_agent_router_task_t *task, cmeta_thread
   int rc, previous_cancelled;
   if (!task || !executor || !task->max_model_turns || (approved != 0 && approved != 1))
     return SALTS_EINVAL;
+  if (host_runtime || review_id) {
+    if (!host_runtime || !turbo_agent_router_id_valid_internal(review_id)) return SALTS_EINVAL;
+    for (size_t i = 0; i < task->router->count; ++i)
+      if (host_runtime == task->router->endpoints[i].config.runtime) return SALTS_EINVAL;
+  }
   if (turbo_agent_execution_wait(task->execution, 0) != SALTS_OK) return SALTS_EBUSY;
   if (task->unresponsive || task->review_cancelled) return SALTS_ECANCELED;
   if (!turbo_agent_router_authority_current_internal(task)) return SALTS_EPERM;
@@ -530,6 +548,12 @@ int turbo_agent_router_task_review(turbo_agent_router_task_t *task, cmeta_thread
   options.deadline_mono_ms = task->deadline_ms;
   hooks.complete = router_loop_complete;
   hooks.user_data = task;
+  if (host_runtime) {
+    intent.task = task; intent.host_runtime = host_runtime; intent.id = review_id;
+    intent.checkpoint_id = checkpoint; intent.requested_ms = now; intent.approved = approved;
+    hooks.before_admit = turbo_agent_router_review_intent_write_internal;
+    hooks.before_admit_user_data = &intent;
+  }
   previous_cancelled = task->review_cancelled;
   task->review_cancelled = !approved;
   rc = turbo_agent_execution_resume_internal(executor, task->endpoint->config.runtime,
@@ -553,6 +577,18 @@ done:
   tstr_free(checkpoint);
   json_free(command); json_free(override);
   return rc;
+}
+
+int turbo_agent_router_task_review(turbo_agent_router_task_t *task, cmeta_threadpool_t *executor,
+                                   int approved) {
+  return router_task_review(task, executor, approved, NULL, NULL);
+}
+
+int turbo_agent_router_task_review_with_intent(turbo_agent_router_task_t *task,
+    cmeta_threadpool_t *executor, turbo_agent_runtime_t *host_runtime,
+    const char *review_id, int approved) {
+  if (!host_runtime || !review_id) return SALTS_EINVAL;
+  return router_task_review(task, executor, approved, host_runtime, review_id);
 }
 
 const char *turbo_agent_router_task_id(const turbo_agent_router_task_t *task) {
@@ -669,6 +705,7 @@ int turbo_agent_router_task_release(turbo_agent_router_task_t *task) {
   task->endpoint->busy = 0;
   if (task->max_model_turns) --task->router->tool_task_count;
   tstr_free(task->review_checkpoint);
+  tstr_free(task->review_run_id);
   tstr_free(task->thread_id);
   tstr_free(task->parent_run_id);
   tstr_free(task->admission_id);

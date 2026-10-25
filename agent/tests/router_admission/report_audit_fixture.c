@@ -19,12 +19,14 @@ struct fixture_s {
   cmeta_threadpool_t *pool;
   document_render_catalog_t catalog;
   single_agent_report_config_t config;
+  single_agent_report_diagnostics_t diagnostics;
   cmeta_mutex_t oracle_mutex;
   atomic_int entered;
   json_value_t **delivery;
 };
 static const char *names[] = {"writer", "reviewer", "planner", "executor"};
 static const char *files[] = {"draft.db", "review.db", "synthesis.db", "delivery.db"};
+static int stop_cut(const fixture_t *f) { return !strncmp(f->cut, "stop_", 5); }
 static void crash_now(fixture_t *f, const char *boundary) {
   fprintf(stderr, "REPORT_CRASH cut=%s boundary=%s\n", f->cut, boundary); fflush(stderr); _Exit(86);
 }
@@ -64,11 +66,15 @@ static int host_create(void *u, const char *c, const char *id, const char *text)
   int fan_in = !strcmp(c, TURBO_AGENT_ROUTER_GROUP_OBSERVATION_COLLECTION) && !strcmp(id, "subject-fan-in");
   int review = !strcmp(c, TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION) && !strcmp(id, "subject-review");
   int ready = !strcmp(c, SINGLE_AGENT_REPORT_READY) && !strcmp(id, "subject-ready");
-  if (f->inject && (manifest || fan_in || review || ready)) {
+  int stopped_task = !strcmp(c, TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION) && !strcmp(id, "subject-stop-aggregate");
+  int stop = !strcmp(c, SINGLE_AGENT_REPORT_STOPS) && !strcmp(id, "subject-stop");
+  if (f->inject && (manifest || fan_in || review || ready || stopped_task || stop)) {
     if (!f->delivery || *f->delivery) return SALTS_EPROTO;
     fprintf(stderr, "REPORT_PREPUBLISH delivery_null=1\n");
     if (manifest && !strcmp(f->cut, "before_manifest")) crash_now(f, "before_manifest_create");
     if (ready && !strcmp(f->cut, "before_ready")) crash_now(f, "before_ready_create");
+    if (stopped_task && !strcmp(f->cut, "stop_before_observation")) crash_now(f, "after_drain_before_terminal_observation");
+    if (stop && !strcmp(f->cut, "stop_before_record")) crash_now(f, "after_terminal_observation_before_stop_record");
   }
   rc = f->base.create_if_absent(f->base.user_data, c, id, text);
   if (!rc && f->inject) {
@@ -76,6 +82,9 @@ static int host_create(void *u, const char *c, const char *id, const char *text)
     if (fan_in && !strcmp(f->cut, "after_fan_in")) crash_now(f, "after_cohort_before_aggregation");
     if (review && !strcmp(f->cut, "after_review")) crash_now(f, "after_review_intent_before_enqueue");
     if (ready && !strcmp(f->cut, "after_ready")) crash_now(f, "after_ready_before_publication");
+    if (stopped_task && !strcmp(f->cut, "stop_after_observation")) crash_now(f, "after_terminal_observation_before_stop_record");
+    if (stop && !strcmp(f->cut, "stop_after_record")) crash_now(f, "after_stop_record_before_error_return");
+    if (stop && !strcmp(f->cut, "stop_lost_ack")) return SALTS_EIO;
   }
   return rc;
 }
@@ -109,6 +118,7 @@ static int transport(const char *request, char **out, void *u) {
   int call = atomic_fetch_add(&model->calls, 1);
   tstr kind = tstr_format("model-{}", i);
   int rc = kind ? counter_add(f, kind) : SALTS_ENOMEM; tstr_free(kind); if (rc) return -77;
+  if (i == 2 && f->inject && stop_cut(f)) return -77;
   if (i < 2) {
     if (!strstr(request, f->config.goal)) return -77;
     atomic_fetch_add_explicit(&f->entered, 1, memory_order_acq_rel);
@@ -182,6 +192,7 @@ static int setup(fixture_t *f) {
   f->config.parent_run_id = "report-host"; f->config.goal = "subject goal"; f->config.brief = "Host-approved brief";
   f->config.timeout_ms = 15000; f->config.review = review; f->config.review_user = f;
   f->config.audit_runtime = f->host; f->config.audit_id = "subject";
+  f->config.diagnostics = &f->diagnostics;
   turbo_agent_router_request_init(&f->config.worker);
   f->config.worker.input_tokens = f->config.worker.output_tokens = 1000; f->config.worker.budget_micros = 10;
   f->config.aggregate = f->config.execute = f->config.worker; f->config.reserved_budget_micros = 40; return 0;
@@ -189,7 +200,18 @@ static int setup(fixture_t *f) {
 static int crash_stage(fixture_t *f) {
   json_value_t *delivery = NULL; const char *phase = NULL;
   REQUIRE(!setup(f)); f->inject = 1; f->delivery = &delivery;
-  REQUIRE(single_agent_report_run(&f->config, &delivery, &phase) == SALTS_OK && delivery);
+  int rc = single_agent_report_run(&f->config, &delivery, &phase);
+  if (stop_cut(f)) {
+    int lost_ack = !strcmp(f->cut, "stop_lost_ack");
+    REQUIRE(rc == SALTS_EIO && !delivery);
+    REQUIRE(!strcmp(phase, lost_ack ? "stop-audit" : "aggregation"));
+    REQUIRE(f->diagnostics.operation_code == SALTS_EIO && !strcmp(f->diagnostics.operation_phase, "aggregation"));
+    REQUIRE(f->diagnostics.stop_audit_attempted && f->diagnostics.stop_audit_code == (lost_ack ? SALTS_EIO : 0));
+    REQUIRE(!counter_add(f, "stop-return"));
+    REQUIRE(lost_ack || !strcmp(f->cut, "stop_after_return"));
+    crash_now(f, lost_ack ? "after_stop_lost_ack_return" : "after_stop_error_return");
+  }
+  REQUIRE(rc == SALTS_OK && delivery);
   REQUIRE(!counter_add(f, "handoff"));
   if (!strcmp(f->cut, "after_return")) crash_now(f, "after_return_before_delivery");
   REQUIRE(!strcmp(f->cut, "after_delivery")); REQUIRE(!counter_add(f, "delivery"));
@@ -198,7 +220,7 @@ static int crash_stage(fixture_t *f) {
 static int inspect(fixture_t *f, int healthy) {
   int no_work = !strcmp(f->cut, "before_manifest") || !strcmp(f->cut, "after_manifest");
   int drafts_only = !strcmp(f->cut, "after_fan_in"), paused = !strcmp(f->cut, "after_review");
-  int terminal = !no_work && !drafts_only && !paused;
+  int stopped = stop_cut(f), terminal = !no_work && !drafts_only && !paused && !stopped;
   int returned = !strcmp(f->cut, "after_return") || !strcmp(f->cut, "after_delivery");
   int delivered = !strcmp(f->cut, "after_delivery"), n;
   json_value_t *manifest = NULL, *record = NULL;
@@ -206,7 +228,7 @@ static int inspect(fixture_t *f, int healthy) {
       (!strcmp(f->cut, "before_manifest") ? SALTS_ENOENT : SALTS_OK));
   for (int i = 0; i < 4; ++i) {
     tstr id = tstr_format("subject-model-{}", i); REQUIRE(id);
-    int expected = no_work || (drafts_only && i >= 2) ? 0 : i == 3 ? (paused ? 1 : 2) : 1;
+    int expected = no_work || (drafts_only && i >= 2) || (stopped && i == 3) ? 0 : i == 3 ? (paused ? 1 : 2) : 1;
     REQUIRE(!counter_get(f, id, &n) && n == expected); tstr_free(id);
     id = tstr_format("healthy-model-{}", i); REQUIRE(id);
     REQUIRE(!counter_get(f, id, &n) && n == healthy * (i == 3 ? 2 : 1)); tstr_free(id);
@@ -219,6 +241,9 @@ static int inspect(fixture_t *f, int healthy) {
   REQUIRE(!counter_get(f, "healthy-tool", &n) && n == healthy);
   REQUIRE(!counter_get(f, "healthy-handoff", &n) && n == healthy);
   REQUIRE(!counter_get(f, "healthy-delivery", &n) && n == healthy);
+  int stop_returned = !strcmp(f->cut, "stop_after_return") || !strcmp(f->cut, "stop_lost_ack");
+  REQUIRE(!counter_get(f, "subject-stop-return", &n) && n == stop_returned);
+  REQUIRE(!counter_get(f, "healthy-stop-return", &n) && n == 0);
   if (!no_work) {
     REQUIRE(turbo_agent_router_load_group_observation(f->host, "subject-fan-in", &record) == SALTS_OK);
     for (int i = 0; i < 2; ++i) {
@@ -248,6 +273,35 @@ static int inspect(fixture_t *f, int healthy) {
         (!strcmp(f->cut, "before_ready") ? SALTS_ENOENT : SALTS_OK));
     if (ready) REQUIRE(!strcmp(json_get_string(ready, "execution_id"), json_get_string(record, "execution_id")));
     json_free(ready); json_free(record);
+  }
+  if (stopped) {
+    json_value_t *intent = NULL, *observation = NULL, *stop = NULL, *run = NULL;
+    int observed = strcmp(f->cut, "stop_before_observation") != 0;
+    int recorded = !strcmp(f->cut, "stop_after_record") || stop_returned;
+    REQUIRE(turbo_agent_router_load_intent(f->host, "subject-aggregate", &intent) == SALTS_OK);
+    REQUIRE(turbo_agent_router_load_observation(f->host, "subject-stop-aggregate", &observation) == (observed ? SALTS_OK : SALTS_ENOENT));
+    if (observation) {
+      REQUIRE(!strcmp(json_get_string(observation, "task_id"), json_get_string(intent, "task_id")));
+      REQUIRE(!strcmp(json_get_string(observation, "thread_id"), "subject-aggregate"));
+      REQUIRE(turbo_runtime_json_value_as_int64(json_object_get(observation, "execution_status"), -1) == TURBO_AGENT_EXECUTION_FAILED);
+      const char *run_id = json_get_string(observation, "runtime_run_id");
+      if (run_id) {
+        REQUIRE(turbo_agent_runtime_get_run(f->runtime[2], run_id, &run) == SALTS_OK);
+        REQUIRE(!strcmp(json_get_string(run, "thread_id"), "subject-aggregate"));
+      }
+    }
+    REQUIRE(turbo_agent_runtime_store_get_json_status(f->host, SINGLE_AGENT_REPORT_STOPS, "subject-stop", &stop) == (recorded ? SALTS_OK : SALTS_ENOENT));
+    if (stop) {
+      REQUIRE(!strcmp(json_get_string(stop, "semantics"), "post_drain_report_stop_observation"));
+      REQUIRE(!strcmp(json_get_string(stop, "operation_phase"), "aggregation"));
+      REQUIRE(turbo_runtime_json_value_as_int64(json_object_get(stop, "operation_code"), 0) == SALTS_EIO);
+      const json_value_t *tasks = json_object_get(stop, "tasks"), *entry = json_array_get(tasks, 0);
+      REQUIRE(json_array_size(tasks) == 1 && !strcmp(json_get_string(entry, "observation_id"), "subject-stop-aggregate"));
+      REQUIRE(!strcmp(json_get_string(entry, "execution_id"), json_get_string(observation, "execution_id")));
+      REQUIRE(!strcmp(json_get_string(entry, "observation_boundary"), "after_drain"));
+      REQUIRE(json_array_size(json_object_get(stop, "acknowledged_gates")) == 5);
+    }
+    json_free(intent); json_free(observation); json_free(stop); json_free(run);
   }
   json_free(manifest);
   fprintf(stderr, "REPORT_INSPECT cut=%s old_handoff=%d old_delivery=%d healthy=%d\n", f->cut, returned, delivered, healthy);
@@ -280,7 +334,7 @@ int main(int argc, char **argv) {
   fixture_t f = {0}; int rc; REQUIRE(argc == 4); f.cut = argv[2];
   REQUIRE(!open_fixture(&f, argv[3], !strcmp(argv[1], "init")));
   if (!strcmp(argv[1], "init")) {
-    static const char *kinds[] = {"model-0", "model-1", "model-2", "model-3", "review", "tool", "handoff", "delivery"};
+    static const char *kinds[] = {"model-0", "model-1", "model-2", "model-3", "review", "tool", "handoff", "delivery", "stop-return"};
     for (int i = 0; i < 2; ++i) for (size_t j = 0; j < sizeof(kinds)/sizeof(kinds[0]); ++j) {
       tstr id = tstr_format("{}-{}", i ? "healthy" : "subject", kinds[j]); REQUIRE(id);
       rc = counter_put(&f, id, 0); tstr_free(id); REQUIRE(!rc);

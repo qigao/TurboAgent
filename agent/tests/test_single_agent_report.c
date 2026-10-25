@@ -14,6 +14,7 @@ typedef struct report_audit_s {
   const char *delay_id;
   unsigned delay_ms;
   int creates, gets, puts, lists, lost_ack;
+  atomic_int *active;
 } report_audit_t;
 typedef struct report_model_s {
   report_fixture_t *fixture;
@@ -30,13 +31,14 @@ struct report_fixture_s {
   turbo_tool_registry_t *tools;
   cmeta_threadpool_t *pool;
   single_agent_report_config_t config;
+  single_agent_report_diagnostics_t diagnostics;
   document_render_catalog_t catalog;
   turbo_agent_session_t *context_session;
   turbo_agent_knowledge_store_t *knowledge;
   turbo_agent_memory_store_t source_store;
   turbo_agent_task_context_options_t context_options;
   int context_reads, context_source;
-  atomic_int tool_calls, authority_calls;
+  atomic_int tool_calls, authority_calls, active;
   int approval, reviews, context_ok, bad_receipt, no_tool, fail_index, proposal_index, revoke, nul_aggregate, late_review;
   report_audit_t audit;
   turbo_agent_runtime_t *audit_runtime;
@@ -54,6 +56,7 @@ static int report_audit_list(void *u, const char *c, const char *k, const char *
 }
 static int report_audit_create(void *u, const char *c, const char *id, const char *text) {
   report_audit_t *a = u; int rc; ++a->creates;
+  if (strstr(id, "-stop") && a->active && atomic_load(a->active)) return SALTS_EBUSY;
   if (a->delay_id && !strcmp(id, a->delay_id)) cmeta_sleep_ms(a->delay_ms);
   int selected = a->fault_id && !strcmp(id, a->fault_id);
   if (selected && !a->lost_ack) return SALTS_ENOSPC;
@@ -67,6 +70,7 @@ static void report_enable_audit(report_fixture_t *f, int atomic) {
   turbo_agent_runtime_store_t store = {report_audit_put, report_audit_get, report_audit_list,
       &f->audit, report_audit_free, atomic ? report_audit_create : NULL};
   f->audit.base = turbo_agent_runtime_store_memory_create();
+  f->audit.active = &f->active;
   f->audit_runtime = turbo_agent_runtime_create(&store); check_not_null(f->audit_runtime);
   f->config.audit_runtime = f->audit_runtime; f->config.audit_id = "sample";
 }
@@ -76,6 +80,37 @@ static turbo_agent_runtime_t *report_sqlite(const char *directory, const char *n
   turbo_runtime_sqlite_config_init(&config); config.path = path; config.create_if_missing = create;
   check_equal(turbo_runtime_store_sqlite_open(&config, &store), SALTS_OK); tstr_free(path);
   turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store); check_not_null(runtime); return runtime;
+}
+
+static json_value_t *report_check_stop(report_fixture_t *f, int code, const char *phase, size_t count) {
+  json_value_t *stop = NULL;
+  check_equal(turbo_agent_runtime_store_get_json_status(f->audit_runtime, SINGLE_AGENT_REPORT_STOPS, "sample-stop", &stop), SALTS_OK);
+  check_equal(json_get_string(stop, "semantics"), "post_drain_report_stop_observation");
+  check_equal(json_get_string(stop, "report_id"), "sample");
+  check_equal(json_get_string(stop, "parent_run_id"), f->config.parent_run_id);
+  check_equal(json_get_string(stop, "operation_phase"), phase);
+  check_equal(turbo_runtime_json_value_as_int64(json_object_get(stop, "operation_code"), 0), code);
+  check_true(f->diagnostics.stop_audit_attempted); check_equal(f->diagnostics.stop_audit_code, 0);
+  const json_value_t *tasks = json_object_get(stop, "tasks"); check_equal(json_array_size(tasks), count);
+  for (size_t i = 0; i < count; ++i) {
+    const json_value_t *entry = json_array_get(tasks, i); json_value_t *observation = NULL, *run = NULL;
+    int64_t status = turbo_runtime_json_value_as_int64(json_object_get(entry, "execution_status"), -1);
+    check_true(status >= TURBO_AGENT_EXECUTION_COMPLETED && status <= TURBO_AGENT_EXECUTION_FAILED);
+    check_equal(turbo_agent_router_load_observation(f->audit_runtime, json_get_string(entry, "observation_id"), &observation), SALTS_OK);
+    check_equal(json_get_string(entry, "task_id"), json_get_string(observation, "task_id"));
+    check_equal(json_get_string(entry, "execution_id"), json_get_string(observation, "execution_id"));
+    check_equal(json_get_string(entry, "thread_id"), json_get_string(observation, "thread_id"));
+    check_equal(status, turbo_runtime_json_value_as_int64(json_object_get(observation, "execution_status"), -1));
+    const char *role = json_get_string(entry, "role"), *run_id = json_get_string(observation, "runtime_run_id");
+    int slot = !strcmp(role, "worker-a") ? 0 : !strcmp(role, "worker-b") ? 1 : !strcmp(role, "aggregate") ? 2 : 3;
+    if (run_id) {
+      check_equal(turbo_agent_runtime_get_run(f->runtimes[slot], run_id, &run), SALTS_OK);
+      check_equal(json_get_string(run, "thread_id"), json_get_string(entry, "thread_id")); json_free(run);
+    }
+    json_free(observation);
+  }
+  check_null(json_object_get(stop, "state")); check_null(json_object_get(stop, "markdown"));
+  return stop;
 }
 static char *report_copy(const char *text) {
   char *copy = malloc(strlen(text) + 1);
@@ -139,6 +174,15 @@ static int report_wait_for_deadline(const char *request, const turbo_cancel_toke
   if (!token || turbo_cancel_token_wait(token, 5000) != TURBO_CANCEL_WAIT_SIGNALED) return -77;
   response->transport_status = turbo_cancel_token_check(token);
   return response->transport_status;
+}
+
+static int report_slow_cancel(const char *request, const turbo_cancel_token_t *token,
+    unsigned timeout_ms, unsigned connect_ms, turbo_agent_transport_response_t *response, void *user) {
+  report_model_t *model = user; report_fixture_t *f = model->fixture;
+  atomic_store(&f->active, 1);
+  int rc = report_wait_for_deadline(request, token, timeout_ms, connect_ms, response, user);
+  cmeta_sleep_ms(100); /* Cancellation is requested before this backend returns. */
+  atomic_store(&f->active, 0); return rc;
 }
 
 static turbo_tool_status_t report_tool(const char *args,
@@ -260,6 +304,7 @@ spec("one Host goal composed from different model workers") {
     f.catalog = (document_render_catalog_t){sources, 2};
     atomic_init(&f.tool_calls, 0);
     atomic_init(&f.authority_calls, 0);
+    atomic_init(&f.active, 0);
     f.tools = turbo_tool_registry_create(); check_not_null(f.tools);
     turbo_tool_definition_v6_t tool = single_agent_report_tool_definition(&f.catalog);
     tool.definition.json_value_handler = NULL; tool.context_handler = report_tool;
@@ -311,6 +356,7 @@ spec("one Host goal composed from different model workers") {
     f.config.parent_run_id = "one-host-task"; f.config.goal = "Write a careful report";
     f.config.brief = "Approved Host context"; f.config.timeout_ms = 10000;
     f.config.review = report_host_review; f.config.review_user = &f;
+    f.config.diagnostics = &f.diagnostics;
     turbo_agent_router_request_init(&f.config.worker);
     f.config.worker.input_tokens = f.config.worker.output_tokens = 1000;
     f.config.worker.budget_micros = 10;
@@ -336,6 +382,152 @@ spec("one Host goal composed from different model workers") {
     turbo_agent_runtime_destroy(f.audit_runtime);
     if (f.directory) tt_remove_tree(f.directory);
     free(f.directory);
+  }
+
+  for (int failed = 0; failed < 4; ++failed) {
+    it("automatically records drained accepted tasks on model failure, endpoint=%d", failed) {
+      report_enable_audit(&f, 1); f.fail_index = failed;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EIO);
+      check_null(delivery);
+      const char *expected = failed < 2 ? "workers" : failed == 2 ? "aggregation" : "execution";
+      check_equal(phase, expected); check_equal(f.diagnostics.operation_code, SALTS_EIO);
+      check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
+      json_value_t *stop = report_check_stop(&f, SALTS_EIO, expected, failed < 2 ? 2 : 1); json_free(stop);
+      check_equal(atomic_load(&f.tool_calls), 0);
+    }
+  }
+
+  for (int decision = -1; decision <= 2; ++decision) {
+    if (decision == 1) continue;
+    it("records explicit review rejection, abort or invalid decision without renderer execution, decision=%d", decision) {
+      report_enable_audit(&f, 1); f.approval = decision;
+      int code = decision == 2 ? SALTS_EINVAL : SALTS_ECANCELED;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), code);
+      json_value_t *stop = report_check_stop(&f, code, "approval", 1);
+      const json_value_t *entry = json_array_get(json_object_get(stop, "tasks"), 0);
+      check_false(json_get_bool(entry, "approval_pending", 1));
+      check_equal(json_get_bool(entry, "result_taken", 0), decision != 0);
+      check_equal(json_get_string(entry, "observation_boundary"), decision ? "before_result_transfer" : "after_drain");
+      json_free(stop); check_null(delivery); check_equal(atomic_load(&f.tool_calls), 0);
+    }
+  }
+
+  for (int revoke = 1; revoke <= 2; ++revoke) {
+    it("preserves historical pending evidence after legal authority invalidation, owner=%d", revoke) {
+      report_enable_audit(&f, 1); f.revoke = revoke;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EPERM);
+      if (revoke == 1) {
+        json_value_t *stop = report_check_stop(&f, SALTS_EPERM, "approval", 1); json_free(stop);
+      } else {
+        /* The review API returns an error before admitting this segment. Its
+         * public result does not distinguish a pre-write denial from storage
+         * denial; conservatively stop auditing after that failed gate. */
+        check_false(f.diagnostics.stop_audit_attempted);
+        json_value_t *pending = NULL;
+        check_equal(turbo_agent_router_load_observation(f.audit_runtime, "sample-pending", &pending), SALTS_OK);
+        json_free(pending);
+      }
+      check_null(delivery); check_equal(atomic_load(&f.tool_calls), 0);
+    }
+  }
+
+  it("waits for the actual backend return before writing terminal stop evidence after timeout") {
+    report_enable_audit(&f, 1); f.config.timeout_ms = 100;
+    check_equal(turbo_agent_transport_v2_set(f.agents[0], report_slow_cancel, &f.models[0], NULL), SALTS_OK);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ETIMEDOUT);
+    check_equal(atomic_load(&f.active), 0); check_equal(atomic_load(&f.models[0].calls), 1);
+    json_value_t *stop = report_check_stop(&f, SALTS_ETIMEDOUT, "workers", 2); json_free(stop);
+    check_null(delivery); check_equal(atomic_load(&f.models[2].calls), 0);
+  }
+
+  it("records a late UI decision against the original pending segment without resuming it") {
+    report_enable_audit(&f, 1); f.config.timeout_ms = 1000; f.late_review = 1;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ETIMEDOUT);
+    json_value_t *stop = report_check_stop(&f, SALTS_ETIMEDOUT, "approval", 1); json_free(stop);
+    check_null(delivery); check_equal(atomic_load(&f.models[3].calls), 1); check_equal(atomic_load(&f.tool_calls), 0);
+  }
+
+  for (int malformed = 0; malformed < 4; ++malformed) {
+    it("records a domain or result-contract stop without publishing a model claim, case=%d", malformed) {
+      report_enable_audit(&f, 1);
+      if (!malformed) f.proposal_index = 0;
+      if (malformed == 1) f.nul_aggregate = 1;
+      if (malformed == 2) f.no_tool = 1;
+      if (malformed == 3) f.bad_receipt = 1;
+      int rc = single_agent_report_run(&f.config, &delivery, &phase); check_true(rc != SALTS_OK);
+      check_false(f.diagnostics.stop_audit_code != 0);
+      json_value_t *stop = report_check_stop(&f, rc, phase, malformed ? 1 : 2); json_free(stop);
+      check_null(delivery);
+    }
+  }
+
+  for (int failure = 0; failure < 8; ++failure) {
+    for (int lost_ack = 0; lost_ack < 2; ++lost_ack) {
+      it("surfaces stop-audit failure and retains the original operation diagnostics, boundary=%d lost_ack=%d", failure, lost_ack) {
+        static const char *ids[] = {"sample-stop-worker-a", "sample-stop-worker-b", "sample-stop",
+            "sample-stop-aggregate", "sample-stop", "sample-stop-execute", "sample-stop", "sample-stop"};
+        static const int failed[] = {0, 0, 0, 2, 2, 3, 3, -1};
+        static const int writes[] = {4, 5, 6, 6, 7, 8, 9, 9};
+        report_enable_audit(&f, 1); f.fail_index = failed[failure]; f.approval = -1;
+        f.audit.fault_id = ids[failure]; f.audit.lost_ack = lost_ack;
+        int rc = lost_ack ? SALTS_EIO : SALTS_ENOSPC;
+        check_equal(single_agent_report_run(&f.config, &delivery, &phase), rc);
+        check_equal(phase, "stop-audit"); check_null(delivery);
+        check_true(f.diagnostics.stop_audit_attempted); check_equal(f.diagnostics.stop_audit_code, rc);
+        check_equal(f.diagnostics.operation_code, failure == 7 ? SALTS_ECANCELED : SALTS_EIO);
+        check_equal(f.diagnostics.operation_phase, failure < 3 ? "workers" : failure < 5 ? "aggregation" : failure < 7 ? "execution" : "approval");
+        check_equal(f.audit.creates, writes[failure]);
+        check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
+        json_value_t *record = NULL;
+        const char *collection = !strcmp(ids[failure], "sample-stop") ? SINGLE_AGENT_REPORT_STOPS : TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION;
+        check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, collection, ids[failure], &record), lost_ack ? SALTS_OK : SALTS_ENOENT);
+        json_free(record);
+        if (strcmp(collection, SINGLE_AGENT_REPORT_STOPS)) {
+          check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_STOPS, "sample-stop", &record), SALTS_ENOENT);
+          check_null(record);
+        }
+        int before = f.audit.creates; f.audit.fault_id = NULL;
+        check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EALREADY);
+        check_equal(f.audit.creates, before + 1); check_false(f.diagnostics.stop_audit_attempted);
+      }
+    }
+  }
+
+  for (int conflict = 0; conflict < 2; ++conflict) {
+    it("never treats a conflicting cleanup record as acknowledgement, kind=%d", conflict) {
+      report_enable_audit(&f, 1); f.fail_index = 2;
+      const char *collection = conflict ? SINGLE_AGENT_REPORT_STOPS : TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION;
+      const char *id = conflict ? "sample-stop" : "sample-stop-aggregate";
+      json_value_t *old = json_create_object(); check_not_null(old);
+      check_equal(turbo_runtime_json_object_set_string(old, "owner", "different-operation"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, collection, id, old), SALTS_OK); json_free(old);
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EALREADY);
+      check_null(delivery); check_equal(phase, "stop-audit"); check_equal(f.diagnostics.operation_code, SALTS_EIO);
+      check_equal(f.diagnostics.stop_audit_code, SALTS_EALREADY); check_true(f.diagnostics.stop_audit_attempted);
+      check_equal(f.audit.creates, conflict ? 7 : 6); check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 1); check_equal(f.audit.lists, 0);
+      check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, collection, id, &old), SALTS_OK);
+      check_equal(json_get_string(old, "owner"), "different-operation"); check_null(json_object_get(old, "operation_code")); json_free(old);
+    }
+  }
+
+  it("preserves the prefix after an admission API error that cannot distinguish storage acknowledgement") {
+    report_enable_audit(&f, 1);
+    check_equal(turbo_agent_router_destroy(f.router), SALTS_OK);
+    turbo_agent_router_config_t c; turbo_agent_router_config_init(&c);
+    c.authority_agent = f.agents[4]; c.endpoints = f.endpoints; c.endpoint_count = 1;
+    check_equal(turbo_agent_router_create(&c, &f.router), SALTS_OK); f.config.router = f.router;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EBUSY);
+    check_false(f.diagnostics.stop_audit_attempted); check_equal(f.audit.creates, 2);
+    check_null(delivery); check_equal(atomic_load(&f.models[1].calls), 0); check_equal(atomic_load(&f.tool_calls), 0);
+  }
+
+  it("does not append a stop to another report's unacknowledged reservation") {
+    report_enable_audit(&f, 1); f.audit.fault_id = "sample"; f.audit.lost_ack = 1;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EIO);
+    check_equal(f.audit.creates, 1); check_false(f.diagnostics.stop_audit_attempted);
+    json_value_t *stop = NULL;
+    check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_STOPS, "sample-stop", &stop), SALTS_ENOENT);
+    check_null(stop);
   }
 
   it("records the complete successful Host handoff chain without duplicating report payloads") {
@@ -387,6 +579,7 @@ spec("one Host goal composed from different model workers") {
         report_enable_audit(&f, 1); f.audit.fault_id = ids[fault]; f.audit.lost_ack = lost_ack;
         check_equal(single_agent_report_run(&f.config, &delivery, &phase), lost_ack ? SALTS_EIO : SALTS_ENOSPC);
         check_null(delivery); check_equal(f.audit.creates, fault + 1);
+        check_false(f.diagnostics.stop_audit_attempted);
         check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
         if (fault <= 1) for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
         if (fault <= 2) check_equal(atomic_load(&f.models[1].calls), 0);
@@ -417,6 +610,8 @@ spec("one Host goal composed from different model workers") {
       f.audit.delay_id = ids[late]; f.audit.delay_ms = 600;
       check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ETIMEDOUT);
       check_null(delivery); check_equal(f.reviews, late == 2 ? 1 : 0);
+      json_value_t *stop = report_check_stop(&f, SALTS_ETIMEDOUT, late == 0 ? "workers" : late == 1 ? "approval" : "delivery-audit", late ? 1 : 0);
+      json_free(stop);
       check_equal(atomic_load(&f.tool_calls), late == 2 ? 1 : 0);
       if (!late) for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
       if (late == 1) check_equal(atomic_load(&f.models[3].calls), 1);

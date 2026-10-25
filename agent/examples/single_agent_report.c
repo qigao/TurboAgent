@@ -86,6 +86,7 @@ int main(int argc, char **argv) {
   turbo_agent_router_endpoint_t endpoints[4] = {0};
   turbo_agent_router_config_t router_config;
   single_agent_report_config_t config = {0};
+  single_agent_report_diagnostics_t diagnostics = {0};
   turbo_agent_router_t *router = NULL;
   turbo_agent_router_t *tool_router = NULL;
   turbo_tool_registry_t *tools = NULL;
@@ -108,6 +109,7 @@ int main(int argc, char **argv) {
     int store_rc = report_store(audit_directory, "host.db", &audit_runtime);
     if (store_rc) { rc = store_rc; goto done; }
     config.audit_runtime = audit_runtime; config.audit_id = audit_id;
+    config.diagnostics = &diagnostics;
   }
   if (argc == 8) {
     turbo_agent_session_config_t session_config = {0};
@@ -206,5 +208,8 @@ done:
   turbo_agent_session_destroy(context_session);
   turbo_agent_knowledge_store_close(knowledge);
   if (rc) fprintf(stderr, "Report stopped at %s (code %d); no verified delivery.\n", phase, rc);
+  if (diagnostics.stop_audit_code) fprintf(stderr,
+      "Stop audit failed (code %d); original stop at %s (code %d); reconcile the persisted prefix.\n",
+      diagnostics.stop_audit_code, diagnostics.operation_phase, diagnostics.operation_code);
   return rc ? 1 : 0;
 }

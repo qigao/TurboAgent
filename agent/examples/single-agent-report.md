@@ -85,7 +85,7 @@ including a first worker whose second submission failed. No fallback, unknown-ef
 retry or detached cleanup is installed. A noncooperative transport can block draining
 past the application deadline; this example cannot forcibly stop it or safely destroy
 dependencies while it is running. Production isolation/reconciliation remains separate.
-The returned phase/error identifies the stop boundary; production audit integrations
+The returned phase/error identifies the stop boundary; unaudited integrations
 must additionally preserve inspection/failure evidence, especially before a Runtime
 failure has committed a run/checkpoint.
 
@@ -199,8 +199,8 @@ Synchronous persistence consumes the original Host deadline. The Host checks it
 again before displaying a pending review and before/after the final ready write;
 a late acknowledgement may leave a ready record while output remains withheld.
 Failure can leave an incomplete trace prefix; absent terminal observations do not prove
-that work never ran or an effect never occurred. This remains an example of explicit
-gates, not a complete automatic lifecycle/error audit.
+that work never ran or an effect never occurred. Controlled operational stops are
+recorded as described below; the trace is not a complete automatic lifecycle audit.
 
 The ready row links the final task/current Execution, Runtime run and terminal
 observation, with reference_identity_only verification. Its semantics are
@@ -219,6 +219,59 @@ references and model/review/render/handoff/delivery counters, reject the old rep
 require current delegation and complete a distinct healthy report once. The renderer
 retains its READ contract: its counter is fixture observation, not write-effect recovery
 qualification. These controlled cuts retain OS/cache and do not qualify power loss.
+
+### Operational stops after drain
+
+Once the manifest was acknowledged, an ordinary execution/domain failure, timeout,
+review rejection/abort or Host-authority invalidation cancels and waits every retained
+handle to actual terminal before releasing it. Group wait only establishes the terminal
+barrier: a fresh group poll checks execution/domain success before the fan-in audit gate.
+After drain, the audited path writes stop-worker-a/stop-worker-b/stop-aggregate/
+stop-execute terminal observations for the handles whose results it still owns.
+These keys also use the report prefix and the existing router_observations schema.
+If a segment's result already moved, it links the acknowledged aggregate-final,
+pending or execute-final observation with before_result_transfer semantics instead.
+It never fabricates a new canonical result after transfer. The stop entry separately
+records the current terminal status, result-taken, loss and approval-pending flags;
+for example, cancellation clears the Router's approval-pending flag on an aborted
+review. The original Runtime checkpoint can still require review; the stop record
+neither durably rejects that checkpoint nor authorizes its resumption.
+
+Only after those references are available does one immutable report_stop_observations
+row at demo-stop capture post_drain_report_stop_observation semantics: report/parent,
+the original operation phase/code, origin monotonic observation time, acknowledged
+gate ids and retained task/Execution/thread identities. Previously released workers
+or aggregators are represented by their acknowledged cohort/terminal gate ids.
+The row is bounded to 16 KiB and contains no prompts, answers, raw states or tool data.
+The manifest maps these prospective cleanup keys along with the normal phase ids.
+Stopping and recording cleanup may outlast the original deadline; this never extends
+admission, approves a pending operation or publishes a late delivery.
+
+If any normal persistence gate returns an error, no stop audit is attempted. This
+includes admission/review API errors whose public return cannot distinguish a
+pre-write rejection from a committed write with lost acknowledgement. An unacknowledged
+manifest or EALREADY namespace never permits appending a stop to an older report.
+The possible prefix remains for explicit inspection; there is no read/list/put fallback.
+Cleanup audit itself stops at its first error or conflicting id, without overwrite,
+retry or further writes. Accepted owners are released even then. Independent terminal
+observations can therefore survive without the report stop row.
+
+Successful stop auditing preserves the original return code/phase. A cleanup audit
+error instead returns that error at stop-audit and withholds output. The optional
+example-private diagnostics output preserves operation_code/operation_phase alongside
+stop_audit_attempted/stop_audit_code; it is reset for each invocation, with the original
+stop fields populated on the cleanup path. The CLI supplies it and reports both errors.
+Caller-owned config, diagnostic storage and backend bindings remain alive through drain
+and return. No installed API or existing Router/Runtime/Journal schema is changed.
+
+Six additional five-process SQLite cases fail the actual aggregation provider, cut
+before/after its post-drain terminal observation, before/after the stop row, after
+error return and after a committed stop write with a lost acknowledgement. New processes
+check exact admission/observation identities, canonical Run anchors when present,
+persisted stop phase/code and independent failed-return/model/tool/delivery counters.
+The old report id cannot run again; current-policy denial and a distinct healthy report
+are still required. These tests qualify the specified boundaries, not arbitrary crashes,
+complete lifecycle/error coverage, external-effect certainty or delivery recovery.
 
 ## Two application routes
 

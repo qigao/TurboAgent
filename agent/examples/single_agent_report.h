@@ -10,6 +10,7 @@
 
 #define SINGLE_AGENT_REPORT_MANIFESTS "report_dispatch_manifests"
 #define SINGLE_AGENT_REPORT_READY "report_delivery_observations"
+#define SINGLE_AGENT_REPORT_STOPS "report_stop_observations"
 
 /* Ordinary ToolExecutor uses the text/context entry point. Adapt explicitly
  * rather than assuming a JSON-only registration is callable through it. */
@@ -51,6 +52,11 @@ static turbo_tool_definition_v6_t single_agent_report_tool_definition(document_r
 typedef int (*single_agent_report_review_fn)(const json_value_t *summary,
     const json_value_t *state, void *user); /* 1 approve, 0 reject, negative abort */
 
+typedef struct single_agent_report_diagnostics_s {
+  int operation_code, stop_audit_code, stop_audit_attempted;
+  const char *operation_phase; /* Static example phase name, valid after return. */
+} single_agent_report_diagnostics_t;
+
 typedef struct single_agent_report_config_s {
   turbo_agent_router_t *router;
   turbo_agent_router_t *tool_router; /* Separate reviewed endpoint pool, same Host. */
@@ -73,7 +79,22 @@ typedef struct single_agent_report_config_s {
    * This example config is not an installed/public ABI. */
   turbo_agent_runtime_t *audit_runtime;
   const char *audit_id;
+  /** Optional owned output for the original stop when cleanup auditing fails. */
+  single_agent_report_diagnostics_t *diagnostics;
 } single_agent_report_config_t;
+
+static const char *const single_agent_report_gates[] = {"manifest", "worker-a", "worker-b",
+    "fan-in", "aggregate", "aggregate-final", "execute", "pending", "review", "execute-final", "ready"};
+typedef struct single_agent_report_trace_s { unsigned acknowledged; int gate_failed; } single_agent_report_trace_t;
+
+/* A failed gate can have committed without acknowledgement. Do not issue more
+ * audit writes, even if an admission error may instead precede persistence. */
+static int single_agent_report_gate(single_agent_report_trace_t *trace, const char *suffix, int rc) {
+  if (rc) trace->gate_failed = 1;
+  else for (size_t i = 0; i < sizeof(single_agent_report_gates)/sizeof(single_agent_report_gates[0]); ++i)
+    if (!strcmp(suffix, single_agent_report_gates[i])) trace->acknowledged |= 1u << i;
+  return rc;
+}
 
 static int single_agent_report_id_valid(const char *id) {
   size_t n = id ? strlen(id) : 0;
@@ -103,7 +124,8 @@ static const char *single_agent_report_thread(const single_agent_report_config_t
 static int single_agent_report_begin(const single_agent_report_config_t *config,
     uint64_t started, uint64_t deadline) {
   static const char *suffixes[] = {"worker-a", "worker-b", "fan-in", "aggregate",
-      "aggregate-final", "execute", "pending", "review", "execute-final", "ready"};
+      "aggregate-final", "execute", "pending", "review", "execute-final", "ready",
+      "stop", "stop-worker-a", "stop-worker-b", "stop-aggregate", "stop-execute"};
   json_value_t *record = NULL, *ids = NULL;
   char key[64];
   int rc = SALTS_ENOMEM;
@@ -133,6 +155,7 @@ done:
 }
 
 static int single_agent_report_submit(const single_agent_report_config_t *config,
+    single_agent_report_trace_t *trace,
     turbo_agent_router_t *router, const char *suffix, const turbo_agent_router_request_t *request,
     const json_value_t *input, unsigned turns, turbo_agent_router_task_t **task) {
   char id[64]; int rc;
@@ -140,17 +163,116 @@ static int single_agent_report_submit(const single_agent_report_config_t *config
       ? turbo_agent_router_submit_tool_loop(router, config->pool, request, input, turns, task)
       : turbo_agent_router_submit(router, config->pool, request, input, task);
   rc = single_agent_report_key(config, suffix, id);
-  return rc ? rc : turbo_agent_router_submit_with_intent(router, config->pool,
+  if (!rc) rc = turbo_agent_router_submit_with_intent(router, config->pool,
       config->audit_runtime, id, request, input, turns, task);
+  return single_agent_report_gate(trace, suffix, rc);
 }
 
 static int single_agent_report_result(const single_agent_report_config_t *config,
+    single_agent_report_trace_t *trace,
     turbo_agent_router_task_t *task, const char *suffix, json_value_t **summary, json_value_t **state) {
   char id[64]; int rc;
   if (!config->audit_runtime) return turbo_agent_router_task_take_result(task, summary, state);
   rc = single_agent_report_key(config, suffix, id);
-  return rc ? rc : turbo_agent_router_task_take_result_with_observation(task,
+  if (!rc) rc = turbo_agent_router_task_take_result_with_observation(task,
       config->audit_runtime, id, summary, state);
+  return single_agent_report_gate(trace, suffix, rc);
+}
+
+/* Called only after every retained task is truly terminal. A taken segment
+ * links its acknowledged pre-transfer observation instead of inventing a new
+ * Runtime result after ownership moved. No result payload is copied here. */
+static int single_agent_report_stop_task(const single_agent_report_config_t *config,
+    const single_agent_report_trace_t *trace, turbo_agent_router_task_t *task,
+    const char *role, json_value_t *tasks) {
+  static const char *fields[] = {"task_id", "execution_id", "thread_id", "execution_status",
+      "runtime_result_code", "unresponsive", "result_taken"};
+  json_value_t *view = NULL, *entry = NULL, *copy = NULL;
+  char suffix[32], id[64];
+  int taken, rc = turbo_agent_router_task_inspect(task, &view);
+  if (rc) return rc;
+  if (turbo_runtime_json_value_as_int64(json_object_get(view, "execution_status"), -1) <
+      TURBO_AGENT_EXECUTION_COMPLETED) { rc = SALTS_EBUSY; goto done; }
+  taken = json_get_bool(view, "result_taken", 0);
+  if (taken) {
+    const char *gate = !strcmp(role, "aggregate") ? "aggregate-final" :
+        turbo_runtime_json_value_as_int64(json_object_get(view, "review_resumes"), 0) ? "execute-final" : "pending";
+    size_t i;
+    for (i = 0; i < sizeof(single_agent_report_gates)/sizeof(single_agent_report_gates[0]); ++i)
+      if (!strcmp(gate, single_agent_report_gates[i])) break;
+    if (i == sizeof(single_agent_report_gates)/sizeof(single_agent_report_gates[0]) ||
+        !(trace->acknowledged & (1u << i))) { rc = SALTS_EPROTO; goto done; }
+    rc = single_agent_report_key(config, gate, id);
+  } else {
+    int n = snprintf(suffix, sizeof(suffix), "stop-%s", role);
+    rc = n > 0 && n < (int)sizeof(suffix) ? single_agent_report_key(config, suffix, id) : SALTS_ENOBUFS;
+    if (!rc) rc = turbo_agent_router_task_record_observation(task, config->audit_runtime, id);
+  }
+  if (rc) goto done;
+  entry = json_create_object(); rc = SALTS_ENOMEM;
+  if (!entry || turbo_runtime_json_object_set_string(entry, "role", role) ||
+      turbo_runtime_json_object_set_string(entry, "observation_id", id) ||
+      turbo_runtime_json_object_set_string(entry, "observation_boundary", taken ? "before_result_transfer" : "after_drain")) goto done;
+  for (size_t i = 0; i < sizeof(fields)/sizeof(fields[0]); ++i) {
+    copy = json_clone(json_object_get(view, fields[i]));
+    if (!copy || turbo_runtime_json_object_set(entry, fields[i], copy)) goto done;
+    copy = NULL;
+  }
+  copy = json_create_bool(json_get_bool(view, "approval_pending", 0));
+  if (!copy || turbo_runtime_json_object_set(entry, "approval_pending", copy)) goto done;
+  copy = NULL;
+  if (turbo_runtime_json_array_append(tasks, entry)) goto done;
+  entry = NULL; rc = SALTS_OK;
+done:
+  json_free(copy); json_free(entry); json_free(view); return rc;
+}
+
+static int single_agent_report_stop(const single_agent_report_config_t *config,
+    const single_agent_report_trace_t *trace, turbo_agent_router_task_t *const workers[2],
+    turbo_agent_router_task_t *task, const char *task_role, const char *phase, int operation) {
+  json_value_t *record = NULL, *tasks = NULL, *gates = NULL, *value = NULL;
+  char id[64]; uint64_t now = cmeta_monotonic_ms();
+  int rc = SALTS_ENOMEM;
+  if (now > UINT64_C(9007199254740991)) return SALTS_ERANGE;
+  record = json_create_object(); tasks = json_create_array(); gates = json_create_array();
+  if (!record || !tasks || !gates) goto done;
+  for (size_t i = 0; i < 2; ++i) if (workers[i]) {
+    rc = single_agent_report_stop_task(config, trace, workers[i], i ? "worker-b" : "worker-a", tasks);
+    if (rc) goto done;
+  }
+  if (task) {
+    rc = single_agent_report_stop_task(config, trace, task, task_role, tasks);
+    if (rc) goto done;
+  }
+  rc = SALTS_ENOMEM;
+  for (size_t i = 0; i < sizeof(single_agent_report_gates)/sizeof(single_agent_report_gates[0]); ++i) {
+    if (!(trace->acknowledged & (1u << i))) continue;
+    if (i) { rc = single_agent_report_key(config, single_agent_report_gates[i], id); if (rc) goto done; }
+    value = json_create_string(i ? id : config->audit_id); rc = SALTS_ENOMEM;
+    if (!value || turbo_runtime_json_array_append(gates, value)) goto done;
+    value = NULL;
+  }
+  if (turbo_runtime_json_object_set_int64(record, "schema_version", 1) ||
+      turbo_runtime_json_object_set_string(record, "semantics", "post_drain_report_stop_observation") ||
+      turbo_runtime_json_object_set_string(record, "report_id", config->audit_id) ||
+      turbo_runtime_json_object_set_string(record, "parent_run_id", config->parent_run_id) ||
+      turbo_runtime_json_object_set_string(record, "operation_phase", phase) ||
+      turbo_runtime_json_object_set_int64(record, "operation_code", operation) ||
+      turbo_runtime_json_object_set_int64(record, "observed_mono_ms", (int64_t)now) ||
+      turbo_runtime_json_object_set_string(record, "clock_domain", "origin_process_monotonic")) goto done;
+  if (turbo_runtime_json_object_set(record, "tasks", tasks)) goto done;
+  tasks = NULL;
+  if (turbo_runtime_json_object_set(record, "acknowledged_gates", gates)) goto done;
+  gates = NULL;
+  rc = single_agent_report_key(config, "stop", id);
+  if (!rc) {
+    char *text = json_serialize(record, NULL);
+    rc = !text ? SALTS_ENOMEM : strlen(text) > TURBO_AGENT_ROUTER_OBSERVATION_MAX_BYTES ? SALTS_ENOBUFS : SALTS_OK;
+    json_serialize_free(text);
+  }
+  if (!rc) rc = turbo_agent_runtime_store_create_json_if_absent(config->audit_runtime, SINGLE_AGENT_REPORT_STOPS, id, record);
+done:
+  json_free(value); json_free(gates); json_free(tasks); json_free(record); return rc;
 }
 
 static int single_agent_report_ready(const single_agent_report_config_t *config,
@@ -282,6 +404,7 @@ static int single_agent_report_wait(turbo_agent_router_task_t *task, uint64_t de
 /* Transfer success alone is not completion. Check Execution and canonical state
  * separately; a failed Runtime may have no summary or committed checkpoint. */
 static int single_agent_report_take(const single_agent_report_config_t *config,
+    single_agent_report_trace_t *trace,
     turbo_agent_router_task_t *task, const char *suffix, const char *parent,
     json_value_t **summary, json_value_t **state) {
   json_value_t *view = NULL;
@@ -294,7 +417,7 @@ static int single_agent_report_take(const single_agent_report_config_t *config,
     rc = SALTS_EIO;
   json_free(view);
   if (rc) return rc;
-  rc = single_agent_report_result(config, task, suffix, summary, state);
+  rc = single_agent_report_result(config, trace, task, suffix, summary, state);
   if (rc) return rc;
   status = *summary ? json_get_string(*summary, "status") : NULL;
   lineage = *summary ? json_get_string(*summary, "parent_agent_run_id") : NULL;
@@ -345,6 +468,8 @@ static const json_value_t *single_agent_report_model_text(const json_value_t *st
 static int single_agent_report_run(const single_agent_report_config_t *config,
     json_value_t **out_delivery, const char **out_phase) {
   turbo_agent_router_task_t *workers[2] = {0}, *task = NULL;
+  turbo_agent_router_task_t *worker_refs[2] = {0}; /* Borrowed only while owner survives. */
+  single_agent_report_trace_t trace = {0};
   turbo_agent_router_group_t *group = NULL;
   turbo_agent_tool_authority_snapshot_t authority;
   turbo_agent_runtime_parent_link_t parent = {0};
@@ -353,9 +478,11 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   uint64_t deadline, started, budget;
   char thread[64], id[64];
   int rc = SALTS_EINVAL;
+  const char *task_role = "aggregate";
   static const char *threads[] = {"report-worker-a", "report-worker-b"};
   if (!out_delivery || !out_phase) return rc;
   *out_delivery = NULL; *out_phase = "admission";
+  if (config && config->diagnostics) *config->diagnostics = (single_agent_report_diagnostics_t){0};
   if (!config || !config->router || !config->tool_router || !config->pool || !config->authority || !config->tools ||
       !config->review || !config->parent_run_id || !config->parent_run_id[0] ||
       strlen(config->parent_run_id) > 128 || !config->goal || !config->goal[0] ||
@@ -398,7 +525,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   }
   if (config->audit_runtime) {
     *out_phase = "manifest";
-    rc = single_agent_report_begin(config, started, deadline);
+    rc = single_agent_report_gate(&trace, "manifest", single_agent_report_begin(config, started, deadline));
     if (rc) goto done;
   }
   *out_phase = "workers";
@@ -408,7 +535,8 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
     const char *suffix = i ? "worker-b" : "worker-a";
     rc = single_agent_report_request(&request, deadline,
         single_agent_report_thread(config, suffix, threads[i], thread), &parent);
-    if (!rc) rc = single_agent_report_submit(config, config->router, suffix, &request, input, 0, &workers[i]);
+    if (!rc) rc = single_agent_report_submit(config, &trace, config->router, suffix, &request, input, 0, &workers[i]);
+    worker_refs[i] = workers[i];
     if (rc) goto done; /* Earlier handles still belong to this Host. */
   }
   rc = turbo_agent_router_group_adopt(single_agent_report_thread(config, "analysis", "report-analysis", thread), workers, 2, &group);
@@ -421,16 +549,21 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
     rc = turbo_agent_router_group_wait(group, 10);
     if (rc != SALTS_ETIMEDOUT) break;
   }
+  /* wait() establishes terminal ownership, not success. Observe failures before
+   * entering the persistence gate, whose errors must remain ambiguous. */
+  if (!rc) rc = turbo_agent_router_group_poll(group, cmeta_monotonic_ms());
   if (!rc && config->audit_runtime) {
     rc = single_agent_report_key(config, "fan-in", id);
     if (!rc) rc = turbo_agent_router_group_build_input_with_observation(group,
         config->goal, config->audit_runtime, id, &next);
+    rc = single_agent_report_gate(&trace, "fan-in", rc);
   } else if (!rc) rc = turbo_agent_router_group_build_input(group, config->goal, &next);
   if (!rc) rc = single_agent_report_bind_context(next, context);
   if (rc) goto done;
   rc = turbo_agent_router_group_release(group);
   if (rc) goto done;
   group = NULL;
+  worker_refs[0] = worker_refs[1] = NULL;
   json_free(input); input = next; next = NULL;
   *out_phase = "aggregation";
   if (turbo_agent_tool_authority_snapshot_is_current(config->authority, &authority) != 1) {
@@ -440,9 +573,9 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   request.required_capabilities = TURBO_AGENT_ROUTER_TEXT;
   rc = single_agent_report_request(&request, deadline,
       single_agent_report_thread(config, "aggregate", "report-aggregation", thread), &parent);
-  if (!rc) rc = single_agent_report_submit(config, config->router, "aggregate", &request, input, 0, &task);
+  if (!rc) rc = single_agent_report_submit(config, &trace, config->router, "aggregate", &request, input, 0, &task);
   if (!rc) rc = single_agent_report_wait(task, deadline);
-  if (!rc) rc = single_agent_report_take(config, task, "aggregate-final", config->parent_run_id, &summary, &state);
+  if (!rc) rc = single_agent_report_take(config, &trace, task, "aggregate-final", config->parent_run_id, &summary, &state);
   if (rc) goto done;
   const char *draft = turbo_agent_state_last_output_text(state);
   const char *run = json_get_string(summary, "run_id");
@@ -462,6 +595,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   rc = turbo_agent_router_task_release(task);
   if (rc) goto done;
   task = NULL;
+  task_role = "execute";
   json_free(summary); json_free(state); summary = state = NULL;
   json_free(input); input = next; next = NULL;
   *out_phase = "execution";
@@ -472,7 +606,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   request.required_capabilities = TURBO_AGENT_ROUTER_TEXT | TURBO_AGENT_ROUTER_TOOL_PROPOSALS;
   rc = single_agent_report_request(&request, deadline,
       single_agent_report_thread(config, "execute", "report-delivery", thread), &parent);
-  if (!rc) rc = single_agent_report_submit(config, config->tool_router, "execute", &request, input, 2, &task);
+  if (!rc) rc = single_agent_report_submit(config, &trace, config->tool_router, "execute", &request, input, 2, &task);
   if (!rc) rc = single_agent_report_wait(task, deadline);
   if (rc) goto done;
   json_value_t *view = NULL;
@@ -489,7 +623,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   if (!pending) { rc = SALTS_EPROTO; goto done; }
   if (pending) {
     *out_phase = "approval";
-    rc = single_agent_report_result(config, task, "pending", &summary, &state);
+    rc = single_agent_report_result(config, &trace, task, "pending", &summary, &state);
     if (rc) goto done;
     if (cmeta_monotonic_ms() >= deadline) { rc = SALTS_ETIMEDOUT; goto done; }
     /* The callback runs on the serialized Host after every execution segment
@@ -506,6 +640,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
     if (config->audit_runtime) {
       rc = single_agent_report_key(config, "review", id);
       if (!rc) rc = turbo_agent_router_task_review_with_intent(task, config->pool, config->audit_runtime, id, approved);
+      rc = single_agent_report_gate(&trace, "review", rc);
     } else rc = turbo_agent_router_task_review(task, config->pool, approved);
     if (!rc) rc = single_agent_report_wait(task, deadline);
     if (rc) goto done;
@@ -513,6 +648,7 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
       if (config->audit_runtime) {
         rc = single_agent_report_key(config, "execute-final", id);
         if (!rc) rc = turbo_agent_router_task_record_observation(task, config->audit_runtime, id);
+        rc = single_agent_report_gate(&trace, "execute-final", rc);
         if (rc) goto done;
       }
       rc = SALTS_ECANCELED; goto done;
@@ -523,31 +659,48 @@ static int single_agent_report_run(const single_agent_report_config_t *config,
   if (turbo_agent_tool_authority_snapshot_is_current(config->authority, &authority) != 1) {
     rc = SALTS_EPERM; goto done;
   }
-  rc = single_agent_report_take(config, task, "execute-final", config->parent_run_id, &summary, &state);
+  rc = single_agent_report_take(config, &trace, task, "execute-final", config->parent_run_id, &summary, &state);
   if (!rc) rc = single_agent_report_deliver(config->tools, state, &delivery);
   if (!rc && cmeta_monotonic_ms() >= deadline) rc = SALTS_ETIMEDOUT;
-  if (!rc && config->audit_runtime) *out_phase = "delivery-audit";
-  if (!rc) rc = single_agent_report_ready(config, task, summary);
+  if (!rc) {
+    if (config->audit_runtime) *out_phase = "delivery-audit";
+    rc = single_agent_report_ready(config, task, summary);
+    if (config->audit_runtime) rc = single_agent_report_gate(&trace, "ready", rc);
+  }
   if (!rc && cmeta_monotonic_ms() >= deadline) rc = SALTS_ETIMEDOUT;
   if (!rc) { *out_phase = "delivery"; *out_delivery = delivery; delivery = NULL; }
 done:
+  if (config->diagnostics) {
+    config->diagnostics->operation_code = rc;
+    config->diagnostics->operation_phase = *out_phase;
+  }
   /* Cancel, then wait for actual terminal. Never detach work on a timeout or
    * release the Router/Agent/store while a callback can still use it. */
   if (group) {
     (void)turbo_agent_router_group_cancel(group, TURBO_CANCEL_PARENT);
     (void)turbo_agent_router_group_wait(group, TURBO_RUNTIME_WAIT_INFINITE);
-    (void)turbo_agent_router_group_release(group);
   }
   for (size_t i = 0; i < 2; ++i) if (workers[i]) {
     (void)turbo_agent_router_task_cancel(workers[i], TURBO_CANCEL_PARENT);
     (void)turbo_agent_router_task_wait(workers[i], TURBO_RUNTIME_WAIT_INFINITE);
-    (void)turbo_agent_router_task_release(workers[i]);
   }
   if (task) {
     (void)turbo_agent_router_task_cancel(task, TURBO_CANCEL_PARENT);
     (void)turbo_agent_router_task_wait(task, TURBO_RUNTIME_WAIT_INFINITE);
-    (void)turbo_agent_router_task_release(task);
   }
+  /* Only an acknowledged reservation owns this namespace. A failed gate may
+   * have committed; leave that prefix for explicit reconciliation. */
+  if (rc && config->audit_runtime && (trace.acknowledged & 1u) && !trace.gate_failed) {
+    int audit_rc = single_agent_report_stop(config, &trace, worker_refs, task, task_role, *out_phase, rc);
+    if (config->diagnostics) {
+      config->diagnostics->stop_audit_attempted = 1;
+      config->diagnostics->stop_audit_code = audit_rc;
+    }
+    if (audit_rc) { rc = audit_rc; *out_phase = "stop-audit"; }
+  }
+  if (group) (void)turbo_agent_router_group_release(group);
+  for (size_t i = 0; i < 2; ++i) if (workers[i]) (void)turbo_agent_router_task_release(workers[i]);
+  if (task) (void)turbo_agent_router_task_release(task);
   json_free(data); json_free(input); json_free(next); json_free(summary); json_free(state); json_free(context); json_free(delivery);
   return rc;
 }

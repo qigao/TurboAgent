@@ -11,8 +11,10 @@ and `test_single_agent_report`. All model calls use existing Execution/Runtime o
 one caller-owned bounded pool, and the same Host-supplied parent run link. The helper
 does not create or validate the parent Runtime record: an embedding application must
 supply its real lineage. Child run/checkpoint records remain in their existing stores.
-The example uses memory stores and fixed child thread names for one exclusive invocation;
-it does not persist a parent task, conversation, supervision audit or recovery record.
+By default the example uses memory stores and fixed child thread names for one
+exclusive invocation. The optional Host trace below reserves a report namespace and
+persists canonical worker stores and handoff metadata. It does not restore a parent
+task, conversation, policy grant or live execution handle after restart.
 
 ## Execution and ownership
 
@@ -138,6 +140,85 @@ Combined payloads are limited to 1 MiB. The rendering catalog distinguishes the 
 these aliases do not assert document hashes or factual support. Session options can
 select up to eight memory keys and eight knowledge matches in embedding applications.
 No generic Retriever, conversation-history selection or automatic memory write is added.
+
+### Optional persistent Host trace
+
+Set both REPORT_AUDIT_DIR and REPORT_AUDIT_ID to enable the audited path. The directory
+must already exist; the id is a Host-chosen 1..32-byte ASCII letter/digit/underscore/
+hyphen namespace. Missing pairs, empty/invalid ids and oversized directory strings
+are rejected before model work. The CLI opens bounded SQLite stores without a memory
+fallback: host.db for audit metadata, and draft.db, review.db, synthesis.db, delivery.db
+for the corresponding canonical endpoint Runtime stores. Their native exclusive-owner
+locks require one application owner at a time. Canonical worker databases contain
+the actual inputs, selected context and results; Host audit rows contain metadata only.
+An embedding Host may choose other backends but must preserve independent store owners
+and serialize all control/store use.
+
+The example-private config has paired audit_runtime/audit_id fields. Existing callers
+that leave both null retain the original path. The store is borrowed synchronously
+through drain/return, and neither workers nor the returned Markdown retain it.
+Keep the config, audit id, input strings and endpoint/store bindings immutable and
+alive through the call, including its Host review callback.
+No installed API, public struct ABI or existing Router/Runtime/Journal schema changes.
+
+After input/context and budget validation, the Host atomically reserves report_id
+in report_dispatch_manifests before any admission. The immutable version-1 manifest
+records parent identity, origin monotonic start/deadline and deterministic phase ids,
+without goal, brief, answer or tool data. An existing id is EALREADY even for the same
+goal. A manifest can survive with no accepted worker; it is prospective admission
+evidence, not acknowledgement of task completion. Reusing it after restart does not
+resume work. Choose a new id only for an explicit new operation under current authority.
+Do not turn an unobserved old outcome into an automatic retry.
+
+For a report id named demo, the successful path acknowledges these rows:
+
+| Key | Collection / boundary |
+| --- | --- |
+| demo | report_dispatch_manifests; before all model admission. |
+| demo-worker-a, demo-worker-b | router_admission_intents; before each worker enqueue. |
+| demo-fan-in | router_group_observations; before publishing worker evidence to the aggregator. |
+| demo-aggregate | router_admission_intents; before aggregator enqueue. |
+| demo-aggregate-final | router_observations; before moving the aggregator result. |
+| demo-execute | router_admission_intents; before initial tool-loop enqueue. |
+| demo-pending | router_observations; before exposing the pending checkpoint to the Host review callback. |
+| demo-review | router_review_intents; explicit approve/reject before resume enqueue. |
+| demo-execute-final | router_observations; before taking final results, or after terminal rejection. |
+| demo-ready | report_delivery_observations; after receipt validation, before returning Markdown. |
+
+The group id and child thread names also use this bounded prefix, separating explicit
+new reports from old heads and tool-call identities. The manifest's phase_ids maps the
+known suffixes to exact keys. Reconcile these records with the original endpoint/store
+binding and exact Runtime run/checkpoint anchors, not an arbitrary newer thread head.
+Origin monotonic timestamps cannot renew leases in a new process.
+
+Every persistence error, including commit with lost acknowledgement, stops forward
+progress and withholds output. Earlier accepted tasks are still cancelled/drained/
+released under the existing ownership contract. There is no get/list/put fallback,
+overwrite or retry. Explicitly inspect a possible surviving record after error.
+Synchronous persistence consumes the original Host deadline. The Host checks it
+again before displaying a pending review and before/after the final ready write;
+a late acknowledgement may leave a ready record while output remains withheld.
+Failure can leave an incomplete trace prefix; absent terminal observations do not prove
+that work never ran or an effect never occurred. This remains an example of explicit
+gates, not a complete automatic lifecycle/error audit.
+
+The ready row links the final task/current Execution, Runtime run and terminal
+observation, with reference_identity_only verification. Its semantics are
+pre_report_delivery_observation. It contains no Markdown, delivery acknowledgement,
+result copy or recovery grant. The same ready record may survive before API return,
+after return or after external delivery. A write error there still withholds the
+owned candidate even if the record committed. No cross-system exactly-once delivery,
+content-factuality or source-freshness claim is made.
+
+Offline tests inject space failure and lost acknowledgement at all eleven writes.
+Eight five-process cases cut before/after the manifest, after cohort capture, after
+review-intent commit, before/after ready commit, after API return and after explicit
+application delivery. They require exact exit 86 and null-output boundary evidence.
+Independent new processes reopen all stores, compare original canonical run/checkpoint
+references and model/review/render/handoff/delivery counters, reject the old report id,
+require current delegation and complete a distinct healthy report once. The renderer
+retains its READ contract: its counter is fixture observation, not write-effect recovery
+qualification. These controlled cuts retain OS/cache and do not qualify power loss.
 
 ## Two application routes
 

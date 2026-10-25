@@ -13,6 +13,27 @@ foreach(cut IN ITEMS before_write after_write lost_ack queue_rejected in_model b
     TIMEOUT 60 LABELS "agent;recovery;process;router-admission")
 endforeach()
 
+add_executable(report_audit_process_fixture report_audit_fixture.c)
+add_test(NAME test_report_audit_cli_configuration
+  COMMAND "${CMAKE_COMMAND}"
+    "-DWORKER=$<TARGET_FILE:single_agent_report>"
+    "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/report_cases"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_report_cli.cmake")
+set_tests_properties(test_report_audit_cli_configuration PROPERTIES TIMEOUT 30 LABELS "agent;report-audit;cli")
+target_link_libraries(report_audit_process_fixture PRIVATE TurboAgent::Agent)
+set_target_properties(report_audit_process_fixture PROPERTIES
+  C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "Agent/tests")
+foreach(cut IN ITEMS before_manifest after_manifest after_fan_in after_review before_ready after_ready after_return after_delivery)
+  add_test(NAME test_report_audit_crash_${cut}
+    COMMAND "${CMAKE_COMMAND}"
+      "-DWORKER=$<TARGET_FILE:report_audit_process_fixture>"
+      "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/report_cases"
+      "-DCUT=${cut}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_report.cmake")
+  set_tests_properties(test_report_audit_crash_${cut} PROPERTIES
+    TIMEOUT 120 LABELS "agent;recovery;process;report-audit")
+endforeach()
+
 add_executable(router_group_process_fixture router_group_fixture.c)
 target_link_libraries(router_group_process_fixture PRIVATE TurboAgent::Agent)
 set_target_properties(router_group_process_fixture PROPERTIES

@@ -1,5 +1,8 @@
 #include "single_agent_report.h"
 #include "turbo_agent_knowledge_store.h"
+#include "turbo_runtime_store_sqlite.h"
+#include <fmt.h>
+#include <tstr.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,11 +33,32 @@ static int report_review(const json_value_t *summary, const json_value_t *state,
   return answer == 'y' || answer == 'Y';
 }
 
+static int report_store(const char *directory, const char *name, turbo_agent_runtime_t **out) {
+  turbo_agent_runtime_store_t store = {0};
+  int rc = SALTS_OK;
+  if (directory) {
+    turbo_runtime_sqlite_config_t sqlite;
+    tstr path = tstr_format("{}/{}", directory, name);
+    if (!path) return SALTS_ENOMEM;
+    turbo_runtime_sqlite_config_init(&sqlite); sqlite.path = path;
+    rc = turbo_runtime_store_sqlite_open(&sqlite, &store);
+    tstr_free(path);
+    if (rc) return rc;
+  } else store = turbo_agent_runtime_store_memory_create();
+  *out = turbo_agent_runtime_create(&store);
+  if (!*out) {
+    if (store.user_data_free) store.user_data_free(store.user_data);
+    return SALTS_ENOMEM;
+  }
+  return SALTS_OK;
+}
+
 int main(int argc, char **argv) {
   static const char *models[] = {"REPORT_A_MODEL", "REPORT_B_MODEL", "REPORT_PLAN_MODEL", "REPORT_EXEC_MODEL"};
   static const char *input_prices[] = {"REPORT_A_INPUT_PRICE", "REPORT_B_INPUT_PRICE", "REPORT_PLAN_INPUT_PRICE", "REPORT_EXEC_INPUT_PRICE"};
   static const char *output_prices[] = {"REPORT_A_OUTPUT_PRICE", "REPORT_B_OUTPUT_PRICE", "REPORT_PLAN_OUTPUT_PRICE", "REPORT_EXEC_OUTPUT_PRICE"};
   static const char *ids[] = {"draft", "review", "synthesis", "delivery"};
+  static const char *stores[] = {"draft.db", "review.db", "synthesis.db", "delivery.db"};
   static const char *instructions[] = {
     "Analyze host_goal, source_text and any selected memory/knowledge user packet. Draft a concise report "
     "using only the supplied brief and explicitly selected context. "
@@ -58,6 +82,7 @@ int main(int argc, char **argv) {
   const char *memory_keys[1];
   turbo_agent_t *agents[5] = {0};
   turbo_agent_runtime_t *runtimes[4] = {0};
+  turbo_agent_runtime_t *audit_runtime = NULL;
   turbo_agent_router_endpoint_t endpoints[4] = {0};
   turbo_agent_router_config_t router_config;
   single_agent_report_config_t config = {0};
@@ -70,10 +95,19 @@ int main(int argc, char **argv) {
   turbo_agent_retry_policy_t retry;
   json_value_t *delivery = NULL;
   const char *phase = "configuration";
+  const char *audit_directory = getenv("REPORT_AUDIT_DIR");
+  const char *audit_id = getenv("REPORT_AUDIT_ID");
   int rc = SALTS_EINVAL;
   if (argc != 4 && argc != 8) {
     fprintf(stderr, "usage: single_agent_report <Host-parent-run-id> <goal> <brief-text> [<knowledge-db> <memory-root> <namespace> <key>]\n");
     return 1;
+  }
+  if (!!audit_directory != !!audit_id || (audit_directory &&
+      (!audit_directory[0] || strlen(audit_directory) > 1024 || !single_agent_report_id_valid(audit_id)))) goto done;
+  if (audit_directory) {
+    int store_rc = report_store(audit_directory, "host.db", &audit_runtime);
+    if (store_rc) { rc = store_rc; goto done; }
+    config.audit_runtime = audit_runtime; config.audit_id = audit_id;
   }
   if (argc == 8) {
     turbo_agent_session_config_t session_config = {0};
@@ -122,9 +156,8 @@ int main(int argc, char **argv) {
     if (!agents[i] || turbo_agent_set_tool_policy(agents[i], &policy) ||
         turbo_agent_retry_configure(agents[i], &retry)) goto done;
     if (i < 4) {
-      turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
-      runtimes[i] = turbo_agent_runtime_create(&store);
-      if (!runtimes[i]) goto done;
+      int store_rc = report_store(audit_directory, stores[i], &runtimes[i]);
+      if (store_rc) { rc = store_rc; goto done; }
       endpoints[i].id = ids[i]; endpoints[i].agent = agents[i]; endpoints[i].runtime = runtimes[i];
       endpoints[i].roles = i == 2 ? TURBO_AGENT_ROUTER_PLAN : TURBO_AGENT_ROUTER_EXECUTE;
       endpoints[i].capabilities = TURBO_AGENT_ROUTER_TEXT |
@@ -167,6 +200,7 @@ done:
   (void)turbo_agent_router_destroy(router);
   (void)turbo_agent_router_destroy(tool_router);
   for (size_t i = 0; i < 4; ++i) if (runtimes[i]) turbo_agent_runtime_destroy(runtimes[i]);
+  turbo_agent_runtime_destroy(audit_runtime);
   for (size_t i = 0; i < 5; ++i) if (agents[i]) turbo_agent_destroy(agents[i]);
   turbo_tool_registry_destroy(tools);
   turbo_agent_session_destroy(context_session);

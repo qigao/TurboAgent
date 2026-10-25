@@ -2,10 +2,19 @@
 #include "../examples/single_agent_report.h"
 #include "turbo_model_provider.h"
 #include "turbo_agent_knowledge_store.h"
+#include "turbo_runtime_store_sqlite.h"
+#include <fmt.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 
 typedef struct report_fixture_s report_fixture_t;
+typedef struct report_audit_s {
+  turbo_agent_runtime_store_t base;
+  const char *fault_id;
+  const char *delay_id;
+  unsigned delay_ms;
+  int creates, gets, puts, lists, lost_ack;
+} report_audit_t;
 typedef struct report_model_s {
   report_fixture_t *fixture;
   unsigned index;
@@ -29,8 +38,45 @@ struct report_fixture_s {
   int context_reads, context_source;
   atomic_int tool_calls, authority_calls;
   int approval, reviews, context_ok, bad_receipt, no_tool, fail_index, proposal_index, revoke, nul_aggregate, late_review;
+  report_audit_t audit;
+  turbo_agent_runtime_t *audit_runtime;
+  char *directory;
 };
 
+static int report_audit_put(void *u, const char *c, const char *id, const char *text) {
+  report_audit_t *a = u; ++a->puts; return a->base.put(a->base.user_data, c, id, text);
+}
+static int report_audit_get(void *u, const char *c, const char *id, char **text) {
+  report_audit_t *a = u; ++a->gets; return a->base.get(a->base.user_data, c, id, text);
+}
+static int report_audit_list(void *u, const char *c, const char *k, const char *v, char **text) {
+  report_audit_t *a = u; ++a->lists; return a->base.list(a->base.user_data, c, k, v, text);
+}
+static int report_audit_create(void *u, const char *c, const char *id, const char *text) {
+  report_audit_t *a = u; int rc; ++a->creates;
+  if (a->delay_id && !strcmp(id, a->delay_id)) cmeta_sleep_ms(a->delay_ms);
+  int selected = a->fault_id && !strcmp(id, a->fault_id);
+  if (selected && !a->lost_ack) return SALTS_ENOSPC;
+  rc = a->base.create_if_absent(a->base.user_data, c, id, text);
+  return !rc && selected && a->lost_ack ? SALTS_EIO : rc;
+}
+static void report_audit_free(void *u) {
+  report_audit_t *a = u; a->base.user_data_free(a->base.user_data);
+}
+static void report_enable_audit(report_fixture_t *f, int atomic) {
+  turbo_agent_runtime_store_t store = {report_audit_put, report_audit_get, report_audit_list,
+      &f->audit, report_audit_free, atomic ? report_audit_create : NULL};
+  f->audit.base = turbo_agent_runtime_store_memory_create();
+  f->audit_runtime = turbo_agent_runtime_create(&store); check_not_null(f->audit_runtime);
+  f->config.audit_runtime = f->audit_runtime; f->config.audit_id = "sample";
+}
+static turbo_agent_runtime_t *report_sqlite(const char *directory, const char *name, int create) {
+  turbo_agent_runtime_store_t store = {0}; turbo_runtime_sqlite_config_t config;
+  tstr path = tstr_format("{}/{}", directory, name); check_not_null(path);
+  turbo_runtime_sqlite_config_init(&config); config.path = path; config.create_if_missing = create;
+  check_equal(turbo_runtime_store_sqlite_open(&config, &store), SALTS_OK); tstr_free(path);
+  turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store); check_not_null(runtime); return runtime;
+}
 static char *report_copy(const char *text) {
   char *copy = malloc(strlen(text) + 1);
   if (copy) memcpy(copy, text, strlen(text) + 1);
@@ -287,6 +333,180 @@ spec("one Host goal composed from different model workers") {
     if (f.context_session) turbo_agent_session_destroy(f.context_session);
     else turbo_agent_memory_store_destroy(&f.source_store);
     turbo_agent_knowledge_store_close(f.knowledge);
+    turbo_agent_runtime_destroy(f.audit_runtime);
+    if (f.directory) tt_remove_tree(f.directory);
+    free(f.directory);
+  }
+
+  it("records the complete successful Host handoff chain without duplicating report payloads") {
+    report_enable_audit(&f, 1);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    check_not_null(delivery); check_equal(phase, "delivery"); check_equal(f.audit.creates, 11);
+    check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
+    json_value_t *manifest = NULL, *cohort = NULL, *pending = NULL, *review = NULL, *final = NULL, *ready = NULL;
+    check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_MANIFESTS, "sample", &manifest), SALTS_OK);
+    check_equal(json_get_string(manifest, "semantics"), "pre_report_dispatch_manifest");
+    check_equal(json_get_string(json_object_get(manifest, "phase_ids"), "fan-in"), "sample-fan-in");
+    check_equal(turbo_agent_router_load_group_observation(f.audit_runtime, "sample-fan-in", &cohort), SALTS_OK);
+    check_equal(json_get_string(cohort, "group_id"), "sample-analysis");
+    for (unsigned i = 0; i < 2; ++i) {
+      check_equal(json_get_string(json_array_get(json_object_get(cohort, "members"), i), "thread_id"),
+          i ? "sample-worker-b" : "sample-worker-a");
+    }
+    check_equal(turbo_agent_router_load_observation(f.audit_runtime, "sample-pending", &pending), SALTS_OK);
+    check_true(json_get_bool(pending, "approval_pending", 0));
+    check_equal(turbo_agent_router_load_review_intent(f.audit_runtime, "sample-review", &review), SALTS_OK);
+    check_equal(json_get_string(review, "source_checkpoint_id"), json_get_string(pending, "runtime_checkpoint_id"));
+    check_equal(turbo_agent_router_load_observation(f.audit_runtime, "sample-execute-final", &final), SALTS_OK);
+    check_equal(json_get_string(review, "execution_id"), json_get_string(final, "execution_id"));
+    check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_READY, "sample-ready", &ready), SALTS_OK);
+    check_equal(json_get_string(ready, "execution_id"), json_get_string(final, "execution_id"));
+    check_equal(json_get_string(ready, "runtime_run_id"), json_get_string(final, "runtime_run_id"));
+    check_equal(json_get_string(ready, "semantics"), "pre_report_delivery_observation");
+    check_null(json_object_get(ready, "markdown")); check_null(json_object_get(manifest, "host_goal"));
+    check_equal(atomic_load(&f.tool_calls), 1);
+    json_free(manifest); json_free(cohort); json_free(pending); json_free(review); json_free(final); json_free(ready);
+    json_free(delivery); delivery = NULL;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EALREADY);
+    check_equal(phase, "manifest"); check_null(delivery); check_equal(atomic_load(&f.tool_calls), 1);
+    for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), i == 3 ? 2 : 1);
+  }
+
+  for (int fault = 0; fault < 11; ++fault) {
+    for (int lost_ack = 0; lost_ack < 2; ++lost_ack) {
+      it("withholds subsequent Host work and delivery on audit failure, phase=%d lost_ack=%d", fault, lost_ack) {
+        static const char *ids[] = {"sample", "sample-worker-a", "sample-worker-b", "sample-fan-in",
+            "sample-aggregate", "sample-aggregate-final", "sample-execute", "sample-pending",
+            "sample-review", "sample-execute-final", "sample-ready"};
+        static const char *collections[] = {SINGLE_AGENT_REPORT_MANIFESTS,
+            TURBO_AGENT_ROUTER_ADMISSION_COLLECTION, TURBO_AGENT_ROUTER_ADMISSION_COLLECTION,
+            TURBO_AGENT_ROUTER_GROUP_OBSERVATION_COLLECTION, TURBO_AGENT_ROUTER_ADMISSION_COLLECTION,
+            TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION, TURBO_AGENT_ROUTER_ADMISSION_COLLECTION,
+            TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION, TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION,
+            TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION, SINGLE_AGENT_REPORT_READY};
+        report_enable_audit(&f, 1); f.audit.fault_id = ids[fault]; f.audit.lost_ack = lost_ack;
+        check_equal(single_agent_report_run(&f.config, &delivery, &phase), lost_ack ? SALTS_EIO : SALTS_ENOSPC);
+        check_null(delivery); check_equal(f.audit.creates, fault + 1);
+        check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
+        if (fault <= 1) for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
+        if (fault <= 2) check_equal(atomic_load(&f.models[1].calls), 0);
+        if (fault <= 4) check_equal(atomic_load(&f.models[2].calls), 0);
+        if (fault <= 6) check_equal(atomic_load(&f.models[3].calls), 0);
+        if (fault == 7 || fault == 8) check_equal(atomic_load(&f.models[3].calls), 1);
+        if (fault >= 9) check_equal(atomic_load(&f.models[3].calls), 2);
+        check_equal(f.reviews, fault >= 8 ? 1 : 0); check_equal(atomic_load(&f.tool_calls), fault >= 9 ? 1 : 0);
+        json_value_t *record = NULL;
+        check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, collections[fault], ids[fault], &record),
+            lost_ack ? SALTS_OK : SALTS_ENOENT); json_free(record);
+        /* Explicitly calling the Host again must not turn a surviving manifest
+         * into automatic recovery, acknowledgement or effect retry. */
+        if (fault || lost_ack) {
+          f.audit.fault_id = NULL;
+          check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EALREADY);
+          check_null(delivery); check_equal(phase, "manifest");
+          check_equal(atomic_load(&f.tool_calls), fault >= 9 ? 1 : 0);
+        }
+      }
+    }
+  }
+
+  for (int late = 0; late < 3; ++late) {
+    it("includes synchronous persistence in the original Host deadline, gate=%d", late) {
+      static const char *ids[] = {"sample", "sample-pending", "sample-ready"};
+      report_enable_audit(&f, 1); f.config.timeout_ms = 500;
+      f.audit.delay_id = ids[late]; f.audit.delay_ms = 600;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ETIMEDOUT);
+      check_null(delivery); check_equal(f.reviews, late == 2 ? 1 : 0);
+      check_equal(atomic_load(&f.tool_calls), late == 2 ? 1 : 0);
+      if (!late) for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
+      if (late == 1) check_equal(atomic_load(&f.models[3].calls), 1);
+      if (late == 2) {
+        json_value_t *ready = NULL;
+        check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_READY, "sample-ready", &ready), SALTS_OK);
+        json_free(ready);
+      }
+    }
+  }
+
+  for (int invalid = 0; invalid < 5; ++invalid) {
+    it("rejects unpaired or invalid audit namespaces before persistence or work, case=%d", invalid) {
+      report_enable_audit(&f, 1);
+      if (invalid == 0) f.config.audit_runtime = NULL;
+      if (invalid == 1) f.config.audit_id = NULL;
+      if (invalid == 2) f.config.audit_id = "";
+      if (invalid == 3) f.config.audit_id = "../bad";
+      if (invalid == 4) f.config.audit_id = "abcdefghijklmnopqrstuvwxyz1234567";
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EINVAL);
+      check_null(delivery); check_equal(f.audit.creates, 0);
+      for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
+    }
+  }
+
+  it("requires atomic namespace reservation without substituting ordinary storage operations") {
+    report_enable_audit(&f, 0);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOTSUP);
+    check_null(delivery); check_equal(f.audit.creates, 0);
+    check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
+    for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
+  }
+
+  for (int approved = 0; approved < 2; ++approved) {
+    it("keeps approval an explicit current Host decision under persisted metadata, approved=%d", approved) {
+      report_enable_audit(&f, 1); f.approval = approved;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), approved ? SALTS_OK : SALTS_ECANCELED);
+      check_equal(f.reviews, 1); check_equal(atomic_load(&f.tool_calls), approved);
+      json_value_t *review = NULL, *terminal = NULL;
+      check_equal(turbo_agent_router_load_review_intent(f.audit_runtime, "sample-review", &review), SALTS_OK);
+      check_equal(json_get_string(review, "decision"), approved ? "approve" : "reject");
+      check_equal(turbo_agent_router_load_observation(f.audit_runtime, "sample-execute-final", &terminal), SALTS_OK);
+      check_equal(json_get_string(terminal, "runtime_status"), approved ? "completed" : "interrupted");
+      check_false(json_get_bool(terminal, "approval_pending", 1)); json_free(review); json_free(terminal);
+    }
+  }
+
+  it("reopens the Host trace and exact canonical Runtime records after all application owners are destroyed") {
+    static const char *names[] = {"draft.db", "review.db", "synthesis.db", "delivery.db"};
+    f.directory = tt_make_temp_dir("report-audit"); check_not_null(f.directory);
+    check_equal(turbo_agent_router_destroy(f.router), SALTS_OK); f.router = NULL;
+    check_equal(turbo_agent_router_destroy(f.tool_router), SALTS_OK); f.tool_router = NULL;
+    for (unsigned i = 0; i < 4; ++i) {
+      turbo_agent_runtime_destroy(f.runtimes[i]); f.runtimes[i] = report_sqlite(f.directory, names[i], 1);
+      f.endpoints[i].runtime = f.runtimes[i];
+    }
+    f.audit_runtime = report_sqlite(f.directory, "host.db", 1);
+    f.config.audit_runtime = f.audit_runtime; f.config.audit_id = "durable";
+    turbo_agent_router_config_t c; turbo_agent_router_config_init(&c);
+    c.authority_agent = f.agents[4]; c.endpoints = f.endpoints; c.endpoint_count = 3;
+    check_equal(turbo_agent_router_create(&c, &f.router), SALTS_OK);
+    c.endpoints = &f.endpoints[3]; c.endpoint_count = 1;
+    check_equal(turbo_agent_router_create(&c, &f.tool_router), SALTS_OK);
+    f.config.router = f.router; f.config.tool_router = f.tool_router;
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    check_equal(turbo_agent_router_destroy(f.router), SALTS_OK); f.router = NULL;
+    check_equal(turbo_agent_router_destroy(f.tool_router), SALTS_OK); f.tool_router = NULL;
+    cmeta_threadpool_destroy(f.pool); f.pool = NULL;
+    for (unsigned i = 0; i < 5; ++i) { turbo_agent_destroy(f.agents[i]); f.agents[i] = NULL; }
+    turbo_tool_registry_destroy(f.tools); f.tools = NULL;
+    for (unsigned i = 0; i < 4; ++i) { turbo_agent_runtime_destroy(f.runtimes[i]); f.runtimes[i] = NULL; }
+    turbo_agent_runtime_destroy(f.audit_runtime);
+    f.audit_runtime = report_sqlite(f.directory, "host.db", 0);
+    json_value_t *cohort = NULL, *terminal = NULL, *ready = NULL;
+    check_equal(turbo_agent_router_load_group_observation(f.audit_runtime, "durable-fan-in", &cohort), SALTS_OK);
+    for (unsigned i = 0; i < 2; ++i) {
+      f.runtimes[i] = report_sqlite(f.directory, names[i], 0);
+      json_value_t *run = NULL;
+      const json_value_t *member = json_array_get(json_object_get(cohort, "members"), i);
+      check_equal(turbo_agent_runtime_get_run(f.runtimes[i], json_get_string(member, "runtime_run_id"), &run), SALTS_OK);
+      check_equal(json_get_string(run, "thread_id"), i ? "durable-worker-b" : "durable-worker-a"); json_free(run);
+    }
+    f.runtimes[3] = report_sqlite(f.directory, names[3], 0);
+    check_equal(turbo_agent_router_load_observation(f.audit_runtime, "durable-execute-final", &terminal), SALTS_OK);
+    check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_READY, "durable-ready", &ready), SALTS_OK);
+    check_equal(json_get_string(ready, "runtime_run_id"), json_get_string(terminal, "runtime_run_id"));
+    json_value_t *run = NULL;
+    check_equal(turbo_agent_runtime_get_run(f.runtimes[3], json_get_string(terminal, "runtime_run_id"), &run), SALTS_OK);
+    check_equal(json_get_string(run, "thread_id"), "durable-execute"); json_free(run);
+    json_free(cohort); json_free(terminal); json_free(ready);
   }
 
   it("hands off one goal and canonical evidence, approves exactly one Host call, and delivers the tool artifact") {

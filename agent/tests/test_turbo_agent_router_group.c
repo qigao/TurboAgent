@@ -107,6 +107,48 @@ static void group_submit_pair(turbo_agent_router_t *router, cmeta_threadpool_t *
   }
 }
 
+typedef struct group_audit_s {
+  turbo_agent_runtime_store_t base;
+  int creates, gets, puts, lists, write_error, lost_ack, read_error, empty_at_create;
+  json_value_t **input;
+  turbo_agent_router_group_result_t *results;
+  size_t *count;
+} group_audit_t;
+static int group_audit_put(void *user, const char *collection, const char *id, const char *text) {
+  group_audit_t *a = user; ++a->puts; return a->base.put(a->base.user_data, collection, id, text);
+}
+static int group_audit_get(void *user, const char *collection, const char *id, char **text) {
+  group_audit_t *a = user; ++a->gets; *text = NULL;
+  return a->read_error ? a->read_error : a->base.get(a->base.user_data, collection, id, text);
+}
+static int group_audit_list(void *user, const char *collection, const char *key, const char *value, char **text) {
+  group_audit_t *a = user; ++a->lists; return a->base.list(a->base.user_data, collection, key, value, text);
+}
+static int group_audit_create(void *user, const char *collection, const char *id, const char *text) {
+  group_audit_t *a = user; int rc; ++a->creates;
+  a->empty_at_create = a->input && !*a->input && a->count && !*a->count &&
+      a->results && !a->results[0].summary && !a->results[0].state &&
+      !a->results[1].summary && !a->results[1].state;
+  if (a->write_error) return a->write_error;
+  rc = a->base.create_if_absent(a->base.user_data, collection, id, text);
+  return !rc && a->lost_ack ? SALTS_EIO : rc;
+}
+static void group_audit_free(void *user) {
+  group_audit_t *a = user; a->base.user_data_free(a->base.user_data);
+}
+static turbo_agent_runtime_t *group_audit_runtime(group_audit_t *a, int atomic) {
+  turbo_agent_runtime_store_t store = {group_audit_put, group_audit_get, group_audit_list,
+      a, group_audit_free, atomic ? group_audit_create : NULL};
+  a->base = turbo_agent_runtime_store_memory_create();
+  turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store); check_not_null(runtime); return runtime;
+}
+static int group_observed_handoff(turbo_agent_router_group_t *group, turbo_agent_runtime_t *host,
+    const char *id, int collect, turbo_agent_router_group_result_t *results,
+    size_t *count, json_value_t **input) {
+  return collect ? turbo_agent_router_group_take_results_with_observation(group, host, id, results, 3, count)
+      : turbo_agent_router_group_build_input_with_observation(group, "Synthesize", host, id, input);
+}
+
 spec("bounded Router worker group supervision and aggregation") {
   static group_transport_t f[4];
   static turbo_agent_t *agents[4];
@@ -124,6 +166,8 @@ spec("bounded Router worker group supervision and aggregation") {
   static turbo_tool_registry_t *tools;
   static json_value_t *input, *aggregate_input, *summary, *state, *view;
   static size_t count;
+  static group_audit_t audit;
+  static turbo_agent_runtime_t *audit_runtime;
 
   before_each() {
     cmeta_threadpool_config_t pool_config = {.num_threads = 2, .queue_capacity = 2};
@@ -170,6 +214,8 @@ spec("bounded Router worker group supervision and aggregation") {
     pool = cmeta_threadpool_create_with_config(&pool_config); check_not_null(pool);
     input = turbo_agent_session_create_input_state_json_value("Analyze the Host-reviewed subtask"); check_not_null(input);
     group = NULL; aggregate_input = summary = state = view = NULL; count = 0;
+    memset(&audit, 0, sizeof(audit)); audit_runtime = group_audit_runtime(&audit, 1);
+    audit.input = &aggregate_input; audit.results = results; audit.count = &count;
   }
   after_each() {
     for (int i = 0; i < 4; ++i) atomic_store_explicit(&f[i].open, 1, memory_order_release);
@@ -192,6 +238,243 @@ spec("bounded Router worker group supervision and aggregation") {
     for (int i = 0; i < 4; ++i) turbo_agent_destroy(agents[i]);
     turbo_tool_registry_destroy(tools);
     json_free(input); json_free(aggregate_input); json_free(summary); json_free(state); json_free(view);
+    turbo_agent_runtime_destroy(audit_runtime);
+  }
+
+  it("atomically observes a cohort before input publication and again before canonical collection") {
+    group_submit_pair(router, pool, &request, input, tasks);
+    check_equal(turbo_agent_router_group_adopt("observed", tasks, 2, &group), SALTS_OK);
+    check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_group_build_input_with_observation(group, "Synthesize", audit_runtime, "fan-in", &aggregate_input), SALTS_OK);
+    check_true(audit.empty_at_create); check_equal(audit.creates, 1);
+    check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+    check_equal(turbo_agent_router_load_group_observation(audit_runtime, "fan-in", &view), SALTS_OK);
+    check_equal(json_get_string(view, "handoff_kind"), "aggregation_input");
+    check_false(json_get_bool(view, "input_built", 1));
+    const json_value_t *members = json_object_get(view, "members");
+    check_equal(json_array_size(members), 2u);
+    for (size_t i = 0; i < 2; ++i) {
+      check_equal(json_get_string(json_array_get(members, i), "task_id"), turbo_agent_router_group_task_id(group, i));
+      check_equal(json_get_string(json_array_get(members, i), "observation_id"), "fan-in");
+    }
+    json_value_t *again = (json_value_t *)1;
+    check_equal(turbo_agent_router_group_build_input_with_observation(group, "Again", audit_runtime, "unused", &again), SALTS_EALREADY);
+    check_null(again); check_equal(audit.creates, 1);
+    json_free(aggregate_input); aggregate_input = NULL;
+    check_equal(turbo_agent_router_group_take_results_with_observation(group, audit_runtime, "collection", results, 3, &count), SALTS_OK);
+    check_equal(count, 2u); check_true(audit.empty_at_create); check_equal(audit.creates, 2);
+    json_value_t *collected = NULL;
+    check_equal(turbo_agent_router_load_group_observation(audit_runtime, "collection", &collected), SALTS_OK);
+    check_true(json_get_bool(collected, "input_built", 0));
+    for (size_t i = 0; i < 2; ++i) {
+      const json_value_t *member = json_array_get(json_object_get(collected, "members"), i);
+      check_equal(json_get_string(member, "runtime_run_id"), json_get_string(results[i].summary, "run_id"));
+      check_equal(json_get_string(member, "thread_id"), i ? "worker-b" : "worker-a");
+    }
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "collection", &again), SALTS_ENOENT);
+    turbo_agent_router_group_result_t empty[3] = {0};
+    check_equal(turbo_agent_router_group_take_results_with_observation(group, audit_runtime, "new-id", empty, 3, &count), SALTS_EALREADY);
+    check_equal(count, 0u); check_equal(audit.creates, 2); json_free(collected);
+  }
+
+  for (int collect = 0; collect < 2; ++collect) {
+    for (int error = 0; error < 4; ++error) {
+      it("preserves every member on group observation error, collect=%d error=%d", collect, error) {
+        if (error == 3) {
+          turbo_agent_runtime_destroy(audit_runtime); audit_runtime = group_audit_runtime(&audit, 0);
+        }
+        group_submit_pair(router, pool, &request, input, tasks);
+        check_equal(turbo_agent_router_group_adopt("observed", tasks, 2, &group), SALTS_OK);
+        check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+        audit.write_error = error == 0 ? SALTS_ENOSPC : error == 1 ? SALTS_EIO : 0;
+        audit.lost_ack = error == 2;
+        check_equal(group_observed_handoff(group, audit_runtime, "uncertain", collect, results, &count, &aggregate_input),
+            error == 0 ? SALTS_ENOSPC : error == 3 ? SALTS_ENOTSUP : SALTS_EIO);
+        check_equal(count, 0u); check_null(aggregate_input);
+        check_null(results[0].summary); check_null(results[1].state);
+        check_equal(audit.creates, error == 3 ? 0 : 1);
+        check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+        check_equal(turbo_agent_router_group_inspect(group, &view), SALTS_OK);
+        check_false(json_get_bool(view, "input_built", 1)); check_false(json_get_bool(view, "results_taken", 1));
+        json_free(view); view = NULL;
+        if (error == 2) {
+          check_equal(turbo_agent_router_load_group_observation(audit_runtime, "uncertain", &view), SALTS_OK);
+          check_equal(json_get_string(view, "group_id"), "observed");
+          check_equal(group_observed_handoff(group, audit_runtime, "uncertain", collect, results, &count, &aggregate_input), SALTS_EALREADY);
+          check_null(aggregate_input); check_equal(count, 0u); audit.lost_ack = 0;
+          check_equal(group_observed_handoff(group, audit_runtime, "fresh", collect, results, &count, &aggregate_input), SALTS_OK);
+          if (!collect) check_equal(turbo_agent_router_group_take_results(group, results, 3, &count), SALTS_OK);
+        } else {
+          check_equal(turbo_agent_router_group_build_input(group, "Explicit ordinary handoff", &aggregate_input), SALTS_OK);
+          check_equal(turbo_agent_router_group_take_results(group, results, 3, &count), SALTS_OK);
+        }
+        check_equal(count, 2u); check_equal(atomic_load(&f[1].calls), 1); check_equal(atomic_load(&f[2].calls), 1);
+      }
+    }
+
+    it("rejects a conflicting id from another group without acknowledging or overwriting it, collect=%d", collect) {
+      group_submit_pair(router, pool, &request, input, tasks);
+      check_equal(turbo_agent_router_group_adopt("original", tasks, 2, &group), SALTS_OK);
+      check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+      check_equal(turbo_agent_router_group_build_input_with_observation(group, "Original", audit_runtime, "collision", &aggregate_input), SALTS_OK);
+      check_equal(turbo_agent_router_load_group_observation(audit_runtime, "collision", &view), SALTS_OK);
+      check_equal(turbo_agent_router_group_release(group), SALTS_OK); group = NULL;
+      json_free(aggregate_input); aggregate_input = NULL;
+      group_submit_pair(router, pool, &request, input, tasks);
+      check_equal(turbo_agent_router_group_adopt("replacement", tasks, 2, &group), SALTS_OK);
+      check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+      check_equal(group_observed_handoff(group, audit_runtime, "collision", collect, results, &count, &aggregate_input), SALTS_EALREADY);
+      check_equal(count, 0u); check_null(aggregate_input);
+      json_value_t *again = NULL;
+      check_equal(turbo_agent_router_load_group_observation(audit_runtime, "collision", &again), SALTS_OK);
+      check_equal(json_get_string(again, "group_id"), "original");
+      check_equal(json_get_string(json_array_get(json_object_get(again, "members"), 0), "task_id"),
+          json_get_string(json_array_get(json_object_get(view, "members"), 0), "task_id"));
+      check_equal(turbo_agent_router_group_take_results(group, results, 3, &count), SALTS_OK); json_free(again);
+    }
+
+    it("requires the actual terminal barrier before group observation, collect=%d", collect) {
+      atomic_store(&f[1].open, 0); atomic_store(&f[2].open, 0);
+      group_submit_pair(router, pool, &request, input, tasks); group_entered(&f[1]); group_entered(&f[2]);
+      check_equal(turbo_agent_router_group_adopt("running", tasks, 2, &group), SALTS_OK);
+      check_equal(group_observed_handoff(group, audit_runtime, "early", collect, results, &count, &aggregate_input), SALTS_EBUSY);
+      check_equal(audit.creates, 0); check_null(aggregate_input); check_equal(count, 0u);
+    }
+
+    for (int owner = 0; owner < 3; ++owner) {
+      it("does not record or hand off after quiescent authority replacement, collect=%d owner=%d", collect, owner) {
+        group_submit_pair(router, pool, &request, input, tasks);
+        check_equal(turbo_agent_router_group_adopt("stale", tasks, 2, &group), SALTS_OK);
+        check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+        check_equal(turbo_agent_set_tool_policy(agents[owner], &grant), SALTS_OK);
+        check_equal(group_observed_handoff(group, audit_runtime, "stale", collect, results, &count, &aggregate_input), SALTS_EPERM);
+        check_equal(audit.creates, 0); check_null(aggregate_input); check_equal(count, 0u);
+      }
+    }
+
+    it("never clears sticky loss to produce a group observation, collect=%d", collect) {
+      atomic_store(&f[1].open, 0); atomic_store(&f[2].open, 0);
+      group_submit_pair(router, pool, &request, input, tasks); group_entered(&f[1]); group_entered(&f[2]);
+      check_equal(turbo_agent_router_group_adopt("lost", tasks, 2, &group), SALTS_OK);
+      check_equal(turbo_agent_router_group_poll(group, cmeta_monotonic_ms() + 4000), SALTS_ECANCELED);
+      atomic_store(&f[1].open, 1); atomic_store(&f[2].open, 1);
+      check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+      check_equal(group_observed_handoff(group, audit_runtime, "lost", collect, results, &count, &aggregate_input), SALTS_ECANCELED);
+      check_equal(audit.creates, 0); check_null(aggregate_input); check_equal(count, 0u);
+    }
+
+    for (int invalid = 0; invalid < 7; ++invalid) {
+      it("rejects invalid group observation destinations before storage, collect=%d case=%d", collect, invalid) {
+        group_submit_pair(router, pool, &request, input, tasks);
+        check_equal(turbo_agent_router_group_adopt("invalid", tasks, 2, &group), SALTS_OK);
+        check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+        check_equal(group_observed_handoff(invalid == 6 ? NULL : group,
+            invalid == 0 ? NULL : invalid >= 3 && invalid <= 5 ? runtimes[invalid-3] : audit_runtime,
+            invalid == 1 ? "../bad" : invalid == 2 ? NULL : "invalid", collect, results, &count, &aggregate_input), SALTS_EINVAL);
+        check_equal(audit.creates, 0); check_null(aggregate_input); check_equal(count, 0u);
+        check_equal(turbo_agent_router_group_take_results(group, results, 3, &count), SALTS_OK);
+      }
+    }
+  }
+
+  it("does not retain the Host store through an independently owned aggregation input") {
+    group_submit_pair(router, pool, &request, input, tasks);
+    check_equal(turbo_agent_router_group_adopt("borrow", tasks, 2, &group), SALTS_OK);
+    check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_group_build_input_with_observation(group, "Synthesize", audit_runtime, "borrow", &aggregate_input), SALTS_OK);
+    turbo_agent_runtime_destroy(audit_runtime); audit_runtime = NULL;
+    request.role = TURBO_AGENT_ROUTER_PLAN; request.thread_id = "synthesis";
+    check_equal(turbo_agent_router_submit(router, pool, &request, aggregate_input, &tasks[2]), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(tasks[2], 5000), SALTS_OK);
+    check_true(f[3].saw_workers);
+    check_equal(turbo_agent_router_group_take_results(group, results, 3, &count), SALTS_OK);
+    check_equal(count, 2u);
+  }
+
+  it("records failed member diagnostics without falsely building aggregation input") {
+    f[1].fail = 1;
+    group_submit_pair(router, pool, &request, input, tasks);
+    check_equal(turbo_agent_router_group_adopt("failed", tasks, 2, &group), SALTS_OK);
+    check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_group_build_input_with_observation(group, "Synthesize", audit_runtime, "not-built", &aggregate_input), SALTS_EIO);
+    check_equal(audit.creates, 0);
+    check_equal(turbo_agent_router_group_take_results_with_observation(group, audit_runtime, "diagnostics", results, 3, &count), SALTS_OK);
+    check_equal(count, 2u); check_null(results[0].summary); check_not_null(results[0].state);
+    check_equal(turbo_agent_router_load_group_observation(audit_runtime, "diagnostics", &view), SALTS_OK);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "failure_code"), 0), SALTS_EIO);
+    check_true(json_is_null(json_object_get(json_array_get(json_object_get(view, "members"), 0), "runtime_run_id")));
+  }
+
+  for (int corrupt = 0; corrupt < 16; ++corrupt) {
+    it("rejects inconsistent stored group/member metadata without changing canonical results, case=%d", corrupt) {
+      group_submit_pair(router, pool, &request, input, tasks);
+      check_equal(turbo_agent_router_group_adopt("schema", tasks, 2, &group), SALTS_OK);
+      check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+      check_equal(turbo_agent_router_group_build_input_with_observation(group, "Synthesize", audit_runtime, "corrupt", &aggregate_input), SALTS_OK);
+      check_equal(turbo_agent_router_load_group_observation(audit_runtime, "corrupt", &view), SALTS_OK);
+      json_value_t *members = json_object_get(view, "members"), *first = json_array_get(members, 0), *second = json_array_get(members, 1);
+      if (corrupt == 0) check_equal(turbo_runtime_json_object_set_int64(view, "schema_version", 2), 0);
+      if (corrupt == 1) check_equal(turbo_runtime_json_object_set_string(view, "extra", "unrecognized"), 0);
+      if (corrupt == 2) check_equal(turbo_runtime_json_object_set_string(view, "observation_id", "other"), 0);
+      if (corrupt == 3) check_equal(turbo_runtime_json_object_set_string(view, "group_id", "../bad"), 0);
+      if (corrupt == 4) check_equal(turbo_runtime_json_object_set_string(first, "parent_run_id", "other-parent"), 0);
+      if (corrupt == 5) {
+        check_equal(turbo_runtime_json_object_set_string(first, "task_id", json_get_string(second, "task_id")), 0);
+        check_equal(turbo_runtime_json_object_set_string(first, "execution_id", json_get_string(second, "execution_id")), 0);
+      }
+      if (corrupt == 6) check_equal(turbo_runtime_json_object_set_string(first, "endpoint", json_get_string(second, "endpoint")), 0);
+      if (corrupt == 7) check_equal(turbo_runtime_json_object_set_int64(first, "observed_mono_ms",
+          turbo_runtime_json_value_as_int64(json_object_get(view, "observed_mono_ms"), 0) + 1), 0);
+      if (corrupt == 8) check_equal(turbo_runtime_json_object_set_int64(first, "max_model_turns", 2), 0);
+      if (corrupt == 9) check_equal(turbo_runtime_json_object_set(first, "authority_current", json_create_bool(0)), 0);
+      if (corrupt == 10) check_equal(turbo_runtime_json_object_set(first, "unresponsive", json_create_bool(1)), 0);
+      if (corrupt == 11) check_equal(turbo_runtime_json_object_set_string(view, "handoff_kind", "delivered"), 0);
+      if (corrupt == 12) check_equal(turbo_runtime_json_object_set(view, "input_built", json_create_bool(1)), 0);
+      if (corrupt == 13) check_equal(turbo_runtime_json_object_set_int64(view, "failure_code", 1), 0);
+      if (corrupt == 14) {
+        json_value_t *one = json_create_array(); check_not_null(one);
+        check_equal(turbo_runtime_json_array_append(one, json_clone(first)), 0);
+        check_equal(turbo_runtime_json_object_set(view, "members", one), 0);
+      }
+      if (corrupt == 15) {
+        const char text[] = "\"group\\u0000hidden\"";
+        check_equal(turbo_runtime_json_object_set(view, "group_id", json_parse(text, strlen(text))), 0);
+      }
+      check_equal(turbo_agent_runtime_store_put_json(audit_runtime, TURBO_AGENT_ROUTER_GROUP_OBSERVATION_COLLECTION, "corrupt", view), SALTS_OK);
+      json_value_t *bad = (json_value_t *)1;
+      check_equal(turbo_agent_router_load_group_observation(audit_runtime, "corrupt", &bad), SALTS_EPROTO);
+      check_null(bad);
+      check_equal(turbo_agent_router_group_take_results(group, results, 3, &count), SALTS_OK);
+      check_equal(count, 2u); check_equal(turbo_agent_state_last_output_text(results[0].state), "worker-a draft");
+    }
+  }
+
+  it("preserves loader errors and null output without a fallback lookup or scan") {
+    view = (json_value_t *)1;
+    check_equal(turbo_agent_router_load_group_observation(NULL, "id", &view), SALTS_EINVAL); check_null(view);
+    check_equal(turbo_agent_router_load_group_observation(audit_runtime, "../bad", &view), SALTS_EINVAL);
+    check_equal(turbo_agent_router_load_group_observation(audit_runtime, "absent", &view), SALTS_ENOENT);
+    audit.read_error = SALTS_EIO; view = (json_value_t *)1;
+    check_equal(turbo_agent_router_load_group_observation(audit_runtime, "absent", &view), SALTS_EIO);
+    check_null(view); check_equal(audit.gets, 2); check_equal(audit.lists, 0); check_equal(audit.puts, 0);
+    check_equal(turbo_agent_router_load_group_observation(audit_runtime, "id", NULL), SALTS_EINVAL);
+  }
+
+  it("rejects invalid output capacity and input bounds before writing any cohort observation") {
+    group_submit_pair(router, pool, &request, input, tasks);
+    check_equal(turbo_agent_router_group_adopt("bounds", tasks, 2, &group), SALTS_OK);
+    check_equal(turbo_agent_router_group_wait(group, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_group_take_results_with_observation(group, audit_runtime, "small", results, 1, &count), SALTS_EINVAL);
+    check_equal(turbo_agent_router_group_take_results_with_observation(group, audit_runtime, "null", NULL, 3, &count), SALTS_EINVAL);
+    check_equal(turbo_agent_router_group_take_results_with_observation(group, audit_runtime, "count", results, 3, NULL), SALTS_EINVAL);
+    check_equal(turbo_agent_router_group_build_input_with_observation(group, "Host", audit_runtime, "out", NULL), SALTS_EINVAL);
+    check_equal(turbo_agent_router_group_build_input_with_observation(group, NULL, audit_runtime, "host", &aggregate_input), SALTS_EINVAL);
+    tstr text = tstr_new_len(NULL, TURBO_AGENT_ROUTER_GROUP_MAX_TEXT_BYTES + 1); check_not_null(text);
+    memset(text, 'h', TURBO_AGENT_ROUTER_GROUP_MAX_TEXT_BYTES + 1);
+    check_equal(turbo_agent_router_group_build_input_with_observation(group, text, audit_runtime, "large", &aggregate_input), SALTS_ENOBUFS);
+    check_equal(audit.creates, 0); check_equal(count, 0u); check_null(aggregate_input);
+    check_equal(turbo_agent_router_group_build_input_with_observation(group, "Bounded Host", audit_runtime, "valid", &aggregate_input), SALTS_OK);
+    tstr_free(text);
   }
 
   it("runs two real model workers concurrently, crosses the barrier and explicitly aggregates their canonical evidence") {
@@ -471,7 +754,8 @@ spec("bounded Router worker group supervision and aggregation") {
     tstr_free(text);
   }
 
-  it("bounds the serialized aggregation projection across sixteen individually valid worker outputs") {
+  for (int observed = 0; observed < 2; ++observed) {
+  it("bounds sixteen-worker aggregation and observed collection, observed=%d", observed) {
     static const char *ids[] = {"large-0", "large-1", "large-2", "large-3", "large-4", "large-5",
         "large-6", "large-7", "large-8", "large-9", "large-10", "large-11", "large-12", "large-13", "large-14", "large-15"};
     group_transport_t transport[16];
@@ -513,7 +797,21 @@ spec("bounded Router worker group supervision and aggregation") {
     check_equal(turbo_agent_router_group_wait(large_group, 10000), SALTS_OK);
     check_equal(turbo_agent_router_group_build_input(large_group, "Synthesize", &aggregate_input), SALTS_ENOBUFS);
     check_null(aggregate_input);
-    check_equal(turbo_agent_router_group_take_results(large_group, pairs, 16, &count), SALTS_OK);
+    if (observed) {
+      check_equal(turbo_agent_router_group_take_results_with_observation(large_group, audit_runtime, "wide", pairs, 16, &count), SALTS_OK);
+      check_equal(turbo_agent_router_load_group_observation(audit_runtime, "wide", &view), SALTS_OK);
+      check_equal(json_array_size(json_object_get(view, "members")), 16u);
+      char escaped[1025]; memset(escaped, 1, 1024); escaped[1024] = '\0';
+      for (size_t i = 0; i < 16; ++i) {
+        json_value_t *member = json_array_get(json_object_get(view, "members"), i);
+        check_equal(turbo_runtime_json_object_set_string(member, "model", escaped), 0);
+        check_equal(turbo_runtime_json_object_set_string(member, "provider", escaped), 0);
+      }
+      check_equal(turbo_agent_runtime_store_put_json(audit_runtime, TURBO_AGENT_ROUTER_GROUP_OBSERVATION_COLLECTION, "wide", view), SALTS_OK);
+      json_value_t *oversized = (json_value_t *)1;
+      check_equal(turbo_agent_router_load_group_observation(audit_runtime, "wide", &oversized), SALTS_ENOBUFS);
+      check_null(oversized);
+    } else check_equal(turbo_agent_router_group_take_results(large_group, pairs, 16, &count), SALTS_OK);
     check_equal(count, 16u);
     check_equal(turbo_agent_router_group_release(large_group), SALTS_OK);
     check_equal(turbo_agent_router_destroy(large_router), SALTS_OK);
@@ -524,6 +822,7 @@ spec("bounded Router worker group supervision and aggregation") {
       json_free(pairs[i].summary); json_free(pairs[i].state);
       turbo_agent_runtime_destroy(stores[i]); turbo_agent_destroy(children[i]);
     }
+  }
   }
 
   it("leaves an accepted task owned by the Host when a later bounded queue admission is rejected") {

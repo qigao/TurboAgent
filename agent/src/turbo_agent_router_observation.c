@@ -141,16 +141,21 @@ static int observation_size(const json_value_t *record) {
   return rc;
 }
 
-int turbo_agent_router_task_record_observation(const turbo_agent_router_task_t *task,
-    turbo_agent_runtime_t *host_runtime, const char *id) {
+int turbo_agent_router_observation_validate_internal(const json_value_t *record, const char *id) {
+  int rc = observation_validate(record, id);
+  return rc ? rc : observation_size(record);
+}
+
+int turbo_agent_router_task_observation_internal(const turbo_agent_router_task_t *task,
+    const char *id, json_value_t **out_record) {
   turbo_agent_execution_status_t status;
   const json_value_t *summary = NULL, *state = NULL;
   json_value_t *record;
   char timestamp[32];
   int rc, operation = 0, terminal;
-  if (!task || !host_runtime || !turbo_agent_router_id_valid_internal(id)) return SALTS_EINVAL;
-  for (size_t i = 0; i < task->router->count; ++i)
-    if (host_runtime == task->router->endpoints[i].config.runtime) return SALTS_EINVAL;
+  if (!out_record) return SALTS_EINVAL;
+  *out_record = NULL;
+  if (!task || !turbo_agent_router_id_valid_internal(id)) return SALTS_EINVAL;
   rc = turbo_agent_execution_get_status(task->execution, &status);
   if (rc) return rc;
   terminal = status >= TURBO_AGENT_EXECUTION_COMPLETED;
@@ -209,11 +214,23 @@ int turbo_agent_router_task_record_observation(const turbo_agent_router_task_t *
       turbo_runtime_json_object_set_int64(record, "estimated_cost_micros", (int64_t)task->estimated_micros) ||
       turbo_runtime_json_object_set_int64(record, "budget_micros", (int64_t)task->budget_micros) ||
       observation_set(record, "actual_cost_micros", json_create_null())) goto done;
-  rc = observation_validate(record, id);
-  if (!rc) rc = observation_size(record);
+  rc = turbo_agent_router_observation_validate_internal(record, id);
+  if (!rc) { *out_record = record; record = NULL; }
+done:
+  json_free(record);
+  return rc;
+}
+
+int turbo_agent_router_task_record_observation(const turbo_agent_router_task_t *task,
+    turbo_agent_runtime_t *host_runtime, const char *id) {
+  json_value_t *record = NULL;
+  int rc;
+  if (!task || !host_runtime || !turbo_agent_router_id_valid_internal(id)) return SALTS_EINVAL;
+  for (size_t i = 0; i < task->router->count; ++i)
+    if (host_runtime == task->router->endpoints[i].config.runtime) return SALTS_EINVAL;
+  rc = turbo_agent_router_task_observation_internal(task, id, &record);
   if (!rc) rc = turbo_agent_runtime_store_create_json_if_absent(host_runtime,
       TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION, id, record);
-done:
   json_free(record);
   return rc;
 }
@@ -227,8 +244,7 @@ int turbo_agent_router_load_observation(turbo_agent_runtime_t *host_runtime,
   if (!host_runtime || !turbo_agent_router_id_valid_internal(id)) return SALTS_EINVAL;
   rc = turbo_agent_runtime_store_get_json_status(host_runtime,
       TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION, id, &record);
-  if (!rc) rc = observation_validate(record, id);
-  if (!rc) rc = observation_size(record);
+  if (!rc) rc = turbo_agent_router_observation_validate_internal(record, id);
   if (!rc) { *out_record = record; record = NULL; }
   json_free(record);
   return rc;

@@ -7,14 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct turbo_agent_router_group_s {
-  tstr id;
-  size_t count;
-  uint64_t observed_ms;
-  int failure_code, input_built, results_taken;
-  turbo_agent_router_task_t *tasks[TURBO_AGENT_ROUTER_MAX_ENDPOINTS];
-};
-
 static int group_terminal(const turbo_agent_router_group_t *group) {
   size_t i;
   for (i = 0; i < group->count; ++i)
@@ -204,10 +196,10 @@ static int group_delivery_preflight(turbo_agent_router_group_t *group) {
   return SALTS_OK;
 }
 
-int turbo_agent_router_group_build_input(turbo_agent_router_group_t *group,
-    const char *host_task, json_value_t **out_input) {
+static int group_build_input(turbo_agent_router_group_t *group, const char *host_task,
+    turbo_agent_runtime_t *host_runtime, const char *id, json_value_t **out_input) {
   const json_value_t *summary = NULL, *state = NULL, *text_value;
-  json_value_t *bundle = NULL, *members = NULL, *member = NULL;
+  json_value_t *bundle = NULL, *members = NULL, *member = NULL, *candidate = NULL;
   const char *text, *run, *parent;
   char *serialized = NULL;
   size_t i;
@@ -215,6 +207,7 @@ int turbo_agent_router_group_build_input(turbo_agent_router_group_t *group,
   if (!out_input) return SALTS_EINVAL;
   *out_input = NULL;
   if (!group || !host_task || !host_task[0]) return SALTS_EINVAL;
+  if (host_runtime && (rc = turbo_agent_router_group_observation_destination_internal(group, host_runtime, id))) return rc;
   if (group->input_built || group->results_taken) return SALTS_EALREADY;
   rc = group_delivery_preflight(group);
   if (rc) return rc;
@@ -258,17 +251,36 @@ int turbo_agent_router_group_build_input(turbo_agent_router_group_t *group,
   serialized = json_serialize(bundle, NULL);
   if (!serialized) goto done;
   if (strlen(serialized) > TURBO_AGENT_ROUTER_GROUP_MAX_INPUT_BYTES) { rc = SALTS_ENOBUFS; goto done; }
-  *out_input = turbo_agent_session_create_input_state_json_value(serialized);
-  if (!*out_input) goto done;
+  rc = SALTS_ENOMEM;
+  candidate = turbo_agent_session_create_input_state_json_value(serialized);
+  if (!candidate) goto done;
+  if (host_runtime && (rc = turbo_agent_router_group_observation_write_internal(group,
+          host_runtime, id, "aggregation_input"))) goto done;
+  *out_input = candidate; candidate = NULL;
   group->input_built = 1;
   rc = SALTS_OK;
 done:
   json_serialize_free(serialized);
-  json_free(member); json_free(members); json_free(bundle);
+  json_free(member); json_free(members); json_free(bundle); json_free(candidate);
   return rc;
 }
 
-int turbo_agent_router_group_take_results(turbo_agent_router_group_t *group,
+int turbo_agent_router_group_build_input(turbo_agent_router_group_t *group,
+    const char *host_task, json_value_t **out_input) {
+  return group_build_input(group, host_task, NULL, NULL, out_input);
+}
+
+int turbo_agent_router_group_build_input_with_observation(turbo_agent_router_group_t *group,
+    const char *host_task, turbo_agent_runtime_t *host_runtime, const char *id, json_value_t **out_input) {
+  if (!host_runtime || !turbo_agent_router_id_valid_internal(id)) {
+    if (out_input) *out_input = NULL;
+    return SALTS_EINVAL;
+  }
+  return group_build_input(group, host_task, host_runtime, id, out_input);
+}
+
+static int group_take_results(turbo_agent_router_group_t *group,
+    turbo_agent_runtime_t *host_runtime, const char *id,
     turbo_agent_router_group_result_t *results, size_t capacity, size_t *out_count) {
   size_t i;
   int rc;
@@ -276,8 +288,11 @@ int turbo_agent_router_group_take_results(turbo_agent_router_group_t *group,
   *out_count = 0;
   if (!group || !results || capacity < group->count) return SALTS_EINVAL;
   memset(results, 0, sizeof(*results) * group->count);
+  if (host_runtime && (rc = turbo_agent_router_group_observation_destination_internal(group, host_runtime, id))) return rc;
   rc = group_delivery_preflight(group);
   if (rc) return rc;
+  if (host_runtime && (rc = turbo_agent_router_group_observation_write_internal(group,
+          host_runtime, id, "result_collection"))) return rc;
   /* No allocations follow these checks. Exclusive group ownership prevents
    * any other result taker between preflight and the individual moves. */
   for (i = 0; i < group->count; ++i) {
@@ -289,6 +304,21 @@ int turbo_agent_router_group_take_results(turbo_agent_router_group_t *group,
     ++*out_count;
   }
   return SALTS_OK;
+}
+
+int turbo_agent_router_group_take_results(turbo_agent_router_group_t *group,
+    turbo_agent_router_group_result_t *results, size_t capacity, size_t *out_count) {
+  return group_take_results(group, NULL, NULL, results, capacity, out_count);
+}
+
+int turbo_agent_router_group_take_results_with_observation(turbo_agent_router_group_t *group,
+    turbo_agent_runtime_t *host_runtime, const char *id,
+    turbo_agent_router_group_result_t *results, size_t capacity, size_t *out_count) {
+  if (!host_runtime || !turbo_agent_router_id_valid_internal(id)) {
+    if (out_count) *out_count = 0;
+    return SALTS_EINVAL;
+  }
+  return group_take_results(group, host_runtime, id, results, capacity, out_count);
 }
 
 int turbo_agent_router_group_release(turbo_agent_router_group_t *group) {

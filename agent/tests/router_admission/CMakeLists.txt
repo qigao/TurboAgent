@@ -13,6 +13,23 @@ foreach(cut IN ITEMS before_write after_write lost_ack queue_rejected in_model b
     TIMEOUT 60 LABELS "agent;recovery;process;router-admission")
 endforeach()
 
+add_executable(router_group_process_fixture router_group_fixture.c)
+target_link_libraries(router_group_process_fixture PRIVATE TurboAgent::Agent)
+set_target_properties(router_group_process_fixture PROPERTIES
+  C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "Agent/tests")
+foreach(cut IN ITEMS before_write after_write lost_ack after_handoff after_delivery)
+  foreach(kind IN ITEMS input collect)
+    add_test(NAME test_router_group_crash_${cut}_${kind}
+      COMMAND "${CMAKE_COMMAND}"
+        "-DWORKER=$<TARGET_FILE:router_group_process_fixture>"
+        "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/group_cases"
+        "-DCUT=${cut}" "-DKIND=${kind}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_group.cmake")
+    set_tests_properties(test_router_group_crash_${cut}_${kind} PROPERTIES
+      TIMEOUT 90 LABELS "agent;recovery;process;router-group-observation")
+  endforeach()
+endforeach()
+
 add_executable(router_review_process_fixture router_review_fixture.c)
 target_link_libraries(router_review_process_fixture PRIVATE TurboAgent::Agent)
 set_target_properties(router_review_process_fixture PROPERTIES

@@ -21,6 +21,8 @@ extern "C" {
 #define TURBO_AGENT_ROUTER_ADMISSION_MAX_BYTES 16384u
 #define TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION "router_review_intents"
 #define TURBO_AGENT_ROUTER_REVIEW_INTENT_MAX_BYTES 16384u
+#define TURBO_AGENT_ROUTER_GROUP_OBSERVATION_COLLECTION "router_group_observations"
+#define TURBO_AGENT_ROUTER_GROUP_OBSERVATION_MAX_BYTES 131072u
 
 typedef struct turbo_agent_router_s turbo_agent_router_t;
 typedef struct turbo_agent_router_task_s turbo_agent_router_task_t;
@@ -458,6 +460,43 @@ CXX_C_API int turbo_agent_router_group_build_input(turbo_agent_router_group_t *g
  */
 CXX_C_API int turbo_agent_router_group_take_results(turbo_agent_router_group_t *group,
     turbo_agent_router_group_result_t *results, size_t capacity, size_t *out_count);
+/**
+ * Optional observed group handoffs. Apply the ordinary build/collection gates,
+ * then atomically create ONE Host group observation before publishing an input
+ * or moving any member result. host_runtime must be independent of every Router
+ * endpoint Runtime/store and is borrowed only synchronously. Host controls/store
+ * use remain serialized; callbacks must not reenter or mutate policy.
+ *
+ * The immutable 1..64 ASCII id record contains group/parent identity, handoff
+ * kind, origin supervision facts and 2..16 terminal member metadata projections
+ * in adoption order. Nested version-1 task observations use the same id; they
+ * are embedded metadata, not separately persisted router_observations records.
+ * No prompt, answer, tool payload, authority grant or resumable handle is stored.
+ * Each member retains existing 16 KiB/identity/model bounds; group <=128 KiB.
+ *
+ * Atomic failure, lost acknowledgement, unsupported create or existing id
+ * withholds the entire handoff (null input / zero transfers). All canonical
+ * pairs and the successful-input flag remain unconsumed; no fallback/retry or
+ * overwrite occurs. An acknowledged record may survive a later crash before
+ * handoff. EALREADY is a conflict, never acknowledgement. Explicitly load and
+ * compare expected group/member/segment/lineage/kind before choosing a fresh
+ * id or ordinary API. Build and collection require distinct observation ids.
+ *
+ * Records prove neither aggregation/transfer/delivery nor answer quality,
+ * current authority, recovery permission or a complete lifecycle audit. Existing
+ * APIs remain available without recording. Backend errors propagate unchanged;
+ * other errors/ownership follow the corresponding ordinary group operation.
+ */
+CXX_C_API int turbo_agent_router_group_build_input_with_observation(
+    turbo_agent_router_group_t *group, const char *host_task,
+    turbo_agent_runtime_t *host_runtime, const char *id, json_value_t **out_input);
+CXX_C_API int turbo_agent_router_group_take_results_with_observation(
+    turbo_agent_router_group_t *group, turbo_agent_runtime_t *host_runtime, const char *id,
+    turbo_agent_router_group_result_t *results, size_t capacity, size_t *out_count);
+/** Exact-id owned/schema/bounds-validated historical metadata; no Router needed.
+ * Clears out_record on every error. No work, results or authority are restored. */
+CXX_C_API int turbo_agent_router_load_group_observation(turbo_agent_runtime_t *host_runtime,
+    const char *id, json_value_t **out_record);
 /** EBUSY until every member is terminal; never partially releases live work.
  * Releases all adopted tasks and their endpoint reservations. NULL is a no-op. */
 CXX_C_API int turbo_agent_router_group_release(turbo_agent_router_group_t *group);

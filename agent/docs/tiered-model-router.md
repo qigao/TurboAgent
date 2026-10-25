@@ -310,6 +310,13 @@ but blocks a later raw-result collection. Policy replacement remains quiescent,
 including queued work and callbacks; group observation only compares generation
 tokens and never makes ordinary policy fields safe for concurrent mutation.
 
+For optional acknowledgement of one atomic cohort record before input publication
+or the first result move, use the
+[observed group handoffs](router-group-observations.md). The record includes all
+terminal member metadata in adoption order. Persistence failure withholds the whole
+handoff for explicit reconciliation; a surviving record cannot prove publication,
+aggregation or application delivery.
+
 Tool-loop tasks cannot be adopted. Parallel model workers therefore do not introduce
 concurrent Host tool callbacks, approval mutation or workspace writes. Existing tool
 loops keep their exclusive authority lane through task release. Parallel tool

@@ -40,6 +40,22 @@ struct turbo_agent_router_task_s {
   turbo_agent_router_group_t *group;
 };
 
+struct turbo_agent_router_group_s {
+  tstr id;
+  size_t count;
+  uint64_t observed_ms;
+  int failure_code, input_built, results_taken;
+  turbo_agent_router_task_t *tasks[TURBO_AGENT_ROUTER_MAX_ENDPOINTS];
+};
+
+int turbo_agent_router_task_observation_internal(const turbo_agent_router_task_t *task,
+    const char *id, json_value_t **out_record);
+int turbo_agent_router_observation_validate_internal(const json_value_t *record, const char *id);
+int turbo_agent_router_group_observation_destination_internal(const turbo_agent_router_group_t *group,
+    turbo_agent_runtime_t *host_runtime, const char *id);
+int turbo_agent_router_group_observation_write_internal(const turbo_agent_router_group_t *group,
+    turbo_agent_runtime_t *host_runtime, const char *id, const char *kind);
+
 typedef struct router_admission_s {
   const turbo_agent_router_task_t *task;
   turbo_agent_runtime_t *host_runtime;

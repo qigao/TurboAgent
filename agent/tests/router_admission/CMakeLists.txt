@@ -28,11 +28,12 @@ foreach(cut IN ITEMS before_manifest after_manifest after_fan_in after_review be
   add_test(NAME test_report_audit_crash_${cut}
     COMMAND "${CMAKE_COMMAND}"
       "-DWORKER=$<TARGET_FILE:report_audit_process_fixture>"
+      "-DCLI=$<TARGET_FILE:single_agent_report>"
       "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/report_cases"
       "-DCUT=${cut}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/run_report.cmake")
   set_tests_properties(test_report_audit_crash_${cut} PROPERTIES
-    TIMEOUT 120 LABELS "agent;recovery;process;report-audit")
+    TIMEOUT 180 LABELS "agent;recovery;process;report-audit")
 endforeach()
 
 add_executable(router_group_process_fixture router_group_fixture.c)

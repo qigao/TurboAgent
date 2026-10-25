@@ -1,5 +1,5 @@
 #include "tinytest.h"
-#include "../examples/single_agent_report.h"
+#include "../examples/single_agent_report_inspect.h"
 #include "turbo_model_provider.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_runtime_store_sqlite.h"
@@ -15,6 +15,8 @@ typedef struct report_audit_s {
   unsigned delay_ms;
   int creates, gets, puts, lists, lost_ack;
   atomic_int *active;
+  const char *get_fault_id;
+  int get_fault_code, get_fault_hits, anchors_only;
 } report_audit_t;
 typedef struct report_model_s {
   report_fixture_t *fixture;
@@ -41,6 +43,7 @@ struct report_fixture_s {
   atomic_int tool_calls, authority_calls, active;
   int approval, reviews, context_ok, bad_receipt, no_tool, fail_index, proposal_index, revoke, nul_aggregate, late_review;
   report_audit_t audit;
+  report_audit_t endpoint_audits[4];
   turbo_agent_runtime_t *audit_runtime;
   char *directory;
 };
@@ -49,7 +52,10 @@ static int report_audit_put(void *u, const char *c, const char *id, const char *
   report_audit_t *a = u; ++a->puts; return a->base.put(a->base.user_data, c, id, text);
 }
 static int report_audit_get(void *u, const char *c, const char *id, char **text) {
-  report_audit_t *a = u; ++a->gets; return a->base.get(a->base.user_data, c, id, text);
+  report_audit_t *a = u; ++a->gets;
+  if (a->anchors_only && strcmp(c, "runs") && strcmp(c, "checkpoints")) return SALTS_EPERM;
+  if (a->get_fault_id && !strcmp(id, a->get_fault_id)) { ++a->get_fault_hits; return a->get_fault_code; }
+  return a->base.get(a->base.user_data, c, id, text);
 }
 static int report_audit_list(void *u, const char *c, const char *k, const char *v, char **text) {
   report_audit_t *a = u; ++a->lists; return a->base.list(a->base.user_data, c, k, v, text);
@@ -80,6 +86,22 @@ static turbo_agent_runtime_t *report_sqlite(const char *directory, const char *n
   turbo_runtime_sqlite_config_init(&config); config.path = path; config.create_if_missing = create;
   check_equal(turbo_runtime_store_sqlite_open(&config, &store), SALTS_OK); tstr_free(path);
   turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store); check_not_null(runtime); return runtime;
+}
+static int report_inspect_fixture(report_fixture_t *f, const char *parent, json_value_t **out) {
+  single_agent_report_binding_t bindings[4];
+  int creates[4], puts[4], lists[4];
+  for (size_t i = 0; i < 4; ++i)
+    bindings[i] = (single_agent_report_binding_t){f->endpoints[i].id, f->runtimes[i], i == 3};
+  for (size_t i = 0; i < 4; ++i) {
+    report_audit_t *a = &f->endpoint_audits[i]; a->anchors_only = 1;
+    creates[i] = a->creates; puts[i] = a->puts; lists[i] = a->lists;
+  }
+  int rc = single_agent_report_inspect(f->audit_runtime, bindings, 4, f->config.audit_id, parent, out);
+  for (size_t i = 0; i < 4; ++i) {
+    report_audit_t *a = &f->endpoint_audits[i]; a->anchors_only = 0;
+    check_equal(a->creates, creates[i]); check_equal(a->puts, puts[i]); check_equal(a->lists, lists[i]);
+  }
+  return rc;
 }
 
 static json_value_t *report_check_stop(report_fixture_t *f, int code, const char *phase, size_t count) {
@@ -328,7 +350,10 @@ spec("one Host goal composed from different model workers") {
       f.agents[i] = turbo_agent_create(&c); check_not_null(f.agents[i]);
       check_equal(turbo_agent_set_tool_policy(f.agents[i], &policy), SALTS_OK);
       if (i < 4) {
-        turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+        report_audit_t *audit = &f.endpoint_audits[i];
+        audit->base = turbo_agent_runtime_store_memory_create();
+        turbo_agent_runtime_store_t store = {report_audit_put, report_audit_get, report_audit_list,
+            audit, report_audit_free, report_audit_create};
         f.runtimes[i] = turbo_agent_runtime_create(&store); check_not_null(f.runtimes[i]);
         f.endpoints[i].id = names[i]; f.endpoints[i].agent = f.agents[i]; f.endpoints[i].runtime = f.runtimes[i];
         f.endpoints[i].roles = i == 2 ? TURBO_AGENT_ROUTER_PLAN : TURBO_AGENT_ROUTER_EXECUTE;
@@ -384,6 +409,253 @@ spec("one Host goal composed from different model workers") {
     free(f.directory);
   }
 
+  it("inspects an owned successful trace by exact canonical anchors without model or storage mutations") {
+    report_enable_audit(&f, 1);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    json_value_t *view = NULL;
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK);
+    check_equal(json_get_string(view, "semantics"), "historical_report_trace_inspection");
+    check_equal(json_type(json_object_get(view, "delivery_proven")), JSON_BOOL);
+    check_false(json_get_bool(view, "delivery_proven", 1)); check_false(json_get_bool(view, "recovery_authorized", 1));
+    check_not_null(json_object_get(json_object_get(view, "records"), "ready"));
+    check_equal(f.audit.creates, 11); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
+    check_equal(f.audit.gets, 16); check_equal(atomic_load(&f.tool_calls), 1);
+    json_free(view);
+  }
+
+  it("inspects a manifest-only prefix while keeping every missing phase explicitly null") {
+    report_enable_audit(&f, 1); uint64_t now = cmeta_monotonic_ms();
+    check_equal(single_agent_report_begin(&f.config, now, now + 1000), SALTS_OK);
+    json_value_t *view = NULL;
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK);
+    const json_value_t *records = json_object_get(view, "records"); check_equal(json_object_size(records), REPORT_INSPECT_COUNT);
+    for (size_t i = 0; i < json_object_size(records); ++i) check_equal(json_type(json_object_value(records, i)), JSON_NULL);
+    check_equal(f.audit.creates, 1); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
+    for (int i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
+    json_free(view);
+  }
+
+  it("retains original report anchors after a real later model Run advances the same aggregation thread") {
+    report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    json_value_t *original = NULL, *input = turbo_agent_session_create_input_state_json_value("Separate later analysis"), *summary = NULL, *state = NULL;
+    check_not_null(input); check_equal(turbo_agent_router_load_observation(f.audit_runtime, "sample-aggregate-final", &original), SALTS_OK);
+    turbo_agent_router_request_t request = f.config.aggregate;
+    turbo_agent_runtime_parent_link_t parent = {0}; parent.parent_agent_run_id = f.config.parent_run_id;
+    request.role = TURBO_AGENT_ROUTER_PLAN; request.required_capabilities = TURBO_AGENT_ROUTER_TEXT;
+    uint64_t deadline = cmeta_monotonic_ms() + 10000;
+    check_equal(single_agent_report_request(&request, deadline, "sample-aggregate", &parent), SALTS_OK);
+    turbo_agent_router_task_t *task = NULL;
+    check_equal(turbo_agent_router_submit(f.router, f.pool, &request, input, &task), SALTS_OK);
+    check_equal(single_agent_report_wait(task, deadline), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_not_null(json_get_string(summary, "run_id"));
+    check_true(strcmp(json_get_string(summary, "run_id"), json_get_string(original, "runtime_run_id")) != 0);
+    check_equal(turbo_agent_router_task_release(task), SALTS_OK);
+    json_value_t *view = NULL; check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK);
+    check_equal(json_get_string(json_object_get(json_object_get(view, "records"), "aggregate-final"), "runtime_run_id"), json_get_string(original, "runtime_run_id"));
+    check_equal(atomic_load(&f.models[2].calls), 2); check_equal(f.audit.creates, 11); check_equal(f.audit.puts, 0);
+    json_free(view); json_free(original); json_free(input); json_free(summary); json_free(state);
+  }
+
+  for (int missing = 0; missing < 3; ++missing) {
+    it("distinguishes optional absence from broken prerequisite/reference evidence, case=%d", missing) {
+      report_enable_audit(&f, 1); if (missing == 2) f.fail_index = 2;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), missing == 2 ? SALTS_EIO : SALTS_OK);
+      f.audit.get_fault_id = missing == 0 ? "sample-ready" : missing == 1 ? "sample-worker-a" : "sample-stop-aggregate";
+      f.audit.get_fault_code = SALTS_ENOENT;
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), missing ? SALTS_EPROTO : SALTS_OK);
+      if (missing) check_null(view);
+      else { check_equal(json_type(json_object_get(json_object_get(view, "records"), "ready")), JSON_NULL); json_free(view); }
+    }
+  }
+
+  for (int contradictory = 0; contradictory < 3; ++contradictory) {
+    it("rejects schema-valid terminal metadata that contradicts its report handoff phase, case=%d", contradictory) {
+      report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+      const char *id = contradictory ? "sample-execute-final" : "sample-aggregate-final";
+      json_value_t *observation = NULL;
+      check_equal(turbo_agent_router_load_observation(f.audit_runtime, id, &observation), SALTS_OK);
+      check_equal(turbo_runtime_json_object_set_int64(observation, "execution_status", TURBO_AGENT_EXECUTION_FAILED), 0);
+      check_equal(turbo_runtime_json_object_set_int64(observation, "runtime_result_code", SALTS_EIO), 0);
+      check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION, id, observation), SALTS_OK); json_free(observation);
+      if (contradictory == 2) {
+        check_equal(turbo_agent_router_load_review_intent(f.audit_runtime, "sample-review", &observation), SALTS_OK);
+        check_equal(turbo_runtime_json_object_set_string(observation, "decision", "reject"), 0);
+        check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION, "sample-review", observation), SALTS_OK); json_free(observation);
+      }
+      check_equal(turbo_agent_router_load_observation(f.audit_runtime, id, &observation), SALTS_OK); json_free(observation);
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view);
+    }
+  }
+
+  for (int broken = 0; broken < 20; ++broken) {
+    it("withholds the whole inspection on inconsistent Host phase metadata, case=%d", broken) {
+      report_enable_audit(&f, 1);
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+      const char *collection = broken < 4 || broken == 19 ? SINGLE_AGENT_REPORT_MANIFESTS :
+          broken < 10 ? SINGLE_AGENT_REPORT_READY : broken < 12 ? TURBO_AGENT_ROUTER_GROUP_OBSERVATION_COLLECTION :
+          broken == 14 || broken == 15 ? TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION :
+          broken == 18 ? TURBO_AGENT_ROUTER_ADMISSION_COLLECTION : TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION;
+      const char *key = broken < 4 || broken == 19 ? "sample" : broken < 10 ? "sample-ready" : broken < 12 ? "sample-fan-in" :
+          broken == 12 ? "sample-aggregate-final" : broken == 13 ? "sample-pending" : broken < 16 ? "sample-review" : broken < 18 ? "sample-execute-final" : "sample-execute";
+      json_value_t *record = NULL, *target; const char *field, *value = "different-identity";
+      check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, collection, key, &record), SALTS_OK); target = record;
+      switch (broken) {
+        case 0: field = "report_id"; break;
+        case 1: field = "parent_run_id"; break;
+        case 2: field = "schema_version"; break;
+        case 3: target = (json_value_t *)json_object_get(record, "phase_ids"); field = "worker-a"; break;
+        case 4: field = "execution_id"; break;
+        case 5: field = "runtime_run_id"; break;
+        case 6: field = "terminal_observation_id"; break;
+        case 7: field = "semantics"; break;
+        case 8: field = "verification"; break;
+        case 9: field = "markdown"; break;
+        case 10: field = "parent_run_id"; break;
+        case 11: target = (json_value_t *)json_array_get(json_object_get(record, "members"), 0); field = "task_id"; break;
+        case 12: field = "endpoint"; value = "reviewer"; break;
+        case 13: field = "thread_id"; break;
+        case 14: field = "source_checkpoint_id"; break;
+        case 15: field = "endpoint"; value = "writer"; break;
+        case 16: field = "execution_id"; break;
+        case 17: field = "review_resumes"; break;
+        case 18: field = "role"; value = "plan"; break;
+        default: target = (json_value_t *)json_object_get(record, "phase_ids"); field = "pending"; break;
+      }
+      if (broken == 2 || broken == 17) check_equal(turbo_runtime_json_object_set_int64(target, field, broken == 2 ? 2 : 0), 0);
+      else if (broken == 7 || broken == 8 || broken == 19) {
+        const char *raw = broken == 7 ? "\"pre_report_delivery_observation\\u0000hidden\"" :
+            broken == 8 ? "\"reference_identity_only\\u0000hidden\"" : "\"sample-pending\\u0000hidden\"";
+        json_value_t *v = json_parse(raw, strlen(raw)); check_not_null(v); check_equal(turbo_runtime_json_object_set(target, field, v), 0);
+      } else check_equal(turbo_runtime_json_object_set_string(target, field, value), 0);
+      check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, collection, key, record), SALTS_OK); json_free(record);
+      int writes = f.audit.creates, puts = f.audit.puts;
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view);
+      check_equal(f.audit.creates, writes); check_equal(f.audit.puts, puts); check_equal(f.audit.lists, 0);
+    }
+  }
+
+  for (int broken = 0; broken < 10; ++broken) {
+    it("rejects a malformed or cross-task stop reference, case=%d", broken) {
+      report_enable_audit(&f, 1); f.fail_index = 2;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EIO);
+      json_value_t *stop = NULL;
+      check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_STOPS, "sample-stop", &stop), SALTS_OK);
+      json_value_t *entry = (json_value_t *)json_array_get(json_object_get(stop, "tasks"), 0);
+      if (broken == 0) check_equal(turbo_runtime_json_object_set_int64(stop, "operation_code", 0), 0);
+      if (broken == 1) check_equal(turbo_runtime_json_object_set_string(stop, "operation_phase", "workers"), 0);
+      if (broken == 2) check_equal(turbo_runtime_json_object_set_string(stop, "report_id", "different"), 0);
+      if (broken == 3) check_equal(turbo_runtime_json_object_set(stop, "acknowledged_gates", json_create_array()), 0);
+      if (broken >= 4 && broken <= 6) check_equal(turbo_runtime_json_object_set_string(entry,
+          broken == 4 ? "task_id" : broken == 5 ? "execution_id" : "observation_id", "different-identity"), 0);
+      if (broken == 7) check_equal(turbo_runtime_json_object_set_string(entry, "observation_boundary", "before_result_transfer"), 0);
+      if (broken >= 8) check_equal(turbo_runtime_json_object_set(entry, broken == 8 ? "result_taken" : "approval_pending", json_create_bool(1)), 0);
+      check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, SINGLE_AGENT_REPORT_STOPS, "sample-stop", stop), SALTS_OK); json_free(stop);
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view);
+    }
+  }
+
+  for (int broken = 0; broken < 8; ++broken) {
+    it("checks exact canonical Run/checkpoint identities rather than accepting Host metadata alone, case=%d", broken) {
+      static const char *const fields[] = {"id", "thread_id", "parent_agent_run_id", "id", "run_id", "thread_id", "parent_agent_run_id", "status"};
+      report_enable_audit(&f, 1);
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+      json_value_t *observation = NULL, *record = NULL;
+      check_equal(turbo_agent_router_load_observation(f.audit_runtime, broken < 3 ? "sample-aggregate-final" : "sample-pending", &observation), SALTS_OK);
+      const char *id = json_get_string(observation, broken < 3 ? "runtime_run_id" : "runtime_checkpoint_id");
+      const char *collection = broken < 3 ? "runs" : "checkpoints"; int slot = broken < 3 ? 2 : 3;
+      check_equal(turbo_agent_runtime_store_get_json_status(f.runtimes[slot], collection, id, &record), SALTS_OK);
+      check_equal(turbo_runtime_json_object_set_string(record, fields[broken], broken == 7 ? "completed" : "different-identity"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(f.runtimes[slot], collection, id, record), SALTS_OK); json_free(record);
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view); json_free(observation);
+    }
+  }
+
+  for (int fault = 0; fault < 4; ++fault) {
+    it("propagates exact canonical read errors without head/list fallback, case=%d", fault) {
+      report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+      json_value_t *observation = NULL;
+      check_equal(turbo_agent_router_load_observation(f.audit_runtime, fault < 2 ? "sample-aggregate-final" : "sample-pending", &observation), SALTS_OK);
+      report_audit_t *audit = &f.endpoint_audits[fault < 2 ? 2 : 3];
+      audit->get_fault_id = json_get_string(observation, fault < 2 ? "runtime_run_id" : "runtime_checkpoint_id");
+      audit->get_fault_code = fault % 2 ? SALTS_ENOENT : SALTS_EIO;
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), audit->get_fault_code);
+      check_null(view); check_equal(audit->get_fault_hits, 1); audit->get_fault_id = NULL; json_free(observation);
+    }
+  }
+
+  for (int fault = 0; fault < 2; ++fault) {
+    it("withholds inspection after a Host read error even after earlier phases loaded, case=%d", fault) {
+      report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+      f.audit.get_fault_id = fault ? "sample-pending" : "sample"; f.audit.get_fault_code = SALTS_EIO;
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EIO); check_null(view);
+      check_equal(f.audit.get_fault_hits, 1); check_equal(f.audit.creates, 11); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
+    }
+  }
+
+  for (int invalid = 0; invalid < 5; ++invalid) {
+    it("rejects invalid or ambiguous caller bindings before any store access, case=%d", invalid) {
+      report_enable_audit(&f, 1); single_agent_report_binding_t b[4];
+      for (size_t i = 0; i < 4; ++i) b[i] = (single_agent_report_binding_t){f.endpoints[i].id, f.runtimes[i], i == 3};
+      if (invalid == 0) b[1] = b[0];
+      if (invalid == 1) b[0].tool_loop = 2;
+      if (invalid == 2) b[0].endpoint = "bad/id";
+      if (invalid == 3) b[0].runtime = f.audit_runtime;
+      json_value_t *view = (json_value_t *)1;
+      check_equal(single_agent_report_inspect(f.audit_runtime, b, invalid == 4 ? 0 : 4, "sample", f.config.parent_run_id, &view), SALTS_EINVAL);
+      check_null(view); check_equal(f.audit.gets, 0); check_equal(f.audit.creates, 0);
+    }
+  }
+
+  it("reads the original ten-phase manifest format without requiring later cleanup keys") {
+    report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    json_value_t *manifest = NULL, *phases = json_create_object(), *view = NULL; check_not_null(phases);
+    check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_MANIFESTS, "sample", &manifest), SALTS_OK);
+    for (size_t i = 0; i < 10; ++i) check_equal(turbo_runtime_json_object_set_clone(phases, report_inspect_suffixes[i], json_object_get(json_object_get(manifest, "phase_ids"), report_inspect_suffixes[i])), 0);
+    check_equal(turbo_runtime_json_object_set(manifest, "phase_ids", phases), 0);
+    check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, SINGLE_AGENT_REPORT_MANIFESTS, "sample", manifest), SALTS_OK); json_free(manifest);
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK); json_free(view);
+  }
+
+  it("requires the caller's expected parent instead of trusting a self-consistent report from another operation") {
+    report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    json_value_t *view = (json_value_t *)1;
+    check_equal(report_inspect_fixture(&f, "different-parent", &view), SALTS_EPROTO); check_null(view);
+  }
+
+  it("scopes repeated endpoint ids by the model and reviewed tool-loop router bindings") {
+    static const char *const collections[] = {TURBO_AGENT_ROUTER_ADMISSION_COLLECTION, TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION,
+        TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION, TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION};
+    static const char *const keys[] = {"sample-execute", "sample-pending", "sample-review", "sample-execute-final"};
+    report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    for (size_t i = 0; i < 4; ++i) {
+      json_value_t *record = NULL;
+      check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, collections[i], keys[i], &record), SALTS_OK);
+      check_equal(turbo_runtime_json_object_set_string(record, "endpoint", "writer"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, collections[i], keys[i], record), SALTS_OK); json_free(record);
+    }
+    f.endpoints[3].id = "writer";
+    json_value_t *view = NULL;
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK); json_free(view);
+    check_equal(f.audit.puts, 4); check_equal(f.audit.creates, 11);
+  }
+
+  for (int decision = -1; decision <= 1; ++decision) {
+    it("keeps historical pending and post-cancel diagnostic flags distinct, decision=%d", decision) {
+      report_enable_audit(&f, 1); f.approval = decision;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), decision == 1 ? SALTS_OK : SALTS_ECANCELED);
+      json_value_t *view = NULL;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK); json_free(view);
+    }
+  }
+
   for (int failed = 0; failed < 4; ++failed) {
     it("automatically records drained accepted tasks on model failure, endpoint=%d", failed) {
       report_enable_audit(&f, 1); f.fail_index = failed;
@@ -393,6 +665,7 @@ spec("one Host goal composed from different model workers") {
       check_equal(phase, expected); check_equal(f.diagnostics.operation_code, SALTS_EIO);
       check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
       json_value_t *stop = report_check_stop(&f, SALTS_EIO, expected, failed < 2 ? 2 : 1); json_free(stop);
+      json_value_t *view = NULL; check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK); json_free(view);
       check_equal(atomic_load(&f.tool_calls), 0);
     }
   }
@@ -591,6 +864,10 @@ spec("one Host goal composed from different model workers") {
         json_value_t *record = NULL;
         check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, collections[fault], ids[fault], &record),
             lost_ack ? SALTS_OK : SALTS_ENOENT); json_free(record);
+        json_value_t *view = (json_value_t *)1;
+        check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), fault || lost_ack ? SALTS_OK : SALTS_ENOENT);
+        if (view) { check_false(json_get_bool(view, "delivery_proven", 1)); json_free(view); }
+        else check_false(fault || lost_ack);
         /* Explicitly calling the Host again must not turn a surviving manifest
          * into automatic recovery, acknowledgement or effect retry. */
         if (fault || lost_ack) {
@@ -694,6 +971,7 @@ spec("one Host goal composed from different model workers") {
       check_equal(turbo_agent_runtime_get_run(f.runtimes[i], json_get_string(member, "runtime_run_id"), &run), SALTS_OK);
       check_equal(json_get_string(run, "thread_id"), i ? "durable-worker-b" : "durable-worker-a"); json_free(run);
     }
+    f.runtimes[2] = report_sqlite(f.directory, names[2], 0);
     f.runtimes[3] = report_sqlite(f.directory, names[3], 0);
     check_equal(turbo_agent_router_load_observation(f.audit_runtime, "durable-execute-final", &terminal), SALTS_OK);
     check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_READY, "durable-ready", &ready), SALTS_OK);
@@ -702,6 +980,12 @@ spec("one Host goal composed from different model workers") {
     check_equal(turbo_agent_runtime_get_run(f.runtimes[3], json_get_string(terminal, "runtime_run_id"), &run), SALTS_OK);
     check_equal(json_get_string(run, "thread_id"), "durable-execute"); json_free(run);
     json_free(cohort); json_free(terminal); json_free(ready);
+    json_value_t *inspection = NULL;
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &inspection), SALTS_OK);
+    for (unsigned i = 0; i < 4; ++i) { turbo_agent_runtime_destroy(f.runtimes[i]); f.runtimes[i] = NULL; }
+    turbo_agent_runtime_destroy(f.audit_runtime); f.audit_runtime = NULL;
+    check_equal(json_get_string(json_object_get(inspection, "manifest"), "report_id"), "durable");
+    check_false(json_get_bool(inspection, "delivery_proven", 1)); json_free(inspection);
   }
 
   it("hands off one goal and canonical evidence, approves exactly one Host call, and delivers the tool artifact") {

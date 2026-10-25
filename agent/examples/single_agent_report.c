@@ -1,4 +1,4 @@
-#include "single_agent_report.h"
+#include "single_agent_report_inspect.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_runtime_store_sqlite.h"
 #include <fmt.h>
@@ -33,14 +33,14 @@ static int report_review(const json_value_t *summary, const json_value_t *state,
   return answer == 'y' || answer == 'Y';
 }
 
-static int report_store(const char *directory, const char *name, turbo_agent_runtime_t **out) {
+static int report_store(const char *directory, const char *name, int create, turbo_agent_runtime_t **out) {
   turbo_agent_runtime_store_t store = {0};
   int rc = SALTS_OK;
   if (directory) {
     turbo_runtime_sqlite_config_t sqlite;
     tstr path = tstr_format("{}/{}", directory, name);
     if (!path) return SALTS_ENOMEM;
-    turbo_runtime_sqlite_config_init(&sqlite); sqlite.path = path;
+    turbo_runtime_sqlite_config_init(&sqlite); sqlite.path = path; sqlite.create_if_missing = create;
     rc = turbo_runtime_store_sqlite_open(&sqlite, &store);
     tstr_free(path);
     if (rc) return rc;
@@ -99,6 +99,29 @@ int main(int argc, char **argv) {
   const char *audit_directory = getenv("REPORT_AUDIT_DIR");
   const char *audit_id = getenv("REPORT_AUDIT_ID");
   int rc = SALTS_EINVAL;
+  int inspecting = argc > 1 && !strcmp(argv[1], "--inspect");
+  if (inspecting) {
+    single_agent_report_binding_t bindings[4] = {0};
+    phase = "inspection";
+    if (argc != 5) {
+      fprintf(stderr, "usage: single_agent_report --inspect <audit-directory> <report-id> <expected-parent-run-id>\n");
+      goto done;
+    }
+    if (!argv[2][0] || strlen(argv[2]) > 1024 || !single_agent_report_id_valid(argv[3]) ||
+        !argv[4][0] || strlen(argv[4]) > 128) goto done;
+    rc = report_store(argv[2], "host.db", 0, &audit_runtime);
+    for (size_t i = 0; !rc && i < 4; ++i) {
+      rc = report_store(argv[2], stores[i], 0, &runtimes[i]);
+      bindings[i] = (single_agent_report_binding_t){ids[i], runtimes[i], i == 3};
+    }
+    if (!rc) rc = single_agent_report_inspect(audit_runtime, bindings, 4, argv[3], argv[4], &delivery);
+    if (!rc) {
+      char *text = json_serialize(delivery, NULL);
+      if (!text) rc = SALTS_ENOMEM;
+      else { puts(text); json_serialize_free(text); }
+    }
+    goto done;
+  }
   if (argc != 4 && argc != 8) {
     fprintf(stderr, "usage: single_agent_report <Host-parent-run-id> <goal> <brief-text> [<knowledge-db> <memory-root> <namespace> <key>]\n");
     return 1;
@@ -106,7 +129,7 @@ int main(int argc, char **argv) {
   if (!!audit_directory != !!audit_id || (audit_directory &&
       (!audit_directory[0] || strlen(audit_directory) > 1024 || !single_agent_report_id_valid(audit_id)))) goto done;
   if (audit_directory) {
-    int store_rc = report_store(audit_directory, "host.db", &audit_runtime);
+    int store_rc = report_store(audit_directory, "host.db", 1, &audit_runtime);
     if (store_rc) { rc = store_rc; goto done; }
     config.audit_runtime = audit_runtime; config.audit_id = audit_id;
     config.diagnostics = &diagnostics;
@@ -158,7 +181,7 @@ int main(int argc, char **argv) {
     if (!agents[i] || turbo_agent_set_tool_policy(agents[i], &policy) ||
         turbo_agent_retry_configure(agents[i], &retry)) goto done;
     if (i < 4) {
-      int store_rc = report_store(audit_directory, stores[i], &runtimes[i]);
+      int store_rc = report_store(audit_directory, stores[i], 1, &runtimes[i]);
       if (store_rc) { rc = store_rc; goto done; }
       endpoints[i].id = ids[i]; endpoints[i].agent = agents[i]; endpoints[i].runtime = runtimes[i];
       endpoints[i].roles = i == 2 ? TURBO_AGENT_ROUTER_PLAN : TURBO_AGENT_ROUTER_EXECUTE;
@@ -207,7 +230,8 @@ done:
   turbo_tool_registry_destroy(tools);
   turbo_agent_session_destroy(context_session);
   turbo_agent_knowledge_store_close(knowledge);
-  if (rc) fprintf(stderr, "Report stopped at %s (code %d); no verified delivery.\n", phase, rc);
+  if (rc && inspecting) fprintf(stderr, "Report inspection failed (code %d).\n", rc);
+  else if (rc) fprintf(stderr, "Report stopped at %s (code %d); no verified delivery.\n", phase, rc);
   if (diagnostics.stop_audit_code) fprintf(stderr,
       "Stop audit failed (code %d); original stop at %s (code %d); reconcile the persisted prefix.\n",
       diagnostics.stop_audit_code, diagnostics.operation_phase, diagnostics.operation_code);

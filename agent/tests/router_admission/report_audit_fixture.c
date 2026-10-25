@@ -1,4 +1,4 @@
-#include "../../examples/single_agent_report.h"
+#include "../../examples/single_agent_report_inspect.h"
 #include "turbo_model_provider.h"
 #include "turbo_runtime_store_sqlite.h"
 #include <fmt.h>
@@ -25,6 +25,7 @@ struct fixture_s {
   json_value_t **delivery;
 };
 static const char *names[] = {"writer", "reviewer", "planner", "executor"};
+static const char *endpoint_ids[] = {"draft", "review", "synthesis", "delivery"};
 static const char *files[] = {"draft.db", "review.db", "synthesis.db", "delivery.db"};
 static int stop_cut(const fixture_t *f) { return !strncmp(f->cut, "stop_", 5); }
 static void crash_now(fixture_t *f, const char *boundary) {
@@ -171,7 +172,7 @@ static int setup(fixture_t *f) {
     f->agent[i] = turbo_agent_create(&config); REQUIRE(f->agent[i]);
     REQUIRE(!turbo_agent_set_tool_policy(f->agent[i], &policy));
     if (i < 4) {
-      endpoints[i].id = names[i]; endpoints[i].agent = f->agent[i]; endpoints[i].runtime = f->runtime[i];
+      endpoints[i].id = endpoint_ids[i]; endpoints[i].agent = f->agent[i]; endpoints[i].runtime = f->runtime[i];
       endpoints[i].roles = i == 2 ? TURBO_AGENT_ROUTER_PLAN : TURBO_AGENT_ROUTER_EXECUTE;
       endpoints[i].capabilities = TURBO_AGENT_ROUTER_TEXT | (i == 3 ? TURBO_AGENT_ROUTER_TOOL_PROPOSALS : 0);
       endpoints[i].max_difficulty = 100; endpoints[i].max_input_tokens = endpoints[i].max_output_tokens = 10000;
@@ -218,6 +219,14 @@ static int crash_stage(fixture_t *f) {
   crash_now(f, "after_application_delivery"); return 2;
 }
 static int inspect(fixture_t *f, int healthy) {
+  single_agent_report_binding_t bindings[4]; json_value_t *inspection = NULL;
+  for (size_t i = 0; i < 4; ++i) bindings[i] = (single_agent_report_binding_t){endpoint_ids[i], f->runtime[i], i == 3};
+  REQUIRE(single_agent_report_inspect(f->host, bindings, 4, "subject", "report-host", &inspection) ==
+      (!strcmp(f->cut, "before_manifest") ? SALTS_ENOENT : SALTS_OK));
+  if (inspection) {
+    REQUIRE(!json_get_bool(inspection, "recovery_authorized", 1) && !json_get_bool(inspection, "delivery_proven", 1));
+    json_free(inspection);
+  }
   int no_work = !strcmp(f->cut, "before_manifest") || !strcmp(f->cut, "after_manifest");
   int drafts_only = !strcmp(f->cut, "after_fan_in"), paused = !strcmp(f->cut, "after_review");
   int stopped = stop_cut(f), terminal = !no_work && !drafts_only && !paused && !stopped;

@@ -273,6 +273,65 @@ The old report id cannot run again; current-policy denial and a distinct healthy
 are still required. These tests qualify the specified boundaries, not arbitrary crashes,
 complete lifecycle/error coverage, external-effect certainty or delivery recovery.
 
+### Explicit inspection after restart
+
+After the prior application owner has drained/closed, inspect a known report without
+configuring models or creating another report:
+
+```sh
+single_agent_report --inspect ./audit demo actual-host-parent-run-id
+```
+
+The expected parent is supplied by the caller, not adopted from the persisted report.
+This mode opens the existing Host and four canonical SQLite databases with creation
+disabled. It follows the normal SQLite owner/lock/open contract; this is an application
+read-only operation, not a new filesystem-read-only SQLite backend. It creates no Agent,
+pool, model transport, review callback or tool registry, ignores model/report environment
+configuration, and never submits, cancels, resumes, delivers or writes Runtime records.
+Missing databases fail without a memory fallback or database creation.
+
+The example-private single_agent_report_inspect helper accepts an independent Host store,
+explicit trusted endpoint-to-Runtime bindings, a report id and the expected parent.
+Bindings are scoped separately for model-only and reviewed tool-loop routers, so the
+same endpoint id in those two pools need not identify the same store. The helper does
+not discover paths, providers or authority from persisted/model data. Owners must be
+quiescent and store access serialized for the entire call. The CLI uses its fixed original
+draft/review/synthesis/delivery bindings; embedding Hosts supply their actual bindings.
+
+Inspection reads exactly the report manifest and the fifteen known phase keys, including
+the five optional cleanup keys. It accepts both the original ten-key manifest and the
+current fifteen-key version. Current manifest/ready/stop fields, versions, bounded strings,
+duplicate fields and references are checked; existing typed Router loaders validate their
+own schemas and limits. Unknown versions/fields and contradictory normal phase prefixes,
+route/task/Execution/thread/parent identities, review checkpoint/segment links and stop
+references fail closed. Standalone terminal cleanup observations can exist without a
+stop row, as after an unacknowledged cleanup write.
+
+Referenced canonical Runs/checkpoints are loaded only by their original recorded ids
+from the caller-bound store, checking their identities and parent/thread lineage. There
+is no latest-thread-head substitution or get/list/put fallback. Approval resume can update
+the same Run from interrupted to completed; its current status must not replace an older
+pending observation. Historical checkpoint status is checked at the original checkpoint.
+The reader verifies reference identities and selected canonical metadata, not signed
+provenance, a complete Runtime/graph payload, model answer quality or external effects.
+
+Success returns one independently owned metadata JSON object, bounded to 384 KiB, with
+historical_report_trace_inspection semantics, the validated manifest and records by phase.
+Absent optional records are explicit JSON nulls: they do not prove work/effects never
+started. delivery_proven and recovery_authorized are always false. In particular identical
+ready/stop rows can precede API return, follow return or follow application delivery.
+Inspection does not reconstruct the original function return or grant any retry/resume.
+Missing referenced canonical records, corrupt data and all other backend errors withhold
+the entire output. Release success with json_free; returned data retains no store/handle.
+
+Backend reads/JSON allocations occur before projection limits. This is bounded logical
+reconciliation over trusted stores, not a cross-store snapshot transaction, authentication
+mechanism, power-loss qualification, automatic lifecycle audit or recovery coordinator.
+The report crash cases also run the actual CLI inspection before and after explicit
+reconciliation in separate processes, without model environment settings. Unit tests
+reject malformed/cross-task metadata and canonical anchors and require store writes/list
+scans and model/tool counters to remain unchanged during inspection.
+
 ## Two application routes
 
 The general Agent route can use this composition for source-based reports and document

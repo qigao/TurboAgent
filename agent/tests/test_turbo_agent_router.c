@@ -24,6 +24,8 @@ typedef struct router_audit_s {
   unsigned delay_ms;
   cmeta_threadpool_t *pool;
   int64_t submitted_at_create;
+  json_value_t **handoff_summary, **handoff_state;
+  int outputs_empty_at_create;
 } router_audit_t;
 
 static int router_audit_put(void *user, const char *collection, const char *id, const char *text) {
@@ -42,6 +44,8 @@ static int router_audit_create(void *user, const char *collection, const char *i
   router_audit_t *audit = user;
   int rc;
   ++audit->creates;
+  if (audit->handoff_summary && audit->handoff_state)
+    audit->outputs_empty_at_create = !*audit->handoff_summary && !*audit->handoff_state;
   if (audit->transport) audit->calls_at_create = atomic_load(&audit->transport->calls);
   if (audit->pool) {
     cmeta_threadpool_stats_t stats = {0};
@@ -503,6 +507,163 @@ spec("bounded tiered model Router") {
     check_equal(atomic_load(&transport[2].calls), 0);
   }
 
+  it("acknowledges a terminal observation before moving the sole canonical result") {
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    audit.handoff_summary = &summary; audit.handoff_state = &state;
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "handoff", &summary, &state), SALTS_OK);
+    check_true(audit.outputs_empty_at_create); check_equal(audit.creates, 1);
+    check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+    check_not_null(summary); check_not_null(state);
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "handoff", &view), SALTS_OK);
+    check_equal(json_get_string(view, "runtime_run_id"), json_get_string(summary, "run_id"));
+    check_equal(json_get_string(view, "task_id"), turbo_agent_router_task_id(task));
+    json_value_t *diagnostic = NULL;
+    check_equal(turbo_agent_router_task_inspect(task, &diagnostic), SALTS_OK);
+    check_true(json_get_bool(diagnostic, "result_taken", 0)); json_free(diagnostic);
+    json_value_t *again_summary = (json_value_t *)1, *again_state = (json_value_t *)1;
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "different-id", &again_summary, &again_state), SALTS_EALREADY);
+    check_null(again_summary); check_null(again_state); check_equal(audit.creates, 1);
+    check_equal(atomic_load(&transport[2].calls), 1);
+  }
+
+  for (int error = 0; error < 4; ++error) {
+    it("withholds result ownership on terminal persistence failure, case=%d", error) {
+      if (error == 3) {
+        turbo_agent_runtime_destroy(audit_runtime); audit_runtime = router_audit_runtime(&audit, 0);
+      }
+      check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      audit.write_error = error == 0 ? SALTS_ENOSPC : error == 1 ? SALTS_EIO : 0;
+      audit.error_after_commit = error == 2;
+      summary = state = (json_value_t *)1;
+      check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "uncertain-handoff", &summary, &state),
+          error == 0 ? SALTS_ENOSPC : error == 3 ? SALTS_ENOTSUP : SALTS_EIO);
+      check_null(summary); check_null(state); check_equal(audit.creates, error == 3 ? 0 : 1);
+      check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+      check_equal(turbo_agent_router_task_inspect(task, &view), SALTS_OK);
+      check_false(json_get_bool(view, "result_taken", 1)); json_free(view); view = NULL;
+      if (error == 2) {
+        check_equal(turbo_agent_router_load_observation(audit_runtime, "uncertain-handoff", &view), SALTS_OK);
+        check_equal(json_get_string(view, "task_id"), turbo_agent_router_task_id(task));
+        check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "uncertain-handoff", &summary, &state), SALTS_EALREADY);
+        check_null(summary); check_null(state);
+      }
+      /* The Host explicitly reconciles; ordinary delivery still owns the pair. */
+      check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+      check_equal(json_get_string(summary, "status"), "completed");
+    }
+  }
+
+  it("allows an explicit fresh observation after a failed write without rerunning the model") {
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    audit.write_error = SALTS_ENOSPC;
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "first-handoff", &summary, &state), SALTS_ENOSPC);
+    audit.write_error = 0;
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "new-handoff", &summary, &state), SALTS_OK);
+    check_not_null(summary); check_not_null(state); check_equal(audit.creates, 2);
+    check_equal(atomic_load(&transport[2].calls), 1);
+  }
+
+  it("does not treat a colliding terminal observation as acknowledgement for another task") {
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "handoff-collision", &summary, &state), SALTS_OK);
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "handoff-collision", &view), SALTS_OK);
+    check_equal(turbo_agent_router_task_release(task), SALTS_OK); task = NULL;
+    json_free(summary); json_free(state); summary = state = NULL;
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "handoff-collision", &summary, &state), SALTS_EALREADY);
+    check_null(summary); check_null(state);
+    check_true(strcmp(json_get_string(view, "task_id"), turbo_agent_router_task_id(task)) != 0);
+    json_value_t *again = NULL;
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "handoff-collision", &again), SALTS_OK);
+    check_equal(json_get_string(again, "task_id"), json_get_string(view, "task_id")); json_free(again);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(atomic_load(&transport[2].calls), 2); check_equal(audit.puts, 0);
+  }
+
+  it("does not persist a running snapshot through the terminal handoff API") {
+    atomic_store(&transport[2].open, 0);
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    router_wait_entered(&transport[2]); summary = state = (json_value_t *)1;
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "too-early", &summary, &state), SALTS_EBUSY);
+    check_null(summary); check_null(state); check_equal(audit.creates, 0);
+    atomic_store(&transport[2].open, 1);
+  }
+
+  for (int invalid = 0; invalid < 9; ++invalid) {
+    it("rejects invalid handoff owners and outputs before persistence, case=%d", invalid) {
+      check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      summary = state = (json_value_t *)1;
+      check_equal(turbo_agent_router_task_take_result_with_observation(invalid == 0 ? NULL : task,
+          invalid == 1 ? NULL : invalid == 7 ? runtimes[0] : invalid == 8 ? runtimes[1] : audit_runtime,
+          invalid == 2 ? NULL : invalid == 3 ? "../bad" : "invalid-handoff",
+          invalid == 4 ? NULL : &summary, invalid == 5 ? NULL : invalid == 6 ? &summary : &state), SALTS_EINVAL);
+      if (invalid != 4) check_null(summary); else summary = NULL;
+      if (invalid != 5 && invalid != 6) check_null(state); else state = NULL;
+      check_equal(audit.creates, 0); check_equal(audit.puts, 0);
+      check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    }
+  }
+
+  it("withholds a handoff for stale authority without creating a misleading observation") {
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_set_tool_policy(agents[0], &grant), 0);
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "stale-handoff", &summary, &state), SALTS_EPERM);
+    check_null(summary); check_null(state); check_equal(audit.creates, 0);
+  }
+
+  it("cannot use a retained group alias to persist and steal a member result") {
+    turbo_agent_router_task_t *members[2] = {0}, *alias;
+    turbo_agent_router_group_t *group = NULL;
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &members[0]), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(members[0], 5000), SALTS_OK);
+    request.thread_id = "other-child"; request.role = TURBO_AGENT_ROUTER_PLAN; request.budget_micros = 100;
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &members[1]), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(members[1], 5000), SALTS_OK); alias = members[0];
+    check_equal(turbo_agent_router_group_adopt("handoff-group", members, 2, &group), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result_with_observation(alias, audit_runtime, "group-handoff", &summary, &state), SALTS_EBUSY);
+    check_null(summary); check_null(state); check_equal(audit.creates, 0);
+    check_equal(turbo_agent_router_group_release(group), SALTS_OK);
+  }
+
+  it("keeps sticky loss separate from terminal completion and does not hand off its result") {
+    atomic_store(&transport[2].open, 0);
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    router_wait_entered(&transport[2]);
+    check_equal(turbo_agent_router_task_poll(task, cmeta_monotonic_ms() + 6000), SALTS_ECANCELED);
+    atomic_store(&transport[2].open, 1); check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "lost-handoff", &summary, &state), SALTS_ECANCELED);
+    check_null(summary); check_null(state); check_equal(audit.creates, 0);
+  }
+
+  it("records an early Runtime failure and moves its diagnostic state without inventing a run") {
+    transport[2].fail = 1;
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "failed-handoff", &summary, &state), SALTS_OK);
+    check_null(summary); check_not_null(state);
+    check_equal(turbo_agent_router_load_observation(audit_runtime, "failed-handoff", &view), SALTS_OK);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "execution_status"), -1), TURBO_AGENT_EXECUTION_FAILED);
+    check_true(turbo_runtime_json_value_as_int64(json_object_get(view, "runtime_result_code"), 0) != 0);
+    check_true(json_is_null(json_object_get(view, "runtime_run_id")));
+  }
+
+  it("retains canonical results if the terminal metadata exceeds observation bounds") {
+    tstr lineage = tstr_new_len(NULL, 129); check_not_null(lineage); memset(lineage, 'p', 129);
+    parent.parent_agent_run_id = lineage;
+    check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "large-handoff", &summary, &state), SALTS_EPROTO);
+    check_null(summary); check_null(state); check_equal(audit.creates, 0);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK); tstr_free(lineage);
+  }
+
   it("records immutable running and terminal observations without consuming or copying canonical results") {
     atomic_store(&transport[2].open, 0);
     check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
@@ -935,7 +1096,8 @@ spec("bounded tiered model Router") {
     check_equal(json_get_string(view, "admission_id"), "durable-intent");
   }
 
-  it("reopens SQLite observations and reconciles canonical Runtime anchors after every Router owner is destroyed") {
+  for (int handoff = 0; handoff < 2; ++handoff) {
+  it("reopens SQLite observations and reconciles canonical anchors after owner destruction, handoff=%d", handoff) {
     directory = tt_make_temp_dir("router-observations"); check_not_null(directory);
     audit_path = tstr_format("{}/host.db", directory); worker_path = tstr_format("{}/worker.db", directory);
     check_not_null(audit_path); check_not_null(worker_path);
@@ -946,7 +1108,10 @@ spec("bounded tiered model Router") {
     check_equal(turbo_agent_router_create(&config, &router), SALTS_OK);
     check_equal(turbo_agent_router_submit(router, pool, &request, input, &task), SALTS_OK);
     check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
-    check_equal(turbo_agent_router_task_record_observation(task, audit_runtime, "persisted"), SALTS_OK);
+    if (handoff) {
+      check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "persisted", &summary, &state), SALTS_OK);
+      json_free(summary); json_free(state); summary = state = NULL;
+    } else check_equal(turbo_agent_router_task_record_observation(task, audit_runtime, "persisted"), SALTS_OK);
     check_equal(turbo_agent_router_task_release(task), SALTS_OK); task = NULL;
     check_equal(turbo_agent_router_destroy(router), SALTS_OK); router = NULL;
     for (int i = 0; i < 2; ++i) { turbo_agent_runtime_destroy(runtimes[i]); runtimes[i] = NULL; }
@@ -965,5 +1130,6 @@ spec("bounded tiered model Router") {
     turbo_agent_runtime_destroy(audit_runtime); audit_runtime = NULL;
     check_equal(json_get_string(view, "endpoint"), "fast");
     check_equal(atomic_load(&transport[2].calls), 1); check_equal(atomic_load(&transport[1].calls), 0);
+  }
   }
 }

@@ -7,7 +7,7 @@ The existing `task_inspect()` view is transient. A Host can now explicitly call
 bounded historical observation in its existing Runtime Store, then use
 `turbo_agent_router_load_observation(host_runtime, id, &record)` after reopening it.
 
-This is the first persisted supervision slice of [#213](https://github.com/qigao/TurboAgent/issues/213).
+This is a persisted supervision slice of [#213](https://github.com/qigao/TurboAgent/issues/213).
 It supports diagnosis and manual reconciliation; it is not an execution recovery API.
 [The Router](tiered-model-router.md), Execution and canonical Runtime/Tool Journal
 continue owning admission, runs, results, effects, cancellation and delivery.
@@ -50,6 +50,70 @@ audit or durable admission protocol. The Host chooses when to observe and must h
 every error. Multiple observations are independent immutable records; there is no
 automatic latest-record index, cross-record sequence or retention/eviction policy.
 Configure existing backend capacity and application retention explicitly.
+
+## Observe before result ownership transfer
+
+`turbo_agent_router_task_take_result_with_observation(task, host_runtime, id,
+&summary, &state)` makes terminal observation acknowledgement a prerequisite for
+one explicit result handoff. It first applies ordinary take-result gates: terminal,
+untaken, individually owned, responsive and current captured authority. It then
+records the current segment using the same version 1 observation schema and only
+moves the canonical Execution summary/state after atomic create returns success.
+The independent Host store is borrowed synchronously and is never retained by workers.
+All Host control operations and store callbacks retain their existing restrictions.
+
+Write failure, lost acknowledgement, unsupported atomic create or an existing id
+returns the original error with null outputs and leaves canonical result ownership
+unchanged. No read, list, put fallback, overwrite or retry occurs. An existing id is
+a conflict even when it matches the expected task. The Host can explicitly load that
+id and compare task, current Execution, thread, parent and canonical Runtime anchors,
+then decide whether to use a fresh id or ordinary `task_take_result()`. This decision
+cannot revive lost ownership, stale authority or an unresponsive child. A fresh id
+after successful transfer returns EALREADY without another write. Group aliases
+return EBUSY before persistence; group collection remains the group's responsibility.
+
+The API also handles early Runtime errors with a null summary and owned diagnostic
+state. OK is ownership transfer, not execution success. An approval-pending segment
+can be observed and taken before an explicit canonical approve/reject command; the
+next segment needs its own observation id. Rejecting approval retains the existing
+`interrupted` / `review_rejected` result, distinct from cancellation.
+
+An observation does not prove transfer or application delivery. The production
+record contains neither a delivered flag nor another result payload. In particular,
+the same terminal record can survive a cut before transfer, after transfer or after
+delivery. Existing take/release/review APIs remain available without automatic audit;
+this opt-in boundary does not install a complete lifecycle logger or make result
+delivery transactional across systems. It grants no restart/resume/retry authority.
+
+```c
+json_value_t *summary = NULL, *state = NULL;
+int rc = turbo_agent_router_task_take_result_with_observation(
+    task, host_runtime, host_observation_id, &summary, &state);
+/* On error, keep supervising/owning task and explicitly reconcile persistence.
+ * On success, check execution status and operation code before using the pair. */
+json_free(summary);
+json_free(state);
+```
+
+Ten additional five-process tests cover approve/reject at these handoff cuts. The
+transfer and delivery columns are separately committed test-oracle counters, not
+claims made by the observation itself:
+
+| Process cut | Terminal observation | Transfer count | Delivery count |
+| --- | --- | --- | --- |
+| Before atomic create | Absent | 0 | 0 |
+| After atomic create, before transfer | Present | 0 | 0 |
+| After lost-ack error returns | Present | 0 | 0 |
+| After transfer, before delivery | Present | 1 | 0 |
+| After explicit application delivery | Present | 1 | 1 |
+
+Each case requires exact exit 86, a matching boundary marker and null-output evidence
+at atomic create. Independent processes reopen Host/worker/oracle SQLite stores and
+check current-segment references, canonical Journal/claim phases and model/effect/
+transfer/delivery counts. A new Host performs different explicitly authorized work
+once on the same thread while preserving the old record and never redelivering the
+old result. These controlled process cuts keep OS/cache alive; they do not qualify
+physical power loss or arbitrary interruption inside SQLite.
 
 ## Historical metadata, not execution authority
 
@@ -128,11 +192,13 @@ anchors, retain the recorded Execution failure instead of inventing a successful
 For nonterminal/lost observations, actual remote/effect outcome remains unresolved.
 A started Journal call without a committed outcome still requires explicit manual
 reconciliation; the observation never makes it safe to automatically re-execute.
-Process crash cuts, durable admission, remote takeover, automatic restart, complete
-supervision audit and [#74](https://github.com/qigao/TurboAgent/issues/74)'s backend
-effect-recovery matrix remain separate acceptance gates.
+Additional backend crash/power-loss coverage, remote takeover, automatic restart,
+complete supervision audit and [#74](https://github.com/qigao/TurboAgent/issues/74)'s
+effect-recovery matrix remain separate acceptance gates. Optional initial and review
+admission records are described in [admission intents](router-admission-intents.md)
+and [review intents](router-review-intents.md).
 
-The change adds two functions and constants without changing existing struct layouts,
+The APIs add functions and constants without changing existing struct layouts,
 submission paths, storage schema version, workflows or dependencies. Rollback is to
 stop calling them; existing Runtime records and APIs are unchanged. These observations
 are a supplement to existing evidence, not a migration of run/result ownership.
@@ -144,3 +210,8 @@ lost write acknowledgement, unsupported backends, invalid ids/shared stores, bou
 corrupt records and independent ownership. The tool-loop test covers approval and
 resumed segment identities while preserving canonical review and actual tool counts.
 Owner destruction/reopen is not a deterministic process-kill or power-loss test.
+The guarded-handoff tests additionally cover output ownership on write errors,
+lost acknowledgements, cross-task collisions, early Runtime failures, stale/lost
+authority, grouped aliases, invalid/aliased outputs and approved/rejected segments.
+Negative controls deliberately ignore an acknowledgement error or transfer before
+persistence; the handoff process cases must reject both implementations.

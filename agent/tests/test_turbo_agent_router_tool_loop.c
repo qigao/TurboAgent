@@ -448,6 +448,44 @@ spec("supervised tiered Router tool loop") {
     tstr_free(run);
   }
 
+  for (int approved = 0; approved < 2; ++approved) {
+    for (int lost_ack = 0; lost_ack < 2; ++lost_ack) {
+      it("observes each approval segment before result handoff, approved=%d lost_ack=%d", approved, lost_ack) {
+        turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
+        audit_runtime = turbo_agent_runtime_create(&store); check_not_null(audit_runtime);
+        f[0].approval = 1;
+        check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+        check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+        check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "pending-handoff", &summary, &state), SALTS_OK);
+        check_equal(turbo_agent_router_load_observation(audit_runtime, "pending-handoff", &view), SALTS_OK);
+        check_true(json_get_bool(view, "approval_pending", 0));
+        tstr run = tstr_dup(json_get_string(view, "runtime_run_id")); check_not_null(run);
+        json_free(summary); json_free(state); json_free(view); summary = state = view = NULL;
+        /* Handoff is not an approval grant; an explicit canonical review is still required. */
+        check_equal(atomic_load(&f[0].tool_calls), 0);
+        check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "explicit-review", approved), SALTS_OK);
+        check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+        turbo_agent_runtime_destroy(audit_runtime); audit_runtime = review_runtime(&audit, pool, 1);
+        audit.lost_ack = lost_ack;
+        check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "resumed-handoff", &summary, &state), lost_ack ? SALTS_EIO : SALTS_OK);
+        if (lost_ack) {
+          check_null(summary); check_null(state);
+          check_equal(turbo_agent_router_load_observation(audit_runtime, "resumed-handoff", &view), SALTS_OK);
+          check_equal(turbo_agent_router_task_take_result_with_observation(task, audit_runtime, "resumed-handoff", &summary, &state), SALTS_EALREADY);
+          check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+        } else check_equal(turbo_agent_router_load_observation(audit_runtime, "resumed-handoff", &view), SALTS_OK);
+        check_equal(json_get_string(view, "runtime_run_id"), run);
+        check_equal(json_get_string(view, "runtime_run_id"), json_get_string(summary, "run_id"));
+        check_false(json_get_bool(view, "approval_pending", 1));
+        check_true(strcmp(json_get_string(view, "execution_id"), json_get_string(view, "task_id")) != 0);
+        check_equal(json_get_string(summary, "status"), approved ? "completed" : "interrupted");
+        if (!approved) check_equal(json_get_string(json_object_get(state, "router_tool_loop"), "reason"), "review_rejected");
+        check_equal(atomic_load(&f[0].tool_calls), approved);
+        check_equal(atomic_load(&f[2].model_calls), approved ? 2 : 1); tstr_free(run);
+      }
+    }
+  }
+
   it("records initial tool-loop intent without retaining its store through approval resumes") {
     turbo_agent_runtime_store_t store = turbo_agent_runtime_store_memory_create();
     audit_runtime = turbo_agent_runtime_create(&store); check_not_null(audit_runtime);

@@ -17,7 +17,8 @@ add_executable(router_review_process_fixture router_review_fixture.c)
 target_link_libraries(router_review_process_fixture PRIVATE TurboAgent::Agent)
 set_target_properties(router_review_process_fixture PROPERTIES
   C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "Agent/tests")
-foreach(cut IN ITEMS before_write after_write lost_ack queue_rejected in_tool before_delivery after_observation)
+foreach(cut IN ITEMS before_write after_write lost_ack queue_rejected in_tool before_delivery after_observation
+    handoff_before_write handoff_after_write handoff_lost_ack handoff_after_take handoff_after_delivery)
   foreach(decision IN ITEMS approve reject)
     if(cut STREQUAL "in_tool" AND decision STREQUAL "reject")
       continue()
@@ -30,5 +31,8 @@ foreach(cut IN ITEMS before_write after_write lost_ack queue_rejected in_tool be
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_review.cmake")
     set_tests_properties(test_router_review_crash_${cut}_${decision} PROPERTIES
       TIMEOUT 75 LABELS "agent;recovery;process;router-review-intent")
+    if(cut MATCHES "^handoff_")
+      set_property(TEST test_router_review_crash_${cut}_${decision} APPEND PROPERTY LABELS "router-result-handoff")
+    endif()
   endforeach()
 endforeach()

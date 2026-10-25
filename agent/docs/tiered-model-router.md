@@ -86,8 +86,13 @@ Result-transfer success only transfers ownership. A Provider/graph failure can
 return a null summary and an owned state carrying `model_error`; it is still an
 Execution failure. Runtime can fail before committing a run/checkpoint, so neither
 this API nor the route state proves that every failed attempt has durable evidence.
-A Host needing that audit must capture the failure state and inspection facts through
-its existing audit integration. A completed model node does not prove the task is done.
+For acknowledgement of a terminal observation before ownership transfer, use
+`task_take_result_with_observation()` with an independent Host Runtime and unique id.
+Persistence errors, lost acknowledgement or conflicts withhold the pair for explicit
+reconciliation; the observation still cannot prove application delivery. It records
+available terminal metadata, including early failures without Runtime anchors. See
+the [handoff contract and process cuts](router-supervision-observations.md#observe-before-result-ownership-transfer).
+Complete lifecycle auditing remains separate. A completed model node does not prove the task is done.
 An unresponsive or stale-authority result is withheld; inspect the existing Runtime
 using the bound thread/run identity for reconciliation. Release returns busy until
 terminal, and Router destruction returns busy until all task handles are released.

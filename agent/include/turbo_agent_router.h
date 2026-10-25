@@ -347,6 +347,31 @@ CXX_C_API int turbo_agent_router_load_observation(turbo_agent_runtime_t *host_ru
  */
 CXX_C_API int turbo_agent_router_task_take_result(turbo_agent_router_task_t *task,
     json_value_t **out_summary, json_value_t **out_state);
+/**
+ * Optional fail-closed terminal result handoff. Applies all take_result() gates,
+ * then atomically records the current terminal observation before moving the
+ * canonical summary/state. Uses record_observation()'s schema, bounds, independent
+ * Host-store ownership and synchronous callback restrictions. The store is not
+ * retained. Outputs must be distinct and are cleared on every rejection.
+ *
+ * Persistence errors (including committed writes with lost acknowledgement),
+ * unsupported atomic create and existing ids prevent ownership transfer; the
+ * prior result remains available. No get/list/put fallback or retry occurs.
+ * EALREADY is a conflict, even for a matching existing observation. Explicitly
+ * load and reconcile the same id and task/segment/lineage before the Host chooses
+ * a fresh-id attempt or ordinary take_result(). New ids do not redeliver a taken
+ * segment. Group-owned tasks return EBUSY without writing.
+ *
+ * OK means an observation was acknowledged and result ownership moved, including
+ * failed executions with a NULL summary. It does not mean execution succeeded,
+ * effects are known or the application delivered/accepted the result. A crash
+ * after persistence can precede transfer or delivery. No cross-system transaction,
+ * durable result copy, restart authority or complete lifecycle audit is created.
+ * Existing take_result() remains available without persistence.
+ */
+CXX_C_API int turbo_agent_router_task_take_result_with_observation(
+    turbo_agent_router_task_t *task, turbo_agent_runtime_t *host_runtime,
+    const char *observation_id, json_value_t **out_summary, json_value_t **out_state);
 /** Returns EBUSY until terminal; never detaches live work. NULL is a no-op. */
 CXX_C_API int turbo_agent_router_task_release(turbo_agent_router_task_t *task);
 

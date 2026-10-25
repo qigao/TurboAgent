@@ -679,7 +679,8 @@ failed:
   return SALTS_ENOMEM;
 }
 
-int turbo_agent_router_task_take_result(turbo_agent_router_task_t *task,
+static int router_task_take_result(turbo_agent_router_task_t *task,
+    turbo_agent_runtime_t *host_runtime, const char *observation_id,
     json_value_t **out_summary, json_value_t **out_state) {
   int rc;
   if (out_summary) *out_summary = NULL;
@@ -690,9 +691,30 @@ int turbo_agent_router_task_take_result(turbo_agent_router_task_t *task,
   if (turbo_agent_execution_wait(task->execution, 0) != SALTS_OK) return SALTS_EBUSY;
   if (task->unresponsive) return SALTS_ECANCELED;
   if (!turbo_agent_router_authority_current_internal(task)) return SALTS_EPERM;
+  if (host_runtime) {
+    rc = turbo_agent_router_task_record_observation(task, host_runtime, observation_id);
+    if (rc) return rc;
+  }
   rc = turbo_agent_execution_take_result(task->execution, out_summary, out_state);
   if (rc == SALTS_OK) task->taken = 1;
   return rc;
+}
+
+int turbo_agent_router_task_take_result(turbo_agent_router_task_t *task,
+    json_value_t **out_summary, json_value_t **out_state) {
+  return router_task_take_result(task, NULL, NULL, out_summary, out_state);
+}
+
+int turbo_agent_router_task_take_result_with_observation(turbo_agent_router_task_t *task,
+    turbo_agent_runtime_t *host_runtime, const char *observation_id,
+    json_value_t **out_summary, json_value_t **out_state) {
+  if (!host_runtime || !turbo_agent_router_id_valid_internal(observation_id) ||
+      (out_summary && out_summary == out_state)) {
+    if (out_summary) *out_summary = NULL;
+    if (out_state) *out_state = NULL;
+    return SALTS_EINVAL;
+  }
+  return router_task_take_result(task, host_runtime, observation_id, out_summary, out_state);
 }
 
 int turbo_agent_router_task_release(turbo_agent_router_task_t *task) {

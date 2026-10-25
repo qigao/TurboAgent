@@ -19,7 +19,7 @@ typedef struct loop_fixture_s {
   turbo_agent_t *host;
   turbo_agent_runtime_store_t store;
   turbo_agent_runtime_t *runtime;
-  int fail_commit;
+  int fail_commit, fail_run_read;
 } loop_fixture_t;
 
 static char *loop_copy(const char *text) {
@@ -135,6 +135,7 @@ static int loop_store_put(void *user, const char *collection, const char *id, co
 }
 static int loop_store_get(void *user, const char *collection, const char *id, char **out) {
   loop_fixture_t *f = user;
+  if (f->fail_run_read && !strcmp(collection, "runs")) { *out = NULL; return SALTS_EIO; }
   return f->store.get(f->store.user_data, collection, id, out);
 }
 static int loop_store_list(void *user, const char *collection, const char *key,
@@ -189,6 +190,47 @@ static cmeta_threadpool_t *loop_parallel_pool(cmeta_threadpool_t *old) {
   return pool;
 }
 
+typedef struct review_audit_s {
+  turbo_agent_runtime_store_t base;
+  cmeta_threadpool_t *pool;
+  int creates, gets, puts, lists, write_error, lost_ack, read_error;
+  int64_t submitted;
+  unsigned delay_ms;
+} review_audit_t;
+
+static int review_put(void *user, const char *collection, const char *id, const char *text) {
+  review_audit_t *a = user; ++a->puts;
+  return a->base.put(a->base.user_data, collection, id, text);
+}
+static int review_get(void *user, const char *collection, const char *id, char **out) {
+  review_audit_t *a = user; ++a->gets; *out = NULL;
+  return a->read_error ? a->read_error : a->base.get(a->base.user_data, collection, id, out);
+}
+static int review_list(void *user, const char *collection, const char *key, const char *value, char **out) {
+  review_audit_t *a = user; ++a->lists;
+  return a->base.list(a->base.user_data, collection, key, value, out);
+}
+static int review_create(void *user, const char *collection, const char *id, const char *text) {
+  review_audit_t *a = user;
+  cmeta_threadpool_stats_t stats = {0};
+  int rc;
+  ++a->creates; cmeta_threadpool_get_stats(a->pool, &stats); a->submitted = stats.submitted_tasks;
+  if (a->delay_ms) cmeta_sleep_ms(a->delay_ms);
+  if (a->write_error) return a->write_error;
+  rc = a->base.create_if_absent(a->base.user_data, collection, id, text);
+  return !rc && a->lost_ack ? SALTS_EIO : rc;
+}
+static void review_free(void *user) {
+  review_audit_t *a = user; a->base.user_data_free(a->base.user_data);
+  a->base = (turbo_agent_runtime_store_t){0};
+}
+static turbo_agent_runtime_t *review_runtime(review_audit_t *a, cmeta_threadpool_t *pool, int atomic) {
+  turbo_agent_runtime_store_t store = {review_put, review_get, review_list, a, review_free, atomic ? review_create : NULL};
+  a->pool = pool; a->base = turbo_agent_runtime_store_memory_create(); check_not_null(a->base.put);
+  turbo_agent_runtime_t *runtime = turbo_agent_runtime_create(&store); check_not_null(runtime);
+  return runtime;
+}
+
 spec("supervised tiered Router tool loop") {
   static loop_fixture_t f[3];
   static turbo_agent_t *agents[3];
@@ -204,6 +246,7 @@ spec("supervised tiered Router tool loop") {
   static cmeta_threadpool_t *pool;
   static json_value_t *input, *summary, *state, *view;
   static turbo_agent_runtime_t *audit_runtime;
+  static review_audit_t audit;
 
   before_each() {
     static const char *capabilities[] = {"custom_tools"};
@@ -279,6 +322,7 @@ spec("supervised tiered Router tool loop") {
     check_not_null(input);
     task = other = NULL; summary = state = view = NULL;
     audit_runtime = NULL;
+    memset(&audit, 0, sizeof(audit));
   }
   after_each() {
     for (int i = 0; i < 3; ++i) atomic_store_explicit(&f[i].open, 1, memory_order_release);
@@ -434,6 +478,301 @@ spec("supervised tiered Router tool loop") {
     check_equal(atomic_load(&f[1].model_calls) + atomic_load(&f[2].model_calls), 0);
     check_equal(atomic_load(&f[0].tool_calls), 0); check_equal(f[0].host_hooks, 0);
     check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+  }
+
+  for (int with_initial = 0; with_initial < 2; ++with_initial) {
+    for (int approved = 0; approved < 2; ++approved) {
+      it("records the exact canonical review segment before enqueue, initial=%d approved=%d", with_initial, approved) {
+        audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+        int rc = with_initial ? turbo_agent_router_submit_with_intent(router, pool, audit_runtime,
+            "initial", &request, input, 2, &task) : turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task);
+        check_equal(rc, SALTS_OK); check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+        check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+        const char *stable = turbo_agent_router_task_id(task);
+        check_equal(turbo_agent_state_request_review(state, "forged caller note"), 0);
+        check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "decision", approved), SALTS_OK);
+        check_equal(audit.creates, with_initial ? 2 : 1); check_equal(audit.submitted, 1);
+        check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+        check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+        check_equal(turbo_agent_router_load_review_intent(audit_runtime, "decision", &view), SALTS_OK);
+        check_equal(json_get_string(view, "task_id"), stable);
+        check_equal(json_get_string(view, "previous_execution_id"), stable);
+        check_true(strcmp(json_get_string(view, "execution_id"), stable) != 0);
+        check_equal(json_get_string(view, "source_checkpoint_id"), json_get_string(summary, "checkpoint_id"));
+        check_equal(json_get_string(view, "source_run_id"), json_get_string(summary, "run_id"));
+        check_equal(json_get_string(view, "decision"), approved ? "approve" : "reject");
+        check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "review_segment"), 0), 1);
+        if (with_initial) check_equal(json_get_string(view, "admission_id"), "initial");
+        else check_true(json_is_null(json_object_get(view, "admission_id")));
+        check_null(json_object_get(view, "arguments")); check_null(json_object_get(view, "result"));
+        json_value_t *inspection = NULL;
+        check_equal(turbo_agent_router_task_inspect(task, &inspection), SALTS_OK);
+        check_equal(json_get_string(inspection, "execution_id"), json_get_string(view, "execution_id"));
+        check_equal(json_get_string(inspection, "task_id"), stable); json_free(inspection);
+        json_free(summary); json_free(state); summary = state = NULL;
+        check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+        check_equal(json_get_string(summary, "status"), approved ? "completed" : "interrupted");
+        check_equal(atomic_load(&f[0].tool_calls), approved); check_equal(atomic_load(&f[2].model_calls), approved ? 2 : 1);
+      }
+    }
+  }
+
+  for (int lost_ack = 0; lost_ack < 2; ++lost_ack) {
+    for (int approved = 0; approved < 2; ++approved) {
+      it("preserves the previous result and review on failed intent persistence, lost_ack=%d approved=%d", lost_ack, approved) {
+        audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+        check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+        check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+        audit.write_error = lost_ack ? 0 : SALTS_ENOSPC; audit.lost_ack = lost_ack;
+        check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "uncertain", approved),
+                    lost_ack ? SALTS_EIO : SALTS_ENOSPC);
+        check_equal(audit.creates, 1); check_equal(audit.gets, 0); check_equal(audit.puts, 0); check_equal(audit.lists, 0);
+        check_equal(audit.submitted, 1); check_equal(atomic_load(&f[0].tool_calls), 0);
+        check_equal(turbo_agent_router_task_inspect(task, &view), SALTS_OK);
+        check_true(json_get_bool(view, "approval_pending", 0));
+        check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "review_resumes"), -1), 0);
+        check_equal(json_get_string(view, "execution_id"), turbo_agent_router_task_id(task));
+        json_free(view); view = NULL;
+        check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+        check_equal(json_get_string(summary, "status"), "interrupted");
+        check_equal(turbo_agent_router_load_review_intent(audit_runtime, "uncertain", &view), lost_ack ? SALTS_OK : SALTS_ENOENT);
+        audit.write_error = audit.lost_ack = 0;
+        if (lost_ack) {
+          check_equal(json_get_string(view, "decision"), approved ? "approve" : "reject");
+          check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "uncertain", !approved), SALTS_EALREADY);
+          check_equal(atomic_load(&f[0].tool_calls), 0);
+        }
+        check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "explicit-new-decision", 1), SALTS_OK);
+        check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+        check_equal(atomic_load(&f[0].tool_calls), 1);
+      }
+    }
+  }
+
+  it("preserves a rejected queue attempt and consumes only its review id") {
+    audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    atomic_store(&f[1].open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, loop_block, &f[1]), SALTS_OK); loop_entered(&f[1]);
+    check_equal(cmeta_threadpool_try_submit(pool, loop_block, &f[1]), SALTS_OK);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "queue", 0), SALTS_ENOBUFS);
+    check_equal(audit.submitted, 3);
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "queue", &view), SALTS_OK);
+    check_equal(json_get_string(view, "decision"), "reject");
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "interrupted");
+    atomic_store(&f[1].open, 1); cmeta_threadpool_wait(pool);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "queue", 1), SALTS_EALREADY);
+    check_equal(atomic_load(&f[0].tool_calls), 0);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "after-queue", 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].tool_calls), 1);
+  }
+
+  it("links accepted segments and rejects a reused review id on a later identical tool call") {
+    audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1; f[2].proposals = 2;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 3, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "first", 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "first", &view), SALTS_OK);
+    check_equal(atomic_load(&f[0].tool_calls), 1);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "first", 1), SALTS_EALREADY);
+    check_equal(atomic_load(&f[0].tool_calls), 1);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "second", 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    json_value_t *second = NULL;
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "second", &second), SALTS_OK);
+    check_equal(json_get_string(second, "task_id"), json_get_string(view, "task_id"));
+    check_equal(json_get_string(second, "previous_execution_id"), json_get_string(view, "execution_id"));
+    check_equal(json_get_string(second, "source_run_id"), json_get_string(view, "source_run_id"));
+    check_true(strcmp(json_get_string(second, "source_checkpoint_id"), json_get_string(view, "source_checkpoint_id")) != 0);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(second, "review_segment"), 0), 2);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(second, "deadline_mono_ms"), 0),
+                turbo_runtime_json_value_as_int64(json_object_get(view, "deadline_mono_ms"), -1));
+    json_free(second); check_equal(atomic_load(&f[0].tool_calls), 2); check_equal(atomic_load(&f[2].model_calls), 3);
+  }
+
+  it("never acknowledges a review id belonging to a different retained task") {
+    audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "collision", 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "collision", &view), SALTS_OK);
+    check_equal(turbo_agent_router_task_release(task), SALTS_OK); task = NULL;
+    atomic_store(&f[2].model_calls, 0);
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_true(strcmp(json_get_string(view, "task_id"), turbo_agent_router_task_id(task)) != 0);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "collision", 0), SALTS_EALREADY);
+    check_equal(atomic_load(&f[0].tool_calls), 1);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "fresh-task-review", 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(atomic_load(&f[0].tool_calls), 2);
+  }
+
+  for (int corrupt = 0; corrupt < 7; ++corrupt) {
+    it("rejects a mismatched canonical source before review intent creation, field=%d", corrupt) {
+      audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+      int run = corrupt >= 4;
+      const char *collection = run ? "runs" : "checkpoints";
+      const char *id = json_get_string(summary, run ? "run_id" : "checkpoint_id");
+      static const char *keys[] = {"id", "thread_id", "run_id", "parent_agent_run_id", "id", "thread_id", "parent_agent_run_id"};
+      json_value_t *original = NULL, *changed;
+      check_equal(turbo_agent_runtime_store_get_json_status(runtimes[1], collection, id, &original), SALTS_OK);
+      changed = json_clone(original); check_not_null(changed);
+      check_equal(turbo_runtime_json_object_set_string(changed, keys[corrupt], "wrong-source"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(runtimes[1], collection, id, changed), SALTS_OK);
+      check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "bad-source", 1), SALTS_EPROTO);
+      check_equal(audit.creates, 0); check_equal(atomic_load(&f[0].tool_calls), 0);
+      check_equal(turbo_agent_runtime_store_put_json(runtimes[1], collection, id, original), SALTS_OK);
+      json_free(original); json_free(changed);
+      check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "restored-source", 1), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK); check_equal(atomic_load(&f[0].tool_calls), 1);
+    }
+  }
+
+  it("preserves source read errors without intent creation or checkpoint mutation") {
+    audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    f[2].fail_run_read = 1;
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "read-error", 1), SALTS_EIO);
+    check_equal(audit.creates, 0); check_equal(audit.puts, 0); check_equal(audit.gets, 0); check_equal(audit.lists, 0);
+    f[2].fail_run_read = 0;
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "interrupted");
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "read-recovered", 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK); check_equal(atomic_load(&f[0].tool_calls), 1);
+  }
+
+  it("does not retain the review store while an approved callback is still executing") {
+    audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK); atomic_store(&f[0].open, 0);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "borrowed-store", 1), SALTS_OK);
+    loop_entered(&f[0]);
+    turbo_agent_runtime_destroy(audit_runtime); audit_runtime = NULL;
+    atomic_store(&f[0].open, 1); check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "completed"); check_equal(atomic_load(&f[0].tool_calls), 1);
+  }
+
+  it("keeps recorded decisions independent across concurrently retained approval owners") {
+    pool = loop_parallel_pool(pool); audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+    check_equal(turbo_agent_router_set_tool_task_limit(router, 2), SALTS_OK);
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    request.thread_id = "loop-other";
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &other), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_review_with_intent(other, pool, audit_runtime, "second-owner", 1), SALTS_OK);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "first-owner", 0), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(other, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "first-owner", &view), SALTS_OK);
+    json_value_t *second = NULL;
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "second-owner", &second), SALTS_OK);
+    check_equal(json_get_string(view, "task_id"), turbo_agent_router_task_id(task));
+    check_equal(json_get_string(second, "task_id"), turbo_agent_router_task_id(other));
+    check_equal(json_get_string(view, "decision"), "reject");
+    check_equal(json_get_string(second, "decision"), "approve");
+    check_true(strcmp(json_get_string(view, "source_run_id"), json_get_string(second, "source_run_id")) != 0);
+    json_free(second);
+    check_equal(atomic_load(&f[0].thread_calls[0]), 0); check_equal(atomic_load(&f[0].thread_calls[1]), 1);
+  }
+
+  it("keeps the original deadline while persisting a review intent and retains no Host store") {
+    audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+    request.timeout_ms = request.heartbeat_timeout_ms = 200;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK); audit.delay_ms = 250;
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "slow-review", 1), SALTS_OK);
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "slow-review", &view), SALTS_OK);
+    turbo_agent_runtime_destroy(audit_runtime); audit_runtime = NULL;
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "timed_out"); check_equal(atomic_load(&f[0].tool_calls), 0);
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(view, "deadline_mono_ms"), 0) -
+                turbo_runtime_json_value_as_int64(json_object_get(view, "started_mono_ms"), 0), 200);
+  }
+
+  for (int invalid = 0; invalid < 8; ++invalid) {
+    it("rejects invalid recorded review controls before touching persistence, case=%d", invalid) {
+      audit_runtime = review_runtime(&audit, pool, invalid != 7); f[0].approval = 1;
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+      turbo_agent_runtime_t *host = audit_runtime;
+      const char *id = "invalid"; int approved = 1, expected = SALTS_EINVAL;
+      if (invalid == 0) host = NULL;
+      if (invalid == 1) id = NULL;
+      if (invalid == 2) id = "../escape";
+      if (invalid == 3) host = runtimes[0];
+      if (invalid == 4) host = runtimes[1];
+      if (invalid == 5) approved = 2;
+      if (invalid == 6) { check_equal(turbo_agent_set_tool_policy(agents[0], &grant), 0); expected = SALTS_EPERM; }
+      if (invalid == 7) expected = SALTS_ENOTSUP;
+      check_equal(turbo_agent_router_task_review_with_intent(task, pool, host, id, approved), expected);
+      check_equal(audit.creates, 0); check_equal(atomic_load(&f[0].tool_calls), 0);
+    }
+  }
+
+  for (int corrupt = 0; corrupt < 13; ++corrupt) {
+    it("loads only bounded internally consistent review-intent metadata, field=%d", corrupt) {
+      audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+      check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+      check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK); audit.lost_ack = 1;
+      check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "corrupt-review", 1), SALTS_EIO);
+      check_equal(turbo_agent_router_load_review_intent(audit_runtime, "corrupt-review", &view), SALTS_OK);
+      if (corrupt == 0) check_equal(turbo_runtime_json_object_set_int64(view, "schema_version", 2), 0);
+      if (corrupt == 1) check_equal(turbo_runtime_json_object_set_string(view, "review_id", "wrong"), 0);
+      if (corrupt == 2) check_equal(turbo_runtime_json_object_set_string(view, "decision", "dispatch"), 0);
+      if (corrupt == 3) check_equal(turbo_runtime_json_object_set_string(view, "semantics", "approval_grant"), 0);
+      if (corrupt == 4) check_equal(turbo_runtime_json_object_set_string(view, "execution_id", json_get_string(view, "previous_execution_id")), 0);
+      if (corrupt == 5) check_equal(turbo_runtime_json_object_set_int64(view, "review_segment", 33), 0);
+      if (corrupt == 6) check_equal(turbo_runtime_json_object_set(view, "review_segment", json_create_number(1.5)), 0);
+      if (corrupt == 7) check_equal(turbo_runtime_json_object_set_int64(view, "requested_mono_ms",
+          turbo_runtime_json_value_as_int64(json_object_get(view, "deadline_mono_ms"), 0)), 0);
+      if (corrupt == 8) { const char text[] = "\"cp\\u0000hidden\"";
+        check_equal(turbo_runtime_json_object_set(view, "source_checkpoint_id", json_parse(text, strlen(text))), 0); }
+      if (corrupt == 9) check_equal(turbo_runtime_json_object_set_string(view, "unexpected", "field"), 0);
+      if (corrupt == 10) { char model[1026]; memset(model, 'm', 1025); model[1025] = '\0';
+        check_equal(turbo_runtime_json_object_set_string(view, "model", model), 0); }
+      if (corrupt == 11) check_equal(turbo_runtime_json_object_set_int64(view, "model_turns", 2), 0);
+      if (corrupt == 12) check_equal(turbo_runtime_json_object_set_string(view, "admission_id", "bad/id"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(audit_runtime, TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION,
+          "corrupt-review", view), SALTS_OK); json_free(view); view = NULL;
+      check_equal(turbo_agent_router_load_review_intent(audit_runtime, "corrupt-review", &view),
+                  corrupt == 10 ? SALTS_ENOBUFS : SALTS_EPROTO);
+      check_null(view); check_equal(atomic_load(&f[0].tool_calls), 0);
+    }
+  }
+
+  it("bounds oversized legacy-task lineage without consuming its paused result") {
+    char parent_id[130]; memset(parent_id, 'p', 129); parent_id[129] = '\0';
+    parent.parent_agent_run_id = parent_id;
+    audit_runtime = review_runtime(&audit, pool, 1); f[0].approval = 1;
+    check_equal(turbo_agent_router_submit_tool_loop(router, pool, &request, input, 2, &task), SALTS_OK);
+    check_equal(turbo_agent_router_task_wait(task, 5000), SALTS_OK);
+    check_equal(turbo_agent_router_task_review_with_intent(task, pool, audit_runtime, "oversized-parent", 1), SALTS_ENOBUFS);
+    check_equal(audit.creates, 0); check_equal(atomic_load(&f[0].tool_calls), 0);
+    check_equal(turbo_agent_router_task_take_result(task, &summary, &state), SALTS_OK);
+    check_equal(json_get_string(summary, "status"), "interrupted");
+  }
+
+  it("preserves exact-id review read errors and clears invalid output slots") {
+    audit_runtime = review_runtime(&audit, pool, 1); view = (json_value_t *)&audit;
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "../invalid", &view), SALTS_EINVAL);
+    check_null(view); check_equal(audit.gets, 0);
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "missing", &view), SALTS_ENOENT);
+    check_null(view); audit.read_error = SALTS_EIO;
+    check_equal(turbo_agent_router_load_review_intent(audit_runtime, "missing", &view), SALTS_EIO);
+    check_null(view); check_equal(audit.lists, 0); check_equal(audit.puts, 0);
   }
 
   it("does not report an old approval after a resumed segment fails before terminal metadata capture") {

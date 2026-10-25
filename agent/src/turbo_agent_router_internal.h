@@ -25,7 +25,7 @@ struct turbo_agent_router_task_s {
   router_endpoint_t *endpoint;
   turbo_graph_t *graph;
   turbo_agent_execution_t *execution, *identity_execution;
-  tstr review_checkpoint;
+  tstr review_checkpoint, review_run_id;
   uint64_t deadline_ms;
   unsigned max_model_turns, model_turns, review_resumes;
   int pending_review, review_cancelled;
@@ -47,6 +47,16 @@ typedef struct router_admission_s {
 } router_admission_t;
 
 int turbo_agent_router_admission_write_internal(void *user_data, const char *execution_id);
+
+typedef struct router_review_intent_s {
+  const turbo_agent_router_task_t *task;
+  turbo_agent_runtime_t *host_runtime;
+  const char *id, *checkpoint_id;
+  uint64_t requested_ms;
+  int approved;
+} router_review_intent_t;
+
+int turbo_agent_router_review_intent_write_internal(void *user_data, const char *execution_id);
 
 int turbo_agent_router_id_valid_internal(const char *text);
 int turbo_agent_router_authority_current_internal(const turbo_agent_router_task_t *task);

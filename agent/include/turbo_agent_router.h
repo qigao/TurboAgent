@@ -19,6 +19,8 @@ extern "C" {
 #define TURBO_AGENT_ROUTER_OBSERVATION_MAX_BYTES 16384u
 #define TURBO_AGENT_ROUTER_ADMISSION_COLLECTION "router_admission_intents"
 #define TURBO_AGENT_ROUTER_ADMISSION_MAX_BYTES 16384u
+#define TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION "router_review_intents"
+#define TURBO_AGENT_ROUTER_REVIEW_INTENT_MAX_BYTES 16384u
 
 typedef struct turbo_agent_router_s turbo_agent_router_t;
 typedef struct turbo_agent_router_task_s turbo_agent_router_task_t;
@@ -227,6 +229,43 @@ CXX_C_API int turbo_agent_router_load_intent(turbo_agent_runtime_t *host_runtime
  */
 CXX_C_API int turbo_agent_router_task_review(turbo_agent_router_task_t *task,
     cmeta_threadpool_t *executor, int approved);
+
+/**
+ * Optional atomic write-ahead intent for one explicit approval/rejection resume.
+ * Requires the same live task/owners as task_review(); records cannot recreate
+ * a task or grant approval after restart. host_runtime is independent of every
+ * endpoint Runtime/store and borrowed only for this synchronous call. The Host
+ * serializes all control/store operations and callbacks must not reenter them.
+ *
+ * Records at REVIEW_INTENT_COLLECTION/review_id (1..64 ASCII id): stable task
+ * UUID, prospective new and previous Execution UUIDs, exact source run/checkpoint,
+ * selected route/lineage, approve/reject decision, next segment ordinal and
+ * original deadline. No tool arguments/results or authority grant are copied.
+ * The source checkpoint's identity is checked against the retained canonical
+ * terminal metadata before writing. Atomic/source-identity read errors propagate
+ * without fallback; existing Runtime command-preparation errors are unchanged.
+ *
+ * Write error (including commit with lost acknowledgement), existing id, or
+ * pool rejection preserves the previous result/checkpoint/review state and
+ * accepted-segment count. A successful write followed by queue rejection still
+ * consumes review_id. EALREADY is a conflict, never acknowledgement or permission
+ * to dispatch; load that id explicitly to reconcile. Success follows ordinary
+ * review semantics with the original deadline; persistence time is included.
+ * Records may refer to rejected/unqueued attempts, so they are not a lifecycle
+ * completion/dispatch/delivery proof or permission to retry UNKNOWN effects.
+ *
+ * Requires atomic create_if_absent; other errors/limits match task_review() and
+ * submit_with_intent(). Record <=16 KiB; model/provider <=1024, run/checkpoint/
+ * parent ids <=128. Existing APIs remain available without automatic recording.
+ */
+CXX_C_API int turbo_agent_router_task_review_with_intent(turbo_agent_router_task_t *task,
+    cmeta_threadpool_t *executor, turbo_agent_runtime_t *host_runtime,
+    const char *review_id, int approved);
+
+/** Exact-id, owned validated metadata only; no work or authority is restored.
+ * Clears out_record on every error. Errors/bounds match load_intent(). */
+CXX_C_API int turbo_agent_router_load_review_intent(turbo_agent_runtime_t *host_runtime,
+    const char *review_id, json_value_t **out_record);
 
 /** Borrowed stable first Execution UUID; distinct from canonical Runtime run ids. */
 CXX_C_API const char *turbo_agent_router_task_id(const turbo_agent_router_task_t *task);

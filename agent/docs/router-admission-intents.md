@@ -78,8 +78,9 @@ delivery, answer quality or effect certainty. Origin monotonic clocks cannot ren
 leases in another process. Apply current Host authority and #74's UNKNOWN-side-effect
 gate to every explicit recovery decision.
 
-This slice records initial dispatch intent. Approval resumes continue through their
-ordinary exact-checkpoint API and are not automatically recorded here. Complete
+This API records initial dispatch intent. Approval resumes continue through their
+ordinary exact-checkpoint API and are not automatically recorded here. Hosts can
+explicitly use [review intents](router-review-intents.md) for those segments. Complete
 supervision, durable work resumption, remote-loss reconciliation and actual-model
 quality/cost evaluation remain separate #213 workstreams.
 

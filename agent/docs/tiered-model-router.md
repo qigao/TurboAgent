@@ -76,8 +76,9 @@ remains the source of run evidence; an observation does not authorize recovery.
 For an initial write before pool admission, use the optional
 [admission-intent submission](router-admission-intents.md). It records a known Host
 id and the first Execution UUID before enqueue. An intent alone does not prove pool
-acceptance/completion or authorize a retry; review resumes and complete supervision
-remain explicit, separate work.
+acceptance/completion or authorize a retry. Hosts can explicitly record
+[review-resume intents](router-review-intents.md); complete supervision remains
+separate work.
 
 Take summary/state once per Execution segment after terminal and verify Execution status, its underlying
 `runtime_result_code`, the summary when present, and the task's domain result.

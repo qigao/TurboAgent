@@ -25,6 +25,7 @@ typedef struct fixture_s {
   turbo_agent_router_t *router;
   cmeta_threadpool_t *pool;
   atomic_int queue_entered, queue_open;
+  json_value_t **handoff_summary, **handoff_state;
 } fixture_t;
 
 static void crash_now(const fixture_t *f, const char *boundary) {
@@ -60,8 +61,14 @@ static int store_list(void *user, const char *collection, const char *key, const
 static int store_create(void *user, const char *collection, const char *id, const char *text) {
   fixture_t *f = user;
   int selected = f->inject && !strcmp(collection, TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION) && !strcmp(id, "review");
+  int handoff = f->inject && !strcmp(collection, TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION) && !strcmp(id, "handoff");
   int rc;
   ++f->creates;
+  if (handoff) {
+    if (!f->handoff_summary || !f->handoff_state || *f->handoff_summary || *f->handoff_state) return SALTS_EPROTO;
+    fprintf(stderr, "REVIEW_HANDOFF id=handoff outputs_null=1\n");
+    if (!strcmp(f->cut, "handoff_before_write")) crash_now(f, "handoff_before_atomic_create");
+  }
   if (!strcmp(collection, TURBO_AGENT_ROUTER_REVIEW_INTENT_COLLECTION)) {
     cmeta_threadpool_stats_t stats = {0};
     int expected = selected && !strcmp(f->cut, "queue_rejected") ? 3 : 1;
@@ -71,6 +78,8 @@ static int store_create(void *user, const char *collection, const char *id, cons
   }
   if (selected && !strcmp(f->cut, "before_write")) crash_now(f, "before_atomic_create");
   rc = f->inner.create_if_absent(f->inner.user_data, collection, id, text);
+  if (!rc && handoff && !strcmp(f->cut, "handoff_after_write")) crash_now(f, "handoff_after_atomic_create_before_transfer");
+  if (!rc && handoff && !strcmp(f->cut, "handoff_lost_ack")) return SALTS_EIO;
   if (!rc && selected && !strcmp(f->cut, "after_write")) crash_now(f, "after_atomic_create_before_enqueue");
   if (!rc && selected && !strcmp(f->cut, "lost_ack")) return SALTS_EIO;
   return rc;
@@ -201,6 +210,23 @@ static int crash_stage(fixture_t *f) {
     crash_now(f, !strcmp(f->cut, "lost_ack") ? "after_lost_ack_return" : "after_queue_rejection");
   }
   REQUIRE(rc == SALTS_OK); REQUIRE(turbo_agent_router_task_wait(task, 5000) == SALTS_OK);
+  if (!strncmp(f->cut, "handoff_", 8)) {
+    f->handoff_summary = &summary; f->handoff_state = &state;
+    rc = turbo_agent_router_task_take_result_with_observation(task, f->host, "handoff", &summary, &state);
+    if (!strcmp(f->cut, "handoff_lost_ack")) {
+      REQUIRE(rc == SALTS_EIO && !summary && !state);
+      REQUIRE(turbo_agent_router_task_inspect(task, &view) == SALTS_OK);
+      REQUIRE(!json_get_bool(view, "result_taken", 1));
+      crash_now(f, "handoff_after_lost_ack_return");
+    }
+    REQUIRE(rc == SALTS_OK && summary && state);
+    REQUIRE(!strcmp(json_get_string(summary, "status"), f->approved ? "completed" : "interrupted"));
+    if (!f->approved) REQUIRE(!strcmp(json_get_string(json_object_get(state, "router_tool_loop"), "reason"), "review_rejected"));
+    REQUIRE(!counter_add(f, "subject_transfer"));
+    if (!strcmp(f->cut, "handoff_after_take")) crash_now(f, "handoff_after_transfer_before_delivery");
+    REQUIRE(!strcmp(f->cut, "handoff_after_delivery"));
+    REQUIRE(!counter_add(f, "subject_delivery")); crash_now(f, "handoff_after_delivery");
+  }
   if (!strcmp(f->cut, "after_observation")) {
     REQUIRE(turbo_agent_router_task_record_observation(task, f->oracle, "terminal") == SALTS_OK);
     crash_now(f, "terminal_observation_before_delivery");
@@ -210,7 +236,10 @@ static int crash_stage(fixture_t *f) {
 
 static int inspect(fixture_t *f, int healthy_done) {
   json_value_t *initial = NULL, *admission = NULL, *review = NULL, *checkpoint = NULL, *journal = NULL, *claims = NULL, *terminal = NULL;
-  int completed = !strcmp(f->cut, "before_delivery") || !strcmp(f->cut, "after_observation");
+  int handoff = !strncmp(f->cut, "handoff_", 8);
+  int completed = !strcmp(f->cut, "before_delivery") || !strcmp(f->cut, "after_observation") || handoff;
+  int transferred = !strcmp(f->cut, "handoff_after_take") || !strcmp(f->cut, "handoff_after_delivery");
+  int delivered = !strcmp(f->cut, "handoff_after_delivery");
   int effect_count = f->approved && (completed || !strcmp(f->cut, "in_tool"));
   int models = f->approved && completed ? 2 : 1, n, rc;
   REQUIRE(turbo_agent_router_load_observation(f->oracle, "initial", &initial) == SALTS_OK);
@@ -234,7 +263,8 @@ static int inspect(fixture_t *f, int healthy_done) {
   }
   REQUIRE(!counter_get(f, "subject_model", &n) && n == models);
   REQUIRE(!counter_get(f, "subject_effect", &n) && n == effect_count);
-  REQUIRE(!counter_get(f, "subject_delivery", &n) && n == 0);
+  REQUIRE(!counter_get(f, "subject_transfer", &n) && n == transferred);
+  REQUIRE(!counter_get(f, "subject_delivery", &n) && n == delivered);
   REQUIRE(!counter_get(f, "healthy_model", &n) && n == 2 * healthy_done);
   REQUIRE(!counter_get(f, "healthy_effect", &n) && n == healthy_done);
   REQUIRE(!counter_get(f, "healthy_delivery", &n) && n == healthy_done);
@@ -256,6 +286,17 @@ static int inspect(fixture_t *f, int healthy_done) {
     REQUIRE(!strcmp(json_get_string(terminal, "execution_id"), json_get_string(review, "execution_id")));
     REQUIRE(!strcmp(json_get_string(terminal, "runtime_run_id"), json_get_string(review, "source_run_id")));
   }
+  if (handoff) {
+    rc = turbo_agent_router_load_observation(f->host, "handoff", &terminal);
+    REQUIRE(rc == (!strcmp(f->cut, "handoff_before_write") ? SALTS_ENOENT : SALTS_OK));
+    if (!rc) {
+      REQUIRE(!strcmp(json_get_string(terminal, "task_id"), json_get_string(review, "task_id")));
+      REQUIRE(!strcmp(json_get_string(terminal, "execution_id"), json_get_string(review, "execution_id")));
+      REQUIRE(!strcmp(json_get_string(terminal, "runtime_run_id"), json_get_string(review, "source_run_id")));
+      REQUIRE(!strcmp(json_get_string(terminal, "runtime_status"), f->approved ? "completed" : "interrupted"));
+      REQUIRE(!json_get_bool(terminal, "approval_pending", 1));
+    }
+  }
   if (healthy_done) {
     json_value_t *healthy = NULL, *observed = NULL, *run = NULL;
     REQUIRE(turbo_agent_router_load_review_intent(f->host, "healthy-review", &healthy) == SALTS_OK);
@@ -266,8 +307,8 @@ static int inspect(fixture_t *f, int healthy_done) {
     REQUIRE(!strcmp(json_get_string(run, "thread_id"), "review-thread"));
     json_free(healthy); json_free(observed); json_free(run);
   }
-  fprintf(stderr, "REVIEW_INSPECT cut=%s decision=%s intent=%d subject_model=%d subject_effect=%d subject_delivery=0 healthy=%d\n",
-          f->cut, f->approved ? "approve" : "reject", rc == SALTS_OK, models, effect_count, healthy_done);
+  fprintf(stderr, "REVIEW_INSPECT cut=%s decision=%s subject_model=%d subject_effect=%d subject_transfer=%d subject_delivery=%d healthy=%d\n",
+          f->cut, f->approved ? "approve" : "reject", models, effect_count, transferred, delivered, healthy_done);
   json_free(initial); json_free(admission); json_free(review); json_free(checkpoint); json_free(journal); json_free(claims); json_free(terminal);
   return 0;
 }
@@ -312,7 +353,7 @@ int main(int argc, char **argv) {
   atomic_init(&f.queue_entered, 0); atomic_init(&f.queue_open, 0);
   REQUIRE(!open_fixture(&f, argv[4], !strcmp(argv[1], "init")));
   if (!strcmp(argv[1], "init")) {
-    static const char *ids[] = {"subject_model", "subject_effect", "subject_delivery", "healthy_model", "healthy_effect", "healthy_delivery"};
+    static const char *ids[] = {"subject_model", "subject_effect", "subject_transfer", "subject_delivery", "healthy_model", "healthy_effect", "healthy_delivery"};
     for (size_t i = 0; i < sizeof(ids)/sizeof(ids[0]); ++i) REQUIRE(!counter_put(&f, ids[i], 0));
     rc = 0;
   } else if (!strcmp(argv[1], "crash")) rc = crash_stage(&f);

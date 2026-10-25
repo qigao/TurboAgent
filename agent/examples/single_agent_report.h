@@ -11,6 +11,7 @@
 #define SINGLE_AGENT_REPORT_MANIFESTS "report_dispatch_manifests"
 #define SINGLE_AGENT_REPORT_READY "report_delivery_observations"
 #define SINGLE_AGENT_REPORT_STOPS "report_stop_observations"
+#define SINGLE_AGENT_REPORT_GATE_FAILURES "report_gate_failures"
 
 /* Ordinary ToolExecutor uses the text/context entry point. Adapt explicitly
  * rather than assuming a JSON-only registration is callable through it. */
@@ -54,6 +55,7 @@ typedef int (*single_agent_report_review_fn)(const json_value_t *summary,
 
 typedef struct single_agent_report_diagnostics_s {
   int operation_code, stop_audit_code, stop_audit_attempted;
+  int gate_audit_code, gate_audit_attempted;
   const char *operation_phase; /* Static example phase name, valid after return. */
 } single_agent_report_diagnostics_t;
 
@@ -85,14 +87,19 @@ typedef struct single_agent_report_config_s {
 
 static const char *const single_agent_report_gates[] = {"manifest", "worker-a", "worker-b",
     "fan-in", "aggregate", "aggregate-final", "execute", "pending", "review", "execute-final", "ready"};
-typedef struct single_agent_report_trace_s { unsigned acknowledged; int gate_failed; } single_agent_report_trace_t;
+typedef struct single_agent_report_trace_s { unsigned acknowledged, failed_gate; int gate_failed; } single_agent_report_trace_t;
 
 /* A failed gate can have committed without acknowledgement. Do not issue more
- * audit writes, even if an admission error may instead precede persistence. */
+ * normal/stop writes or retry the gate. A separate post-drain error observation
+ * may retain the error without resolving that gate's persistence outcome. */
 static int single_agent_report_gate(single_agent_report_trace_t *trace, const char *suffix, int rc) {
   if (rc) trace->gate_failed = 1;
-  else for (size_t i = 0; i < sizeof(single_agent_report_gates)/sizeof(single_agent_report_gates[0]); ++i)
-    if (!strcmp(suffix, single_agent_report_gates[i])) trace->acknowledged |= 1u << i;
+  for (size_t i = 0; i < sizeof(single_agent_report_gates)/sizeof(single_agent_report_gates[0]); ++i)
+    if (!strcmp(suffix, single_agent_report_gates[i])) {
+      if (rc) trace->failed_gate = (unsigned)i;
+      else trace->acknowledged |= 1u << i;
+      break;
+    }
   return rc;
 }
 
@@ -125,7 +132,7 @@ static int single_agent_report_begin(const single_agent_report_config_t *config,
     uint64_t started, uint64_t deadline) {
   static const char *suffixes[] = {"worker-a", "worker-b", "fan-in", "aggregate",
       "aggregate-final", "execute", "pending", "review", "execute-final", "ready",
-      "stop", "stop-worker-a", "stop-worker-b", "stop-aggregate", "stop-execute"};
+      "stop", "stop-worker-a", "stop-worker-b", "stop-aggregate", "stop-execute", "gate-failure"};
   json_value_t *record = NULL, *ids = NULL;
   char key[64];
   int rc = SALTS_ENOMEM;
@@ -297,6 +304,51 @@ static int single_agent_report_ready(const single_agent_report_config_t *config,
   rc = turbo_agent_runtime_store_create_json_if_absent(config->audit_runtime, SINGLE_AGENT_REPORT_READY, id, record);
 done:
   json_free(record); json_free(view); return rc;
+}
+
+/* Only an acknowledged manifest owns this diagnostic namespace. The failed
+ * gate is never read/retried/overwritten, and no task/result payload is copied.
+ * This write's own error is diagnostic: preserve the original gate return. */
+static int single_agent_report_gate_failure(const single_agent_report_config_t *config,
+    const single_agent_report_trace_t *trace, const char *phase, int operation) {
+  json_value_t *record = NULL, *gates = NULL, *value = NULL;
+  char id[64], failed[64]; uint64_t now = cmeta_monotonic_ms();
+  int rc = SALTS_ENOMEM;
+  if (!trace->gate_failed || !trace->failed_gate || trace->failed_gate >= 11 ||
+      trace->acknowledged != (1u << trace->failed_gate) - 1u || !operation) return SALTS_EPROTO;
+  if (now > UINT64_C(9007199254740991)) return SALTS_ERANGE;
+  rc = single_agent_report_key(config, single_agent_report_gates[trace->failed_gate], failed);
+  if (rc) return rc;
+  record = json_create_object(); gates = json_create_array(); rc = SALTS_ENOMEM;
+  if (!record || !gates) goto done;
+  for (unsigned i = 0; i < trace->failed_gate; ++i) {
+    if (i && (rc = single_agent_report_key(config, single_agent_report_gates[i], id))) goto done;
+    value = json_create_string(i ? id : config->audit_id); rc = SALTS_ENOMEM;
+    if (!value || turbo_runtime_json_array_append(gates, value)) goto done;
+    value = NULL;
+  }
+  if (turbo_runtime_json_object_set_int64(record, "schema_version", 1) ||
+      turbo_runtime_json_object_set_string(record, "semantics", "post_drain_report_gate_failure_observation") ||
+      turbo_runtime_json_object_set_string(record, "report_id", config->audit_id) ||
+      turbo_runtime_json_object_set_string(record, "parent_run_id", config->parent_run_id) ||
+      turbo_runtime_json_object_set_string(record, "operation_phase", phase) ||
+      turbo_runtime_json_object_set_string(record, "gate_id", failed) ||
+      turbo_runtime_json_object_set_int64(record, "gate_return_code", operation) ||
+      turbo_runtime_json_object_set_string(record, "gate_outcome", "unresolved") ||
+      turbo_runtime_json_object_set_int64(record, "observed_mono_ms", (int64_t)now) ||
+      turbo_runtime_json_object_set_string(record, "clock_domain", "origin_process_monotonic")) goto done;
+  if (turbo_runtime_json_object_set(record, "acknowledged_gates", gates)) goto done;
+  gates = NULL;
+  rc = single_agent_report_key(config, "gate-failure", id);
+  if (!rc) {
+    char *text = json_serialize(record, NULL);
+    rc = !text ? SALTS_ENOMEM : strlen(text) > TURBO_AGENT_ROUTER_OBSERVATION_MAX_BYTES ? SALTS_ENOBUFS : SALTS_OK;
+    json_serialize_free(text);
+  }
+  if (!rc) rc = turbo_agent_runtime_store_create_json_if_absent(config->audit_runtime,
+      SINGLE_AGENT_REPORT_GATE_FAILURES, id, record);
+done:
+  json_free(value); json_free(gates); json_free(record); return rc;
 }
 
 /* Validate the raw Provider response before accepting its normalized event.
@@ -689,7 +741,14 @@ done:
     (void)turbo_agent_router_task_wait(task, TURBO_RUNTIME_WAIT_INFINITE);
   }
   /* Only an acknowledged reservation owns this namespace. A failed gate may
-   * have committed; leave that prefix for explicit reconciliation. */
+   * have committed; retain its error separately without resolving the prefix. */
+  if (rc && config->audit_runtime && (trace.acknowledged & 1u) && trace.gate_failed) {
+    int audit_rc = single_agent_report_gate_failure(config, &trace, *out_phase, rc);
+    if (config->diagnostics) {
+      config->diagnostics->gate_audit_attempted = 1;
+      config->diagnostics->gate_audit_code = audit_rc;
+    }
+  }
   if (rc && config->audit_runtime && (trace.acknowledged & 1u) && !trace.gate_failed) {
     int audit_rc = single_agent_report_stop(config, &trace, worker_refs, task, task_role, *out_phase, rc);
     if (config->diagnostics) {

@@ -28,6 +28,7 @@ static const char *names[] = {"writer", "reviewer", "planner", "executor"};
 static const char *endpoint_ids[] = {"draft", "review", "synthesis", "delivery"};
 static const char *files[] = {"draft.db", "review.db", "synthesis.db", "delivery.db"};
 static int stop_cut(const fixture_t *f) { return !strncmp(f->cut, "stop_", 5); }
+static int gate_cut(const fixture_t *f) { return !strncmp(f->cut, "gate_", 5); }
 static void crash_now(fixture_t *f, const char *boundary) {
   fprintf(stderr, "REPORT_CRASH cut=%s boundary=%s\n", f->cut, boundary); fflush(stderr); _Exit(86);
 }
@@ -69,13 +70,16 @@ static int host_create(void *u, const char *c, const char *id, const char *text)
   int ready = !strcmp(c, SINGLE_AGENT_REPORT_READY) && !strcmp(id, "subject-ready");
   int stopped_task = !strcmp(c, TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION) && !strcmp(id, "subject-stop-aggregate");
   int stop = !strcmp(c, SINGLE_AGENT_REPORT_STOPS) && !strcmp(id, "subject-stop");
-  if (f->inject && (manifest || fan_in || review || ready || stopped_task || stop)) {
+  int gate_failure = !strcmp(c, SINGLE_AGENT_REPORT_GATE_FAILURES) && !strcmp(id, "subject-gate-failure");
+  if (f->inject && (manifest || fan_in || review || ready || stopped_task || stop || gate_failure)) {
     if (!f->delivery || *f->delivery) return SALTS_EPROTO;
     fprintf(stderr, "REPORT_PREPUBLISH delivery_null=1\n");
     if (manifest && !strcmp(f->cut, "before_manifest")) crash_now(f, "before_manifest_create");
     if (ready && !strcmp(f->cut, "before_ready")) crash_now(f, "before_ready_create");
     if (stopped_task && !strcmp(f->cut, "stop_before_observation")) crash_now(f, "after_drain_before_terminal_observation");
     if (stop && !strcmp(f->cut, "stop_before_record")) crash_now(f, "after_terminal_observation_before_stop_record");
+    if (gate_failure && !strcmp(f->cut, "gate_before_record")) crash_now(f, "after_drain_before_gate_failure_record");
+    if (fan_in && !strcmp(f->cut, "gate_unwritten")) return SALTS_ENOSPC;
   }
   rc = f->base.create_if_absent(f->base.user_data, c, id, text);
   if (!rc && f->inject) {
@@ -86,6 +90,9 @@ static int host_create(void *u, const char *c, const char *id, const char *text)
     if (stopped_task && !strcmp(f->cut, "stop_after_observation")) crash_now(f, "after_terminal_observation_before_stop_record");
     if (stop && !strcmp(f->cut, "stop_after_record")) crash_now(f, "after_stop_record_before_error_return");
     if (stop && !strcmp(f->cut, "stop_lost_ack")) return SALTS_EIO;
+    if (fan_in && gate_cut(f)) return SALTS_EIO;
+    if (gate_failure && !strcmp(f->cut, "gate_after_record")) crash_now(f, "after_gate_failure_record_before_error_return");
+    if (gate_failure && !strcmp(f->cut, "gate_lost_ack")) return SALTS_ENOSPC;
   }
   return rc;
 }
@@ -202,6 +209,15 @@ static int crash_stage(fixture_t *f) {
   json_value_t *delivery = NULL; const char *phase = NULL;
   REQUIRE(!setup(f)); f->inject = 1; f->delivery = &delivery;
   int rc = single_agent_report_run(&f->config, &delivery, &phase);
+  if (gate_cut(f)) {
+    int unwritten = !strcmp(f->cut, "gate_unwritten"), lost_ack = !strcmp(f->cut, "gate_lost_ack");
+    REQUIRE(rc == (unwritten ? SALTS_ENOSPC : SALTS_EIO) && !delivery && !strcmp(phase, "workers"));
+    REQUIRE(f->diagnostics.operation_code == rc && !strcmp(f->diagnostics.operation_phase, phase));
+    REQUIRE(f->diagnostics.gate_audit_attempted && f->diagnostics.gate_audit_code == (lost_ack ? SALTS_ENOSPC : 0));
+    REQUIRE(!f->diagnostics.stop_audit_attempted && !counter_add(f, "gate-return"));
+    REQUIRE(unwritten || lost_ack || !strcmp(f->cut, "gate_after_return"));
+    crash_now(f, unwritten ? "after_unwritten_gate_error_return" : lost_ack ? "after_gate_failure_lost_ack_return" : "after_gate_error_return");
+  }
   if (stop_cut(f)) {
     int lost_ack = !strcmp(f->cut, "stop_lost_ack");
     REQUIRE(rc == SALTS_EIO && !delivery);
@@ -228,7 +244,7 @@ static int inspect(fixture_t *f, int healthy) {
     json_free(inspection);
   }
   int no_work = !strcmp(f->cut, "before_manifest") || !strcmp(f->cut, "after_manifest");
-  int drafts_only = !strcmp(f->cut, "after_fan_in"), paused = !strcmp(f->cut, "after_review");
+  int drafts_only = !strcmp(f->cut, "after_fan_in") || gate_cut(f), paused = !strcmp(f->cut, "after_review");
   int stopped = stop_cut(f), terminal = !no_work && !drafts_only && !paused && !stopped;
   int returned = !strcmp(f->cut, "after_return") || !strcmp(f->cut, "after_delivery");
   int delivered = !strcmp(f->cut, "after_delivery"), n;
@@ -253,9 +269,13 @@ static int inspect(fixture_t *f, int healthy) {
   int stop_returned = !strcmp(f->cut, "stop_after_return") || !strcmp(f->cut, "stop_lost_ack");
   REQUIRE(!counter_get(f, "subject-stop-return", &n) && n == stop_returned);
   REQUIRE(!counter_get(f, "healthy-stop-return", &n) && n == 0);
+  int gate_returned = !strcmp(f->cut, "gate_after_return") || !strcmp(f->cut, "gate_lost_ack") || !strcmp(f->cut, "gate_unwritten");
+  REQUIRE(!counter_get(f, "subject-gate-return", &n) && n == gate_returned);
+  REQUIRE(!counter_get(f, "healthy-gate-return", &n) && n == 0);
   if (!no_work) {
-    REQUIRE(turbo_agent_router_load_group_observation(f->host, "subject-fan-in", &record) == SALTS_OK);
-    for (int i = 0; i < 2; ++i) {
+    REQUIRE(turbo_agent_router_load_group_observation(f->host, "subject-fan-in", &record) ==
+        (!strcmp(f->cut, "gate_unwritten") ? SALTS_ENOENT : SALTS_OK));
+    for (int i = 0; record && i < 2; ++i) {
       const json_value_t *member = json_array_get(json_object_get(record, "members"), i);
       json_value_t *run = NULL; REQUIRE(turbo_agent_runtime_get_run(f->runtime[i], json_get_string(member, "runtime_run_id"), &run) == SALTS_OK);
       REQUIRE(!strcmp(json_get_string(run, "thread_id"), i ? "subject-worker-b" : "subject-worker-a")); json_free(run);
@@ -312,6 +332,20 @@ static int inspect(fixture_t *f, int healthy) {
     }
     json_free(intent); json_free(observation); json_free(stop); json_free(run);
   }
+  json_value_t *failure = NULL;
+  int recorded = gate_cut(f) && strcmp(f->cut, "gate_before_record");
+  REQUIRE(turbo_agent_runtime_store_get_json_status(f->host, SINGLE_AGENT_REPORT_GATE_FAILURES, "subject-gate-failure", &failure) ==
+      (recorded ? SALTS_OK : SALTS_ENOENT));
+  if (failure) {
+    REQUIRE(!strcmp(json_get_string(failure, "gate_id"), "subject-fan-in"));
+    REQUIRE(!strcmp(json_get_string(failure, "gate_outcome"), "unresolved"));
+    REQUIRE(!strcmp(json_get_string(failure, "operation_phase"), "workers"));
+    REQUIRE(!strcmp(json_get_string(failure, "parent_run_id"), "report-host"));
+    REQUIRE(turbo_runtime_json_value_as_int64(json_object_get(failure, "gate_return_code"), 0) ==
+        (!strcmp(f->cut, "gate_unwritten") ? SALTS_ENOSPC : SALTS_EIO));
+    REQUIRE(json_array_size(json_object_get(failure, "acknowledged_gates")) == 3);
+  }
+  json_free(failure);
   json_free(manifest);
   fprintf(stderr, "REPORT_INSPECT cut=%s old_handoff=%d old_delivery=%d healthy=%d\n", f->cut, returned, delivered, healthy);
   return 0;
@@ -343,7 +377,7 @@ int main(int argc, char **argv) {
   fixture_t f = {0}; int rc; REQUIRE(argc == 4); f.cut = argv[2];
   REQUIRE(!open_fixture(&f, argv[3], !strcmp(argv[1], "init")));
   if (!strcmp(argv[1], "init")) {
-    static const char *kinds[] = {"model-0", "model-1", "model-2", "model-3", "review", "tool", "handoff", "delivery", "stop-return"};
+    static const char *kinds[] = {"model-0", "model-1", "model-2", "model-3", "review", "tool", "handoff", "delivery", "stop-return", "gate-return"};
     for (int i = 0; i < 2; ++i) for (size_t j = 0; j < sizeof(kinds)/sizeof(kinds[0]); ++j) {
       tstr id = tstr_format("{}-{}", i ? "healthy" : "subject", kinds[j]); REQUIRE(id);
       rc = counter_put(&f, id, 0); tstr_free(id); REQUIRE(!rc);

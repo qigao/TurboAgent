@@ -11,9 +11,10 @@ typedef struct report_fixture_s report_fixture_t;
 typedef struct report_audit_s {
   turbo_agent_runtime_store_t base;
   const char *fault_id;
+  const char *fault2_id, *wait_active_id;
   const char *delay_id;
   unsigned delay_ms;
-  int creates, gets, puts, lists, lost_ack;
+  int creates, gets, puts, lists, lost_ack, lost_ack2;
   atomic_int *active;
   const char *get_fault_id;
   int get_fault_code, get_fault_hits, anchors_only;
@@ -62,12 +63,19 @@ static int report_audit_list(void *u, const char *c, const char *k, const char *
 }
 static int report_audit_create(void *u, const char *c, const char *id, const char *text) {
   report_audit_t *a = u; int rc; ++a->creates;
-  if (strstr(id, "-stop") && a->active && atomic_load(a->active)) return SALTS_EBUSY;
+  if ((strstr(id, "-stop") || strstr(id, "-gate-failure")) && a->active && atomic_load(a->active)) return SALTS_EBUSY;
+  if (a->wait_active_id && !strcmp(id, a->wait_active_id)) {
+    uint64_t until = cmeta_monotonic_ms() + 5000;
+    while (!atomic_load(a->active) && cmeta_monotonic_ms() < until) cmeta_thread_yield();
+    if (!atomic_load(a->active)) return SALTS_EBUSY;
+  }
   if (a->delay_id && !strcmp(id, a->delay_id)) cmeta_sleep_ms(a->delay_ms);
   int selected = a->fault_id && !strcmp(id, a->fault_id);
-  if (selected && !a->lost_ack) return SALTS_ENOSPC;
+  int second = a->fault2_id && !strcmp(id, a->fault2_id);
+  int lost = selected ? a->lost_ack : a->lost_ack2;
+  if ((selected || second) && !lost) return SALTS_ENOSPC;
   rc = a->base.create_if_absent(a->base.user_data, c, id, text);
-  return !rc && selected && a->lost_ack ? SALTS_EIO : rc;
+  return !rc && (selected || second) && lost ? SALTS_EIO : rc;
 }
 static void report_audit_free(void *u) {
   report_audit_t *a = u; a->base.user_data_free(a->base.user_data);
@@ -419,7 +427,7 @@ spec("one Host goal composed from different model workers") {
     check_false(json_get_bool(view, "delivery_proven", 1)); check_false(json_get_bool(view, "recovery_authorized", 1));
     check_not_null(json_object_get(json_object_get(view, "records"), "ready"));
     check_equal(f.audit.creates, 11); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
-    check_equal(f.audit.gets, 16); check_equal(atomic_load(&f.tool_calls), 1);
+    check_equal(f.audit.gets, 1 + REPORT_INSPECT_COUNT); check_equal(atomic_load(&f.tool_calls), 1);
     json_free(view);
   }
 
@@ -614,14 +622,16 @@ spec("one Host goal composed from different model workers") {
     }
   }
 
-  it("reads the original ten-phase manifest format without requiring later cleanup keys") {
+  for (int legacy = 10; legacy <= 15; legacy += 5) {
+  it("reads the prior manifest formats without requiring later keys, phases=%d", legacy) {
     report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
     json_value_t *manifest = NULL, *phases = json_create_object(), *view = NULL; check_not_null(phases);
     check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_MANIFESTS, "sample", &manifest), SALTS_OK);
-    for (size_t i = 0; i < 10; ++i) check_equal(turbo_runtime_json_object_set_clone(phases, report_inspect_suffixes[i], json_object_get(json_object_get(manifest, "phase_ids"), report_inspect_suffixes[i])), 0);
+    for (size_t i = 0; i < (size_t)legacy; ++i) check_equal(turbo_runtime_json_object_set_clone(phases, report_inspect_suffixes[i], json_object_get(json_object_get(manifest, "phase_ids"), report_inspect_suffixes[i])), 0);
     check_equal(turbo_runtime_json_object_set(manifest, "phase_ids", phases), 0);
     check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, SINGLE_AGENT_REPORT_MANIFESTS, "sample", manifest), SALTS_OK); json_free(manifest);
     check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK); json_free(view);
+  }
   }
 
   it("requires the caller's expected parent instead of trusting a self-consistent report from another operation") {
@@ -694,7 +704,7 @@ spec("one Host goal composed from different model workers") {
       } else {
         /* The review API returns an error before admitting this segment. Its
          * public result does not distinguish a pre-write denial from storage
-         * denial; conservatively stop auditing after that failed gate. */
+         * denial; retain only an unresolved gate-failure observation. */
         check_false(f.diagnostics.stop_audit_attempted);
         json_value_t *pending = NULL;
         check_equal(turbo_agent_router_load_observation(f.audit_runtime, "sample-pending", &pending), SALTS_OK);
@@ -790,7 +800,8 @@ spec("one Host goal composed from different model workers") {
     c.authority_agent = f.agents[4]; c.endpoints = f.endpoints; c.endpoint_count = 1;
     check_equal(turbo_agent_router_create(&c, &f.router), SALTS_OK); f.config.router = f.router;
     check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EBUSY);
-    check_false(f.diagnostics.stop_audit_attempted); check_equal(f.audit.creates, 2);
+    check_false(f.diagnostics.stop_audit_attempted); check_equal(f.audit.creates, 3);
+    check_true(f.diagnostics.gate_audit_attempted); check_equal(f.diagnostics.gate_audit_code, 0);
     check_null(delivery); check_equal(atomic_load(&f.models[1].calls), 0); check_equal(atomic_load(&f.tool_calls), 0);
   }
 
@@ -851,8 +862,9 @@ spec("one Host goal composed from different model workers") {
             TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION, SINGLE_AGENT_REPORT_READY};
         report_enable_audit(&f, 1); f.audit.fault_id = ids[fault]; f.audit.lost_ack = lost_ack;
         check_equal(single_agent_report_run(&f.config, &delivery, &phase), lost_ack ? SALTS_EIO : SALTS_ENOSPC);
-        check_null(delivery); check_equal(f.audit.creates, fault + 1);
+        check_null(delivery); check_equal(f.audit.creates, fault + 1 + !!fault);
         check_false(f.diagnostics.stop_audit_attempted);
+        check_equal(f.diagnostics.gate_audit_attempted, !!fault); check_equal(f.diagnostics.gate_audit_code, 0);
         check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
         if (fault <= 1) for (unsigned i = 0; i < 4; ++i) check_equal(atomic_load(&f.models[i].calls), 0);
         if (fault <= 2) check_equal(atomic_load(&f.models[1].calls), 0);
@@ -864,6 +876,17 @@ spec("one Host goal composed from different model workers") {
         json_value_t *record = NULL;
         check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, collections[fault], ids[fault], &record),
             lost_ack ? SALTS_OK : SALTS_ENOENT); json_free(record);
+        check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES,
+            "sample-gate-failure", &record), fault ? SALTS_OK : SALTS_ENOENT);
+        if (record) {
+          check_equal(json_get_string(record, "gate_id"), ids[fault]);
+          check_equal(json_get_string(record, "operation_phase"), phase);
+          check_equal(json_get_string(record, "gate_outcome"), "unresolved");
+          check_equal(turbo_runtime_json_value_as_int64(json_object_get(record, "gate_return_code"), 0), lost_ack ? SALTS_EIO : SALTS_ENOSPC);
+          check_equal(json_array_size(json_object_get(record, "acknowledged_gates")), (size_t)fault);
+          check_null(json_object_get(record, "state")); check_null(json_object_get(record, "markdown"));
+        }
+        json_free(record);
         json_value_t *view = (json_value_t *)1;
         check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), fault || lost_ack ? SALTS_OK : SALTS_ENOENT);
         if (view) { check_false(json_get_bool(view, "delivery_proven", 1)); json_free(view); }
@@ -878,6 +901,120 @@ spec("one Host goal composed from different model workers") {
         }
       }
     }
+  }
+
+  for (int lost = 0; lost < 2; ++lost) {
+    for (int diagnostic = 0; diagnostic < 3; ++diagnostic) {
+      it("preserves the original gate error when its independent failure observation fails, lost=%d diagnostic=%d", lost, diagnostic) {
+        report_enable_audit(&f, 1); f.audit.fault_id = "sample-fan-in"; f.audit.lost_ack = lost;
+        f.audit.fault2_id = "sample-gate-failure"; f.audit.lost_ack2 = diagnostic == 1;
+        if (diagnostic == 2) {
+          json_value_t *old = json_create_object(); check_not_null(old);
+          check_equal(turbo_runtime_json_object_set_string(old, "owner", "different-operation"), 0);
+          check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES, "sample-gate-failure", old), SALTS_OK);
+          json_free(old); f.audit.fault2_id = NULL;
+        }
+        int code = lost ? SALTS_EIO : SALTS_ENOSPC;
+        check_equal(single_agent_report_run(&f.config, &delivery, &phase), code);
+        check_null(delivery); check_equal(phase, "workers"); check_equal(f.audit.creates, 5);
+        check_true(f.diagnostics.gate_audit_attempted);
+        check_equal(f.diagnostics.gate_audit_code, diagnostic == 2 ? SALTS_EALREADY : diagnostic == 1 ? SALTS_EIO : SALTS_ENOSPC);
+        check_equal(f.diagnostics.operation_code, code); check_equal(f.diagnostics.operation_phase, phase);
+        check_false(f.diagnostics.stop_audit_attempted); check_equal(f.audit.gets, 0); check_equal(f.audit.lists, 0);
+        check_equal(f.audit.puts, diagnostic == 2); check_equal(atomic_load(&f.tool_calls), 0);
+        json_value_t *record = NULL;
+        check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES,
+            "sample-gate-failure", &record), diagnostic ? SALTS_OK : SALTS_ENOENT);
+        if (record) check_equal(json_get_string(record, diagnostic == 2 ? "owner" : "gate_outcome"), diagnostic == 2 ? "different-operation" : "unresolved");
+        json_free(record);
+        int before = f.audit.creates; f.audit.fault_id = f.audit.fault2_id = NULL;
+        check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EALREADY);
+        check_equal(f.audit.creates, before + 1); check_false(f.diagnostics.gate_audit_attempted);
+      }
+    }
+  }
+
+  it("drains a running backend before observing a later admission gate failure") {
+    report_enable_audit(&f, 1); f.audit.fault_id = f.audit.wait_active_id = "sample-worker-b";
+    check_equal(turbo_agent_transport_v2_set(f.agents[0], report_slow_cancel, &f.models[0], NULL), SALTS_OK);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOSPC);
+    check_null(delivery); check_equal(atomic_load(&f.active), 0); check_equal(atomic_load(&f.models[0].calls), 1);
+    check_true(f.diagnostics.gate_audit_attempted); check_equal(f.diagnostics.gate_audit_code, 0);
+    check_equal(f.audit.creates, 4); check_equal(atomic_load(&f.models[1].calls), 0);
+  }
+
+  it("retains a gate error without requiring the optional in-memory diagnostics output") {
+    report_enable_audit(&f, 1); f.config.diagnostics = NULL; f.audit.fault_id = "sample-fan-in";
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOSPC); check_null(delivery);
+    json_value_t *view = NULL;
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK);
+    check_equal(json_get_string(json_object_get(json_object_get(view, "records"), "gate-failure"), "gate_id"), "sample-fan-in");
+    json_free(view);
+  }
+
+  for (int broken = 0; broken < 16; ++broken) {
+    it("rejects corrupt gate-failure identity, error and acknowledgement metadata, case=%d", broken) {
+      report_enable_audit(&f, 1); f.audit.fault_id = "sample-fan-in";
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOSPC);
+      json_value_t *record = NULL, *value = NULL;
+      check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES,
+          "sample-gate-failure", &record), SALTS_OK);
+      if (broken < 6) {
+        static const char *fields[] = {"semantics", "report_id", "parent_run_id", "operation_phase", "gate_id", "gate_outcome"};
+        check_equal(turbo_runtime_json_object_set_string(record, fields[broken], broken == 5 ? "committed" : "different"), 0);
+      }
+      if (broken == 6) check_equal(turbo_runtime_json_object_set_int64(record, "schema_version", 2), 0);
+      if (broken == 7) check_equal(turbo_runtime_json_object_set_int64(record, "gate_return_code", 0), 0);
+      if (broken == 8) check_equal(turbo_runtime_json_object_set_int64(record, "observed_mono_ms", -1), 0);
+      if (broken == 9) check_equal(turbo_runtime_json_object_set_string(record, "clock_domain", "utc"), 0);
+      if (broken == 10) check_equal(turbo_runtime_json_object_set(record, "acknowledged_gates", json_create_array()), 0);
+      if (broken == 11) check_equal(turbo_runtime_json_object_set_string(record, "extra", "unknown"), 0);
+      if (broken == 12) {
+        const char *raw = "\"unresolved\\u0000committed\""; value = json_parse(raw, strlen(raw)); check_not_null(value);
+        check_equal(turbo_runtime_json_object_set(record, "gate_outcome", value), 0);
+      }
+      if (broken == 13) check_equal(turbo_runtime_json_object_set_string(record, "gate_id", "sample-manifest"), 0);
+      if (broken == 14) {
+        const char *raw = "1.5"; value = json_parse(raw, strlen(raw)); check_not_null(value);
+        check_equal(turbo_runtime_json_object_set(record, "gate_return_code", value), 0);
+      }
+      if (broken == 15) {
+        value = json_create_array(); check_not_null(value);
+        check_equal(turbo_runtime_json_array_append(value, json_create_string("sample")), 0);
+        check_equal(turbo_runtime_json_array_append(value, json_create_string("sample-worker-b")), 0);
+        check_equal(turbo_runtime_json_array_append(value, json_create_string("sample-worker-a")), 0);
+        check_equal(turbo_runtime_json_object_set(record, "acknowledged_gates", value), 0);
+      }
+      check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES, "sample-gate-failure", record), SALTS_OK); json_free(record);
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view);
+    }
+  }
+
+  for (int invalid = 0; invalid < 3; ++invalid) {
+    it("withholds inspection on a gate-failure read error, missing prerequisite or unreserved phase, case=%d", invalid) {
+      report_enable_audit(&f, 1); f.audit.fault_id = "sample-fan-in";
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOSPC);
+      if (invalid < 2) { f.audit.get_fault_id = invalid ? "sample-worker-b" : "sample-gate-failure"; f.audit.get_fault_code = invalid ? SALTS_ENOENT : SALTS_EIO; }
+      else {
+        json_value_t *m = NULL, *ids = json_create_object(); check_not_null(ids);
+        check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_MANIFESTS, "sample", &m), SALTS_OK);
+        for (size_t i = 0; i < 15; ++i) check_equal(turbo_runtime_json_object_set_clone(ids, report_inspect_suffixes[i], json_object_get(json_object_get(m, "phase_ids"), report_inspect_suffixes[i])), 0);
+        check_equal(turbo_runtime_json_object_set(m, "phase_ids", ids), 0);
+        check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, SINGLE_AGENT_REPORT_MANIFESTS, "sample", m), SALTS_OK); json_free(m);
+      }
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), invalid ? SALTS_EPROTO : SALTS_EIO); check_null(view);
+    }
+  }
+
+  it("rejects later normal gates after a historical gate-failure observation") {
+    report_enable_audit(&f, 1);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    single_agent_report_trace_t trace = {.acknowledged = 7u, .failed_gate = 3, .gate_failed = 1};
+    check_equal(single_agent_report_gate_failure(&f.config, &trace, "workers", SALTS_EIO), SALTS_OK);
+    json_value_t *view = (json_value_t *)1;
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view);
   }
 
   for (int late = 0; late < 3; ++late) {

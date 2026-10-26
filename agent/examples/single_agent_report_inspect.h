@@ -121,7 +121,12 @@ static int report_inspect_anchors(const json_value_t *o, turbo_agent_runtime_t *
       !report_inspect_text(checkpoint, "thread_id", 64) || !report_inspect_equal(checkpoint, "thread_id", o, "thread_id") ||
       !report_inspect_text(checkpoint, "parent_agent_run_id", 128) ||
       !report_inspect_equal(checkpoint, "parent_agent_run_id", o, "parent_run_id") ||
-      !report_inspect_text(checkpoint, "status", 128) || !report_inspect_equal(checkpoint, "status", o, "runtime_status"))) rc = SALTS_EPROTO;
+      /* Segment checkpoints are resumable snapshots, always interrupted;
+       * cancelled/timed_out are Run/summary outcomes, not checkpoint states. */
+      !report_inspect_is(checkpoint, "status", "interrupted") ||
+      (!report_inspect_is(o, "runtime_status", "interrupted") &&
+       !report_inspect_is(o, "runtime_status", "cancelled") &&
+       !report_inspect_is(o, "runtime_status", "timed_out")))) rc = SALTS_EPROTO;
 done:
   json_free(run); json_free(checkpoint); return rc;
 }
@@ -213,8 +218,71 @@ static int report_inspect_stop(const json_value_t *stop, json_value_t *const p[]
   return report_inspect_size(stop, 16384);
 }
 
+static int report_inspect_cleanup_failure(const json_value_t *failure, json_value_t *const p[],
+    const json_value_t *manifest, const char *id, const char *parent) {
+  static const char *const keys[] = {"schema_version", "semantics", "report_id", "parent_run_id",
+      "operation_phase", "operation_code", "gate_id", "gate_return_code", "gate_outcome", "observed_mono_ms",
+      "clock_domain", "acknowledged_gates", "acknowledged_cleanup"};
+  static const char *const phases[] = {"workers", "aggregation", "execution", "approval", "delivery", "delivery-audit"};
+  static const size_t min_normal[] = {0, 3, 5, 7, 8, 10}, max_normal[] = {3, 5, 6, 9, 9, 10};
+  const json_value_t *gates = json_object_get(failure, "acknowledged_gates"), *cleaned = json_object_get(failure, "acknowledged_cleanup");
+  int64_t code = report_inspect_integer(failure, "gate_return_code"), operation = report_inspect_integer(failure, "operation_code");
+  int64_t observed = report_inspect_integer(failure, "observed_mono_ms");
+  char key[64]; size_t phase, normal = 0, expected[2], count = 0, acknowledged, gate = 5;
+  for (phase = 0; phase < 6; ++phase) if (report_inspect_is(failure, "operation_phase", phases[phase])) break;
+  if (!report_inspect_shape(failure, keys, sizeof(keys)/sizeof(keys[0])) ||
+      report_inspect_integer(failure, "schema_version") != 2 ||
+      !report_inspect_is(failure, "semantics", "post_drain_report_cleanup_failure_observation") ||
+      !report_inspect_is(failure, "report_id", id) || !report_inspect_is(failure, "parent_run_id", parent) ||
+      !report_inspect_is(failure, "clock_domain", "origin_process_monotonic") || phase == 6 ||
+      code < INT_MIN || code > INT_MAX || !code || operation < INT_MIN || operation > INT_MAX || !operation ||
+      observed < report_inspect_integer(manifest, "started_mono_ms") || observed > INT64_C(9007199254740991) ||
+      json_type(gates) != JSON_ARRAY || json_type(cleaned) != JSON_ARRAY) return SALTS_EPROTO;
+  while (normal < 10 && p[normal]) ++normal;
+  if (normal < min_normal[phase] || normal > max_normal[phase] || json_array_size(gates) != normal + 1) return SALTS_EPROTO;
+  if (phase == 3 && normal == 9 && !report_inspect_is(p[7], "decision", "reject")) return SALTS_EPROTO;
+  for (size_t i = 0; i <= normal; ++i) {
+    const json_value_t *v = json_array_get(gates, i); const char *s = json_string(v);
+    if (i && report_inspect_key(id, single_agent_report_gates[i], key)) return SALTS_EPROTO;
+    if (!s || strlen(s) != json_string_len(v) || strcmp(s, i ? key : id)) return SALTS_EPROTO;
+  }
+  /* Normal gates acknowledged all preceding work. The retained segment and
+   * result-transfer boundaries determine which cleanup writes can occur. */
+  if (phase == 0) { if (normal) expected[count++] = 0; if (normal > 1) expected[count++] = 1; }
+  else if (phase == 1 && normal == 4) expected[count++] = 2;
+  else if ((phase == 2 && normal == 6) || (phase == 3 && normal >= 8) || (phase == 4 && normal == 8)) expected[count++] = 3;
+  acknowledged = json_array_size(cleaned);
+  if (acknowledged > count) return SALTS_EPROTO;
+  for (size_t i = 0; i < acknowledged; ++i) {
+    const json_value_t *v = json_array_get(cleaned, i); const char *s = json_string(v);
+    if (report_inspect_key(id, single_agent_report_cleanup_gates[expected[i]], key) || !s ||
+        strlen(s) != json_string_len(v) || strcmp(s, key) || !p[11 + expected[i]]) return SALTS_EPROTO;
+  }
+  int attempted = json_type(json_object_get(failure, "gate_id")) != JSON_NULL;
+  if (attempted) {
+    for (gate = 0; gate < 5; ++gate) {
+      if (report_inspect_key(id, single_agent_report_cleanup_gates[gate], key)) return SALTS_EPROTO;
+      if (report_inspect_is(failure, "gate_id", key)) break;
+    }
+    if (gate == 5 || !report_inspect_is(failure, "gate_outcome", "unresolved") ||
+        (gate == 4 ? acknowledged != count : acknowledged == count || gate != expected[acknowledged])) return SALTS_EPROTO;
+  } else if (!report_inspect_is(failure, "gate_outcome", "not_attempted")) return SALTS_EPROTO;
+  for (size_t role = 0; role < 4; ++role) if (p[11 + role]) {
+    int permitted = attempted && gate == role;
+    for (size_t i = 0; i < acknowledged; ++i) if (expected[i] == role) permitted = 1;
+    if (!permitted) return SALTS_EPROTO;
+  }
+  if (p[10] && (!attempted || gate != 4 ||
+      !report_inspect_equal(p[10], "operation_phase", failure, "operation_phase") ||
+      report_inspect_integer(p[10], "operation_code") != operation ||
+      report_inspect_integer(p[10], "observed_mono_ms") > observed)) return SALTS_EPROTO;
+  return report_inspect_size(failure, 16384);
+}
+
 static int report_inspect_gate_failure(const json_value_t *failure, json_value_t *const p[],
     const json_value_t *manifest, const char *id, const char *parent) {
+  if (report_inspect_integer(failure, "schema_version") == 2)
+    return report_inspect_cleanup_failure(failure, p, manifest, id, parent);
   static const char *const keys[] = {"schema_version", "semantics", "report_id", "parent_run_id",
       "operation_phase", "gate_id", "gate_return_code", "gate_outcome", "observed_mono_ms",
       "clock_domain", "acknowledged_gates"};

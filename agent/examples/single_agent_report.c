@@ -236,7 +236,7 @@ done:
       "Stop audit failed (code %d); original stop at %s (code %d); reconcile the persisted prefix.\n",
       diagnostics.stop_audit_code, diagnostics.operation_phase, diagnostics.operation_code);
   if (diagnostics.gate_audit_code) fprintf(stderr,
-      "Gate-failure observation failed (code %d); original stop at %s (code %d); reconcile the persisted prefix.\n",
+      "Failure observation failed (code %d); original stop at %s (code %d); reconcile the persisted prefix.\n",
       diagnostics.gate_audit_code, diagnostics.operation_phase, diagnostics.operation_code);
   return rc ? 1 : 0;
 }

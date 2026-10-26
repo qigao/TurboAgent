@@ -88,6 +88,9 @@ typedef struct single_agent_report_config_s {
 static const char *const single_agent_report_gates[] = {"manifest", "worker-a", "worker-b",
     "fan-in", "aggregate", "aggregate-final", "execute", "pending", "review", "execute-final", "ready"};
 typedef struct single_agent_report_trace_s { unsigned acknowledged, failed_gate; int gate_failed; } single_agent_report_trace_t;
+static const char *const single_agent_report_cleanup_gates[] = {
+    "stop-worker-a", "stop-worker-b", "stop-aggregate", "stop-execute", "stop"};
+typedef struct single_agent_report_cleanup_trace_s { unsigned acknowledged, failed_gate; } single_agent_report_cleanup_trace_t;
 
 /* A failed gate can have committed without acknowledgement. Do not issue more
  * normal/stop writes or retry the gate. A separate post-drain error observation
@@ -190,7 +193,7 @@ static int single_agent_report_result(const single_agent_report_config_t *config
  * links its acknowledged pre-transfer observation instead of inventing a new
  * Runtime result after ownership moved. No result payload is copied here. */
 static int single_agent_report_stop_task(const single_agent_report_config_t *config,
-    const single_agent_report_trace_t *trace, turbo_agent_router_task_t *task,
+    const single_agent_report_trace_t *trace, single_agent_report_cleanup_trace_t *cleanup, turbo_agent_router_task_t *task,
     const char *role, json_value_t *tasks) {
   static const char *fields[] = {"task_id", "execution_id", "thread_id", "execution_status",
       "runtime_result_code", "unresponsive", "result_taken"};
@@ -211,9 +214,14 @@ static int single_agent_report_stop_task(const single_agent_report_config_t *con
         !(trace->acknowledged & (1u << i))) { rc = SALTS_EPROTO; goto done; }
     rc = single_agent_report_key(config, gate, id);
   } else {
+    unsigned role_index = !strcmp(role, "worker-a") ? 0 : !strcmp(role, "worker-b") ? 1 : !strcmp(role, "aggregate") ? 2 : 3;
     int n = snprintf(suffix, sizeof(suffix), "stop-%s", role);
     rc = n > 0 && n < (int)sizeof(suffix) ? single_agent_report_key(config, suffix, id) : SALTS_ENOBUFS;
-    if (!rc) rc = turbo_agent_router_task_record_observation(task, config->audit_runtime, id);
+    if (!rc) {
+      cleanup->failed_gate = role_index + 1;
+      rc = turbo_agent_router_task_record_observation(task, config->audit_runtime, id);
+      if (!rc) { cleanup->acknowledged |= 1u << role_index; cleanup->failed_gate = 0; }
+    }
   }
   if (rc) goto done;
   entry = json_create_object(); rc = SALTS_ENOMEM;
@@ -235,7 +243,7 @@ done:
 }
 
 static int single_agent_report_stop(const single_agent_report_config_t *config,
-    const single_agent_report_trace_t *trace, turbo_agent_router_task_t *const workers[2],
+    const single_agent_report_trace_t *trace, single_agent_report_cleanup_trace_t *cleanup, turbo_agent_router_task_t *const workers[2],
     turbo_agent_router_task_t *task, const char *task_role, const char *phase, int operation) {
   json_value_t *record = NULL, *tasks = NULL, *gates = NULL, *value = NULL;
   char id[64]; uint64_t now = cmeta_monotonic_ms();
@@ -244,11 +252,11 @@ static int single_agent_report_stop(const single_agent_report_config_t *config,
   record = json_create_object(); tasks = json_create_array(); gates = json_create_array();
   if (!record || !tasks || !gates) goto done;
   for (size_t i = 0; i < 2; ++i) if (workers[i]) {
-    rc = single_agent_report_stop_task(config, trace, workers[i], i ? "worker-b" : "worker-a", tasks);
+    rc = single_agent_report_stop_task(config, trace, cleanup, workers[i], i ? "worker-b" : "worker-a", tasks);
     if (rc) goto done;
   }
   if (task) {
-    rc = single_agent_report_stop_task(config, trace, task, task_role, tasks);
+    rc = single_agent_report_stop_task(config, trace, cleanup, task, task_role, tasks);
     if (rc) goto done;
   }
   rc = SALTS_ENOMEM;
@@ -277,7 +285,11 @@ static int single_agent_report_stop(const single_agent_report_config_t *config,
     rc = !text ? SALTS_ENOMEM : strlen(text) > TURBO_AGENT_ROUTER_OBSERVATION_MAX_BYTES ? SALTS_ENOBUFS : SALTS_OK;
     json_serialize_free(text);
   }
-  if (!rc) rc = turbo_agent_runtime_store_create_json_if_absent(config->audit_runtime, SINGLE_AGENT_REPORT_STOPS, id, record);
+  if (!rc) {
+    cleanup->failed_gate = 5;
+    rc = turbo_agent_runtime_store_create_json_if_absent(config->audit_runtime, SINGLE_AGENT_REPORT_STOPS, id, record);
+    if (!rc) cleanup->failed_gate = 0;
+  }
 done:
   json_free(value); json_free(gates); json_free(tasks); json_free(record); return rc;
 }
@@ -304,6 +316,17 @@ static int single_agent_report_ready(const single_agent_report_config_t *config,
   rc = turbo_agent_runtime_store_create_json_if_absent(config->audit_runtime, SINGLE_AGENT_REPORT_READY, id, record);
 done:
   json_free(record); json_free(view); return rc;
+}
+
+static int single_agent_report_failure_save(const single_agent_report_config_t *config, const json_value_t *record) {
+  char id[64]; int rc = single_agent_report_key(config, "gate-failure", id);
+  if (!rc) {
+    char *text = json_serialize(record, NULL);
+    rc = !text ? SALTS_ENOMEM : strlen(text) > TURBO_AGENT_ROUTER_OBSERVATION_MAX_BYTES ? SALTS_ENOBUFS : SALTS_OK;
+    json_serialize_free(text);
+  }
+  return rc ? rc : turbo_agent_runtime_store_create_json_if_absent(config->audit_runtime,
+      SINGLE_AGENT_REPORT_GATE_FAILURES, id, record);
 }
 
 /* Only an acknowledged manifest owns this diagnostic namespace. The failed
@@ -339,16 +362,60 @@ static int single_agent_report_gate_failure(const single_agent_report_config_t *
       turbo_runtime_json_object_set_string(record, "clock_domain", "origin_process_monotonic")) goto done;
   if (turbo_runtime_json_object_set(record, "acknowledged_gates", gates)) goto done;
   gates = NULL;
-  rc = single_agent_report_key(config, "gate-failure", id);
-  if (!rc) {
-    char *text = json_serialize(record, NULL);
-    rc = !text ? SALTS_ENOMEM : strlen(text) > TURBO_AGENT_ROUTER_OBSERVATION_MAX_BYTES ? SALTS_ENOBUFS : SALTS_OK;
-    json_serialize_free(text);
-  }
-  if (!rc) rc = turbo_agent_runtime_store_create_json_if_absent(config->audit_runtime,
-      SINGLE_AGENT_REPORT_GATE_FAILURES, id, record);
+  rc = single_agent_report_failure_save(config, record);
 done:
   json_free(value); json_free(gates); json_free(record); return rc;
+}
+
+/* Version 2 supplements an operational stop with its cleanup error. Reuse the
+ * reserved diagnostic key, never read back/retry cleanup or recursively audit
+ * this write. A projection error has no failed persistence gate. */
+static int single_agent_report_cleanup_failure(const single_agent_report_config_t *config,
+    const single_agent_report_trace_t *trace, const single_agent_report_cleanup_trace_t *cleanup,
+    const char *phase, int operation, int audit) {
+  json_value_t *record = NULL, *gates = NULL, *cleaned = NULL, *value = NULL;
+  char id[64]; uint64_t now = cmeta_monotonic_ms(); int rc = SALTS_ENOMEM;
+  if (!(trace->acknowledged & 1u) || trace->gate_failed || !operation || !audit ||
+      cleanup->failed_gate > 5 || cleanup->acknowledged > 15u) return SALTS_EPROTO;
+  if (now > UINT64_C(9007199254740991)) return SALTS_ERANGE;
+  record = json_create_object(); gates = json_create_array(); cleaned = json_create_array();
+  if (!record || !gates || !cleaned) goto done;
+  for (unsigned i = 0; i < 11; ++i) if (trace->acknowledged & (1u << i)) {
+    if (i && (rc = single_agent_report_key(config, single_agent_report_gates[i], id))) goto done;
+    value = json_create_string(i ? id : config->audit_id); rc = SALTS_ENOMEM;
+    if (!value || turbo_runtime_json_array_append(gates, value)) goto done;
+    value = NULL;
+  }
+  for (unsigned i = 0; i < 4; ++i) if (cleanup->acknowledged & (1u << i)) {
+    rc = single_agent_report_key(config, single_agent_report_cleanup_gates[i], id); if (rc) goto done;
+    value = json_create_string(id); rc = SALTS_ENOMEM;
+    if (!value || turbo_runtime_json_array_append(cleaned, value)) goto done;
+    value = NULL;
+  }
+  if (turbo_runtime_json_object_set_int64(record, "schema_version", 2) ||
+      turbo_runtime_json_object_set_string(record, "semantics", "post_drain_report_cleanup_failure_observation") ||
+      turbo_runtime_json_object_set_string(record, "report_id", config->audit_id) ||
+      turbo_runtime_json_object_set_string(record, "parent_run_id", config->parent_run_id) ||
+      turbo_runtime_json_object_set_string(record, "operation_phase", phase) ||
+      turbo_runtime_json_object_set_int64(record, "operation_code", operation) ||
+      turbo_runtime_json_object_set_int64(record, "gate_return_code", audit) ||
+      turbo_runtime_json_object_set_string(record, "gate_outcome", cleanup->failed_gate ? "unresolved" : "not_attempted") ||
+      turbo_runtime_json_object_set_int64(record, "observed_mono_ms", (int64_t)now) ||
+      turbo_runtime_json_object_set_string(record, "clock_domain", "origin_process_monotonic")) goto done;
+  if (cleanup->failed_gate) {
+    rc = single_agent_report_key(config, single_agent_report_cleanup_gates[cleanup->failed_gate - 1], id); if (rc) goto done;
+    value = json_create_string(id);
+  } else value = json_create_null();
+  rc = SALTS_ENOMEM;
+  if (!value || turbo_runtime_json_object_set(record, "gate_id", value)) goto done;
+  value = NULL;
+  if (turbo_runtime_json_object_set(record, "acknowledged_gates", gates)) goto done;
+  gates = NULL;
+  if (turbo_runtime_json_object_set(record, "acknowledged_cleanup", cleaned)) goto done;
+  cleaned = NULL;
+  rc = single_agent_report_failure_save(config, record);
+done:
+  json_free(value); json_free(cleaned); json_free(gates); json_free(record); return rc;
 }
 
 /* Validate the raw Provider response before accepting its normalized event.
@@ -750,12 +817,20 @@ done:
     }
   }
   if (rc && config->audit_runtime && (trace.acknowledged & 1u) && !trace.gate_failed) {
-    int audit_rc = single_agent_report_stop(config, &trace, worker_refs, task, task_role, *out_phase, rc);
+    single_agent_report_cleanup_trace_t cleanup = {0};
+    int audit_rc = single_agent_report_stop(config, &trace, &cleanup, worker_refs, task, task_role, *out_phase, rc);
     if (config->diagnostics) {
       config->diagnostics->stop_audit_attempted = 1;
       config->diagnostics->stop_audit_code = audit_rc;
     }
-    if (audit_rc) { rc = audit_rc; *out_phase = "stop-audit"; }
+    if (audit_rc) {
+      int diagnostic_rc = single_agent_report_cleanup_failure(config, &trace, &cleanup, *out_phase, rc, audit_rc);
+      if (config->diagnostics) {
+        config->diagnostics->gate_audit_attempted = 1;
+        config->diagnostics->gate_audit_code = diagnostic_rc;
+      }
+      rc = audit_rc; *out_phase = "stop-audit";
+    }
   }
   if (group) (void)turbo_agent_router_group_release(group);
   for (size_t i = 0; i < 2; ++i) if (workers[i]) (void)turbo_agent_router_task_release(workers[i]);

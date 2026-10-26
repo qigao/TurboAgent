@@ -254,7 +254,8 @@ manifest or EALREADY namespace never permits appending a stop to an older report
 The possible prefix remains for explicit inspection; a separate gate-failure observation
 described below retains the returned error without resolving that prefix. There is no read/list/put fallback.
 Cleanup audit itself stops at its first error or conflicting id, without overwrite,
-retry or further writes. Accepted owners are released even then. Independent terminal
+retry or further cleanup writes. One independent failure observation can retain that
+error as described below. Accepted owners are released even then. Independent terminal
 observations can therefore survive without the report stop row.
 
 Successful stop auditing preserves the original return code/phase. A cleanup audit
@@ -305,6 +306,43 @@ a gate error with no gate record. Reopened owners and the real CLI check the ori
 prefix/error and independent model/tool/error-return/handoff/delivery counters. Both
 ambiguous committed and absent gates remain unresolved; old ids cannot be reissued.
 
+### Cleanup failures in the same diagnostic namespace
+
+If operational stop auditing fails, the Host attempts one version-2 record at the same
+reserved report_gate_failures / demo-gate-failure key. It uses
+post_drain_report_cleanup_failure_observation semantics and retains both the original
+operation_phase/operation_code and the cleanup gate_return_code. Normal acknowledged
+gate ids and separately acknowledged_cleanup terminal-observation ids are ordered
+metadata; no result payload or second task owner is created. The manifest and existing
+normal-gate version-1 format remain unchanged.
+
+For an error from a cleanup persistence API, gate_id names its exact prospective
+observation/stop key and gate_outcome remains unresolved. A committed row with a lost
+acknowledgement may be present, but it is not added to acknowledged_cleanup. If cleanup
+construction fails outside a persistence gate, gate_id is null and gate_outcome is
+not_attempted; earlier acknowledged cleanup writes can still be present. Acknowledgement
+is captured immediately after a successful write, before later projection/allocation.
+
+The original return contract remains: a cleanup error returns that code at stop-audit,
+with the earlier operation retained in optional diagnostics. The separate failure
+observation cannot replace either error; its own error/conflict/lost acknowledgement
+is gate_audit_code, with no recursive logging, retry, readback or fallback. Existing
+ids are never overwritten. No new key, installed API or Router/Runtime/Journal schema
+is introduced, and normal successful reports still have eleven writes.
+
+Inspection accepts version 1 and version 2 independently. Version 2 must match the
+exact normal prefix, original stop phase and legal retained result segment. Confirmed
+cleanup rows must exist in order. Only the failed gate can additionally exist without
+acknowledgement; later/unrelated cleanup rows are rejected. A surviving stop row must
+agree on the original error/phase and precede the diagnostic observation time. These
+checks establish historical consistency, not authenticity, delivery or recovery rights.
+
+Five additional crash cases exercise cleanup-observation and stop-row errors, diagnostic
+commit boundaries and diagnostic lost acknowledgement. The process oracle separately
+counts original model/tool work, error returns and application delivery; old report ids
+remain unusable. Unit tests additionally project a construction-only error without
+inventing a persistence attempt; this is not an allocator-fault qualification.
+
 ### Explicit inspection after restart
 
 After the prior application owner has drained/closed, inspect a known report without
@@ -337,15 +375,21 @@ duplicate fields and references are checked; existing typed Router loaders valid
 own schemas and limits. Unknown versions/fields and contradictory normal phase prefixes,
 route/task/Execution/thread/parent identities, review checkpoint/segment links and stop
 references fail closed. Standalone terminal cleanup observations can exist without a
-stop row, as after an unacknowledged cleanup write. A gate-failure record must reference
-the exact acknowledged prefix; only its failed gate may be present or absent, with no
-later gate or stop records. An error key absent from an older manifest is rejected.
+stop row, as after an unacknowledged cleanup write. A version-1 normal gate-failure record
+must reference the exact acknowledged prefix; only its failed normal gate may be present
+or absent, with no later gate or stop records. Version 2 follows the cleanup contract
+above. An error key absent from an older manifest is rejected.
 
 Referenced canonical Runs/checkpoints are loaded only by their original recorded ids
 from the caller-bound store, checking their identities and parent/thread lineage. There
 is no latest-thread-head substitution or get/list/put fallback. Approval resume can update
 the same Run from interrupted to completed; its current status must not replace an older
 pending observation. Historical checkpoint status is checked at the original checkpoint.
+Runtime segment checkpoints use interrupted status for approval, cancellation and
+deadline snapshots, while the corresponding Run/summary can be interrupted, cancelled
+or timed_out. Inspection checks that explicit mapping rather than requiring equal
+status strings. Deterministic Runtime segment tests generate actual cancelled/timed-out
+Runs and interrupted checkpoints, and reject corrupted checkpoint outcome strings.
 The reader verifies reference identities and selected canonical metadata, not signed
 provenance, a complete Runtime/graph payload, model answer quality or external effects.
 

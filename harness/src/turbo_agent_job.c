@@ -1,4 +1,6 @@
 #include "turbo_agent_job.h"
+#include "turbo_agent_job_cancel.h"
+#include "turbo_agent_job_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,6 +8,7 @@
 
 #define JOBS "agent_jobs"
 #define REVISIONS "agent_job_revisions"
+#define CANCELLATIONS "agent_job_cancellations"
 
 struct turbo_agent_job_s {
   turbo_agent_runtime_t *runtime;
@@ -152,7 +155,81 @@ static int history_absent(const turbo_agent_job_t *job) {
     json_free(record);
     if (rc != SALTS_ENOENT) return rc == SALTS_OK ? SALTS_EALREADY : rc;
   }
-  return SALTS_OK;
+  {
+    json_value_t *record = NULL;
+    int rc = turbo_agent_runtime_store_get_json_status(job->runtime,
+        CANCELLATIONS, job->id, &record);
+    json_free(record);
+    return rc == SALTS_ENOENT ? SALTS_OK : rc == SALTS_OK ? SALTS_EALREADY : rc;
+  }
+}
+
+static int cancellation_read(turbo_agent_runtime_t *runtime, const char *id,
+    uint32_t revision, json_value_t **out) {
+  json_value_t *record = NULL;
+  const char *request;
+  int rc = turbo_agent_runtime_store_get_json_status(runtime, CANCELLATIONS, id, &record);
+  *out = NULL;
+  if (rc != SALTS_OK) { json_free(record); return rc; }
+  /* Cancellation has its own additive schema, independent of Job history. */
+  if (!record || json_type(record) != JSON_OBJECT) rc = SALTS_EPROTO;
+  else {
+    int64_t version = number(record, "schema_version");
+    rc = version == 1 ? SALTS_OK : version > 0 ? SALTS_ENOTSUP : SALTS_EPROTO;
+  }
+  request = field_text(record, "request_id", 64);
+  if (rc == SALTS_OK && (json_object_size(record) != 6 ||
+      !field_is(record, "kind", "job_cancellation") ||
+      !field_is(record, "job_id", id) || number(record, "job_revision") != revision ||
+      !id_valid(request, 64) || !field_text(record, "reason_ref", 1024))) rc = SALTS_EPROTO;
+  if (rc == SALTS_OK) { *out = record; record = NULL; }
+  json_free(record);
+  return rc;
+}
+
+int turbo_agent_job_check_active(turbo_agent_runtime_t *runtime, const char *id,
+    uint32_t revision) {
+  json_value_t *record = NULL;
+  int rc = cancellation_read(runtime, id, revision, &record);
+  json_free(record);
+  return rc == SALTS_ENOENT ? SALTS_OK : rc == SALTS_OK ? SALTS_ECANCELED : rc;
+}
+
+int turbo_agent_job_get_cancellation(const turbo_agent_job_t *job, json_value_t **out) {
+  job_head_t head;
+  int rc;
+  if (!out) return SALTS_EINVAL;
+  *out = NULL;
+  if (!job) return SALTS_EINVAL;
+  rc = head_read(job, &head);
+  if (rc != SALTS_OK) return rc;
+  rc = cancellation_read(job->runtime, job->id, head.revision, out);
+  head_destroy(&head);
+  return rc;
+}
+
+int turbo_agent_job_request_cancel(turbo_agent_job_t *job, uint32_t expected,
+    const char *request, const char *reason) {
+  job_head_t head;
+  json_value_t *record;
+  int rc;
+  if (!job || !id_valid(request, 64) || !text_valid(reason, 1024)) return SALTS_EINVAL;
+  rc = head_read(job, &head);
+  if (rc != SALTS_OK) return rc;
+  rc = head.revision == expected ? SALTS_OK : SALTS_EBUSY;
+  head_destroy(&head);
+  if (rc != SALTS_OK) return rc;
+  record = json_create_object();
+  rc = SALTS_ENOMEM;
+  if (record && !turbo_runtime_json_object_set_int64(record, "schema_version", 1) &&
+      !turbo_runtime_json_object_set_string(record, "kind", "job_cancellation") &&
+      !turbo_runtime_json_object_set_string(record, "job_id", job->id) &&
+      !turbo_runtime_json_object_set_int64(record, "job_revision", expected) &&
+      !turbo_runtime_json_object_set_string(record, "request_id", request) &&
+      !turbo_runtime_json_object_set_string(record, "reason_ref", reason))
+    rc = turbo_agent_runtime_store_create_json_if_absent(job->runtime, CANCELLATIONS, job->id, record);
+  json_free(record);
+  return rc;
 }
 
 static turbo_agent_job_t *job_allocate(turbo_agent_runtime_t *runtime, const char *id) {
@@ -254,9 +331,10 @@ static int append_admit(turbo_agent_job_t *job, uint32_t expected, int binding,
     job_head_t *head) {
   int rc = head_read(job, head);
   if (rc != SALTS_OK) return rc;
-  if (head->revision != expected || head->binding || (binding && !head->proposal))
-    rc = SALTS_EBUSY;
-  else if (head->revision == TURBO_AGENT_JOB_MAX_REVISIONS) rc = SALTS_ENOSPC;
+  if (head->revision != expected) rc = SALTS_EBUSY;
+  else rc = turbo_agent_job_check_active(job->runtime, job->id, head->revision);
+  if (rc == SALTS_OK && (head->binding || (binding && !head->proposal))) rc = SALTS_EBUSY;
+  if (rc == SALTS_OK && head->revision == TURBO_AGENT_JOB_MAX_REVISIONS) rc = SALTS_ENOSPC;
   if (rc != SALTS_OK) head_destroy(head);
   return rc;
 }

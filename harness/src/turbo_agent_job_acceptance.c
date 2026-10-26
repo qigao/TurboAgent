@@ -198,7 +198,7 @@ int turbo_agent_harness_record_job_acceptance_json(turbo_agent_harness_t *harnes
       (decision != TURBO_AGENT_JOB_ACCEPTED && decision != TURBO_AGENT_JOB_REJECTED)) return SALTS_EINVAL;
   rc = turbo_agent_harness_begin_submit(harness);
   if (rc != SALTS_OK) return rc;
-  rc = turbo_agent_harness_prepare_job_proof(harness, id, revision, config, diagnostic, &proof);
+  rc = turbo_agent_harness_prepare_job_proof(harness, id, revision, 1, config, diagnostic, &proof);
   if (rc != SALTS_OK) goto done;
   rc = validate_reference(&proof, reference, decision, evidence_ref, diagnostic);
   if (rc != SALTS_OK) goto done;
@@ -214,9 +214,12 @@ int turbo_agent_harness_record_job_acceptance_json(turbo_agent_harness_t *harnes
       turbo_runtime_json_object_set_clone(record, "execution_reference", reference)) goto done;
   rc = current(&proof);
   if (rc != SALTS_OK) goto done;
+  rc = turbo_agent_harness_require_job_active(proof.runtime, proof.snapshot, diagnostic);
+  if (rc != SALTS_OK) goto done;
   rc = turbo_agent_runtime_store_create_json_if_absent(proof.runtime, ACCEPTANCE, id, record);
   if (rc != SALTS_OK) goto done;
   rc = current(&proof);
+  if (rc == SALTS_OK) rc = turbo_agent_harness_require_job_active(proof.runtime, proof.snapshot, diagnostic);
   if (rc == SALTS_OK) { *out = record; record = NULL; }
 done:
   json_free(record);
@@ -253,7 +256,7 @@ int turbo_agent_harness_get_job_acceptance_json(turbo_agent_harness_t *harness,
     return SALTS_EINVAL;
   rc = turbo_agent_harness_begin_submit(harness);
   if (rc != SALTS_OK) return rc;
-  rc = turbo_agent_harness_prepare_job_proof(harness, id, revision, config, diagnostic, &proof);
+  rc = turbo_agent_harness_prepare_job_proof(harness, id, revision, 0, config, diagnostic, &proof);
   if (rc != SALTS_OK) goto done;
   rc = turbo_agent_harness_load_job_acceptance(&proof, diagnostic, &record);
   if (rc == SALTS_OK) { *out = record; record = NULL; }

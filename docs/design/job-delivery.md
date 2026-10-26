@@ -67,6 +67,12 @@ receipt reference. If the destination cannot reconcile an unknown outcome, this
 API cannot safely choose a resend; it makes no exactly-once network guarantee.
 There is no callback or automatic delivery/retry path in Runtime or Harness.
 
+[Durable cancellation](job-cancellation.md) fences new intent preparation. Existing
+delivery reads and matching receipt publication remain available for explicit
+reconciliation after cancellation, under the same current proof checks. Host
+must serialize cancellation checks through any external send; a historical intent
+or recovery read does not authorize sending cancelled work.
+
 Both publications use one create-if-absent. All record allocation occurs before
 publication. Duplicate records, including identical submissions, return EALREADY;
 there is no get/put fallback, overwrite, automatic retry or error readback. A

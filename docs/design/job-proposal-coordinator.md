@@ -1,5 +1,9 @@
 # Job proposal coordinator, schema v1
 
+The additive [cancellation control API](job-cancellation.md) now fences future
+proposal/binding and bound Job execution without changing the v1 history schema.
+Cancellation is separate control evidence; snapshots retain their proposal state.
+
 Status: implemented proposal/binding foundation, not a complete Job scheduler or
 M1 workbench. Public C11 API: `turbo_agent_job.h`, owned by Harness. This API uses
 a caller-supplied Runtime, never selects a backend and does not consume it.

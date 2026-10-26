@@ -1,6 +1,7 @@
 #include <turbo_agent.h>
 #include <turbo_agent_app.h>
 #include <turbo_agent_job.h>
+#include <turbo_agent_job_cancel.h>
 #include <turbo_agent_job_acceptance.h>
 #include <turbo_agent_job_delivery.h>
 #include <turbo_agent_job_verifier.h>
@@ -131,6 +132,10 @@ spec("installed C++17 SDK consumer") {
     check_equal(turbo_agent_job_bind_compiled_inspect(job, 1, "thread", "attempt"), SALTS_OK);
     check_equal(turbo_agent_job_get_snapshot(job, &snapshot), SALTS_OK);
     check_equal(json_get_string(snapshot, "state"), "attempt_bound");
+    json_free(snapshot); snapshot = nullptr;
+    check_equal(turbo_agent_job_request_cancel(job, 2, "cpp-stop", "host-reason"), SALTS_OK);
+    check_equal(turbo_agent_job_get_cancellation(job, &snapshot), SALTS_OK);
+    check_equal(json_get_string(snapshot, "request_id"), "cpp-stop");
     turbo_agent_job_destroy(job);
     json_free(snapshot);
     turbo_agent_runtime_destroy(runtime);

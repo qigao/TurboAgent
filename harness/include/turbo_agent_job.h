@@ -81,6 +81,8 @@ CXX_C_API int turbo_agent_job_bind_compiled_inspect(turbo_agent_job_t *job,
  * expected revision or illegal state returns EBUSY; exhausted history ENOSPC.
  * Reads scan all 64 revision slots to reject gaps, with bounded retained data.
  * Backend atomicity/crash durability is only as documented by that backend.
+ * The additive turbo_agent_job_cancel.h control API durably fences proposals
+ * and binding with ECANCELED without altering this schema or snapshot state.
  */
 
 #ifdef __cplusplus

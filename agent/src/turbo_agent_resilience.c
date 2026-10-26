@@ -145,8 +145,8 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
   unsigned int attempt;
   if (!agent || !request_json || !out_response_json) return SALTS_EINVAL;
   *out_response_json = NULL;
-  tstr_free(agent->last_provider_request_id);
-  agent->last_provider_request_id = NULL;
+  tstr_free(agent->call_state.last_provider_request_id);
+  agent->call_state.last_provider_request_id = NULL;
   if (!agent->transport_v2) {
     if (agent->transport_fn == turbo_agent_http_transport) {
       turbo_agent_transport_response_t response;
@@ -192,8 +192,8 @@ int turbo_agent_resilient_transport(turbo_agent_t *agent, json_value_t *state,
       }
       *out_response_json = response.body;
       if (response.provider_request_id) {
-        agent->last_provider_request_id = turbo_agent_util_strdup(response.provider_request_id);
-        if (!agent->last_provider_request_id) {
+        agent->call_state.last_provider_request_id = turbo_agent_util_strdup(response.provider_request_id);
+        if (!agent->call_state.last_provider_request_id) {
           free(*out_response_json);
           *out_response_json = NULL;
           return SALTS_ENOMEM;
@@ -297,8 +297,8 @@ int turbo_agent_usage_record(turbo_agent_t *agent, json_value_t *state,
   json_object_set_string(record, "operation", "model");
   json_object_set_string(record, "provider", turbo_agent_provider_name(agent));
   json_object_set_string(record, "model", agent->model);
-  if (agent->last_provider_request_id)
-    json_object_set_string(record, "provider_request_id", agent->last_provider_request_id);
+  if (agent->call_state.last_provider_request_id)
+    json_object_set_string(record, "provider_request_id", agent->call_state.last_provider_request_id);
   json_object_set_number(record, "input_tokens", (double)input_tokens);
   json_object_set_null(record, "cached_input_tokens");
   json_object_set_number(record, "output_tokens", (double)output_tokens);

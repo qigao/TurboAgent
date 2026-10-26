@@ -18,6 +18,12 @@ typedef struct turbo_agent_app_config_s {
 } turbo_agent_app_config_t;
 
 CXX_C_API turbo_agent_app_t *turbo_agent_app_create(const turbo_agent_app_config_t *config);
+/** Explicit-store counterpart of create; no implicit memory fallback.
+ * Validation and Session store ownership follow session_create_with_store.
+ * Allocation failure before Session construction consumes no stores.
+ * *out_app is NULL on failure. */
+CXX_C_API int turbo_agent_app_create_with_store(
+    const turbo_agent_app_config_t *config, turbo_agent_app_t **out_app);
 CXX_C_API void turbo_agent_app_destroy(turbo_agent_app_t *app);
 
 CXX_C_API turbo_agent_session_t *turbo_agent_app_session(const turbo_agent_app_t *app);

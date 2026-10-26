@@ -1,6 +1,7 @@
 #include "tinytest.h"
 #include "turbo_agent_remote_session.h"
 #include "turbo_agent_session.h"
+#include "turbo_agent_app.h"
 #include <tstr.h>
 
 typedef struct lifecycle_store_probe_s {
@@ -134,6 +135,74 @@ spec("Session construction ownership") {
     check_equal(memory_probe.releases, 1);
     config.runtime_store.user_data_free(config.runtime_store.user_data);
     check_equal(runtime_probe.releases, 1);
+  }
+
+  it("rejects each incomplete explicit store without consuming resources") {
+    turbo_agent_runtime_store_t complete = config.runtime_store;
+    int i;
+    for (i = 0; i < 3; ++i) {
+      config.runtime_store = complete;
+      if (i == 0) config.runtime_store.put = NULL;
+      if (i == 1) config.runtime_store.get = NULL;
+      if (i == 2) config.runtime_store.list = NULL;
+      session = (turbo_agent_session_t *)&config;
+      check_equal(turbo_agent_session_create_with_store(&config, &session), SALTS_EINVAL);
+      check_null(session);
+      check_equal(runtime_probe.calls, 0);
+      check_equal(runtime_probe.releases, 0);
+      check_equal(memory_probe.releases, 0);
+    }
+    check_equal(turbo_agent_session_create_with_store(NULL, &session), SALTS_EINVAL);
+    check_equal(turbo_agent_session_create_with_store(&config, NULL), SALTS_EINVAL);
+  }
+
+  it("accepts a complete explicit store and releases both owned stores once") {
+    check_equal(turbo_agent_session_create_with_store(&config, &session), SALTS_OK);
+    check_not_null(session);
+    check_equal(runtime_probe.calls, 0);
+    turbo_agent_session_destroy(session);
+    session = NULL;
+    check_equal(runtime_probe.releases, 1);
+    check_equal(memory_probe.releases, 1);
+  }
+
+  it("reports explicit-store Agent rejection with the documented transfer boundary") {
+    config.agent_config.model = "model-without-transport-or-credentials";
+    check_equal(turbo_agent_session_create_with_store(&config, &session), SALTS_EIO);
+    check_null(session);
+    check_equal(runtime_probe.releases, 1);
+    check_equal(memory_probe.releases, 0);
+    turbo_agent_memory_store_destroy(&config.memory_store);
+    check_equal(memory_probe.releases, 1);
+  }
+
+  it("accepts explicitly selected memory without claiming durability") {
+    config.runtime_store = turbo_agent_runtime_store_memory_create();
+    check_equal(turbo_agent_session_create_with_store(&config, &session), SALTS_OK);
+    check_not_null(session);
+  }
+
+  it("propagates explicit-store admission and ownership through App") {
+    turbo_agent_app_config_t app_config = {.session_config = &config};
+    turbo_agent_app_t *app = NULL;
+    config.runtime_store.list = NULL;
+    check_equal(turbo_agent_app_create_with_store(&app_config, &app), SALTS_EINVAL);
+    check_null(app);
+    check_equal(runtime_probe.releases, 0);
+    check_equal(memory_probe.releases, 0);
+    config.runtime_store.list = lifecycle_list;
+    config.agent_config.model = "model-without-transport-or-credentials";
+    check_equal(turbo_agent_app_create_with_store(&app_config, &app), SALTS_EIO);
+    check_null(app);
+    check_equal(runtime_probe.releases, 1);
+    check_equal(memory_probe.releases, 0);
+    config.runtime_store = turbo_agent_runtime_store_memory_create();
+    config.agent_config.model = NULL;
+    check_equal(turbo_agent_app_create_with_store(&app_config, &app), SALTS_OK);
+    check_not_null(app);
+    turbo_agent_app_destroy(app);
+    check_equal(runtime_probe.releases, 1);
+    check_equal(memory_probe.releases, 1);
   }
 
   it("copies aliased caller strings and preserves empty optional configuration") {

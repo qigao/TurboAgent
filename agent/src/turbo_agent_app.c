@@ -24,6 +24,27 @@ CXX_C_API turbo_agent_app_t *turbo_agent_app_create(const turbo_agent_app_config
   return app;
 }
 
+CXX_C_API int turbo_agent_app_create_with_store(
+    const turbo_agent_app_config_t *config, turbo_agent_app_t **out_app) {
+  turbo_agent_app_t *app;
+  int rc;
+  if (!out_app) return SALTS_EINVAL;
+  *out_app = NULL;
+  if (!config || !config->session_config ||
+      !config->session_config->runtime_store.put ||
+      !config->session_config->runtime_store.get ||
+      !config->session_config->runtime_store.list) return SALTS_EINVAL;
+  app = (turbo_agent_app_t *)calloc(1, sizeof(*app));
+  if (!app) return SALTS_ENOMEM;
+  rc = turbo_agent_session_create_with_store(config->session_config, &app->session);
+  if (rc != SALTS_OK) {
+    free(app);
+    return rc;
+  }
+  *out_app = app;
+  return SALTS_OK;
+}
+
 CXX_C_API void turbo_agent_app_destroy(turbo_agent_app_t *app) {
   if (!app) {
     return;

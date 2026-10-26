@@ -342,31 +342,22 @@ static int turbo_agent_session_copy_optional_config(
   return 0;
 }
 
-CXX_C_API turbo_agent_session_t *
-turbo_agent_session_create(const turbo_agent_session_config_t *config) {
+static int turbo_agent_session_construct(
+    const turbo_agent_session_config_t *config, turbo_agent_session_t **out_session) {
   turbo_agent_session_t *session;
   turbo_agent_runtime_store_t runtime_store;
   turbo_agent_config_t effective_config = {0};
   const turbo_model_provider_t *provider;
   int create_agent;
 
-  if (!config) {
-    return NULL;
-  }
   runtime_store = config->runtime_store;
-  if (!runtime_store.put || !runtime_store.get || !runtime_store.list) {
-    runtime_store = turbo_agent_runtime_store_memory_create();
-  }
-  if (!runtime_store.put || !runtime_store.get || !runtime_store.list) {
-    return NULL;
-  }
 
   session = (turbo_agent_session_t *)calloc(1, sizeof(*session));
   if (!session) {
     if (runtime_store.user_data_free) {
       runtime_store.user_data_free(runtime_store.user_data);
     }
-    return NULL;
+    return SALTS_ENOMEM;
   }
 
   session->runtime = turbo_agent_runtime_create(&runtime_store);
@@ -375,7 +366,7 @@ turbo_agent_session_create(const turbo_agent_session_config_t *config) {
       runtime_store.user_data_free(runtime_store.user_data);
     }
     turbo_agent_session_destroy(session);
-    return NULL;
+    return SALTS_ENOMEM;
   }
 
   effective_config = config->agent_config;
@@ -389,7 +380,7 @@ turbo_agent_session_create(const turbo_agent_session_config_t *config) {
     session->agent = turbo_agent_create(&effective_config);
     if (!session->agent) {
       turbo_agent_session_destroy(session);
-      return NULL;
+      return SALTS_EIO;
     }
   }
 
@@ -418,11 +409,37 @@ turbo_agent_session_create(const turbo_agent_session_config_t *config) {
   session->retriever_context_config.scope = session->retriever_scope;
   /* MemoryStore transfers only after all fallible Session construction succeeds. */
   session->memory_store = config->memory_store;
-  return session;
+  *out_session = session;
+  return SALTS_OK;
 
 failure:
   turbo_agent_session_destroy(session);
-  return NULL;
+  return SALTS_ENOMEM;
+}
+
+CXX_C_API int turbo_agent_session_create_with_store(
+    const turbo_agent_session_config_t *config, turbo_agent_session_t **out_session) {
+  if (!out_session) return SALTS_EINVAL;
+  *out_session = NULL;
+  if (!config || !config->runtime_store.put || !config->runtime_store.get ||
+      !config->runtime_store.list) return SALTS_EINVAL;
+  return turbo_agent_session_construct(config, out_session);
+}
+
+CXX_C_API turbo_agent_session_t *
+turbo_agent_session_create(const turbo_agent_session_config_t *config) {
+  turbo_agent_session_config_t effective;
+  turbo_agent_session_t *session = NULL;
+  if (!config) return NULL;
+  effective = *config;
+  if (!effective.runtime_store.put || !effective.runtime_store.get ||
+      !effective.runtime_store.list) {
+    effective.runtime_store = turbo_agent_runtime_store_memory_create();
+    if (!effective.runtime_store.put || !effective.runtime_store.get ||
+        !effective.runtime_store.list) return NULL;
+  }
+  (void)turbo_agent_session_construct(&effective, &session);
+  return session;
 }
 
 CXX_C_API void turbo_agent_session_destroy(turbo_agent_session_t *session) {

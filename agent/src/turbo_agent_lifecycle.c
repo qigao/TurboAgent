@@ -19,9 +19,9 @@ CXX_C_API void turbo_agent_clear_last_stream_sse(turbo_agent_t *agent) {
     return;
   }
 
-  free(agent->last_stream_sse);
-  agent->last_stream_sse = NULL;
-  agent->last_stream_sse_len = 0;
+  free(agent->call_state.last_stream_sse);
+  agent->call_state.last_stream_sse = NULL;
+  agent->call_state.last_stream_sse_len = 0;
 }
 
 static void turbo_agent_finalize_transport(turbo_agent_t *agent) {
@@ -120,9 +120,9 @@ static void turbo_agent_free_strings(turbo_agent_t *agent) {
   tstr_free(agent->instructions);
   tstr_free(agent->structured_output_name);
   tstr_free(agent->structured_output_schema_json);
-  tstr_free(agent->last_provider_request_id);
-  turbo_runtime_json_destroy(agent->context_summary);
-  agent->context_summary = NULL;
+  tstr_free(agent->call_state.last_provider_request_id);
+  turbo_runtime_json_destroy(agent->projection.summary);
+  agent->projection.summary = NULL;
   turbo_agent_clear_last_stream_sse(agent);
 }
 

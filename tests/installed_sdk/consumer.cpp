@@ -1,4 +1,5 @@
 #include <turbo_agent.h>
+#include <turbo_agent_app.h>
 #include <turbo_agent_policy.h>
 #include <turbo_agent_state.h>
 #include <turbo_agent_harness.h>
@@ -45,6 +46,19 @@ spec("installed C++17 SDK consumer") {
     turbo_agent_destroy(agent);
     json_free(state);
     turbo_graph_destroy(graph);
+  }
+
+  it("uses explicit-store construction through the installed C ABI") {
+    turbo_agent_session_config_t config{};
+    turbo_agent_session_t *session = nullptr;
+    check_equal(turbo_agent_session_create_with_store(&config, &session), SALTS_EINVAL);
+    check_null(session);
+    config.runtime_store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_app_config_t app_config{&config};
+    turbo_agent_app_t *app = nullptr;
+    check_equal(turbo_agent_app_create_with_store(&app_config, &app), SALTS_OK);
+    check_not_null(app);
+    turbo_agent_app_destroy(app);
   }
 
   it("receives the Harness configuration ABI across the C++ boundary") {

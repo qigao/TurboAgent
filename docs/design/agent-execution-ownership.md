@@ -42,9 +42,11 @@ For tool execution guarantees see [the admission matrix](../../agent_compiler/BO
 ## Job coordination boundary
 
 The report example remains application composition. Its report-specific gate and
-manifest schema must not become the generic Job schema. A future coordinator
-belongs above Router/Session and references existing Run, Checkpoint, compiled
-attempt and ToolExecutor journal records instead of copying their payloads.
+manifest schema must not become the generic Job schema. The proposal/binding
+foundation in [Job schema v1](job-proposal-coordinator.md) belongs above
+Router/Session and stores only stable compiled-attempt scope. Later observation
+will reference existing Run, Checkpoint and journal records, without copying
+their result payloads.
 
 A minimal durable Job implementation needs a frozen versioned envelope, immutable
 proposal versions, attempt references, acceptance evidence, and delivery outcome.
@@ -52,7 +54,8 @@ Its state machine must distinguish unresolved dispatch/delivery from confirmed
 failure. One coordinator owns transitions; atomic create-if-absent can claim a
 single transition but is not a multi-record transaction. Recovery validates exact
 references and never retries an unknown external effect automatically.
-These are new product state-machine semantics, not part of this behavior-preserving
-ownership/dependency refactor. They require separate failure and recovery tests
-before becoming an installed API. Real-model quality/cost qualification remains
+The initial installed Job API covers only immutable goals, proposals and a stable
+compiled-attempt binding, with its own publication/recovery tests. Acceptance,
+delivery and execution supervision remain future state-machine work.
+Real-model quality/cost qualification remains
 tracked independently in issue #278.

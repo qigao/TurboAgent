@@ -1,5 +1,6 @@
 #include <turbo_agent.h>
 #include <turbo_agent_app.h>
+#include <turbo_agent_job.h>
 #include <turbo_agent_policy.h>
 #include <turbo_agent_state.h>
 #include <turbo_agent_harness.h>
@@ -76,6 +77,22 @@ spec("installed C++17 SDK consumer") {
     check_not_null(harness);
     turbo_agent_harness_release(harness);
     cmeta_threadpool_destroy(pool);
+  }
+
+  it("uses the Job proposal ABI without creating an execution service") {
+    auto store = turbo_agent_runtime_store_memory_create();
+    auto *runtime = turbo_agent_runtime_create(&store);
+    turbo_agent_job_t *job = nullptr;
+    json_value_t *snapshot = nullptr;
+    check_not_null(runtime);
+    check_equal(turbo_agent_job_create(runtime, "cpp-job", "goal", "criteria", &job), SALTS_OK);
+    check_equal(turbo_agent_job_propose(job, 0, "{}", 2, "source-v1"), SALTS_OK);
+    check_equal(turbo_agent_job_bind_compiled_inspect(job, 1, "thread", "attempt"), SALTS_OK);
+    check_equal(turbo_agent_job_get_snapshot(job, &snapshot), SALTS_OK);
+    check_equal(json_get_string(snapshot, "state"), "attempt_bound");
+    turbo_agent_job_destroy(job);
+    json_free(snapshot);
+    turbo_agent_runtime_destroy(runtime);
   }
 
   it("receives the Harness configuration ABI across the C++ boundary") {

@@ -1306,7 +1306,9 @@ same kernel and canonical execution evidence; engineering-specific relationships
 and validators stay in the workbench layer.
 
 Status: broader design proposal. The read-only diagram slice above is implemented;
-the artifact index, durable Job lifecycle, scheduler and interactive UI are not.
+the [Job v1 foundation](../../docs/design/job-proposal-coordinator.md) now stores
+immutable proposals and compiled-attempt bindings. The artifact index, complete
+durable Job lifecycle, scheduler and interactive UI are not implemented.
 The working assumption is that core discovery/review works without Praktor,
 while reviewed Praktor workflows remain an optional execution backend. This
 proposal adopts source analysis, relationships and incremental synchronization;

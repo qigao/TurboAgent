@@ -3,6 +3,7 @@ project(harness LANGUAGES C)
 
 include(CmakeUtils)
 add_library(turbo_agent_harness SHARED
+  src/turbo_agent_job_admission.c
   src/turbo_agent_job_observation.c
   src/turbo_agent_job_execution.c
   src/turbo_agent_job_file_verifier.c

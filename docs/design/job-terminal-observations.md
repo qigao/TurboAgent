@@ -128,7 +128,9 @@ exact exit 86/87, then inspect under both fresh and denied authority and verify
 again. Independent invocation counters and canonical attempt/Run checks ensure
 queries do not rerun a callback or fabricate an observation/receipt.
 
-Durable pre-queue admission, crash recovery of uncommitted cancellation intent,
+[Write-ahead admission intents](job-admission-intents.md) now record an immutable
+intent before attempting the native queue. They do not prove queue acceptance.
+Durable queue commit receipts, crash recovery of uncommitted cancellation intent,
 distributed ownership, remote worker supervision and stronger terminal/finalizer
 acknowledgements remain open. M1 and #213 remain incomplete. #278 independently
 tracks real-model quality/cost/latency; fixtures use offline tools only. The

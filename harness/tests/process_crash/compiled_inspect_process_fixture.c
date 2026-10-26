@@ -3,6 +3,7 @@
 #include "turbo_agent_job_cancel.h"
 #include "turbo_agent_job_execution.h"
 #include "turbo_agent_job_observation.h"
+#include "turbo_agent_job_admission.h"
 #include "turbo_agent_job_acceptance.h"
 #include "turbo_agent_job_delivery.h"
 #include "turbo_agent_job_verifier.h"
@@ -83,7 +84,15 @@ static const crash_case_t cases[] = {
   {"observation_pool_before", NULL, NULL, 0},
   {"observation_pool_after", NULL, NULL, 0},
   {"observation_pool_lost_ack", NULL, NULL, 0},
-  {"observation_pool_returned", NULL, NULL, 0}
+  {"observation_pool_returned", NULL, NULL, 0},
+  {"admission_before", NULL, NULL, 0},
+  {"admission_after", NULL, NULL, 0},
+  {"admission_lost_ack", NULL, NULL, 0},
+  {"admission_queued", NULL, NULL, 0},
+  {"admission_full", NULL, NULL, 0},
+  {"admission_closed", NULL, NULL, 0},
+  {"admission_pool", NULL, NULL, 0},
+  {"admission_completed", "committed", "committed", 1}
 };
 
 typedef struct fixture_s {
@@ -95,6 +104,7 @@ typedef struct fixture_s {
   cmeta_threadpool_t *pool;
   int inject, callbacks, transports, attempt_reads, attempt_writes, reference_writes;
   int job_mode, acceptance_mode, delivery_mode, verified_mode, file_mode, cancellation_mode, async_mode, observation_mode;
+  int admission_mode;
   turbo_agent_job_file_verifier_t *file_verifier;
   char workspace_path[SALTS_FS_MAX_PATH], verification_path[SALTS_FS_MAX_PATH];
   json_value_t *execution_reference;
@@ -178,7 +188,17 @@ static int store_write(fixture_t *f, const char *collection, const char *id,
     before = strstr(f->cut->name, "_before") != NULL;
     after = strstr(f->cut->name, "_after") != NULL;
   }
-  if (!strcmp(collection, "agent_job_observations")) {
+  if (!strcmp(collection, "agent_job_admissions")) {
+    if (!create) return SALTS_EPROTO;
+    record = json_parse(text, strlen(text));
+    if (!record) return SALTS_EPROTO;
+    if (f->inject && turbo_agent_runtime_store_put_json(f->oracle, "expected_admission", "intent-1", record)) {
+      json_free(record); return SALTS_EIO;
+    }
+    before = !strcmp(f->cut->name, "admission_before");
+    after = !strcmp(f->cut->name, "admission_after");
+  }
+  if (!strcmp(collection, "agent_job_observations") && !strncmp(f->cut->name, "observation_", 12)) {
     if (!create) return SALTS_EPROTO;
     before = strstr(f->cut->name, "_before") != NULL;
     after = strstr(f->cut->name, "_after") != NULL;
@@ -193,6 +213,8 @@ static int store_write(fixture_t *f, const char *collection, const char *id,
       !strncmp(f->cut->name, "cancel_", 7) && strstr(f->cut->name, "_lost_ack")) return SALTS_EIO;
   if (!rc && f->inject && !strcmp(collection, "agent_job_observations") &&
       strstr(f->cut->name, "_lost_ack")) return SALTS_EIO;
+  if (!rc && f->inject && !strcmp(collection, "agent_job_admissions") &&
+      !strcmp(f->cut->name, "admission_lost_ack")) { json_free(record); return SALTS_EIO; }
   if (!rc && f->inject &&
       ((!strcmp(collection, "agent_job_delivery_intents") && !strcmp(f->cut->name, "delivery_intent_lost_ack")) ||
        (!strcmp(collection, "agent_job_delivery_receipts") && !strcmp(f->cut->name, "delivery_receipt_lost_ack"))))
@@ -1092,18 +1114,107 @@ static int exercise_observation(fixture_t *f, const char *mode) {
   return evidence(f, completed ? "committed" : NULL, completed, 0, 1);
 }
 
+static int exercise_admission(fixture_t *f, const char *mode) {
+  const int completed = !strcmp(f->cut->name, "admission_completed");
+  const int pool_cancelled = !strcmp(f->cut->name, "admission_pool");
+  const int before = !strcmp(f->cut->name, "admission_before");
+  const int full = !strcmp(f->cut->name, "admission_full");
+  const int closed = !strcmp(f->cut->name, "admission_closed");
+  const char *caps[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_job_execution_t *execution = NULL;
+  json_value_t *record = NULL, *expected = NULL, *observation = NULL;
+  int rc, n;
+  if (!strcmp(mode, "init")) {
+    REQUIRE(!exercise(f, "init"));
+    return counter_put(f, "send_requests", 0);
+  }
+  REQUIRE(!grant(f, strcmp(mode, "denied") != 0));
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = caps; config.allowed_capability_count = 1;
+  if (!strcmp(mode, "crash")) {
+    async_queue_t queue;
+    atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    if (closed) cmeta_threadpool_shutdown(f->pool);
+    else {
+      REQUIRE(!cmeta_threadpool_try_submit(f->pool, block_async_queue, &queue));
+      while (!atomic_load_explicit(&queue.entered, memory_order_acquire)) cmeta_thread_yield();
+      if (full) REQUIRE(!cmeta_threadpool_try_submit(f->pool, block_async_queue, &queue));
+    }
+    f->inject = 1;
+    rc = turbo_agent_harness_submit_admitted_job_inspect(f->harness, "bound-job", 2,
+        &config, 0, "intent-1", &execution);
+    if (!strcmp(f->cut->name, "admission_lost_ack")) {
+      REQUIRE(rc == SALTS_EIO && !execution && !f->callbacks); _Exit(87);
+    }
+    if (full || closed) {
+      REQUIRE(rc == (full ? SALTS_ENOBUFS : SALTS_ESHUTDOWN) && !execution && !f->callbacks);
+      _Exit(FIXTURE_CRASH);
+    }
+    REQUIRE(rc == SALTS_OK && execution);
+    if (pool_cancelled)
+      REQUIRE(!cmeta_threadpool_shutdown_with_policy(f->pool, SALTS_THREADPOOL_SHUTDOWN_CANCEL_PENDING));
+    if (completed || pool_cancelled) {
+      atomic_store_explicit(&queue.open, 1, memory_order_release);
+      REQUIRE(!turbo_agent_job_execution_wait(execution, 10000));
+      REQUIRE(!turbo_agent_job_execution_observation_status(execution, &rc) && rc == SALTS_OK);
+    } else REQUIRE(!strcmp(f->cut->name, "admission_queued") && !f->callbacks);
+    _Exit(FIXTURE_CRASH);
+  }
+  REQUIRE(!turbo_agent_runtime_store_get_json_status(f->oracle, "expected_admission", "intent-1", &expected));
+  rc = turbo_agent_job_admission_get(f->runtime, "bound-job", "intent-1", &record);
+  if (before) REQUIRE(rc == SALTS_ENOENT && !record);
+  else {
+    REQUIRE(rc == SALTS_OK && record && json_object_size(record) == 10);
+    REQUIRE(text_is(record, "supervisor_id", json_get_string(expected, "supervisor_id")) &&
+        text_is(record, "admission_id", "intent-1") && text_is(record, "observation_id", "intent-1") &&
+        text_is(record, "job_id", "bound-job") && json_get_int(record, "job_revision", -1) == 2 &&
+        json_get_int(record, "proposal_version", -1) == 1 && text_is(record, "thread_id", THREAD_ID) &&
+        text_is(record, "attempt_id", ATTEMPT_ID));
+    REQUIRE(!json_object_get(record, "result") && !json_object_get(record, "certificate") &&
+        !json_object_get(record, "deadline_mono_ms") && !json_object_get(record, "allowed_capabilities"));
+  }
+  rc = turbo_agent_job_execution_observation_get(f->runtime, "bound-job", "intent-1", &observation);
+  if (completed || pool_cancelled) {
+    REQUIRE(rc == SALTS_OK && text_is(observation, "supervisor_id", json_get_string(expected, "supervisor_id")));
+    REQUIRE(text_is(observation, "state", completed ? "completed" : "cancelled"));
+    REQUIRE(text_is(observation, "dispatch", completed ? "inspect" : "pool_cancelled"));
+  } else REQUIRE(rc == SALTS_ENOENT && !observation);
+  if (!strcmp(mode, "duplicate") && !before) {
+    REQUIRE(turbo_agent_harness_submit_admitted_job_inspect(f->harness, "bound-job", 2,
+        &config, 0, "intent-1", &execution) == SALTS_EALREADY && !execution);
+    cmeta_threadpool_wait(f->pool);
+  }
+  json_free(record); json_free(expected); json_free(observation); record = NULL;
+  if (!strcmp(mode, "denied")) {
+    turbo_agent_compile_diagnostic_t diagnostic;
+    turbo_tool_status_t status;
+    json_value_t *result = NULL, *certificate = NULL;
+    REQUIRE(execute(f, source, &diagnostic, &status, &result, &certificate) == SALTS_EPROTO);
+    REQUIRE(!result && !certificate);
+  }
+  REQUIRE(!turbo_agent_runtime_store_list_json(f->runtime, "runs", NULL, NULL, &record));
+  REQUIRE(json_array_size(record) == (completed ? 1u : 0u)); json_free(record); record = NULL;
+  REQUIRE(!turbo_agent_runtime_store_list_json(f->runtime, "agent_job_delivery_intents", NULL, NULL, &record));
+  REQUIRE(!json_array_size(record)); json_free(record);
+  REQUIRE(!counter_get(f, "send_requests", &n) && n == 0);
+  REQUIRE(!f->callbacks && !f->transports && !f->attempt_writes && !f->reference_writes);
+  return evidence(f, completed ? "committed" : NULL, completed, 0, 1);
+}
+
 int main(int argc, char **argv) {
   fixture_t fixture = {0};
   int rc;
   if (argc != 4 && argc != 5) return failure("mode/cut/private-directory/[job] required", __LINE__);
   if (argc == 5) {
-    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery") && strcmp(argv[4], "verified") && strcmp(argv[4], "files") && strcmp(argv[4], "cancellation") && strcmp(argv[4], "async") && strcmp(argv[4], "observation"))
+    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery") && strcmp(argv[4], "verified") && strcmp(argv[4], "files") && strcmp(argv[4], "cancellation") && strcmp(argv[4], "async") && strcmp(argv[4], "observation") && strcmp(argv[4], "admission"))
       return failure("unknown execution mode", __LINE__);
     fixture.job_mode = 1;
     fixture.verified_mode = !strcmp(argv[4], "verified");
     fixture.file_mode = !strcmp(argv[4], "files");
     fixture.async_mode = !strcmp(argv[4], "async");
     fixture.observation_mode = !strcmp(argv[4], "observation");
+    fixture.admission_mode = !strcmp(argv[4], "admission");
     fixture.cancellation_mode = !strcmp(argv[4], "cancellation") || fixture.async_mode;
     fixture.delivery_mode = !strcmp(argv[4], "delivery") || fixture.verified_mode || fixture.file_mode;
     fixture.acceptance_mode = !strcmp(argv[4], "acceptance") || fixture.delivery_mode || fixture.cancellation_mode;
@@ -1112,7 +1223,8 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[2], cases[i].name)) fixture.cut = &cases[i];
   if (!fixture.cut) return failure("unknown crash cut", __LINE__);
   rc = fixture_open(&fixture, argv[3], !strcmp(argv[1], "init"));
-  if (!rc) rc = fixture.observation_mode ? exercise_observation(&fixture, argv[1]) :
+  if (!rc) rc = fixture.admission_mode ? exercise_admission(&fixture, argv[1]) :
+      fixture.observation_mode ? exercise_observation(&fixture, argv[1]) :
       fixture.cancellation_mode ? exercise_cancellation(&fixture, argv[1]) :
       fixture.delivery_mode ? exercise_delivery(&fixture, argv[1]) :
       fixture.acceptance_mode ? exercise_acceptance(&fixture, argv[1]) : exercise(&fixture, argv[1]);

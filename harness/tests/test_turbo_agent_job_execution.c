@@ -1,6 +1,7 @@
 #include "tinytest.h"
 #include "turbo_agent_job_execution.h"
 #include "turbo_agent_job_observation.h"
+#include "turbo_agent_job_admission.h"
 #include "turbo_agent_job_cancel.h"
 #include "turbo_agent_job_verifier.h"
 #include "turbo_agent_policy.h"
@@ -16,11 +17,14 @@ typedef struct probe_s {
   turbo_agent_runtime_t *runtime;
   turbo_agent_harness_t *harness;
   turbo_agent_job_execution_t *nested;
-  gate_t callback, publication, observation;
+  gate_t callback, publication, observation, admission;
   atomic_int calls, reads, claims, cancellation_claims, frees, sources, evidences;
   atomic_int reads_after_error, unacknowledged;
   atomic_int observation_claims, observation_gets, observation_puts, observation_unacknowledged;
   atomic_int reads_after_observation_error, cancel_gets_after_error;
+  atomic_int admission_claims, admission_gets, admission_puts, admission_unacknowledged;
+  atomic_int reads_after_admission_error;
+  int admission_error, admission_after_commit;
   int observation_error, observation_after_commit, observation_nested_status;
   int publication_error, after_commit, source_error, source_fail_at, nested_status;
   const char *read_failure;
@@ -41,6 +45,8 @@ static void block(void *user) {
 static int get(void *user, const char *collection, const char *id, char **out) {
   probe_t *p = user;
   atomic_fetch_add(&p->reads, 1);
+  if (!strcmp(collection, "agent_job_admissions")) atomic_fetch_add(&p->admission_gets, 1);
+  if (atomic_load(&p->admission_unacknowledged)) atomic_fetch_add(&p->reads_after_admission_error, 1);
   if (!strcmp(collection, "agent_job_observations")) atomic_fetch_add(&p->observation_gets, 1);
   if (!strcmp(collection, "agent_job_cancellations") && atomic_load(&p->unacknowledged))
     atomic_fetch_add(&p->cancel_gets_after_error, 1);
@@ -51,6 +57,7 @@ static int get(void *user, const char *collection, const char *id, char **out) {
 }
 static int put(void *user, const char *collection, const char *id, const char *value) {
   probe_t *p = user;
+  if (!strcmp(collection, "agent_job_admissions")) atomic_fetch_add(&p->admission_puts, 1);
   if (!strcmp(collection, "agent_job_observations")) atomic_fetch_add(&p->observation_puts, 1);
   return p->inner.put(p->inner.user_data, collection, id, value);
 }
@@ -62,6 +69,17 @@ static int claim(void *user, const char *collection, const char *id, const char 
   probe_t *p = user;
   int rc;
   atomic_fetch_add(&p->claims, 1);
+  if (!strcmp(collection, "agent_job_admissions")) {
+    atomic_fetch_add(&p->admission_claims, 1);
+    block(&p->admission);
+    if (p->admission_error && !p->admission_after_commit) {
+      atomic_store(&p->admission_unacknowledged, 1); return p->admission_error;
+    }
+    rc = p->inner.create_if_absent(p->inner.user_data, collection, id, value);
+    if (rc == SALTS_OK && p->admission_error) rc = p->admission_error;
+    if (rc != SALTS_OK) atomic_store(&p->admission_unacknowledged, 1);
+    return rc;
+  }
   if (!strcmp(collection, "agent_job_observations")) {
     atomic_fetch_add(&p->observation_claims, 1);
     if (p->nested) {
@@ -147,6 +165,23 @@ static int submit_recorded(turbo_agent_harness_t *h, const char *observation,
   config.allowed_capabilities = caps; config.allowed_capability_count = 1;
   return turbo_agent_harness_submit_recorded_job_inspect(h, "job", 2, &config, deadline, observation, out);
 }
+static int submit_admitted(turbo_agent_harness_t *h, const char *admission,
+    turbo_agent_job_execution_t **out) {
+  const char *caps[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = caps; config.allowed_capability_count = 1;
+  return turbo_agent_harness_submit_admitted_job_inspect(h, "job", 2, &config, 0, admission, out);
+}
+typedef struct admission_submit_s {
+  turbo_agent_harness_t *harness;
+  turbo_agent_job_execution_t *execution;
+  int rc;
+} admission_submit_t;
+static void submit_admission_thread(void *user) {
+  admission_submit_t *s = user;
+  s->rc = submit_admitted(s->harness, "blocked-admission", &s->execution);
+}
 typedef struct observer_s { turbo_agent_job_execution_t *execution; atomic_int ready, done, errors; } observer_t;
 typedef struct contender_s {
   turbo_agent_job_execution_t *execution;
@@ -196,6 +231,7 @@ spec("Bound Job asynchronous supervision") {
     atomic_init(&p.callback.entered, 0); atomic_init(&p.callback.open, 1);
     atomic_init(&p.publication.entered, 0); atomic_init(&p.publication.open, 1);
     atomic_init(&p.observation.entered, 0); atomic_init(&p.observation.open, 1);
+    atomic_init(&p.admission.entered, 0); atomic_init(&p.admission.open, 1);
     atomic_init(&p.calls, 0); atomic_init(&p.reads, 0); atomic_init(&p.claims, 0);
     atomic_init(&p.cancellation_claims, 0); atomic_init(&p.frees, 0);
     atomic_init(&p.sources, 0); atomic_init(&p.evidences, 0);
@@ -203,6 +239,9 @@ spec("Bound Job asynchronous supervision") {
     atomic_init(&p.observation_claims, 0); atomic_init(&p.observation_gets, 0);
     atomic_init(&p.observation_puts, 0); atomic_init(&p.observation_unacknowledged, 0);
     atomic_init(&p.reads_after_observation_error, 0); atomic_init(&p.cancel_gets_after_error, 0);
+    atomic_init(&p.admission_claims, 0); atomic_init(&p.admission_gets, 0);
+    atomic_init(&p.admission_puts, 0); atomic_init(&p.admission_unacknowledged, 0);
+    atomic_init(&p.reads_after_admission_error, 0);
     pool = cmeta_threadpool_create_with_config(&pool_config);
     registry = turbo_tool_registry_create();
     p.inner = turbo_agent_runtime_store_memory_create();
@@ -234,6 +273,7 @@ spec("Bound Job asynchronous supervision") {
     turbo_agent_job_execution_status_init(&status);
   }
   after_each() {
+    atomic_store(&p.admission.open, 1);
     atomic_store(&p.callback.open, 1); atomic_store(&p.publication.open, 1); atomic_store(&p.observation.open, 1);
     cmeta_threadpool_wait(pool);
     turbo_agent_job_destroy(job); job = NULL;
@@ -243,6 +283,157 @@ spec("Bound Job asynchronous supervision") {
     turbo_tool_registry_destroy(registry); cmeta_threadpool_destroy(pool);
     json_free(result); json_free(certificate); json_free(reference); json_free(record);
     result = certificate = reference = record = NULL;
+  }
+
+  it("persists admission before enqueue and joins the eventual observation to the same supervisor") {
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    char id[] = "intent-1";
+    check_equal(submit_admitted(harness, id, &execution), SALTS_OK);
+    memset(id, 'x', strlen(id));
+    check_equal(atomic_load(&p.admission_claims), 1); check_equal(atomic_load(&p.admission_gets), 0);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "intent-1", &record), SALTS_OK);
+    check_equal(json_object_size(record), (size_t)10);
+    check_equal(json_get_string(record, "kind"), "job_inspect_admission_intent");
+    check_equal(json_get_string(record, "observation_id"), "intent-1");
+    check_equal(json_get_string(record, "supervisor_id"), turbo_agent_job_execution_id(execution));
+    check_equal(json_get_string(record, "thread_id"), "async-job-thread");
+    check_equal(atomic_load(&p.calls), 0); check_equal(atomic_load(&p.observation_claims), 0);
+    json_free(record); record = NULL;
+    atomic_store(&queue.open, 1);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "intent-1", &record), SALTS_OK);
+    check_equal(json_get_string(record, "supervisor_id"), turbo_agent_job_execution_id(execution));
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_OK);
+    check_equal(atomic_load(&p.calls), 1); check_equal(atomic_load(&p.admission_puts), 0);
+    check_equal(submit_admitted(harness, "intent-1", &other), SALTS_EALREADY); check_null(other);
+    check_equal(atomic_load(&p.reads_after_admission_error), 0);
+  }
+
+  it("never queues after admission errors or lost acknowledgements and never reads them back") {
+    const int errors[] = {SALTS_ENOTSUP, SALTS_EIO, SALTS_EIO};
+    const char *ids[] = {"unsupported-admission", "failed-admission", "uncertain-admission"};
+    for (int i = 0; i < 3; ++i) {
+      p.admission_error = errors[i]; p.admission_after_commit = i == 2;
+      atomic_store(&p.admission_unacknowledged, 0); atomic_store(&p.reads_after_admission_error, 0);
+      check_equal(submit_admitted(harness, ids[i], &execution), errors[i]); check_null(execution);
+      cmeta_threadpool_wait(pool);
+      check_equal(atomic_load(&p.calls), 0); check_equal(atomic_load(&p.sources), 0);
+      check_equal(atomic_load(&p.observation_claims), 0); check_equal(atomic_load(&p.admission_gets), i);
+      check_equal(atomic_load(&p.reads_after_admission_error), 0);
+      atomic_store(&p.admission_unacknowledged, 0);
+      check_equal(turbo_agent_job_admission_get(p.runtime, "job", ids[i], &record), i == 2 ? SALTS_OK : SALTS_ENOENT);
+      json_free(record); record = NULL;
+    }
+    p.admission_error = 0;
+    check_equal(submit_admitted(harness, "uncertain-admission", &execution), SALTS_EALREADY); check_null(execution);
+    check_equal(atomic_load(&p.reads_after_admission_error), 0);
+    check_equal(atomic_load(&p.admission_puts), 0); check_equal(atomic_load(&p.calls), 0);
+  }
+
+  it("preserves intent and the original queue rejection without inventing a terminal observation") {
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK);
+    check_equal(submit_admitted(harness, "full-admission", &execution), SALTS_ENOBUFS); check_null(execution);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "full-admission", &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "full-admission", &record), SALTS_ENOENT);
+    atomic_store(&queue.open, 1); cmeta_threadpool_wait(pool);
+    check_equal(submit_admitted(harness, "full-admission", &execution), SALTS_EALREADY); check_null(execution);
+    atomic_store(&p.admission_unacknowledged, 0);
+    cmeta_threadpool_shutdown(pool);
+    check_equal(submit_admitted(harness, "closed-admission", &execution), SALTS_ESHUTDOWN); check_null(execution);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "closed-admission", &record), SALTS_OK);
+    check_equal(atomic_load(&p.observation_claims), 0); check_equal(atomic_load(&p.calls), 0);
+  }
+
+  it("rejects invalid inputs, stale bindings, read failures and cancellation before creating an intent") {
+    turbo_agent_compiler_config_t config; turbo_agent_compiler_config_init(&config);
+    int reads = atomic_load(&p.reads);
+    check_equal(submit_admitted(harness, "bad:id", &execution), SALTS_EINVAL); check_null(execution);
+    check_equal(submit_admitted(harness, NULL, &execution), SALTS_EINVAL);
+    check_equal(atomic_load(&p.reads), reads);
+    check_equal(turbo_agent_harness_submit_admitted_job_inspect(harness, "job", 1, &config, 0, "stale", &execution), SALTS_EBUSY);
+    p.read_failure = "agent_job_revisions";
+    check_equal(submit_admitted(harness, "unreadable", &execution), SALTS_EIO); check_null(execution);
+    p.read_failure = NULL;
+    check_equal(turbo_agent_job_request_cancel(job, 2, "stop", "reason"), SALTS_OK);
+    check_equal(submit_admitted(harness, "cancelled-admission", &execution), SALTS_ECANCELED); check_null(execution);
+    check_equal(atomic_load(&p.admission_claims), 0); check_equal(atomic_load(&p.calls), 0);
+  }
+
+  it("retains the reservation and owners while pre-queue admission publication is blocked") {
+    admission_submit_t s = {harness, NULL, SALTS_EBUSY}; cmeta_thread_t thread = {0};
+    atomic_store(&p.admission.open, 0);
+    check_equal(cmeta_thread_create(&thread, submit_admission_thread, &s), SALTS_OK);
+    check_true(await(&p.admission.entered));
+    check_equal(atomic_load(&p.calls), 0); check_equal(atomic_load(&p.sources), 0);
+    check_equal(submit(harness, &other, 0), SALTS_EBUSY); check_null(other);
+    turbo_agent_job_destroy(job); job = NULL;
+    turbo_agent_harness_release(harness); harness = NULL;
+    check_equal(atomic_load(&p.frees), 0);
+    atomic_store(&p.admission.open, 1);
+    check_equal(cmeta_thread_join(&thread), SALTS_OK); cmeta_thread_destroy(&thread);
+    check_equal(s.rc, SALTS_OK); execution = s.execution;
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    turbo_agent_job_execution_release(execution); execution = NULL;
+    cmeta_threadpool_wait(pool); check_equal(atomic_load(&p.frees), 1);
+  }
+
+  it("validates every admission field, unsupported schemas and complete Job history") {
+    const char *keys[] = {"kind", "admission_id", "observation_id", "supervisor_id", "job_id", "thread_id", "attempt_id"};
+    const char *numbers[] = {"job_revision", "proposal_version"};
+    json_value_t *original = NULL, *bad = NULL;
+    check_equal(submit_admitted(harness, "admission-shape", &execution), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "admission-shape", &original), SALTS_OK);
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+      bad = json_clone(original);
+      check_equal(turbo_runtime_json_object_set_string(bad, keys[i], "wrong"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_admissions", "job:admission-shape", bad), SALTS_OK);
+      check_equal(turbo_agent_job_admission_get(p.runtime, "job", "admission-shape", &record), SALTS_EPROTO);
+      check_null(record); json_free(bad);
+    }
+    for (size_t i = 0; i < sizeof(numbers) / sizeof(numbers[0]); ++i) {
+      bad = json_clone(original);
+      check_equal(turbo_runtime_json_object_set_int64(bad, numbers[i], INT64_MAX), 0);
+      check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_admissions", "job:admission-shape", bad), SALTS_OK);
+      check_equal(turbo_agent_job_admission_get(p.runtime, "job", "admission-shape", &record), SALTS_EPROTO);
+      check_null(record); json_free(bad);
+    }
+    bad = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_int64(bad, "schema_version", INT64_MAX), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_admissions", "job:admission-shape", bad), SALTS_OK);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "admission-shape", &record), SALTS_ENOTSUP);
+    json_free(bad); bad = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_string(bad, "result", "forbidden"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_admissions", "job:admission-shape", bad), SALTS_OK);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "admission-shape", &record), SALTS_EPROTO);
+    check_null(record); json_free(bad);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_admissions", "job:admission-shape", original), SALTS_OK);
+    p.read_failure = "agent_job_revisions";
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "admission-shape", &record), SALTS_EIO);
+    check_null(record); json_free(original);
+  }
+
+  it("reads historical intent without authority or source checks and preserves backend query errors") {
+    check_equal(submit_admitted(harness, "historical-admission", &execution), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(policy(harness, 0), SALTS_OK); p.source_error = SALTS_EIO;
+    check_equal(turbo_agent_job_request_cancel(job, 2, "late-stop", "reason"), SALTS_OK);
+    int sources = atomic_load(&p.sources), claims = atomic_load(&p.claims);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "historical-admission", &record), SALTS_OK);
+    check_equal(atomic_load(&p.sources), sources); check_equal(atomic_load(&p.claims), claims);
+    json_free(record); record = (json_value_t *)1;
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "missing-admission", &record), SALTS_ENOENT); check_null(record);
+    p.read_failure = "agent_job_admissions";
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "historical-admission", &record), SALTS_EIO); check_null(record);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "../bad", "x", &record), SALTS_EINVAL); check_null(record);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "x", NULL), SALTS_EINVAL);
+    /* Durable cancellation is checked before source verification at take. */
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_ECANCELED);
+    check_null(result); check_null(certificate); check_null(reference);
   }
 
   it("keeps exclusive ownership until terminal result retirement and reads the canonical result once") {

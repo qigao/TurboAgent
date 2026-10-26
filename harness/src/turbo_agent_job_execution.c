@@ -2,6 +2,7 @@
 #include "turbo_agent_job_cancel.h"
 #include "turbo_agent_harness_internal.h"
 #include "turbo_agent_job_observation_internal.h"
+#include "turbo_agent_job_admission_internal.h"
 
 #include <cmeta_uuid.h>
 #include <salts/clock.h>
@@ -222,7 +223,7 @@ static void finalize(void *user) { turbo_agent_job_execution_release(user); }
 
 static int submit(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
-    uint64_t deadline, const char *observation, turbo_agent_job_execution_t **out) {
+    uint64_t deadline, const char *observation, int admitted, turbo_agent_job_execution_t **out) {
   turbo_agent_job_execution_t *e;
   turbo_cancel_source_config_t cancel_config = {sizeof(cancel_config), TURBO_RUNTIME_CONTROL_ABI_VERSION, 0, NULL, NULL};
   cmeta_uuid_t uuid;
@@ -265,6 +266,12 @@ static int submit(turbo_agent_harness_t *harness,
   rc = turbo_agent_harness_begin_submit(harness);
   if (rc != SALTS_OK) goto fail;
   e->reserved = 1;
+  if (admitted) {
+    turbo_agent_runtime_t *runtime = turbo_agent_session_runtime(
+        turbo_agent_app_session(turbo_agent_harness_app(harness)));
+    rc = turbo_agent_job_admission_write(runtime, e->job_id, e->revision, e->observation_id, e->id);
+    if (rc != SALTS_OK) goto fail;
+  }
   if (!turbo_agent_job_execution_retain(e)) { rc = SALTS_ERANGE; goto fail; }
   task.arg = e;
   rc = cmeta_threadpool_try_submit_task(turbo_agent_harness_executor(harness), &task);
@@ -279,13 +286,20 @@ fail:
 int turbo_agent_harness_submit_job_inspect(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
     uint64_t deadline, turbo_agent_job_execution_t **out) {
-  return submit(harness, id, revision, config, deadline, NULL, out);
+  return submit(harness, id, revision, config, deadline, NULL, 0, out);
 }
 int turbo_agent_harness_submit_recorded_job_inspect(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
     uint64_t deadline, const char *observation, turbo_agent_job_execution_t **out) {
   if (!observation) { if (out) *out = NULL; return SALTS_EINVAL; }
-  return submit(harness, id, revision, config, deadline, observation, out);
+  return submit(harness, id, revision, config, deadline, observation, 0, out);
+}
+
+int turbo_agent_harness_submit_admitted_job_inspect(turbo_agent_harness_t *harness,
+    const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
+    uint64_t deadline, const char *admission, turbo_agent_job_execution_t **out) {
+  if (!admission) { if (out) *out = NULL; return SALTS_EINVAL; }
+  return submit(harness, id, revision, config, deadline, admission, 1, out);
 }
 
 int turbo_agent_job_execution_take_result(turbo_agent_job_execution_t *e,

@@ -1,6 +1,7 @@
 #include "tinytest.h"
 
 #include "turbo_agent_harness.h"
+#include "turbo_agent_job.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_inbox.h"
@@ -289,6 +290,81 @@ static int run_compiled_inspect_attempt(turbo_agent_harness_t *harness,
 }
 
 spec("Harness Phase-1 compiled Inspect boundary") {
+  it("keeps Job binding separate from compiled admission and the canonical result") {
+    const char *allowed[] = {"runtime_tools"};
+    compiled_inspect_probe_t probe = {0};
+    cmeta_threadpool_config_t pool_config = {.num_threads = 1, .queue_capacity = 1};
+    cmeta_threadpool_t *pool = cmeta_threadpool_create_with_config(&pool_config);
+    turbo_tool_registry_t *registry = turbo_tool_registry_create();
+    turbo_agent_harness_t *harness;
+    turbo_agent_job_t *job = NULL;
+    turbo_agent_compile_diagnostic_t diagnostic = {0};
+    turbo_tool_status_t status = TURBO_TOOL_ERROR;
+    json_value_t *snapshot = NULL, *result = NULL, *certificate = NULL, *records = NULL;
+    const json_value_t *proposal, *attempt;
+    check_not_null(pool);
+    check_not_null(registry);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness(pool, registry);
+    check_not_null(harness);
+    attach_compiled_probe_runtime(harness, &probe);
+    check_equal(set_compiled_host_policy(harness, 0), 0);
+    check_equal(turbo_agent_job_create(probe.runtime, "inspect-job", "inspect repository",
+                "Host verifies evidence", &job), SALTS_OK);
+    check_equal(turbo_agent_job_propose(job, 0, compiled_inspect_source,
+                strlen(compiled_inspect_source), "source-v1"), SALTS_OK);
+    check_equal(turbo_agent_job_bind_compiled_inspect(job, 1,
+                COMPILED_INSPECT_TEST_THREAD_ID, "job-attempt"), SALTS_OK);
+    check_equal(turbo_agent_job_get_snapshot(job, &snapshot), SALTS_OK);
+    proposal = json_object_get(snapshot, "proposal");
+    attempt = json_object_get(snapshot, "attempt");
+    check_not_equal(run_compiled_inspect_attempt(harness,
+        json_get_string(attempt, "attempt_id"), json_get_string(proposal, "source_json"),
+        allowed, 1, &diagnostic, &status, &result, &certificate), SALTS_OK);
+    check_equal(probe.calls, 0);
+    check_null(result);
+    json_free(certificate); certificate = NULL;
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    check_equal(run_compiled_inspect_attempt(harness,
+        json_get_string(attempt, "attempt_id"), json_get_string(proposal, "source_json"),
+        allowed, 1, &diagnostic, &status, &result, &certificate), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_true(json_get_bool(result, "ok", false));
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+    json_free(snapshot); snapshot = NULL;
+    turbo_agent_job_destroy(job); job = NULL;
+    check_equal(turbo_agent_job_open(probe.runtime, "inspect-job", &job), SALTS_OK);
+    check_equal(turbo_agent_job_get_snapshot(job, &snapshot), SALTS_OK);
+    check_equal(json_get_string(snapshot, "state"), "attempt_bound");
+    check_null(json_object_get(snapshot, "result"));
+    proposal = json_object_get(snapshot, "proposal");
+    attempt = json_object_get(snapshot, "attempt");
+    check_equal(run_compiled_inspect_attempt(harness,
+        json_get_string(attempt, "attempt_id"), json_get_string(proposal, "source_json"),
+        allowed, 1, &diagnostic, &status, &result, &certificate), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(turbo_agent_runtime_store_list_json(probe.runtime,
+        COMPILED_INSPECT_JOURNAL_COLLECTION, NULL, NULL, &records), SALTS_OK);
+    check_equal(json_array_size(records), 1u);
+    check_not_null(json_object_get(json_array_get(records, 0), "result"));
+    json_free(records); records = NULL;
+    json_free(result); result = NULL;
+    json_free(certificate); certificate = NULL;
+    check_equal(set_compiled_host_policy(harness, 0), 0);
+    check_not_equal(run_compiled_inspect_attempt(harness,
+        json_get_string(attempt, "attempt_id"), json_get_string(proposal, "source_json"),
+        allowed, 1, &diagnostic, &status, &result, &certificate), SALTS_OK);
+    check_null(result);
+    check_equal(probe.calls, 1);
+    turbo_agent_job_destroy(job);
+    json_free(snapshot);
+    json_free(certificate);
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
   it("compiles a DataBind source, freezes authority and verifies the result") {
     const char *allowed[] = {"runtime_tools"};
     const char *alias_allowed[] = {"wasm"};

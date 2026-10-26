@@ -69,3 +69,8 @@ endif()
 add_executable(installed_provider_c11 provider.c)
 target_link_libraries(installed_provider_c11 PRIVATE TurboAgent::Provider)
 add_test(NAME installed_provider_c11 COMMAND installed_provider_c11)
+
+add_executable(installed_job_c11 ../../harness/tests/test_turbo_agent_job.c)
+target_link_libraries(installed_job_c11 PRIVATE TurboAgent::Harness Salts::TinyTest)
+add_test(NAME installed_job_c11 COMMAND installed_job_c11)
+set_tests_properties(installed_job_c11 PROPERTIES TIMEOUT 60)

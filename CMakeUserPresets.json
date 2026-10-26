@@ -259,6 +259,12 @@
             "inherits": "base-test",
             "configurePreset": "ci-macos-release",
             "filter": {"include": {"label": "sqlite-vfs"}}
+        },
+        {
+            "name": "ci-macos-job-files",
+            "inherits": "base-test",
+            "configurePreset": "ci-macos-release",
+            "filter": {"include": {"label": "file-verification"}}
         }
     ]
 }

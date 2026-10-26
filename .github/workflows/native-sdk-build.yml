@@ -39,7 +39,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test curl package transport offline
+      - name: Test package transport and qualification guards offline
         run: |
           cmake -S cmake/ci/tests -B build/ci-transport-tests
           ctest --test-dir build/ci-transport-tests --output-on-failure --no-tests=error
@@ -227,6 +227,26 @@ jobs:
         if: matrix.rid == 'macos-arm64'
         shell: bash
         run: ctest --preset ci-macos-sqlite-vfs --verbose --no-tests=error
+
+      - name: Test Job file verification and recovery on macOS arm64
+        if: matrix.rid == 'macos-arm64'
+        shell: bash
+        run: |
+          python cmake/ci/run-job-file-conformance.py \
+            --build-dir "$PWD/build/ci-macos-release" \
+            --evidence-dir "$PWD/build/job-file-conformance/macos-arm64/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --preset ci-macos-job-files \
+            --expected-commit "$GITHUB_SHA" --require-macos-arm64
+
+      - name: Retain macOS Job file verification evidence
+        if: always() && matrix.rid == 'macos-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-file-conformance-macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/job-file-conformance/macos-arm64/
+            build/ci-macos-release/harness/tests/process_crash/cases/
+          if-no-files-found: warn
 
       # Manual Release-Tag qualification is strictly an installed-package
       # consumer test. Prove CMake consumed the published .nupkg identified

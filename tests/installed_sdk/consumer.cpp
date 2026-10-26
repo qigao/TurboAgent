@@ -2,6 +2,7 @@
 #include <turbo_agent_app.h>
 #include <turbo_agent_job.h>
 #include <turbo_agent_job_cancel.h>
+#include <turbo_agent_job_execution.h>
 #include <turbo_agent_job_acceptance.h>
 #include <turbo_agent_job_delivery.h>
 #include <turbo_agent_job_verifier.h>
@@ -97,6 +98,12 @@ spec("installed C++17 SDK consumer") {
     turbo_agent_compiler_config_t compiler{};
     turbo_agent_compiler_config_init(&compiler);
     turbo_agent_compile_diagnostic_t diagnostic{};
+    turbo_agent_job_execution_status_t job_status{};
+    turbo_agent_job_execution_status_init(&job_status);
+    check_equal(job_status.abi_version, TURBO_AGENT_JOB_EXECUTION_ABI_VERSION);
+    turbo_agent_job_execution_t *job_execution = nullptr;
+    check_equal(turbo_agent_harness_submit_job_inspect(harness, "../bad", 2, &compiler, 0, &job_execution), SALTS_EINVAL);
+    check_null(job_execution);
     turbo_tool_status_t tool_status = TURBO_TOOL_OK;
     json_value_t *result = nullptr, *certificate = nullptr, *reference = nullptr;
     check_equal(turbo_agent_harness_execute_job_inspect_json(harness, "../bad", 2,

@@ -75,9 +75,9 @@ static int identity(const json_value_t *record, const json_value_t *reference,
       is(record, "tool_name", proof->admission.name) &&
       number(record, "authority_generation") == (int64_t)proof->authority.generation;
 }
-static int validate_reference(const turbo_agent_job_proof_t *proof, const json_value_t *reference,
+static int validate_reference_impl(const turbo_agent_job_proof_t *proof, const json_value_t *reference,
     turbo_agent_job_acceptance_decision_t decision, const char *evidence_ref,
-    turbo_agent_compile_diagnostic_t *diagnostic) {
+    turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out_result) {
   json_value_t *attempt = NULL, *journal = NULL, *run = NULL;
   const json_value_t *binding = json_object_get(proof->snapshot, "attempt");
   const json_value_t *proposal = json_object_get(proof->snapshot, "proposal");
@@ -87,6 +87,7 @@ static int validate_reference(const turbo_agent_job_proof_t *proof, const json_v
   const char *stage = "canonical attempt";
   char key[160];
   int equal, rc = reference_shape(reference);
+  if (out_result) *out_result = NULL;
   if (rc != SALTS_OK) return rc;
   if (!is(reference, "job_id", json_get_string(proof->snapshot, "id")) ||
       number(reference, "job_revision") != number(proof->snapshot, "revision") ||
@@ -144,9 +145,15 @@ static int validate_reference(const turbo_agent_job_proof_t *proof, const json_v
   equal = json_equal(json_object_get(execution, "certificate"), proof->admission.certificate);
   rc = equal == 1 ? SALTS_OK : equal < 0 ? SALTS_ENOMEM : SALTS_EPROTO;
   if (rc == SALTS_OK) {
-    stage = "Host evidence";
-    rc = turbo_agent_harness_verify_job_evidence(proof, reference,
-        json_object_get(attempt, "result"), decision, evidence_ref, diagnostic);
+    if (out_result) {
+      stage = "canonical result allocation";
+      *out_result = json_clone(json_object_get(attempt, "result"));
+      if (!*out_result) rc = SALTS_ENOMEM;
+    } else {
+      stage = "Host evidence";
+      rc = turbo_agent_harness_verify_job_evidence(proof, reference,
+          json_object_get(attempt, "result"), decision, evidence_ref, diagnostic);
+    }
   }
 done:
   if (rc != SALTS_OK && diagnostic && diagnostic->status == TURBO_AGENT_COMPILE_OK) {
@@ -156,6 +163,15 @@ done:
   }
   json_free(attempt); json_free(journal); json_free(run);
   return rc;
+}
+static int validate_reference(const turbo_agent_job_proof_t *proof, const json_value_t *reference,
+    turbo_agent_job_acceptance_decision_t decision, const char *evidence_ref,
+    turbo_agent_compile_diagnostic_t *diagnostic) {
+  return validate_reference_impl(proof, reference, decision, evidence_ref, diagnostic, NULL);
+}
+int turbo_agent_harness_load_job_result(const turbo_agent_job_proof_t *proof,
+    const json_value_t *reference, turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out) {
+  return validate_reference_impl(proof, reference, TURBO_AGENT_JOB_ACCEPTED, NULL, diagnostic, out);
 }
 static int config_valid(const turbo_agent_compiler_config_t *config) {
   return config && config->struct_size >= sizeof(*config) &&

@@ -1,6 +1,7 @@
 #include <turbo_agent.h>
 #include <turbo_agent_app.h>
 #include <turbo_agent_job.h>
+#include <turbo_agent_job_acceptance.h>
 #include <turbo_agent_policy.h>
 #include <turbo_agent_state.h>
 #include <turbo_agent_harness.h>
@@ -83,6 +84,12 @@ spec("installed C++17 SDK consumer") {
     check_equal(turbo_agent_harness_execute_job_inspect_json(harness, "../bad", 2,
         &compiler, nullptr, &diagnostic, &tool_status, &result, &certificate, &reference), SALTS_EINVAL);
     check_null(result); check_null(certificate); check_null(reference);
+    check_equal(turbo_agent_harness_get_job_acceptance_json(harness, "../bad", 2,
+        &compiler, &diagnostic, &reference), SALTS_EINVAL);
+    check_null(reference);
+    check_equal(turbo_agent_harness_record_job_acceptance_json(harness, "../bad", 2,
+        &compiler, nullptr, TURBO_AGENT_JOB_ACCEPTED, "evidence", &diagnostic, &reference), SALTS_EINVAL);
+    check_null(reference);
     turbo_agent_harness_release(harness);
     cmeta_threadpool_destroy(pool);
   }

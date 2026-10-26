@@ -1,5 +1,6 @@
 #include "turbo_agent_harness.h"
 #include "turbo_agent_job.h"
+#include "turbo_agent_job_acceptance.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_runtime_json.h"
@@ -37,7 +38,11 @@ static const crash_case_t cases[] = {
   {"before_committed", "started", "started", 1},
   {"after_committed", "committed", "started", 1},
   {"after_run_committed", "committed", "committed", 1},
-  {"before_delivery", "committed", "committed", 1}
+  {"before_delivery", "committed", "committed", 1},
+  {"acceptance_before", "committed", "committed", 1},
+  {"acceptance_after", "committed", "committed", 1},
+  {"acceptance_lost_ack", "committed", "committed", 1},
+  {"acceptance_returned", "committed", "committed", 1}
 };
 
 typedef struct fixture_s {
@@ -48,7 +53,8 @@ typedef struct fixture_s {
   turbo_agent_harness_t *harness;
   cmeta_threadpool_t *pool;
   int inject, callbacks, transports, attempt_reads, attempt_writes, reference_writes;
-  int job_mode;
+  int job_mode, acceptance_mode;
+  json_value_t *execution_reference;
 } fixture_t;
 
 static int failure(const char *expression, int line) {
@@ -113,10 +119,17 @@ static int store_write(fixture_t *f, const char *collection, const char *id,
       } else if (!strcmp(phase, "committed")) after = !strcmp(f->cut->name, "after_run_committed");
     }
   }
+  if (!strcmp(collection, "agent_job_acceptance")) {
+    if (!create) return SALTS_EPROTO;
+    before = !strcmp(f->cut->name, "acceptance_before");
+    after = !strcmp(f->cut->name, "acceptance_after");
+  }
   if (f->inject && before) _Exit(FIXTURE_CRASH);
   rc = create ? f->inner.create_if_absent(f->inner.user_data, collection, id, text)
               : f->inner.put(f->inner.user_data, collection, id, text);
   if (!rc && f->inject && after) _Exit(FIXTURE_CRASH);
+  if (!rc && f->inject && !strcmp(collection, "agent_job_acceptance") &&
+      !strcmp(f->cut->name, "acceptance_lost_ack")) return SALTS_EIO;
   json_free(record);
   return rc;
 }
@@ -221,6 +234,7 @@ done:
   return rc;
 }
 static void fixture_close(fixture_t *f) {
+  json_free(f->execution_reference);
   if (f->harness) turbo_agent_harness_release(f->harness);
   store_free(f); /* Cleared by Session destruction if it consumed the store. */
   turbo_tool_registry_destroy(f->registry);
@@ -259,6 +273,10 @@ static int execute(fixture_t *f, const char *input, turbo_agent_compile_diagnost
       REQUIRE(text_is(journal, "phase", "committed") && text_is(journal, "attempt_record_id",
           json_get_string(reference, "attempt_record_id")) && !json_object_get(journal, "result"));
     } else REQUIRE(!reference);
+    if (f->acceptance_mode && rc == SALTS_OK) {
+      f->execution_reference = reference;
+      reference = NULL;
+    }
     json_free(reference); json_free(run); json_free(journal);
     return rc;
   }
@@ -393,19 +411,92 @@ done:
   json_free(result); json_free(certificate);
   return rc;
 }
+static int acceptance_operation(fixture_t *f, int write,
+    turbo_agent_job_acceptance_decision_t decision, json_value_t **out) {
+  const char *allowed[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compile_diagnostic_t diagnostic;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+  if (write) return turbo_agent_harness_record_job_acceptance_json(f->harness,
+      "bound-job", 2, &config, f->execution_reference, decision, "host-evidence-v1", &diagnostic, out);
+  return turbo_agent_harness_get_job_acceptance_json(f->harness, "bound-job", 2,
+      &config, &diagnostic, out);
+}
+static int exercise_acceptance(fixture_t *f, const char *mode) {
+  turbo_agent_compile_diagnostic_t diagnostic;
+  turbo_tool_status_t status;
+  json_value_t *result = NULL, *certificate = NULL, *record = NULL, *runs = NULL;
+  int rc;
+  if (!strcmp(mode, "init")) return exercise(f, mode);
+  REQUIRE(!grant(f, strcmp(mode, "denied") != 0));
+  if (!strcmp(mode, "crash")) {
+    REQUIRE(!execute(f, source, &diagnostic, &status, &result, &certificate));
+    REQUIRE(result_valid(f, result) && certificate && f->execution_reference);
+    /* Persist the Host's input metadata in the independent oracle before the
+     * acceptance cut. It contains no typed tool result or fabricated decision. */
+    REQUIRE(!turbo_agent_runtime_store_put_json(f->oracle, "host_acceptance_input",
+        "candidate", f->execution_reference));
+    json_free(result); json_free(certificate);
+    f->inject = 1;
+    rc = acceptance_operation(f, 1, TURBO_AGENT_JOB_ACCEPTED, &record);
+    if (!strcmp(f->cut->name, "acceptance_lost_ack")) {
+      REQUIRE(rc == SALTS_EIO && !record);
+      _Exit(87);
+    }
+    REQUIRE(!strcmp(f->cut->name, "acceptance_returned") && rc == SALTS_OK && record);
+    _Exit(FIXTURE_CRASH);
+  }
+  REQUIRE(!turbo_agent_runtime_store_get_json_status(f->oracle, "host_acceptance_input",
+      "candidate", &f->execution_reference));
+  if (!strcmp(mode, "denied") || !strcmp(mode, "stale")) {
+    if (!strcmp(mode, "stale")) {
+      REQUIRE(!grant(f, 1)); /* Quiescent same-grant generation replacement. */
+      rc = acceptance_operation(f, 1, TURBO_AGENT_JOB_ACCEPTED, &record);
+    } else rc = acceptance_operation(f, 0, TURBO_AGENT_JOB_ACCEPTED, &record);
+    REQUIRE(rc == SALTS_EPROTO && !record);
+  } else {
+    rc = acceptance_operation(f, 0, TURBO_AGENT_JOB_ACCEPTED, &record);
+    if (!strcmp(mode, "inspect") && !strcmp(f->cut->name, "acceptance_before")) {
+      REQUIRE(rc == SALTS_ENOENT && !record);
+    } else {
+      if (!strcmp(mode, "recover") && !strcmp(f->cut->name, "acceptance_before")) {
+        REQUIRE(rc == SALTS_ENOENT && !record);
+        REQUIRE(!acceptance_operation(f, 1, TURBO_AGENT_JOB_ACCEPTED, &record));
+      } else REQUIRE(rc == SALTS_OK && record);
+      REQUIRE(text_is(record, "decision", "accepted") && text_is(record, "evidence_ref", "host-evidence-v1") &&
+          !json_object_get(record, "result"));
+      json_free(record); record = NULL;
+      if (!strcmp(mode, "recover")) {
+        REQUIRE(acceptance_operation(f, 1, TURBO_AGENT_JOB_REJECTED, &record) == SALTS_EALREADY && !record);
+        REQUIRE(!acceptance_operation(f, 0, TURBO_AGENT_JOB_ACCEPTED, &record));
+        REQUIRE(text_is(record, "decision", "accepted"));
+        json_free(record); record = NULL;
+      }
+    }
+  }
+  REQUIRE(!f->callbacks && !f->transports);
+  REQUIRE(!turbo_agent_runtime_store_list_json(f->runtime, "runs", NULL, NULL, &runs));
+  REQUIRE(json_array_size(runs) == 1); /* Recovery/review never creates a Run. */
+  json_free(runs);
+  return evidence(f, "committed", 1, 0, 1); /* Acceptance is not external delivery. */
+}
+
 int main(int argc, char **argv) {
   fixture_t fixture = {0};
   int rc;
   if (argc != 4 && argc != 5) return failure("mode/cut/private-directory/[job] required", __LINE__);
   if (argc == 5) {
-    if (strcmp(argv[4], "job")) return failure("unknown execution mode", __LINE__);
+    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance"))
+      return failure("unknown execution mode", __LINE__);
     fixture.job_mode = 1;
+    fixture.acceptance_mode = !strcmp(argv[4], "acceptance");
   }
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
     if (!strcmp(argv[2], cases[i].name)) fixture.cut = &cases[i];
   if (!fixture.cut) return failure("unknown crash cut", __LINE__);
   rc = fixture_open(&fixture, argv[3], !strcmp(argv[1], "init"));
-  if (!rc) rc = exercise(&fixture, argv[1]);
+  if (!rc) rc = fixture.acceptance_mode ? exercise_acceptance(&fixture, argv[1]) : exercise(&fixture, argv[1]);
   else fprintf(stderr, "Compiled Inspect fixture open failed: %d\n", rc);
   fixture_close(&fixture);
   return rc ? FIXTURE_FAILURE : 0;

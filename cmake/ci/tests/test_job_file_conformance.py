@@ -1,9 +1,13 @@
 import copy
+import json
 import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
 import sys
+import shutil
+import subprocess
+import os
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
@@ -35,6 +39,26 @@ def traces(path):
 
 
 class QualificationGuards(unittest.TestCase):
+    def test_real_json_preset_boolean_cache_encoding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'preset fixture with spaces'
+            source.mkdir()
+            (source / 'CMakeLists.txt').write_text('cmake_minimum_required(VERSION 3.21)\nproject(BooleanCache NONE)\n'
+                'option(TURBOAGENT_JOB_FILE_CONFORMANCE "" OFF)\noption(BUILD_TESTS "" ON)\n')
+            (source / 'CMakePresets.json').write_text(json.dumps({'version': 3, 'configurePresets': [{
+                'name': 'booleans', 'binaryDir': str(source / 'build'), 'cacheVariables': {
+                    'TURBOAGENT_JOB_FILE_CONFORMANCE': True, 'BUILD_TESTS': False, 'CMAKE_OSX_ARCHITECTURES': 'arm64'}}]}))
+            cmake = os.environ.get('JOB_FILE_TEST_CMAKE') or shutil.which('cmake')
+            self.assertIsNotNone(cmake, 'CTest must supply its CMake executable')
+            subprocess.run([cmake, '--preset', 'booleans'], cwd=source, check=True, capture_output=True)
+            cache = gate.read_cache(source / 'build/CMakeCache.txt')
+            self.assertEqual(cache['TURBOAGENT_JOB_FILE_CONFORMANCE'], 'TRUE')
+            self.assertEqual(cache['BUILD_TESTS'], 'FALSE')
+            with patch.object(gate.platform, 'system', return_value='Darwin'), patch.object(gate.platform, 'machine', return_value='arm64'):
+                gate.check_host(cache, True)
+        for value in ('', 'unset', 'NOTFOUND', 'maybe'):
+            with self.subTest(value=value), self.assertRaises(ValueError): gate.cache_boolean({'flag': value}, 'flag')
+
     def test_inventory_requires_exact_complete_enabled_set(self):
         original = inventory()
         self.assertEqual(len(gate.check_inventory(original)), 10)

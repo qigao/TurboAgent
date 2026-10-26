@@ -83,12 +83,21 @@ def read_cache(path):
     return entries
 
 
+def cache_boolean(cache, key):
+    value = cache.get(key, '').upper()
+    if value in ('1', 'ON', 'YES', 'TRUE', 'Y'):
+        return True
+    if value in ('0', 'OFF', 'NO', 'FALSE', 'N'):
+        return False
+    raise ValueError(f'Expected explicit CMake boolean for {key}: {value!r}')
+
+
 def check_host(cache, require_mac):
-    require(cache.get('TURBOAGENT_JOB_FILE_CONFORMANCE') == 'ON', 'Explicit Job file conformance must be ON')
+    require(cache_boolean(cache, 'TURBOAGENT_JOB_FILE_CONFORMANCE'), 'Explicit Job file conformance must be ON')
     if require_mac:
         require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'Requires actual macOS arm64 host')
         require(cache.get('CMAKE_OSX_ARCHITECTURES') == 'arm64', 'Requires arm64 build')
-        require(cache.get('BUILD_TESTS') == 'OFF', 'macOS dedicated profile must keep full tests OFF')
+        require(not cache_boolean(cache, 'BUILD_TESTS'), 'macOS dedicated profile must keep full tests OFF')
 
 
 def main(argv=None):

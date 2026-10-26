@@ -103,7 +103,7 @@ committed replay invokes the callback once overall, and Job records own no resul
 
 The bound execution adapter now selects the exact persisted source/scope and
 returns canonical attempt/Run references. Remaining M1 work includes source
-freshness, durable observation/acceptance evidence, delivery intent and
+freshness, external evidence verification, delivery intent and
 ambiguous-delivery reconciliation. Async execution, cancellation supervision,
 replanning of bound Jobs and distributed ownership need separate contracts.
 Real-model quality/cost remains issue #278. This foundation does not mark M1 done.
@@ -157,3 +157,12 @@ Run-journal completion and pre-delivery exit. Each restart verifies that the Job
 stays bound, denied/stale authority still rejects, and committed replay does not
 repeat the callback. Legacy direct-attempt crash cases remain separate; Job mode
 has no source override, so its script omits the legacy caller-source-mismatch stage.
+
+
+## Verified Host acceptance
+
+[Host acceptance](job-acceptance.md) now revalidates current admission and the exact
+canonical attempt, compiled journal and completed Runtime Run state snapshot before
+publishing a separate immutable decision/evidence-reference record. It does not
+change Job v1 proposal history, copy a typed result or imply external delivery.
+Normal Run completion is joined through state_snapshot; no Checkpoint is assumed.

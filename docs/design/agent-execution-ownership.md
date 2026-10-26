@@ -55,8 +55,10 @@ Its state machine must distinguish unresolved dispatch/delivery from confirmed
 failure. One coordinator owns transitions; atomic create-if-absent can claim a
 single transition but is not a multi-record transaction. Recovery validates exact
 references and never retries an unknown external effect automatically.
-The initial installed Job API covers only immutable goals, proposals and a stable
-compiled-attempt binding, with its own publication/recovery tests. Acceptance,
-delivery and execution supervision remain future state-machine work.
+The installed Job API covers immutable goals, proposals, stable compiled-attempt
+binding and bound execution. A [verified Host acceptance layer](job-acceptance.md)
+stores only a decision and exact evidence references after checking the canonical
+result and Runtime Run snapshot. Delivery and execution supervision remain future
+state-machine work.
 Real-model quality/cost qualification remains
 tracked independently in issue #278.

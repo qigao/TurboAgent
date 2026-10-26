@@ -2,6 +2,7 @@
 
 #include "turbo_agent_harness.h"
 #include "turbo_agent_job.h"
+#include "turbo_agent_job_acceptance.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_inbox.h"
@@ -134,6 +135,9 @@ typedef struct compiled_inspect_store_fault_s {
   int job_read_status;
   turbo_agent_harness_t *nested_harness;
   int nested_entered, nested_status;
+  int acceptance_status, acceptance_after_commit, acceptance_claims, acceptance_puts;
+  int acceptance_unacknowledged, reads_after_acceptance_error;
+  const char *proof_read_failure;
 } compiled_inspect_store_fault_t;
 
 static int compiled_inspect_fault_store_put(void *user_data, const char *collection,
@@ -142,6 +146,7 @@ static int compiled_inspect_fault_store_put(void *user_data, const char *collect
   char phase_token[64];
   int length;
   if (!fault || !record_json) return -1;
+  if (!strcmp(collection, "agent_job_acceptance")) ++fault->acceptance_puts;
   length = snprintf(phase_token, sizeof(phase_token), "\"phase\":\"%s\"",
                     fault->failed_phase ? fault->failed_phase : "");
   if (fault->failed_phase && strcmp(fault->failed_phase, "inbox_applied") == 0 &&
@@ -157,6 +162,20 @@ static int compiled_inspect_fault_store_create_if_absent(
     const char *record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
   if (!fault || !fault->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, "agent_job_acceptance")) {
+    int rc;
+    ++fault->acceptance_claims;
+    if (fault->acceptance_status && !fault->acceptance_after_commit) {
+      fault->acceptance_unacknowledged = 1;
+      return fault->acceptance_status;
+    }
+    rc = fault->inner.create_if_absent(fault->inner.user_data, collection, id, record_json);
+    if (rc == SALTS_OK && fault->acceptance_status) {
+      fault->acceptance_unacknowledged = 1;
+      return fault->acceptance_status;
+    }
+    return rc;
+  }
   if (fault->claim_failure_status != SALTS_OK) return fault->claim_failure_status;
   return fault->inner.create_if_absent(fault->inner.user_data, collection, id, record_json);
 }
@@ -164,6 +183,11 @@ static int compiled_inspect_fault_store_create_if_absent(
 static int compiled_inspect_fault_store_get(void *user_data, const char *collection,
                                             const char *id, char **out_record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
+  if (fault && fault->acceptance_unacknowledged) ++fault->reads_after_acceptance_error;
+  if (fault && fault->proof_read_failure && !strcmp(collection, fault->proof_read_failure)) {
+    *out_record_json = NULL;
+    return SALTS_EIO;
+  }
   if (fault && fault->job_read_status &&
       (!strcmp(collection, "agent_jobs") || !strcmp(collection, "agent_job_revisions"))) {
     *out_record_json = NULL;
@@ -1332,6 +1356,25 @@ static int run_job_inspect(turbo_agent_harness_t *harness, const char *id, uint3
       &config, NULL, diagnostic, status, result, certificate, reference);
 }
 
+static int record_acceptance(turbo_agent_harness_t *harness, const json_value_t *reference,
+    turbo_agent_job_acceptance_decision_t decision, turbo_agent_compile_diagnostic_t *diagnostic,
+    json_value_t **out) {
+  const char *allowed[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+  return turbo_agent_harness_record_job_acceptance_json(harness, "job-bound", 2,
+      &config, reference, decision, "host-evidence-v1", diagnostic, out);
+}
+static int read_acceptance(turbo_agent_harness_t *harness,
+    turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out) {
+  const char *allowed[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+  return turbo_agent_harness_get_job_acceptance_json(harness, "job-bound", 2, &config, diagnostic, out);
+}
+
 spec("Harness persisted Job dispatch") {
   static cmeta_threadpool_t *pool;
   static turbo_tool_registry_t *registry;
@@ -1518,6 +1561,197 @@ spec("Harness persisted Job dispatch") {
                 &result, &certificate, &reference), SALTS_OK);
     check_equal(fault->nested_entered, 1);
     check_equal(fault->nested_status, SALTS_EBUSY);
+    check_equal(probe.calls, 1);
+  }
+
+  it("persists one explicit Host acceptance with canonical references and no second result") {
+    int rc;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    rc = record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED, &diagnostic, &record);
+    if (rc) fprintf(stderr, "Acceptance failed: %d, %s\n", rc, diagnostic.message);
+    check_equal(rc, SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(json_get_string(record, "decision"), "accepted");
+    check_equal(json_get_string(record, "evidence_ref"), "host-evidence-v1");
+    check_null(json_object_get(record, "result"));
+    check_null(json_object_get(json_object_get(record, "execution_reference"), "result"));
+    json_free(record); record = NULL;
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "decision"), "accepted");
+    json_free(record); record = NULL;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_REJECTED,
+                &diagnostic, &record), SALTS_EALREADY);
+    check_null(record);
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "decision"), "accepted");
+    check_equal(turbo_agent_job_get_snapshot(job, &snapshot), SALTS_OK);
+    check_equal(json_get_string(snapshot, "state"), "attempt_bound");
+    check_equal(probe.calls, 1);
+  }
+
+  it("records Host quality rejection independently of successful tool status") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(status, TURBO_TOOL_OK);
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_REJECTED,
+                &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "decision"), "rejected");
+    check_equal(probe.calls, 1);
+    check_equal(fault->acceptance_claims, 1);
+    check_equal(fault->acceptance_puts, 0);
+  }
+
+  it("does not retry or read back a lost acceptance acknowledgement") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    fault->acceptance_status = SALTS_EIO; fault->acceptance_after_commit = 1;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_EIO);
+    check_null(record);
+    check_equal(fault->reads_after_acceptance_error, 0);
+    check_equal(fault->acceptance_claims, 1);
+    fault->acceptance_unacknowledged = 0; fault->acceptance_status = 0;
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "decision"), "accepted");
+    check_equal(probe.calls, 1);
+    check_equal(turbo_agent_session_last_run_id(turbo_agent_app_session(turbo_agent_harness_app(harness))),
+                json_get_string(reference, "run_id"));
+  }
+
+  it("fails closed on unsupported or failed acceptance publication without a put fallback") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    fault->acceptance_status = SALTS_ENOTSUP;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_ENOTSUP);
+    check_null(record);
+    check_equal(fault->reads_after_acceptance_error, 0);
+    fault->acceptance_unacknowledged = 0; fault->acceptance_status = SALTS_ENOSPC;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_ENOSPC);
+    check_null(record);
+    check_equal(fault->acceptance_claims, 2);
+    check_equal(fault->acceptance_puts, 0);
+    fault->acceptance_unacknowledged = 0; fault->acceptance_status = 0;
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_ENOENT);
+    check_null(record);
+    check_equal(probe.calls, 1);
+  }
+
+  it("rejects every forged reference identity and preserves canonical read errors") {
+    const char *string_keys[] = {"job_id", "thread_id", "attempt_id", "attempt_record_id",
+        "run_id", "run_thread_id", "execution_id", "plan_hash"};
+    const char *number_keys[] = {"job_revision", "proposal_version", "authority_generation"};
+    const char *collections[] = {COMPILED_INSPECT_JOURNAL_COLLECTION,
+        COMPILED_INSPECT_RUN_JOURNAL_COLLECTION, "runs"};
+    size_t i;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    for (i = 0; i < sizeof(string_keys) / sizeof(string_keys[0]); ++i) {
+      snapshot = json_clone(reference);
+      check_equal(turbo_runtime_json_object_set_string(snapshot, string_keys[i], "forged"), 0);
+      check_not_equal(record_acceptance(harness, snapshot, TURBO_AGENT_JOB_ACCEPTED,
+                  &diagnostic, &record), SALTS_OK);
+      check_null(record);
+      json_free(snapshot); snapshot = NULL;
+    }
+    for (i = 0; i < sizeof(number_keys) / sizeof(number_keys[0]); ++i) {
+      snapshot = json_clone(reference);
+      check_equal(turbo_runtime_json_object_set_int64(snapshot, number_keys[i], 9), 0);
+      check_not_equal(record_acceptance(harness, snapshot, TURBO_AGENT_JOB_ACCEPTED,
+                  &diagnostic, &record), SALTS_OK);
+      check_null(record);
+      json_free(snapshot); snapshot = NULL;
+    }
+    for (i = 0; i < sizeof(collections) / sizeof(collections[0]); ++i) {
+      fault->proof_read_failure = collections[i];
+      check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                  &diagnostic, &record), SALTS_EIO);
+      check_null(record);
+    }
+    fault->proof_read_failure = NULL;
+    check_equal(fault->acceptance_claims, 0);
+    check_equal(probe.calls, 1);
+  }
+
+  it("rejects a cross-wired completed Run and its compiled journal identity") {
+    json_value_t *first;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    first = reference; reference = NULL;
+    json_free(result); result = NULL; json_free(certificate); certificate = NULL;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(turbo_runtime_json_object_set_string(first, "run_id", json_get_string(reference, "run_id")), 0);
+    check_equal(record_acceptance(harness, first, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_EPROTO);
+    check_null(record);
+    check_equal(fault->acceptance_claims, 0);
+    check_equal(probe.calls, 1);
+    json_free(first);
+  }
+
+  it("rejects invalid canonical result, pending outcome and corrupted Run snapshot") {
+    json_value_t *original;
+    const char *key;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    key = json_get_string(reference, "attempt_record_id");
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime,
+        COMPILED_INSPECT_JOURNAL_COLLECTION, key, &snapshot), SALTS_OK);
+    original = json_clone(snapshot);
+    check_equal(turbo_runtime_json_object_set_string(snapshot, "result", "invalid typed result"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, key, snapshot), SALTS_OK);
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_EPROTO);
+    check_equal(turbo_runtime_json_object_set_string(snapshot, "phase", "started"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, key, snapshot), SALTS_OK);
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_EBUSY);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, COMPILED_INSPECT_JOURNAL_COLLECTION, key, original), SALTS_OK);
+    json_free(original); json_free(snapshot); snapshot = NULL;
+    key = json_get_string(reference, "run_id");
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime, "runs", key, &snapshot), SALTS_OK);
+    check_equal(turbo_runtime_json_object_set_string(json_object_get(json_object_get(snapshot,
+        "state_snapshot"), "compiled_execution"), "execution_id", "forged"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "runs", key, snapshot), SALTS_OK);
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_EPROTO);
+    check_equal(fault->acceptance_claims, 0);
+    check_equal(probe.calls, 1);
+  }
+
+  it("withholds stored decisions after revocation or same-grant generation replacement") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_EPROTO);
+    check_null(record);
+    check_equal(set_compiled_host_policy(harness, 0), 0);
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_EPROTO);
+    check_null(record);
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime,
+        "agent_job_acceptance", "job-bound", &record), SALTS_OK);
+    check_equal(json_get_string(record, "decision"), "accepted");
+    check_equal(probe.calls, 1);
+  }
+
+  it("rejects future or malformed acceptance records and cannot infer acceptance from a tool result") {
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_ENOENT);
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_ENOENT);
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+                &diagnostic, &record), SALTS_OK);
+    check_equal(turbo_runtime_json_object_set_int64(record, "schema_version", 2), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "agent_job_acceptance", "job-bound", record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_ENOTSUP);
+    check_null(record);
     check_equal(probe.calls, 1);
   }
 

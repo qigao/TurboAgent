@@ -44,3 +44,14 @@ foreach(cut IN ITEMS before_claim after_claim before_run_started after_run_start
   set_tests_properties(test_job_inspect_crash_${cut} PROPERTIES
     TIMEOUT 90 LABELS "harness;job;recovery;process")
 endforeach()
+
+foreach(cut IN ITEMS acceptance_before acceptance_after acceptance_lost_ack acceptance_returned)
+  add_test(NAME test_job_${cut}
+    COMMAND "${CMAKE_COMMAND}"
+      "-DWORKER=$<TARGET_FILE:compiled_inspect_process_fixture>"
+      "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/cases"
+      "-DCUT=${cut}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_job_acceptance_crash.cmake")
+  set_tests_properties(test_job_${cut} PROPERTIES
+    TIMEOUT 90 LABELS "harness;job;acceptance;recovery;process")
+endforeach()

@@ -213,7 +213,9 @@ static turbo_agent_harness_t *make_compiled_harness_with_transport(
   turbo_agent_harness_config_init(&config);
   config.app_config = &app_config;
   config.executor = pool;
-  return turbo_agent_harness_create(&config);
+  turbo_agent_harness_t *harness = NULL;
+  (void)turbo_agent_harness_create_with_store(&config, &harness);
+  return harness;
 }
 
 static turbo_agent_harness_t *make_compiled_harness_with_store(

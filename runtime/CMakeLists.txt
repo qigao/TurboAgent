@@ -4,7 +4,6 @@ project(runtime LANGUAGES C)
 include(CmakeUtils)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 add_library(turbo_runtime SHARED
-  src/turbo_event.c
   src/turbo_event_log.c
   src/turbo_graph.c
   src/turbo_graph_run_log.c

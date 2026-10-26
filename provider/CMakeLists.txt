@@ -8,7 +8,7 @@ target_compile_definitions(turbo_provider PRIVATE SHARED_CXX)
 target_include_directories(turbo_provider PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-target_link_libraries(turbo_provider PUBLIC TurboAgent::Runtime
+target_link_libraries(turbo_provider PUBLIC TurboAgent::RuntimeData
   PRIVATE Salts::Mustache)
 cmake_config_target(turbo_provider FOLDER "Provider" EXPORT_NAME Provider
                     ALIAS TurboAgent::Provider)

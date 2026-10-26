@@ -51,6 +51,23 @@ Audit performed while introducing the Phase-1 AgentCompiler target.
 | `agent/tests/*` direct registry calls | **test-only / legacy-surface qualification** | These tests exercise current public legacy APIs and are not the compiled-path contract. |
 | `agent/docs/workspace-skills-tools.md` direct Wasm registry example | **host example** | Demonstrates explicit host composition, not model execution authority. |
 
+## Host selection of execution guarantees
+
+These are distinct entry contracts; choosing a registry does not select a policy.
+
+| Entry | Admission owner | Approval / journal | Compiler certificate |
+| --- | --- | --- | --- |
+| Agent workflow tool node | Agent policy, middleware and exact approval | ToolExecutor | No |
+| Harness compiled Inspect | Compiler capability/effect/schema admission | Compiled attempt store and Run references; read-only scope | Yes |
+| Generic Chain tool step | Trusted caller composing the chain | Caller responsibility; no implicit Agent approval or ToolExecutor journal | No |
+| RuntimeTools registry API | Trusted host/backend | Caller responsibility | No |
+
+Do not pass untrusted model-generated tool requests into a generic Chain tool
+step expecting Agent policy enforcement. Compose the Agent workflow or submit
+an admitted compiled plan instead. A Chain step has no Agent policy/approval
+owner and cannot manufacture that authority. Existing direct registry entry
+points remain available for trusted host composition.
+
 ## No-fallback rule
 
 The compiled path must never do this:

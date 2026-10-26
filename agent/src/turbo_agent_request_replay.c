@@ -243,7 +243,7 @@ static json_value_t *turbo_agent_request_project_messages(
   if (!state || ((include_instructions || apply_context_projection) && !agent)) {
     return NULL;
   }
-  context_active = apply_context_projection && agent->context_projection_active;
+  context_active = apply_context_projection && agent->projection.active;
 
   messages = turbo_prompt_messages_create();
   if (!messages) {
@@ -280,11 +280,11 @@ static json_value_t *turbo_agent_request_project_messages(
     tstr summary_text;
     json_value_t *summary_message;
 
-    if (!agent->context_summary) {
+    if (!agent->projection.summary) {
       json_free(messages); messages = NULL;
       return NULL;
     }
-    summary_json = json_serialize(agent->context_summary, NULL);
+    summary_json = json_serialize(agent->projection.summary, NULL);
     if (!summary_json) {
       json_free(messages); messages = NULL;
       return NULL;
@@ -328,7 +328,7 @@ static json_value_t *turbo_agent_request_project_messages(
 
   events = json_object_get(state, "events");
   if (turbo_agent_request_replay_message_events(
-          events, context_active ? agent->context_event_start : 0, messages,
+          events, context_active ? agent->projection.event_start : 0, messages,
           turbo_agent_request_append_chat_model_event_message,
           turbo_agent_request_append_chat_tool_results_messages) != 0) {
     json_free(messages); messages = NULL;

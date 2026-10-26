@@ -40,6 +40,7 @@ struct turbo_agent_harness_execution_s {
 static int turbo_agent_harness_config_valid(const turbo_agent_harness_config_t *config) {
   return config && config->struct_size >= sizeof(*config) &&
          config->abi_version == TURBO_AGENT_HARNESS_ABI_VERSION && config->app_config &&
+         config->app_config->session_config &&
          config->executor && cmeta_threadpool_capacity(config->executor) > 0 &&
          cmeta_threadpool_is_accepting(config->executor);
 }
@@ -67,47 +68,68 @@ void turbo_agent_harness_run_options_init(turbo_agent_harness_run_options_t *opt
   options->abi_version = TURBO_AGENT_HARNESS_ABI_VERSION;
 }
 
-turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_config_t *config) {
+static int turbo_agent_harness_construct(const turbo_agent_harness_config_t *config,
+    int explicit_store, turbo_agent_harness_t **out_harness) {
   turbo_agent_harness_t *harness;
+  const turbo_agent_session_config_t *session_config;
+  const char *thread_id;
+  int rc;
 
-  if (!turbo_agent_harness_config_valid(config)) {
-    return NULL;
-  }
+  if (!out_harness) return SALTS_EINVAL;
+  *out_harness = NULL;
+  if (!turbo_agent_harness_config_valid(config)) return SALTS_EINVAL;
+  session_config = config->app_config->session_config;
+  if (explicit_store && (!session_config->runtime_store.put ||
+      !session_config->runtime_store.get || !session_config->runtime_store.list))
+    return SALTS_EINVAL;
   harness = (turbo_agent_harness_t *)calloc(1, sizeof(*harness));
-  if (!harness) {
-    return NULL;
-  }
+  if (!harness) return SALTS_ENOMEM;
   atomic_init(&harness->ref_count, 1);
   cmeta_mutex_init(&harness->mutex);
   if (!harness->mutex) {
     free(harness);
-    return NULL;
+    return SALTS_ENOMEM;
   }
-  harness->app = turbo_agent_app_create(config->app_config);
-  if (!harness->app) {
+  /* Allocate the stable scope before App/Session consumes any store. There
+   * must be no fallible construction left after App succeeds. */
+  thread_id = session_config->thread_id;
+  if (thread_id && thread_id[0]) {
+    size_t size = strlen(thread_id) + 1;
+    harness->compiled_attempt_thread_id = (char *)malloc(size);
+    if (!harness->compiled_attempt_thread_id) {
+      cmeta_mutex_destroy(&harness->mutex);
+      free(harness);
+      return SALTS_ENOMEM;
+    }
+    memcpy(harness->compiled_attempt_thread_id, thread_id, size);
+  }
+  if (explicit_store) {
+    rc = turbo_agent_app_create_with_store(config->app_config, &harness->app);
+  } else {
+    harness->app = turbo_agent_app_create(config->app_config);
+    rc = harness->app ? SALTS_OK : SALTS_EIO;
+  }
+  if (rc != SALTS_OK) {
+    free(harness->compiled_attempt_thread_id);
     cmeta_mutex_destroy(&harness->mutex);
     free(harness);
-    return NULL;
+    return rc;
   }
-  {
-    turbo_agent_session_t *session = turbo_agent_app_session(harness->app);
-    const char *thread_id = turbo_agent_session_thread_id(session);
-    if (thread_id && thread_id[0]) {
-      size_t thread_id_size = strlen(thread_id) + 1;
-      harness->compiled_attempt_thread_id = (char *)malloc(thread_id_size);
-      if (!harness->compiled_attempt_thread_id) {
-        turbo_agent_app_destroy(harness->app);
-        cmeta_mutex_destroy(&harness->mutex);
-        free(harness);
-        return NULL;
-      }
-      memcpy(harness->compiled_attempt_thread_id, thread_id, thread_id_size);
-    }
-    /* Ordinary Harness creation historically permits an empty thread ID.
-     * Durable compiled Inspect captures a stable scope lazily when invoked. */
-  }
+  /* Empty thread scope is still captured lazily by compiled Inspect. */
   harness->executor = config->executor;
+  *out_harness = harness;
+  return SALTS_OK;
+}
+
+turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_config_t *config) {
+  turbo_agent_harness_t *harness = NULL;
+  (void)turbo_agent_harness_construct(config, 0, &harness);
   return harness;
+}
+
+int turbo_agent_harness_create_with_store(const turbo_agent_harness_config_t *config,
+    turbo_agent_harness_t **out_harness) {
+  return turbo_agent_harness_construct(config, 1, out_harness);
 }
 
 turbo_agent_harness_t *turbo_agent_harness_retain(turbo_agent_harness_t *harness) {

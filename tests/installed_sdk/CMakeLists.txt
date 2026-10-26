@@ -60,3 +60,12 @@ foreach(consumer installed_public_c11 installed_harness_c11 installed_remote_c11
   add_test(NAME ${consumer} COMMAND ${consumer})
   set_tests_properties(${consumer} PROPERTIES TIMEOUT 60)
 endforeach()
+
+# A Provider-only consumer must not inherit graph/storage Runtime dependencies.
+get_target_property(provider_links TurboAgent::Provider INTERFACE_LINK_LIBRARIES)
+if("TurboAgent::Runtime" IN_LIST provider_links)
+  message(FATAL_ERROR "Provider must depend on event/data contracts, not durable Runtime")
+endif()
+add_executable(installed_provider_c11 provider.c)
+target_link_libraries(installed_provider_c11 PRIVATE TurboAgent::Provider)
+add_test(NAME installed_provider_c11 COMMAND installed_provider_c11)

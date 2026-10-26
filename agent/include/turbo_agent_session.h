@@ -114,6 +114,20 @@ CXX_C_API turbo_agent_session_t *
 turbo_agent_session_create(const turbo_agent_session_config_t *config);
 
 /**
+ * Create with an explicit, complete RuntimeStore; never substitute memory.
+ * A missing put/get/list callback returns SALTS_EINVAL before consuming any
+ * resources. *out_session is cleared on every rejection. Once validated, store
+ * ownership follows create(): RuntimeStore is consumed even on failure, while
+ * MemoryStore transfers only on success. Returns SALTS_OK, SALTS_EINVAL,
+ * SALTS_ENOMEM, or SALTS_EIO (Agent configuration/construction rejected).
+ *
+ * This validates callbacks, not durability: an explicitly supplied memory store
+ * is accepted. Hosts requiring persistence must supply a durable backend.
+ */
+CXX_C_API int turbo_agent_session_create_with_store(
+    const turbo_agent_session_config_t *config, turbo_agent_session_t **out_session);
+
+/**
  * @brief Destroy one session wrapper.
  * @param session Session handle, may be NULL.
  */

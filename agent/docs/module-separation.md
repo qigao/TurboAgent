@@ -21,10 +21,10 @@ compiled into one owning library; no object or durable state is duplicated.
 | Source owner | Exported target | Responsibility and dependencies |
 |---|---|---|
 | `runtime_core/` | `RuntimeCore` | Cancellation/deadline control; Salts Core |
-| `runtime_data/` | `RuntimeData` | JSON value ownership, checked insertion, and borrowed-value copy helpers |
+| `runtime_data/` | `RuntimeData` | JSON value ownership, checked insertion, borrowed-value copy helpers, and transport-independent event contracts |
 | `runtime_tools/` | `RuntimeTools` | Tool contracts, registry, schemas |
 | `runtime/` | `Runtime` | Graph/checkpoint execution, StateGraph stores, durable records/segments, checkpoint selection/loading and raw history; only RuntimeCore/RuntimeData below it |
-| `provider/` | `Provider` | Wire request encoding, prompt messages/templates, response/SSE conversion, and embedding helpers; Runtime and Salts Mustache only |
+| `provider/` | `Provider` | Wire request encoding, prompt messages/templates, response/SSE conversion, and embedding helpers; RuntimeData and Salts Mustache only |
 | `agent/src/` | `Agent` | Agent policy/workflow/state, App/Session and asynchronous submission, commands and inspection projections, provider callbacks and state projection, memory/context |
 | `harness/src/` | `Harness` | Embedded Harness, host server, connection journal, and JSON-lines framing; public Agent API only |
 | `agent_compiler/` | `AgentCompiler` | Existing compiler qualification; no Agent or LangChain dependency |
@@ -32,7 +32,7 @@ compiled into one owning library; no object or durable state is duplicated.
 
 ```text
 Harness -> Agent -> Runtime -> RuntimeCore / RuntimeData
-             +--> Provider -> Runtime
+             +--> Provider -> RuntimeData
              +--> RuntimeTools
 AgentCompiler --> RuntimeTools / RuntimeData / Salts CFlow
 ```

@@ -21,7 +21,26 @@ typedef int (*turbo_agent_context_overflow_fn)(turbo_agent_t *agent, json_value_
 typedef struct turbo_agent_tool_executor_s turbo_agent_tool_executor_t;
 typedef struct turbo_agent_http_owner_s turbo_agent_http_owner_t;
 
+/* Mutable state belongs to the exclusively owned Agent execution lane.
+ * Keeping it separate from configuration makes ownership visible; it does not
+ * permit concurrent calls on one Agent or sharing its HTTP client. */
+typedef struct turbo_agent_call_state_s {
+  char *last_provider_request_id;
+  char *last_stream_sse;
+  size_t last_stream_sse_len;
+} turbo_agent_call_state_t;
+
+/* Session Context publishes this projection on its exclusively owned Agent.
+ * It survives individual provider calls and is not request scratch space. */
+typedef struct turbo_agent_projection_state_s {
+  json_value_t *summary;
+  size_t event_start;
+  int active;
+} turbo_agent_projection_state_t;
+
 struct turbo_agent_s {
+  turbo_agent_call_state_t call_state;
+  turbo_agent_projection_state_t projection;
   char *api_key;
   char *http_authorization;
   char *model;
@@ -49,16 +68,12 @@ struct turbo_agent_s {
   void *transport_v2_user_data;
   turbo_agent_transport_v2_user_data_free_fn transport_v2_user_data_free;
   turbo_agent_retry_policy_t retry_policy;
-  char *last_provider_request_id;
   void *owned_resource;
   turbo_agent_owned_resource_free_fn owned_resource_free;
   turbo_agent_before_turn_fn before_turn;
   void *before_turn_user_data;
   turbo_agent_context_overflow_fn context_overflow;
   void *context_overflow_user_data;
-  json_value_t *context_summary;
-  size_t context_event_start;
-  int context_projection_active;
   const turbo_model_provider_t *provider;
   turbo_agent_middleware_t *middlewares;
   size_t middleware_count;
@@ -73,8 +88,6 @@ struct turbo_agent_s {
   size_t trace_json_value_sink_count;
   size_t trace_json_value_sink_capacity;
   int capture_trace_history;
-  char *last_stream_sse;
-  size_t last_stream_sse_len;
   turbo_agent_store_t store;
   int has_store;
 };

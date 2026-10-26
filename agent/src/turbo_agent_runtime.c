@@ -99,9 +99,9 @@ CXX_C_API int turbo_agent_append_model_event(turbo_agent_t *agent, json_value_t 
     return -1;
   }
 
-  if (agent->last_stream_sse && agent->last_stream_sse_len > 0) {
-    event = turbo_model_provider_sse_to_event_json(agent->provider, agent->last_stream_sse,
-                                                   agent->last_stream_sse_len);
+  if (agent->call_state.last_stream_sse && agent->call_state.last_stream_sse_len > 0) {
+    event = turbo_model_provider_sse_to_event_json(agent->provider, agent->call_state.last_stream_sse,
+                                                   agent->call_state.last_stream_sse_len);
   }
   if (!event && response) {
     event = turbo_model_provider_response_to_event_json(agent->provider, response);

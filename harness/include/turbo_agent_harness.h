@@ -57,6 +57,16 @@ CXX_C_API void turbo_agent_harness_run_options_init(turbo_agent_harness_run_opti
 
 CXX_C_API turbo_agent_harness_t *
 turbo_agent_harness_create(const turbo_agent_harness_config_t *config);
+/**
+ * Construct with an explicit complete RuntimeStore, without memory fallback.
+ * Invalid configuration clears *out_harness and consumes no stores. Allocation
+ * before Session construction also consumes none. Once Session construction begins,
+ * RuntimeStore is consumed even on failure; MemoryStore transfers only on
+ * success. Executor is always borrowed. Callback completeness does not establish
+ * backend durability. Returns SALTS_OK, SALTS_EINVAL, SALTS_ENOMEM or SALTS_EIO.
+ */
+CXX_C_API int turbo_agent_harness_create_with_store(
+    const turbo_agent_harness_config_t *config, turbo_agent_harness_t **out_harness);
 CXX_C_API turbo_agent_harness_t *turbo_agent_harness_retain(turbo_agent_harness_t *harness);
 CXX_C_API void turbo_agent_harness_release(turbo_agent_harness_t *harness);
 

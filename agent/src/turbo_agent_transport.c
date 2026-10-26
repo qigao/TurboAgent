@@ -45,8 +45,8 @@ static int turbo_agent_capture_last_stream_sse(turbo_agent_t *agent, const void 
   copy = turbo_agent_transport_copy_bytes(data, len);
   if (!copy) return -1;
   turbo_agent_clear_last_stream_sse(agent);
-  agent->last_stream_sse = copy;
-  agent->last_stream_sse_len = len;
+  agent->call_state.last_stream_sse = copy;
+  agent->call_state.last_stream_sse_len = len;
   return 0;
 }
 
@@ -293,8 +293,8 @@ static int turbo_agent_http_transport_call(const char *request_json, char **out_
       return -1;
     }
     if (!agent->provider ||
-        turbo_agent_provider_sse_to_response_json(agent->provider, agent->last_stream_sse,
-                                                  agent->last_stream_sse_len,
+        turbo_agent_provider_sse_to_response_json(agent->provider, agent->call_state.last_stream_sse,
+                                                  agent->call_state.last_stream_sse_len,
                                                   out_response_json) != 0) {
       chttp_response_destroy(&response);
       *out_response_json = turbo_agent_transport_strdup_malloc(

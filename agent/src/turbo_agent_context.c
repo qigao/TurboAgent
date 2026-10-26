@@ -71,10 +71,10 @@ static int turbo_agent_context_summary_valid(const json_value_t *summary) {
 
 static void turbo_agent_context_clear_projection(turbo_agent_context_t *context) {
   if (!context || !context->agent) return;
-  turbo_runtime_json_destroy(context->agent->context_summary);
-  context->agent->context_summary = NULL;
-  context->agent->context_event_start = 0;
-  context->agent->context_projection_active = 0;
+  turbo_runtime_json_destroy(context->agent->projection.summary);
+  context->agent->projection.summary = NULL;
+  context->agent->projection.event_start = 0;
+  context->agent->projection.active = 0;
 }
 
 static int turbo_agent_context_apply_projection(turbo_agent_context_t *context) {
@@ -87,10 +87,10 @@ static int turbo_agent_context_apply_projection(turbo_agent_context_t *context) 
   }
   summary = json_clone(context->summary);
   if (!summary) return SALTS_ENOMEM;
-  turbo_runtime_json_destroy(context->agent->context_summary);
-  context->agent->context_summary = summary;
-  context->agent->context_event_start = context->event_start;
-  context->agent->context_projection_active = 1;
+  turbo_runtime_json_destroy(context->agent->projection.summary);
+  context->agent->projection.summary = summary;
+  context->agent->projection.event_start = context->event_start;
+  context->agent->projection.active = 1;
   return SALTS_OK;
 }
 
@@ -537,16 +537,16 @@ static int turbo_agent_context_compact_once(turbo_agent_context_t *context, json
 
   turbo_runtime_json_destroy(context->summary);
   turbo_runtime_json_destroy(context->head);
-  turbo_runtime_json_destroy(context->agent->context_summary);
+  turbo_runtime_json_destroy(context->agent->projection.summary);
   context->summary = context_summary;
   context_summary = NULL;
   context->head = head;
   head = NULL;
   context->event_start = cut;
-  context->agent->context_summary = agent_summary;
+  context->agent->projection.summary = agent_summary;
   agent_summary = NULL;
-  context->agent->context_event_start = cut;
-  context->agent->context_projection_active = 1;
+  context->agent->projection.event_start = cut;
+  context->agent->projection.active = 1;
   rc = SALTS_OK;
 
 cleanup:

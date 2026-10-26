@@ -179,7 +179,9 @@ CXX_C_API int turbo_agent_harness_execute_compiled_inspect_attempt_json(
  * Compiler, current Host grants, result contract and stable-attempt recovery
  * use the existing compiled Inspect path. STARTED/unknown attempts still refuse
  * redispatch; committed attempts replay through Session finalization. Source
- * freshness remains a Host precondition: source_revision is only a stored label.
+ * freshness remains a Host responsibility: source_revision is only a stored
+ * label. The opt-in create_verified_with_store constructor additionally requires
+ * and invokes Host source/evidence callbacks; see turbo_agent_job_verifier.h.
  *
  * On success, the three distinct output slots own independent JSON values:
  * typed result, certificate and execution reference. The reference contains

@@ -20,6 +20,9 @@ quiescent through return. This is not distributed ownership or an atomic fence
 spanning policy, storage and a destination. External outbound authorization,
 source freshness, destination/payload validity and receipt verification remain
 Host responsibilities. The API does not evaluate identifiers or dereference URLs.
+The [verified constructor](job-host-verifier.md) installs mandatory Host source
+and acceptance-evidence callbacks, revalidated on every delivery operation.
+Destination/payload and remote receipt verification remain delivery Host duties.
 
 ## Persistent format
 
@@ -102,6 +105,7 @@ callback and one Runtime Run. No real external message is sent by qualification.
 This tests Host composition and local durable gaps, not a production connector's
 remote idempotency or transactional guarantees.
 
-Source freshness and external evidence verification, review amendment/replanning,
+The source/evidence [Host verification seam](job-host-verifier.md) is available;
+production adapters and their external consistency qualification, review amendment/replanning,
 cancellation supervision, production delivery connectors and broader Job scheduling
 remain open. M1 is not complete. Real-model quality/cost/latency remains #278.

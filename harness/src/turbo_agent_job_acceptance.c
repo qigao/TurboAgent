@@ -76,6 +76,7 @@ static int identity(const json_value_t *record, const json_value_t *reference,
       number(record, "authority_generation") == (int64_t)proof->authority.generation;
 }
 static int validate_reference(const turbo_agent_job_proof_t *proof, const json_value_t *reference,
+    turbo_agent_job_acceptance_decision_t decision, const char *evidence_ref,
     turbo_agent_compile_diagnostic_t *diagnostic) {
   json_value_t *attempt = NULL, *journal = NULL, *run = NULL;
   const json_value_t *binding = json_object_get(proof->snapshot, "attempt");
@@ -142,6 +143,11 @@ static int validate_reference(const turbo_agent_job_proof_t *proof, const json_v
       !is(execution, "attempt_record_id", key)) goto done;
   equal = json_equal(json_object_get(execution, "certificate"), proof->admission.certificate);
   rc = equal == 1 ? SALTS_OK : equal < 0 ? SALTS_ENOMEM : SALTS_EPROTO;
+  if (rc == SALTS_OK) {
+    stage = "Host evidence";
+    rc = turbo_agent_harness_verify_job_evidence(proof, reference,
+        json_object_get(attempt, "result"), decision, evidence_ref, diagnostic);
+  }
 done:
   if (rc != SALTS_OK && diagnostic && diagnostic->status == TURBO_AGENT_COMPILE_OK) {
     diagnostic->status = rc == SALTS_ENOMEM ? TURBO_AGENT_COMPILE_OUT_OF_MEMORY : TURBO_AGENT_COMPILE_SOURCE_INVALID;
@@ -194,7 +200,7 @@ int turbo_agent_harness_record_job_acceptance_json(turbo_agent_harness_t *harnes
   if (rc != SALTS_OK) return rc;
   rc = turbo_agent_harness_prepare_job_proof(harness, id, revision, config, diagnostic, &proof);
   if (rc != SALTS_OK) goto done;
-  rc = validate_reference(&proof, reference, diagnostic);
+  rc = validate_reference(&proof, reference, decision, evidence_ref, diagnostic);
   if (rc != SALTS_OK) goto done;
   record = json_create_object();
   rc = SALTS_ENOMEM;
@@ -226,7 +232,9 @@ int turbo_agent_harness_load_job_acceptance(const turbo_agent_job_proof_t *proof
   int rc = turbo_agent_runtime_store_get_json_status(proof->runtime, ACCEPTANCE, id, &record);
   *out = NULL;
   if (rc == SALTS_OK) rc = record_shape(record, id, (uint32_t)number(proof->snapshot, "revision"));
-  if (rc == SALTS_OK) rc = validate_reference(proof, json_object_get(record, "execution_reference"), diagnostic);
+  if (rc == SALTS_OK) rc = validate_reference(proof, json_object_get(record, "execution_reference"),
+      is(record, "decision", "accepted") ? TURBO_AGENT_JOB_ACCEPTED : TURBO_AGENT_JOB_REJECTED,
+      text(record, "evidence_ref", 1024), diagnostic);
   if (rc == SALTS_OK) rc = current(proof);
   if (rc == SALTS_OK) { *out = record; record = NULL; }
   json_free(record);

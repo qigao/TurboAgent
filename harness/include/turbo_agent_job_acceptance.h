@@ -24,7 +24,9 @@ typedef enum turbo_agent_job_acceptance_decision_e {
  * automatically evaluated. Accepting does not grant execution or external
  * delivery authority. Only successful typed Inspect results can be reviewed by
  * this slice; rejected refers to Host quality/criteria, not a fabricated tool
- * failure. Source freshness and external evidence verification remain with Host.
+ * failure. Source freshness and external evidence verification remain with Host;
+ * create_verified_with_store enforces installed callbacks on record/read/delivery.
+ * See turbo_agent_job_verifier.h for that constructor and borrowed verifier inputs.
  *
  * A single create-if-absent record in agent_job_acceptance is keyed by Job ID.
  * Even identical or contrary second decisions return EALREADY; no replacement,

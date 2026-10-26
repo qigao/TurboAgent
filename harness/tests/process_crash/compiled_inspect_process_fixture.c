@@ -2,6 +2,7 @@
 #include "turbo_agent_job.h"
 #include "turbo_agent_job_acceptance.h"
 #include "turbo_agent_job_delivery.h"
+#include "turbo_agent_job_verifier.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_runtime_json.h"
@@ -63,7 +64,7 @@ typedef struct fixture_s {
   turbo_agent_harness_t *harness;
   cmeta_threadpool_t *pool;
   int inject, callbacks, transports, attempt_reads, attempt_writes, reference_writes;
-  int job_mode, acceptance_mode, delivery_mode;
+  int job_mode, acceptance_mode, delivery_mode, verified_mode;
   json_value_t *execution_reference;
 } fixture_t;
 
@@ -75,7 +76,7 @@ static int failure(const char *expression, int line) {
 
 static int text_is(const json_value_t *record, const char *key, const char *expected) {
   const json_value_t *value = json_object_get(record, key);
-  return value && json_type(value) == JSON_STRING && json_string_len(value) == strlen(expected) &&
+  return expected && value && json_type(value) == JSON_STRING && json_string_len(value) == strlen(expected) &&
       !memcmp(json_string(value), expected, strlen(expected));
 }
 static int counter_put(fixture_t *f, const char *id, int count) {
@@ -202,6 +203,41 @@ static int inspect_callback(const json_value_t *arguments, json_value_t **out, v
   return 0;
 }
 
+static int host_source(const json_value_t *snapshot, void *user) {
+  fixture_t *f = user;
+  const json_value_t *proposal = json_object_get(snapshot, "proposal");
+  json_value_t *external = NULL;
+  int rc = turbo_agent_runtime_store_get_json_status(f->oracle, "host_verification", "source", &external);
+  if (rc == SALTS_OK && (!text_is(external, "source_revision", json_get_string(proposal, "source_revision")) ||
+      !text_is(external, "source_json", json_get_string(proposal, "source_json")))) rc = SALTS_EPROTO;
+  json_free(external);
+  return rc;
+}
+static int host_evidence(const json_value_t *snapshot, const json_value_t *reference,
+    const json_value_t *result, turbo_agent_job_acceptance_decision_t decision,
+    const char *evidence_ref, void *user) {
+  fixture_t *f = user;
+  json_value_t *catalog = NULL, *external = NULL;
+  const char *id;
+  int rc = turbo_agent_runtime_store_get_json_status(f->oracle, "host_verification", "catalog", &catalog);
+  if (rc != SALTS_OK) goto done;
+  id = json_get_string(catalog, "record_id");
+  if (!id || !id[0]) { rc = SALTS_EPROTO; goto done; }
+  rc = turbo_agent_runtime_store_get_json_status(f->oracle, "host_job_evidence", id, &external);
+  if (rc != SALTS_OK) goto done;
+  if (!text_is(external, "evidence_ref", evidence_ref) ||
+      !text_is(external, "job_id", json_get_string(snapshot, "id")) ||
+      !text_is(external, "run_id", json_get_string(reference, "run_id")) ||
+      !text_is(external, "execution_id", json_get_string(reference, "execution_id")) ||
+      !text_is(external, "attempt_record_id", json_get_string(reference, "attempt_record_id")) ||
+      !text_is(external, "criteria", json_get_string(snapshot, "acceptance_criteria")) ||
+      !text_is(external, "decision", decision == TURBO_AGENT_JOB_ACCEPTED ? "accepted" : "rejected") ||
+      !json_get_bool(result, "ok", false)) rc = SALTS_EPROTO;
+done:
+  json_free(catalog); json_free(external);
+  return rc;
+}
+
 static int fixture_open(fixture_t *f, const char *directory, int create) {
   static const char *capabilities[] = {"runtime_tools"};
   turbo_runtime_sqlite_config_t sqlite;
@@ -245,8 +281,16 @@ static int fixture_open(fixture_t *f, const char *directory, int create) {
   session.agent_config.tool_registry = f->registry;
   app.session_config = &session;
   turbo_agent_harness_config_init(&harness); harness.app_config = &app; harness.executor = f->pool;
-  f->harness = turbo_agent_harness_create(&harness);
-  if (!f->harness) { rc = SALTS_ENOMEM; goto done; }
+  if (f->verified_mode) {
+    turbo_agent_job_verifier_t verifier;
+    turbo_agent_job_verifier_init(&verifier);
+    verifier.source = host_source; verifier.evidence = host_evidence; verifier.user_data = f;
+    rc = turbo_agent_harness_create_verified_with_store(&harness, &verifier, &f->harness);
+    if (rc != SALTS_OK) goto done;
+  } else {
+    f->harness = turbo_agent_harness_create(&harness);
+    if (!f->harness) { rc = SALTS_ENOMEM; goto done; }
+  }
   f->runtime = turbo_agent_session_runtime(turbo_agent_app_session(turbo_agent_harness_app(f->harness)));
   rc = f->runtime ? SALTS_OK : SALTS_EIO;
 done:
@@ -534,6 +578,57 @@ static int host_send(fixture_t *f, const json_value_t *intent) {
   REQUIRE(rc == SALTS_OK || rc == SALTS_EALREADY);
   return rc == SALTS_OK ? counter_add(f, "delivery") : SALTS_OK;
 }
+static int host_verification_init(fixture_t *f) {
+  json_value_t *record = json_create_object();
+  REQUIRE(record && !turbo_runtime_json_object_set_string(record, "source_json", source) &&
+      !turbo_runtime_json_object_set_string(record, "source_revision", "fixture-source-v1"));
+  REQUIRE(!turbo_agent_runtime_store_put_json(f->oracle, "host_verification", "source", record));
+  json_free(record); record = json_create_object();
+  REQUIRE(record && !turbo_runtime_json_object_set_string(record, "record_id", "evidence-v1"));
+  REQUIRE(!turbo_agent_runtime_store_put_json(f->oracle, "host_verification", "catalog", record));
+  json_free(record);
+  return SALTS_OK;
+}
+static int publish_host_evidence(fixture_t *f) {
+  /* The independent Host fixture records execution identity and its explicit
+   * criterion decision; this is metadata, not another canonical result. */
+  json_value_t *record = json_clone(f->execution_reference);
+  REQUIRE(record && !turbo_runtime_json_object_set_string(record, "evidence_ref", "host-evidence-v1") &&
+      !turbo_runtime_json_object_set_string(record, "criteria", "Host verifies") &&
+      !turbo_runtime_json_object_set_string(record, "decision", "accepted"));
+  REQUIRE(!turbo_agent_runtime_store_put_json(f->oracle, "host_job_evidence", "evidence-v1", record));
+  json_free(record);
+  return SALTS_OK;
+}
+static int verification_failure_stage(fixture_t *f, const char *mode) {
+  turbo_agent_compile_diagnostic_t diagnostic;
+  turbo_tool_status_t status;
+  json_value_t *original = NULL, *changed = NULL, *record = NULL, *result = NULL, *certificate = NULL;
+  int source_changed = !strcmp(mode, "verification_source_changed");
+  int missing = !strcmp(mode, "verification_evidence_missing");
+  const char *collection = source_changed || missing ? "host_verification" : "host_job_evidence";
+  const char *id = source_changed ? "source" : missing ? "catalog" : "evidence-v1";
+  const char *key = source_changed ? "source_revision" : missing ? "record_id" : "run_id";
+  int expected = missing ? SALTS_ENOENT : SALTS_EPROTO;
+  REQUIRE(!turbo_agent_runtime_store_get_json_status(f->oracle, collection, id, &original));
+  changed = json_clone(original);
+  REQUIRE(changed && !turbo_runtime_json_object_set_string(changed, key, "unrelated-or-missing"));
+  REQUIRE(!turbo_agent_runtime_store_put_json(f->oracle, collection, id, changed));
+  json_free(changed);
+  for (int op = 0; op < 3; ++op) {
+    REQUIRE(delivery_operation(f, op, &record) == expected && !record);
+  }
+  REQUIRE(acceptance_operation(f, 0, TURBO_AGENT_JOB_ACCEPTED, &record) == expected && !record);
+  if (source_changed) {
+    REQUIRE(execute(f, source, &diagnostic, &status, &result, &certificate) == expected);
+    REQUIRE(!result && !certificate && !f->execution_reference);
+  }
+  /* Test Host explicitly restores its external view; no production API repairs
+   * or writes these independently owned manifests. */
+  REQUIRE(!turbo_agent_runtime_store_put_json(f->oracle, collection, id, original));
+  json_free(original);
+  return SALTS_OK;
+}
 static int exercise_delivery(fixture_t *f, const char *mode) {
   turbo_agent_compile_diagnostic_t diagnostic;
   turbo_tool_status_t status;
@@ -545,6 +640,7 @@ static int exercise_delivery(fixture_t *f, const char *mode) {
   int rc, n;
   if (!strcmp(mode, "init")) {
     REQUIRE(!exercise(f, mode));
+    if (f->verified_mode) REQUIRE(!host_verification_init(f));
     return counter_put(f, "send_requests", 0);
   }
   REQUIRE(!grant(f, strcmp(mode, "denied") != 0));
@@ -552,6 +648,7 @@ static int exercise_delivery(fixture_t *f, const char *mode) {
     REQUIRE(!execute(f, source, &diagnostic, &status, &result, &certificate));
     REQUIRE(result_valid(f, result) && certificate && f->execution_reference);
     json_free(result); json_free(certificate);
+    if (f->verified_mode) REQUIRE(!publish_host_evidence(f));
     REQUIRE(!acceptance_operation(f, 1, TURBO_AGENT_JOB_ACCEPTED, &record));
     json_free(record); record = NULL;
     f->inject = 1;
@@ -571,7 +668,9 @@ static int exercise_delivery(fixture_t *f, const char *mode) {
     REQUIRE(!strcmp(f->cut->name, "delivery_receipt_returned") && rc == SALTS_OK && record);
     _Exit(FIXTURE_CRASH);
   }
-  if (!strcmp(mode, "denied") || !strcmp(mode, "stale")) {
+  if (f->verified_mode && !strncmp(mode, "verification_", 13)) {
+    REQUIRE(!verification_failure_stage(f, mode));
+  } else if (!strcmp(mode, "denied") || !strcmp(mode, "stale")) {
     if (!strcmp(mode, "stale")) REQUIRE(!grant(f, 1));
     for (int op = 0; op < 3; ++op) {
       REQUIRE(delivery_operation(f, op, &record) == SALTS_EPROTO && !record);
@@ -625,10 +724,11 @@ int main(int argc, char **argv) {
   int rc;
   if (argc != 4 && argc != 5) return failure("mode/cut/private-directory/[job] required", __LINE__);
   if (argc == 5) {
-    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery"))
+    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery") && strcmp(argv[4], "verified"))
       return failure("unknown execution mode", __LINE__);
     fixture.job_mode = 1;
-    fixture.delivery_mode = !strcmp(argv[4], "delivery");
+    fixture.verified_mode = !strcmp(argv[4], "verified");
+    fixture.delivery_mode = !strcmp(argv[4], "delivery") || fixture.verified_mode;
     fixture.acceptance_mode = !strcmp(argv[4], "acceptance") || fixture.delivery_mode;
   }
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)

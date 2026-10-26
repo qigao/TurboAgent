@@ -44,9 +44,10 @@ For tool execution guarantees see [the admission matrix](../../agent_compiler/BO
 The report example remains application composition. Its report-specific gate and
 manifest schema must not become the generic Job schema. The proposal/binding
 foundation in [Job schema v1](job-proposal-coordinator.md) belongs above
-Router/Session and stores only stable compiled-attempt scope. Later observation
-will reference existing Run, Checkpoint and journal records, without copying
-their result payloads.
+Router/Session and stores only stable compiled-attempt scope. The bound Job
+execution adapter selects those persisted inputs and returns canonical attempt,
+compiled execution journal and Runtime Run references, without another result
+payload authority.
 
 A minimal durable Job implementation needs a frozen versioned envelope, immutable
 proposal versions, attempt references, acceptance evidence, and delivery outcome.

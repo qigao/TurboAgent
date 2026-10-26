@@ -1,4 +1,5 @@
 #include "turbo_agent_harness.h"
+#include "turbo_agent_job.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_runtime_json.h"
@@ -47,6 +48,7 @@ typedef struct fixture_s {
   turbo_agent_harness_t *harness;
   cmeta_threadpool_t *pool;
   int inject, callbacks, transports, attempt_reads, attempt_writes, reference_writes;
+  int job_mode;
 } fixture_t;
 
 static int failure(const char *expression, int line) {
@@ -239,6 +241,27 @@ static int execute(fixture_t *f, const char *input, turbo_agent_compile_diagnost
   turbo_agent_compiler_config_t config;
   turbo_agent_compiler_config_init(&config);
   config.allowed_capabilities = capabilities; config.allowed_capability_count = 1;
+  if (f->job_mode) {
+    json_value_t *reference = NULL, *run = NULL, *journal = NULL;
+    int rc = turbo_agent_harness_execute_job_inspect_json(f->harness, "bound-job", 2,
+        &config, NULL, diagnostic, status, result, certificate, &reference);
+    if (rc == SALTS_OK) {
+      REQUIRE(reference && text_is(reference, "job_id", "bound-job") &&
+          text_is(reference, "attempt_id", ATTEMPT_ID) && text_is(reference, "thread_id", THREAD_ID) &&
+          json_get_int(reference, "job_revision", -1) == 2 &&
+          json_get_int(reference, "proposal_version", -1) == 1 && !json_object_get(reference, "result"));
+      REQUIRE(!turbo_agent_runtime_store_get_json_status(f->runtime, "runs",
+          json_get_string(reference, "run_id"), &run));
+      REQUIRE(text_is(run, "status", "completed") && text_is(run, "thread_id",
+          json_get_string(reference, "run_thread_id")));
+      REQUIRE(!turbo_agent_runtime_store_get_json_status(f->runtime, RUN_REFERENCES,
+          json_get_string(reference, "execution_id"), &journal));
+      REQUIRE(text_is(journal, "phase", "committed") && text_is(journal, "attempt_record_id",
+          json_get_string(reference, "attempt_record_id")) && !json_object_get(journal, "result"));
+    } else REQUIRE(!reference);
+    json_free(reference); json_free(run); json_free(journal);
+    return rc;
+  }
   return turbo_agent_harness_execute_compiled_inspect_attempt_json(f->harness, &config,
       input, strlen(input), NULL, ATTEMPT_ID, diagnostic, status, result, certificate);
 }
@@ -251,6 +274,20 @@ static int evidence(fixture_t *f, const char *phase, int calls, int deliveries, 
   json_value_t *attempts = NULL, *references = NULL;
   const json_value_t *attempt;
   int n, valid;
+  if (f->job_mode) {
+    turbo_agent_job_t *job = NULL;
+    json_value_t *snapshot = NULL;
+    const json_value_t *proposal, *binding;
+    REQUIRE(!turbo_agent_job_open(f->runtime, "bound-job", &job));
+    REQUIRE(!turbo_agent_job_get_snapshot(job, &snapshot));
+    proposal = json_object_get(snapshot, "proposal");
+    binding = json_object_get(snapshot, "attempt");
+    REQUIRE(text_is(snapshot, "state", "attempt_bound") && json_get_int(snapshot, "revision", -1) == 2 &&
+        text_is(proposal, "source_json", source) && text_is(binding, "attempt_id", ATTEMPT_ID) &&
+        text_is(binding, "thread_id", THREAD_ID) && !json_object_get(snapshot, "result"));
+    json_free(snapshot);
+    turbo_agent_job_destroy(job);
+  }
   REQUIRE(!counter_get(f, "invocation", &n) && n == calls);
   REQUIRE(!counter_get(f, "delivery", &n) && n == deliveries);
   REQUIRE(!turbo_agent_runtime_store_list_json(f->runtime, ATTEMPTS, NULL, NULL, &attempts));
@@ -298,6 +335,13 @@ static int exercise(fixture_t *f, const char *mode) {
   json_value_t *result = NULL, *certificate = NULL;
   int rc = FIXTURE_FAILURE, operation = SALTS_EIO;
   if (!strcmp(mode, "init")) {
+    if (f->job_mode) {
+      turbo_agent_job_t *job = NULL;
+      REQUIRE(!turbo_agent_job_create(f->runtime, "bound-job", "inspect repository", "Host verifies", &job));
+      REQUIRE(!turbo_agent_job_propose(job, 0, source, strlen(source), "fixture-source-v1"));
+      REQUIRE(!turbo_agent_job_bind_compiled_inspect(job, 1, THREAD_ID, ATTEMPT_ID));
+      turbo_agent_job_destroy(job);
+    }
     REQUIRE(!counter_put(f, "invocation", 0) && !counter_put(f, "delivery", 0));
     return evidence(f, NULL, 0, 0, 0);
   }
@@ -352,7 +396,11 @@ done:
 int main(int argc, char **argv) {
   fixture_t fixture = {0};
   int rc;
-  if (argc != 4) return failure("mode/cut/private-directory required", __LINE__);
+  if (argc != 4 && argc != 5) return failure("mode/cut/private-directory/[job] required", __LINE__);
+  if (argc == 5) {
+    if (strcmp(argv[4], "job")) return failure("unknown execution mode", __LINE__);
+    fixture.job_mode = 1;
+  }
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
     if (!strcmp(argv[2], cases[i].name)) fixture.cut = &cases[i];
   if (!fixture.cut) return failure("unknown crash cut", __LINE__);

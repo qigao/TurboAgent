@@ -1,5 +1,6 @@
 #include <salts/thread_pool.h>
 #include "turbo_agent_harness.h"
+#include "turbo_agent_job.h"
 #include <json_parser.h>
 
 #include "turbo_agent_session_execution.h"
@@ -1076,6 +1077,61 @@ static json_value_t *turbo_agent_compiled_inspect_initial_state(
   return state;
 }
 
+/* Job metadata selects an existing execution contract; it never grants one. */
+static int turbo_agent_harness_job_snapshot(turbo_agent_runtime_t *runtime,
+    const char *job_id, uint32_t expected, const char *thread_id,
+    json_value_t **out, turbo_agent_compile_diagnostic_t *diagnostic) {
+  turbo_agent_job_t *job = NULL;
+  json_value_t *snapshot = NULL;
+  const json_value_t *binding;
+  int rc = turbo_agent_job_open(runtime, job_id, &job);
+  if (rc == SALTS_OK) rc = turbo_agent_job_get_snapshot(job, &snapshot);
+  turbo_agent_job_destroy(job);
+  if (rc != SALTS_OK) {
+    (void)turbo_agent_harness_compiled_reject(diagnostic,
+        TURBO_AGENT_COMPILE_SOURCE_INVALID, "could not read the complete persisted Job binding");
+    return rc;
+  }
+  binding = json_object_get(snapshot, "attempt");
+  if (strcmp(json_get_string(snapshot, "state"), "attempt_bound") ||
+      turbo_runtime_json_value_as_int64(json_object_get(snapshot, "revision"), -1) != expected) {
+    (void)turbo_agent_harness_compiled_reject(diagnostic,
+        TURBO_AGENT_COMPILE_SOURCE_INVALID, "Job is not bound at the expected revision");
+    rc = SALTS_EBUSY;
+  } else if (!binding || strcmp(json_get_string(binding, "thread_id"), thread_id)) {
+    rc = turbo_agent_harness_compiled_reject(diagnostic,
+        TURBO_AGENT_COMPILE_SOURCE_INVALID, "Job attempt scope does not match this Harness thread");
+  }
+  if (rc != SALTS_OK) { json_free(snapshot); return rc; }
+  *out = snapshot;
+  return SALTS_OK;
+}
+
+static json_value_t *turbo_agent_harness_job_reference(
+    const json_value_t *snapshot, const json_value_t *summary,
+    const turbo_agent_compiled_inspect_run_t *run) {
+  json_value_t *reference = json_create_object();
+  const json_value_t *proposal = json_object_get(snapshot, "proposal");
+  if (!reference ||
+      turbo_runtime_json_object_set_int64(reference, "schema_version", 1) ||
+      turbo_runtime_json_object_set_string(reference, "kind", "compiled_inspect") ||
+      turbo_runtime_json_object_set_string(reference, "job_id", json_get_string(snapshot, "id")) ||
+      turbo_runtime_json_object_set_int64(reference, "job_revision", json_get_int(snapshot, "revision", -1)) ||
+      turbo_runtime_json_object_set_int64(reference, "proposal_version", json_get_int(proposal, "revision", -1)) ||
+      turbo_runtime_json_object_set_string(reference, "thread_id", run->thread_id) ||
+      turbo_runtime_json_object_set_string(reference, "attempt_id", run->attempt_id) ||
+      turbo_runtime_json_object_set_string(reference, "attempt_record_id", run->attempt_record_id) ||
+      turbo_runtime_json_object_set_string(reference, "run_id", json_get_string(summary, "run_id")) ||
+      turbo_runtime_json_object_set_string(reference, "run_thread_id", json_get_string(summary, "thread_id")) ||
+      turbo_runtime_json_object_set_string(reference, "execution_id", run->execution_id) ||
+      turbo_runtime_json_object_set_string(reference, "plan_hash", run->plan_hash) ||
+      turbo_runtime_json_object_set_int64(reference, "authority_generation", (int64_t)run->authority.generation)) {
+    json_free(reference);
+    return NULL;
+  }
+  return reference;
+}
+
 /* A synchronous compiled Inspect is executed inside the existing Session/Runtime
  * Run. Three graph nodes force Runtime to persist an admitted checkpoint and
  * then a started checkpoint BEFORE the tool callback node is entered. */
@@ -1084,11 +1140,13 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
     const turbo_agent_compiler_config_t *compiler_config,
     const char *source_json, size_t source_json_size,
     const turbo_tool_execution_context_t *context,
-    const char *attempt_id,
+    const char *attempt_id, const char *job_id, uint32_t expected_job_revision,
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,
-    json_value_t **out_certificate) {
+    json_value_t **out_certificate, json_value_t **out_reference) {
+  json_value_t *job_snapshot = NULL;
+  json_value_t *job_reference = NULL;
   turbo_agent_executable_plan_t *plan = NULL;
   const turbo_tool_registry_t *registry;
   const turbo_tool_registry_t *approved;
@@ -1117,6 +1175,7 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
   int strict_result = 0;
   int rc = SALTS_EIO;
 
+  if (out_reference) *out_reference = NULL;
   if (out_result) *out_result = NULL;
   if (out_certificate) *out_certificate = NULL;
   if (out_tool_status) *out_tool_status = TURBO_TOOL_INVALID_ARGUMENT;
@@ -1126,9 +1185,13 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
       compiler_config->abi_version != TURBO_AGENT_COMPILER_CONFIG_ABI_VERSION ||
       !compiler_config->deny_unlisted_capabilities ||
       (compiler_config->allowed_capability_count && !compiler_config->allowed_capabilities) ||
-      !source_json || !source_json_size ||
-      !turbo_agent_compiled_inspect_attempt_id_valid(attempt_id) ||
-      !out_result || !out_certificate || !out_tool_status ||
+      (job_id ? (!turbo_agent_compiled_inspect_key_component_valid(job_id, 64) ||
+          expected_job_revision > TURBO_AGENT_JOB_MAX_REVISIONS || !out_reference ||
+          out_reference == out_result || out_reference == out_certificate ||
+          source_json || source_json_size || attempt_id) :
+          (!source_json || !source_json_size ||
+           !turbo_agent_compiled_inspect_attempt_id_valid(attempt_id))) ||
+      !out_result || !out_certificate || out_result == out_certificate || !out_tool_status ||
       (context && (context->abi_version != TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION ||
                    context->struct_size < sizeof(*context)))) {
     return SALTS_EINVAL;
@@ -1166,6 +1229,18 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
         out_diagnostic, TURBO_AGENT_COMPILE_CAPABILITY_DENIED,
         "Harness has no readable Host Tool Authority or Runtime snapshot");
     goto done;
+  }
+  if (job_id) {
+    const json_value_t *proposal;
+    const json_value_t *binding;
+    rc = turbo_agent_harness_job_snapshot(runtime, job_id, expected_job_revision,
+        harness->compiled_attempt_thread_id, &job_snapshot, out_diagnostic);
+    if (rc != SALTS_OK) goto done;
+    proposal = json_object_get(job_snapshot, "proposal");
+    binding = json_object_get(job_snapshot, "attempt");
+    source_json = json_get_string(proposal, "source_json");
+    source_json_size = json_string_len(json_object_get(proposal, "source_json"));
+    attempt_id = json_get_string(binding, "attempt_id");
   }
   rc = turbo_agent_harness_compiler_authority_configure(
       compiler_config, &authority, &effective_config,
@@ -1345,6 +1420,26 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
     rc = SALTS_EPROTO;
     goto done;
   }
+  if (job_snapshot) {
+    const char *run_id = json_get_string(summary, "run_id");
+    const char *run_thread_id = json_get_string(summary, "thread_id");
+    const char *run_status = json_get_string(summary, "status");
+    if (!run_id || !run_id[0] || !run_thread_id || !run_thread_id[0] ||
+        !run_status || strcmp(run_status, "completed")) {
+      rc = turbo_agent_harness_compiled_reject(out_diagnostic,
+          TURBO_AGENT_COMPILE_SOURCE_INVALID, "Job delivery has no completed Runtime Run summary");
+      goto done;
+    }
+    job_reference = turbo_agent_harness_job_reference(job_snapshot, summary, &compiled_run);
+    if (!job_reference) {
+      (void)turbo_agent_harness_compiled_reject(out_diagnostic,
+          TURBO_AGENT_COMPILE_OUT_OF_MEMORY, "could not allocate Job execution reference after result commit");
+      rc = SALTS_ENOMEM;
+      goto done;
+    }
+    *out_reference = job_reference;
+    job_reference = NULL;
+  }
   *out_result = compiled_run.result;
   compiled_run.result = NULL;
   *out_tool_status = compiled_run.tool_status;
@@ -1354,6 +1449,7 @@ done:
   if (out_tool_status && compiled_run.plan &&
       compiled_run.tool_status != TURBO_TOOL_INVALID_ARGUMENT)
     *out_tool_status = compiled_run.tool_status;
+  json_free(job_reference);
   turbo_runtime_json_destroy(compiled_run.result);
   turbo_runtime_json_destroy(result_state);
   turbo_runtime_json_destroy(summary);
@@ -1364,6 +1460,7 @@ done:
   free(execution_id);
   turbo_agent_executable_plan_destroy(plan);
   free((void *)effective_capabilities);
+  json_free(job_snapshot);
   turbo_agent_harness_end_failed_submit(harness);
   return rc;
 }
@@ -1379,8 +1476,8 @@ int turbo_agent_harness_execute_compiled_inspect_attempt_json(
     json_value_t **out_result,
     json_value_t **out_certificate) {
   return turbo_agent_harness_execute_compiled_inspect_attempt_impl(
-      harness, compiler_config, source_json, source_json_size, context, attempt_id,
-      out_diagnostic, out_tool_status, out_result, out_certificate);
+      harness, compiler_config, source_json, source_json_size, context, attempt_id, NULL, 0,
+      out_diagnostic, out_tool_status, out_result, out_certificate, NULL);
 }
 
 int turbo_agent_harness_execute_compiled_inspect_json(
@@ -1396,10 +1493,24 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   int rc;
   if (!attempt_id) return SALTS_ENOMEM;
   rc = turbo_agent_harness_execute_compiled_inspect_attempt_impl(
-      harness, compiler_config, source_json, source_json_size, context, attempt_id,
-      out_diagnostic, out_tool_status, out_result, out_certificate);
+      harness, compiler_config, source_json, source_json_size, context, attempt_id, NULL, 0,
+      out_diagnostic, out_tool_status, out_result, out_certificate, NULL);
   free(attempt_id);
   return rc;
+}
+
+int turbo_agent_harness_execute_job_inspect_json(
+    turbo_agent_harness_t *harness, const char *job_id, uint32_t expected_job_revision,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const turbo_tool_execution_context_t *context,
+    turbo_agent_compile_diagnostic_t *out_diagnostic, turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result, json_value_t **out_certificate, json_value_t **out_reference) {
+  /* Empty strings keep invalid job_id on Job validation, never on the legacy
+   * source/attempt path. All outputs are initialized by the common entry. */
+  return turbo_agent_harness_execute_compiled_inspect_attempt_impl(
+      harness, compiler_config, NULL, 0, context, NULL, job_id ? job_id : "",
+      expected_job_revision, out_diagnostic, out_tool_status, out_result,
+      out_certificate, out_reference);
 }
 
 static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,

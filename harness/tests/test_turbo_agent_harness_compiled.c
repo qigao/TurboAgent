@@ -28,6 +28,7 @@ typedef struct compiled_inspect_probe_s {
   int produce_invalid_result;
   int saw_started_journal;
   turbo_agent_runtime_t *runtime;
+  char last_value[32];
   const char *thread_id;
 } compiled_inspect_probe_t;
 
@@ -81,6 +82,7 @@ static int compiled_inspect_handler(const json_value_t *arguments,
   if (!probe || !out_result || !arguments ||
       !json_get_string(arguments, "value")) return -1;
   ++probe->calls;
+  snprintf(probe->last_value, sizeof(probe->last_value), "%s", json_get_string(arguments, "value"));
   if (probe->runtime && probe->thread_id) {
     if (!compiled_journal_has_phase(probe->runtime, probe->thread_id, "started")) return -1;
     ++probe->saw_started_journal;
@@ -129,6 +131,9 @@ typedef struct compiled_inspect_store_fault_s {
   turbo_agent_runtime_store_t inner;
   const char *failed_phase;
   int claim_failure_status;
+  int job_read_status;
+  turbo_agent_harness_t *nested_harness;
+  int nested_entered, nested_status;
 } compiled_inspect_store_fault_t;
 
 static int compiled_inspect_fault_store_put(void *user_data, const char *collection,
@@ -159,6 +164,25 @@ static int compiled_inspect_fault_store_create_if_absent(
 static int compiled_inspect_fault_store_get(void *user_data, const char *collection,
                                             const char *id, char **out_record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
+  if (fault && fault->job_read_status &&
+      (!strcmp(collection, "agent_jobs") || !strcmp(collection, "agent_job_revisions"))) {
+    *out_record_json = NULL;
+    return fault->job_read_status;
+  }
+  if (fault && fault->nested_harness && !fault->nested_entered && !strcmp(collection, "agent_jobs")) {
+    const char *allowed[] = {"runtime_tools"};
+    turbo_agent_compiler_config_t config;
+    turbo_agent_compile_diagnostic_t diagnostic;
+    turbo_tool_status_t status;
+    json_value_t *result = NULL, *certificate = NULL, *reference = NULL;
+    fault->nested_entered = 1;
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+    fault->nested_status = turbo_agent_harness_execute_job_inspect_json(
+        fault->nested_harness, "job-bound", 2, &config, NULL, &diagnostic,
+        &status, &result, &certificate, &reference);
+    json_free(result); json_free(certificate); json_free(reference);
+  }
   return fault ? fault->inner.get(fault->inner.user_data, collection, id, out_record_json) : -1;
 }
 
@@ -1294,4 +1318,221 @@ spec("Harness Phase-1 compiled Inspect boundary") {
     cmeta_threadpool_destroy(pool);
   }
 
+}
+
+static int run_job_inspect(turbo_agent_harness_t *harness, const char *id, uint32_t revision,
+    turbo_agent_compile_diagnostic_t *diagnostic, turbo_tool_status_t *status,
+    json_value_t **result, json_value_t **certificate, json_value_t **reference) {
+  const char *allowed[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = allowed;
+  config.allowed_capability_count = 1;
+  return turbo_agent_harness_execute_job_inspect_json(harness, id, revision,
+      &config, NULL, diagnostic, status, result, certificate, reference);
+}
+
+spec("Harness persisted Job dispatch") {
+  static cmeta_threadpool_t *pool;
+  static turbo_tool_registry_t *registry;
+  static turbo_agent_harness_t *harness;
+  static turbo_agent_job_t *job, *other;
+  static compiled_inspect_probe_t probe;
+  static compiled_inspect_store_fault_t *fault;
+  static turbo_agent_compile_diagnostic_t diagnostic;
+  static turbo_tool_status_t status;
+  static json_value_t *result, *certificate, *reference, *record, *snapshot;
+
+  before_each() {
+    cmeta_threadpool_config_t options = {.num_threads = 1, .queue_capacity = 1};
+    turbo_agent_runtime_store_t callbacks = compiled_inspect_store_fail_phase(NULL);
+    pool = cmeta_threadpool_create_with_config(&options);
+    registry = turbo_tool_registry_create();
+    probe = (compiled_inspect_probe_t){0};
+    diagnostic = (turbo_agent_compile_diagnostic_t){0};
+    status = TURBO_TOOL_ERROR;
+    fault = callbacks.user_data;
+    check_not_null(pool);
+    check_not_null(registry);
+    check_not_null(fault);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    harness = make_compiled_harness_with_store(pool, registry, callbacks);
+    check_not_null(harness);
+    attach_compiled_probe_runtime(harness, &probe);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    check_equal(turbo_agent_job_create(probe.runtime, "job-bound", "inspect", "Host verifies", &job), SALTS_OK);
+    check_equal(turbo_agent_job_propose(job, 0, compiled_inspect_source,
+                strlen(compiled_inspect_source), "source-v1"), SALTS_OK);
+    check_equal(turbo_agent_job_bind_compiled_inspect(job, 1,
+                COMPILED_INSPECT_TEST_THREAD_ID, "bound-attempt"), SALTS_OK);
+  }
+  after_each() {
+    json_free(result); json_free(certificate); json_free(reference); json_free(record); json_free(snapshot);
+    result = certificate = reference = record = snapshot = NULL;
+    turbo_agent_job_destroy(job); turbo_agent_job_destroy(other); job = other = NULL;
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("executes the frozen source and returns exact attempt, journal and Runtime Run references") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(status, TURBO_TOOL_OK);
+    check_equal(probe.calls, 1);
+    check_equal(probe.last_value, "hello");
+    check_not_null(result); check_not_null(certificate); check_not_null(reference);
+    check_equal(json_get_string(reference, "job_id"), "job-bound");
+    check_equal(json_get_int(reference, "job_revision", -1), 2);
+    check_equal(json_get_int(reference, "proposal_version", -1), 1);
+    check_equal(json_get_string(reference, "attempt_id"), "bound-attempt");
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime,
+        COMPILED_INSPECT_JOURNAL_COLLECTION, json_get_string(reference, "attempt_record_id"), &record), SALTS_OK);
+    check_equal(json_get_string(record, "phase"), "committed");
+    check_equal(json_get_string(record, "plan_hash"), json_get_string(reference, "plan_hash"));
+    check_equal(json_get_string(record, "thread_id"), json_get_string(reference, "thread_id"));
+    check_true(json_get_bool(json_object_get(record, "result"), "ok", false));
+    json_free(record); record = NULL;
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime,
+        COMPILED_INSPECT_RUN_JOURNAL_COLLECTION, json_get_string(reference, "execution_id"), &record), SALTS_OK);
+    check_equal(json_get_string(record, "phase"), "committed");
+    check_equal(json_get_string(record, "attempt_record_id"), json_get_string(reference, "attempt_record_id"));
+    check_null(json_object_get(record, "result"));
+    json_free(record); record = NULL;
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime,
+        "runs", json_get_string(reference, "run_id"), &record), SALTS_OK);
+    check_equal(json_get_string(record, "status"), "completed");
+    check_equal(json_get_string(record, "thread_id"), json_get_string(reference, "run_thread_id"));
+    check_not_equal(json_get_string(reference, "run_id"), json_get_string(reference, "execution_id"));
+    check_null(json_object_get(reference, "result"));
+    check_equal(turbo_agent_job_get_snapshot(job, &snapshot), SALTS_OK);
+    check_equal(json_get_string(snapshot, "state"), "attempt_bound");
+    check_null(json_object_get(snapshot, "result"));
+  }
+
+  it("replays the bound committed attempt once overall and still rejects revoked authority") {
+    json_value_t *first;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    first = reference; reference = NULL;
+    json_free(result); result = NULL; json_free(certificate); certificate = NULL;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(json_get_string(reference, "attempt_record_id"), json_get_string(first, "attempt_record_id"));
+    check_not_equal(json_get_string(reference, "run_id"), json_get_string(first, "run_id"));
+    json_free(first);
+    json_free(reference); reference = NULL; json_free(result); result = NULL; json_free(certificate); certificate = NULL;
+    check_equal(set_compiled_host_policy(harness, 0), 0);
+    check_not_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_null(result); check_null(certificate); check_null(reference);
+  }
+
+  it("rejects stale or unbound Jobs and preserves store read errors before Run creation") {
+    check_equal(run_job_inspect(harness, "job-bound", 1, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EBUSY);
+    check_equal(turbo_agent_job_create(probe.runtime, "unbound", "goal", "criteria", &other), SALTS_OK);
+    check_equal(run_job_inspect(harness, "unbound", 0, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EBUSY);
+    check_equal(run_job_inspect(harness, "missing", 0, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_ENOENT);
+    fault->job_read_status = SALTS_EIO;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EIO);
+    fault->job_read_status = 0;
+    check_equal(probe.calls, 0);
+    check_null(result); check_null(certificate); check_null(reference);
+    check_null(turbo_agent_session_last_run_id(turbo_agent_app_session(turbo_agent_harness_app(harness))));
+    /* Rejections must release the Harness submission exclusion. */
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+  }
+
+  it("rejects another thread scope and cannot resolve a Job from another Runtime") {
+    turbo_agent_runtime_store_t foreign_store = turbo_agent_runtime_store_memory_create();
+    turbo_agent_runtime_t *foreign = turbo_agent_runtime_create(&foreign_store);
+    check_not_null(foreign);
+    check_equal(turbo_agent_job_create(foreign, "foreign-only", "goal", "criteria", &other), SALTS_OK);
+    check_equal(run_job_inspect(harness, "foreign-only", 0, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_ENOENT);
+    turbo_agent_job_destroy(other); other = NULL;
+    turbo_agent_runtime_destroy(foreign);
+    check_equal(turbo_agent_job_create(probe.runtime, "wrong-scope", "goal", "criteria", &other), SALTS_OK);
+    check_equal(turbo_agent_job_propose(other, 0, compiled_inspect_source,
+                strlen(compiled_inspect_source), "source-v1"), SALTS_OK);
+    check_equal(turbo_agent_job_bind_compiled_inspect(other, 1, "another-thread", "another-attempt"), SALTS_OK);
+    check_equal(run_job_inspect(harness, "wrong-scope", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EPROTO);
+    check_equal(probe.calls, 0);
+    check_null(result); check_null(certificate); check_null(reference);
+    check_null(turbo_agent_session_last_run_id(turbo_agent_app_session(turbo_agent_harness_app(harness))));
+  }
+
+  it("uses the newest frozen proposal and reports its exact version") {
+    check_equal(turbo_agent_job_create(probe.runtime, "edited-job", "goal", "criteria", &other), SALTS_OK);
+    check_equal(turbo_agent_job_propose(other, 0, compiled_inspect_source,
+                strlen(compiled_inspect_source), "source-v1"), SALTS_OK);
+    check_equal(turbo_agent_job_propose(other, 1, compiled_inspect_source_alternate,
+                strlen(compiled_inspect_source_alternate), "source-v2"), SALTS_OK);
+    check_equal(turbo_agent_job_bind_compiled_inspect(other, 2,
+                COMPILED_INSPECT_TEST_THREAD_ID, "edited-attempt"), SALTS_OK);
+    check_equal(run_job_inspect(harness, "edited-job", 3, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(probe.last_value, "different");
+    check_equal(json_get_int(reference, "proposal_version", -1), 2);
+    check_equal(json_get_int(reference, "job_revision", -1), 3);
+  }
+
+  it("still compiles persisted source and rejects reuse of an attempt under a different plan") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    json_free(result); result = NULL; json_free(certificate); certificate = NULL;
+    json_free(reference); reference = NULL;
+    check_equal(turbo_agent_job_create(probe.runtime, "other-plan", "goal", "criteria", &other), SALTS_OK);
+    check_equal(turbo_agent_job_propose(other, 0, compiled_inspect_source_alternate,
+                strlen(compiled_inspect_source_alternate), "source-v2"), SALTS_OK);
+    check_equal(turbo_agent_job_bind_compiled_inspect(other, 1,
+                COMPILED_INSPECT_TEST_THREAD_ID, "bound-attempt"), SALTS_OK);
+    check_equal(run_job_inspect(harness, "other-plan", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EPROTO);
+    check_equal(probe.calls, 1);
+    check_null(result); check_null(reference); check_not_null(certificate);
+    json_free(certificate); certificate = NULL;
+    turbo_agent_job_destroy(other); other = NULL;
+    check_equal(turbo_agent_job_create(probe.runtime, "invalid-source", "goal", "criteria", &other), SALTS_OK);
+    check_equal(turbo_agent_job_propose(other, 0, "{broken", 7, "source-v1"), SALTS_OK);
+    check_equal(turbo_agent_job_bind_compiled_inspect(other, 1,
+                COMPILED_INSPECT_TEST_THREAD_ID, "invalid-attempt"), SALTS_OK);
+    check_equal(run_job_inspect(harness, "invalid-source", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EPROTO);
+    check_equal(probe.calls, 1);
+    check_null(result); check_null(reference); check_null(certificate);
+  }
+
+  it("holds submission exclusion while reading persisted Job metadata") {
+    fault->nested_harness = harness;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_OK);
+    check_equal(fault->nested_entered, 1);
+    check_equal(fault->nested_status, SALTS_EBUSY);
+    check_equal(probe.calls, 1);
+  }
+
+  it("clears outputs on bad arguments and rejects aliased output slots") {
+    reference = (json_value_t *)&status;
+    check_equal(run_job_inspect(harness, "../bad", 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EINVAL);
+    check_null(reference);
+    check_equal(run_job_inspect(harness, NULL, 2, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EINVAL);
+    check_equal(run_job_inspect(harness, "job-bound", UINT32_MAX, &diagnostic, &status,
+                &result, &certificate, &reference), SALTS_EINVAL);
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+                &result, &certificate, &result), SALTS_EINVAL);
+    check_null(result); check_null(certificate); check_null(reference);
+    check_equal(probe.calls, 0);
+  }
 }

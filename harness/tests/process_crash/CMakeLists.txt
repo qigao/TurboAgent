@@ -31,3 +31,16 @@ foreach(cut IN ITEMS root_before root_after proposal_before proposal_after
   set_tests_properties(test_job_crash_${cut} PROPERTIES
     TIMEOUT 90 LABELS "harness;job;recovery;process")
 endforeach()
+
+# Same canonical attempt/Run crash oracle through persisted Job dispatch.
+foreach(cut IN ITEMS before_claim after_claim before_run_started after_run_started
+    in_callback before_committed after_committed after_run_committed before_delivery)
+  add_test(NAME test_job_inspect_crash_${cut}
+    COMMAND "${CMAKE_COMMAND}"
+      "-DWORKER=$<TARGET_FILE:compiled_inspect_process_fixture>"
+      "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/cases"
+      "-DCUT=${cut}" "-DMODE=job"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_process_crash.cmake")
+  set_tests_properties(test_job_inspect_crash_${cut} PROPERTIES
+    TIMEOUT 90 LABELS "harness;job;recovery;process")
+endforeach()

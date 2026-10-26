@@ -49,9 +49,10 @@ compiled Inspect identity limits (80/64 ASCII bytes). Its proposal_version must
 join the latest prior proposal. Binding occurs before Host dispatch, but does
 not create/read an attempt or certify that a callback started. A bound Job is
 unresolved even if a tool later commits; no inferred acceptance/delivery occurs.
-The Host must call the existing Harness stable-attempt API under the exact frozen
-source and scope. This first API does not enforce that later Host call or verify
-that a referenced attempt exists; those are execution integration responsibilities.
+The Host can use the bound Job execution adapter described below to select the
+exact stored source and scope. Direct stable-attempt API composition remains the
+Host's responsibility; the binding operation itself never verifies that an
+attempt exists.
 
 Reads validate the descriptor and every one of 64 possible revision slots.
 They check schema, field counts, types, bounds, Job identity, contiguous sequence,
@@ -100,8 +101,59 @@ exercise coordination metadata, not new tool execution crash guarantees.
 A Harness integration test shows denied policy still invokes zero callbacks,
 committed replay invokes the callback once overall, and Job records own no result.
 
-Remaining M1 work includes source freshness and exact dispatch binding, validated
-Run/attempt result-reference observation, acceptance evidence, delivery intent and
+The bound execution adapter now selects the exact persisted source/scope and
+returns canonical attempt/Run references. Remaining M1 work includes source
+freshness, durable observation/acceptance evidence, delivery intent and
 ambiguous-delivery reconciliation. Async execution, cancellation supervision,
 replanning of bound Jobs and distributed ownership need separate contracts.
 Real-model quality/cost remains issue #278. This foundation does not mark M1 done.
+
+## Bound Job execution adapter
+
+`turbo_agent_harness_execute_job_inspect_json` reads a Job by ID from the Harness's
+own Runtime, inside its submission exclusion. The expected Job head revision must
+match a bound snapshot and its thread scope must match the Harness's captured
+compiled-attempt scope. Source bytes and attempt ID come only from that independent
+snapshot; this API accepts no caller override. Reading another Runtime's handle or
+falling back to another source/attempt is not part of this adapter.
+
+The adapter uses the existing compiled Inspect engine for every admission gate,
+Host policy check, cancellation check, attempt claim, typed result validation and
+Session finalization. A persisted source is compiled again; a Job binding does not
+make it executable. STARTED/unknown attempts remain unresolved and fail closed;
+committed attempts replay without a second callback, under current policy and the
+same frozen plan/contract. The Host still owns source freshness validation and
+must serialize all Job access and record mutation for the synchronous call.
+
+Success returns independent result, certificate and an ephemeral execution reference:
+
+| Reference field | Exact identity |
+| --- | --- |
+| job_id, job_revision, proposal_version | Persisted Job head and frozen proposal |
+| thread_id, attempt_id, attempt_record_id | Stable compiled-attempt scope and canonical result key |
+| execution_id | Compiled execution journal metadata key for this API call |
+| run_id, run_thread_id | Actual Runtime Run from the completed Session summary |
+| plan_hash, authority_generation | Admitted execution facts used by the existing engine |
+
+The compiled execution metadata UUID and Runtime Run UUID are distinct; tests load
+both records by their own returned keys and compare their exact references. On replay,
+the attempt identity stays fixed while a new delivery Run is finalized. The reference
+has schema_version=1 and kind=compiled_inspect, contains no typed result and is not
+persisted. Job metadata is not updated and remains attempt_bound after success.
+A returned reference is an observation of this completed operation, not proof of
+Job acceptance, an external delivery receipt or a new grant.
+
+A lookup failure preserves the store status. Wrong Job phase/revision returns EBUSY;
+a thread mismatch EPROTO; no Run/attempt/tool is started by these rejections. All
+JSON outputs clear on rejection, except the existing post-compilation certificate
+contract on execution failure. If the tool result commits but constructing the
+reference fails, ENOMEM withholds result/reference; explicit retry addresses the
+same bound attempt. There is no implicit retry or alternate execution path.
+
+The nine existing compiled Inspect process cuts also run through this adapter in
+Job mode, with independent invocation/delivery counters and canonical-record checks.
+They cover pre/post claim, pre/post Run-journal start, callback, pre/post result commit,
+Run-journal completion and pre-delivery exit. Each restart verifies that the Job
+stays bound, denied/stale authority still rejects, and committed replay does not
+repeat the callback. Legacy direct-attempt crash cases remain separate; Job mode
+has no source override, so its script omits the legacy caller-source-mismatch stage.

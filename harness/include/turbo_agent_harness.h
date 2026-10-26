@@ -168,6 +168,45 @@ CXX_C_API int turbo_agent_harness_execute_compiled_inspect_attempt_json(
     json_value_t **out_certificate);
 
 /**
+ * Execute exactly the source/attempt frozen in a bound Job in this Harness's
+ * Runtime. job_id accepts 1..64 ASCII letters/digits/underscores/hyphens.
+ * expected_job_revision must match the complete current Job head (0..64).
+ * Missing/invalid/unbound Jobs, stale revisions and mismatched Harness thread
+ * scope reject before Run creation or tool dispatch. No source, thread or
+ * attempt override is accepted. Job lookup occurs inside Harness submission
+ * exclusion. The Host must also serialize all access/mutation to this Job.
+ *
+ * Compiler, current Host grants, result contract and stable-attempt recovery
+ * use the existing compiled Inspect path. STARTED/unknown attempts still refuse
+ * redispatch; committed attempts replay through Session finalization. Source
+ * freshness remains a Host precondition: source_revision is only a stored label.
+ *
+ * On success, the three distinct output slots own independent JSON values:
+ * typed result, certificate and execution reference. The reference contains
+ * Job/proposal revision, thread/attempt identity, canonical attempt record ID,
+ * this delivery Runtime Run ID/thread, compiled execution metadata ID, plan
+ * hash and authority generation; it has no result
+ * payload and is not persisted as another result authority. It does not assert
+ * Job acceptance or external delivery. No Job record/schema is changed.
+ *
+ * Output JSON slots are cleared on rejection. After compilation a certificate
+ * can still accompany an execution failure, as on the existing path. If the
+ * result committed but reference allocation fails, ENOMEM is returned without
+ * publishing result/reference; explicit retry uses the same bound attempt.
+ * Policy stability, borrowed callback lifetimes and exclusive ownership follow
+ * execute_compiled_inspect_attempt_json throughout this synchronous operation.
+ */
+CXX_C_API int turbo_agent_harness_execute_job_inspect_json(
+    turbo_agent_harness_t *harness, const char *job_id,
+    uint32_t expected_job_revision,
+    const turbo_agent_compiler_config_t *compiler_config,
+    const turbo_tool_execution_context_t *context,
+    turbo_agent_compile_diagnostic_t *out_diagnostic,
+    turbo_tool_status_t *out_tool_status,
+    json_value_t **out_result, json_value_t **out_certificate,
+    json_value_t **out_execution_reference);
+
+/**
  * Resume the harness default workflow.
  * `options->session_options` is required and selects checkpoint/thread scope
  * and override/patch/command input semantics.

@@ -24,6 +24,7 @@ if(BUILD_TESTS)
     tests/test_turbo_document_render_example.c
     tests/test_turbo_agent_public_api.c
     LIBS TurboAgent::Harness Salts::TinyTest FOLDER "Harness/tests")
+  set_tests_properties(test_turbo_agent_harness_compiled PROPERTIES TIMEOUT 60)
   if(NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(tests/process_crash)
   endif()

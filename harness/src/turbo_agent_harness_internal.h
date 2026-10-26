@@ -32,5 +32,9 @@ int turbo_agent_harness_prepare_job_proof(turbo_agent_harness_t *harness,
     const turbo_agent_compiler_config_t *config,
     turbo_agent_compile_diagnostic_t *diagnostic, turbo_agent_job_proof_t *out);
 void turbo_agent_harness_job_proof_destroy(turbo_agent_job_proof_t *proof);
+/* Caller holds submission exclusion and owns a prepared proof. Revalidates the
+ * immutable Host decision, including its canonical execution records. */
+int turbo_agent_harness_load_job_acceptance(const turbo_agent_job_proof_t *proof,
+    turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out);
 
 #endif

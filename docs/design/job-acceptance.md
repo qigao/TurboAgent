@@ -86,7 +86,8 @@ recover and read again. An independent Host-input/counter database stores only
 reference metadata. Every recovery keeps one original tool invocation and one
 Runtime Run; external delivery count stays zero.
 
-Acceptance evidence remains Host-authored. External evidence verification,
-source freshness, amendment/replanning, delivery intent/receipt reconciliation
-and cancellation supervision remain future product work. Real-model quality and
+Acceptance evidence remains Host-authored. [Delivery intent/receipt metadata](job-delivery.md)
+now composes this decision with explicit Host reconciliation, without sending.
+External evidence verification, source freshness, amendment/replanning,
+production delivery connectors and cancellation supervision remain future product work. Real-model quality and
 cost qualification stays independently tracked in issue #278. M1 is not complete.

@@ -219,6 +219,20 @@ done:
   turbo_agent_harness_end_submit(harness);
   return rc;
 }
+int turbo_agent_harness_load_job_acceptance(const turbo_agent_job_proof_t *proof,
+    turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out) {
+  const char *id = json_get_string(proof->snapshot, "id");
+  json_value_t *record = NULL;
+  int rc = turbo_agent_runtime_store_get_json_status(proof->runtime, ACCEPTANCE, id, &record);
+  *out = NULL;
+  if (rc == SALTS_OK) rc = record_shape(record, id, (uint32_t)number(proof->snapshot, "revision"));
+  if (rc == SALTS_OK) rc = validate_reference(proof, json_object_get(record, "execution_reference"), diagnostic);
+  if (rc == SALTS_OK) rc = current(proof);
+  if (rc == SALTS_OK) { *out = record; record = NULL; }
+  json_free(record);
+  return rc;
+}
+
 int turbo_agent_harness_get_job_acceptance_json(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
     turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out) {
@@ -233,13 +247,7 @@ int turbo_agent_harness_get_job_acceptance_json(turbo_agent_harness_t *harness,
   if (rc != SALTS_OK) return rc;
   rc = turbo_agent_harness_prepare_job_proof(harness, id, revision, config, diagnostic, &proof);
   if (rc != SALTS_OK) goto done;
-  rc = turbo_agent_runtime_store_get_json_status(proof.runtime, ACCEPTANCE, id, &record);
-  if (rc != SALTS_OK) goto done;
-  rc = record_shape(record, id, revision);
-  if (rc != SALTS_OK) goto done;
-  rc = validate_reference(&proof, json_object_get(record, "execution_reference"), diagnostic);
-  if (rc != SALTS_OK) goto done;
-  rc = current(&proof);
+  rc = turbo_agent_harness_load_job_acceptance(&proof, diagnostic, &record);
   if (rc == SALTS_OK) { *out = record; record = NULL; }
 done:
   json_free(record);

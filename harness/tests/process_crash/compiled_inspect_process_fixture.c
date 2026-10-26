@@ -1,6 +1,7 @@
 #include "turbo_agent_harness.h"
 #include "turbo_agent_job.h"
 #include "turbo_agent_job_acceptance.h"
+#include "turbo_agent_job_delivery.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_runtime_json.h"
@@ -42,7 +43,16 @@ static const crash_case_t cases[] = {
   {"acceptance_before", "committed", "committed", 1},
   {"acceptance_after", "committed", "committed", 1},
   {"acceptance_lost_ack", "committed", "committed", 1},
-  {"acceptance_returned", "committed", "committed", 1}
+  {"acceptance_returned", "committed", "committed", 1},
+  {"delivery_intent_before", "committed", "committed", 1},
+  {"delivery_intent_after", "committed", "committed", 1},
+  {"delivery_intent_lost_ack", "committed", "committed", 1},
+  {"delivery_intent_returned", "committed", "committed", 1},
+  {"delivery_after_send", "committed", "committed", 1},
+  {"delivery_receipt_before", "committed", "committed", 1},
+  {"delivery_receipt_after", "committed", "committed", 1},
+  {"delivery_receipt_lost_ack", "committed", "committed", 1},
+  {"delivery_receipt_returned", "committed", "committed", 1}
 };
 
 typedef struct fixture_s {
@@ -53,7 +63,7 @@ typedef struct fixture_s {
   turbo_agent_harness_t *harness;
   cmeta_threadpool_t *pool;
   int inject, callbacks, transports, attempt_reads, attempt_writes, reference_writes;
-  int job_mode, acceptance_mode;
+  int job_mode, acceptance_mode, delivery_mode;
   json_value_t *execution_reference;
 } fixture_t;
 
@@ -124,12 +134,22 @@ static int store_write(fixture_t *f, const char *collection, const char *id,
     before = !strcmp(f->cut->name, "acceptance_before");
     after = !strcmp(f->cut->name, "acceptance_after");
   }
+  if (!strcmp(collection, "agent_job_delivery_intents") || !strcmp(collection, "agent_job_delivery_receipts")) {
+    int intent = !strcmp(collection, "agent_job_delivery_intents");
+    if (!create) return SALTS_EPROTO;
+    before = !strcmp(f->cut->name, intent ? "delivery_intent_before" : "delivery_receipt_before");
+    after = !strcmp(f->cut->name, intent ? "delivery_intent_after" : "delivery_receipt_after");
+  }
   if (f->inject && before) _Exit(FIXTURE_CRASH);
   rc = create ? f->inner.create_if_absent(f->inner.user_data, collection, id, text)
               : f->inner.put(f->inner.user_data, collection, id, text);
   if (!rc && f->inject && after) _Exit(FIXTURE_CRASH);
   if (!rc && f->inject && !strcmp(collection, "agent_job_acceptance") &&
       !strcmp(f->cut->name, "acceptance_lost_ack")) return SALTS_EIO;
+  if (!rc && f->inject &&
+      ((!strcmp(collection, "agent_job_delivery_intents") && !strcmp(f->cut->name, "delivery_intent_lost_ack")) ||
+       (!strcmp(collection, "agent_job_delivery_receipts") && !strcmp(f->cut->name, "delivery_receipt_lost_ack"))))
+    return SALTS_EIO;
   json_free(record);
   return rc;
 }
@@ -482,21 +502,141 @@ static int exercise_acceptance(fixture_t *f, const char *mode) {
   return evidence(f, "committed", 1, 0, 1); /* Acceptance is not external delivery. */
 }
 
+static int delivery_operation(fixture_t *f, int op, json_value_t **out) {
+  const char *allowed[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compile_diagnostic_t diagnostic;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+  if (op == 0) return turbo_agent_harness_prepare_job_delivery_json(f->harness,
+      "bound-job", 2, &config, "delivery-1", "fixture-destination", "fixture-payload", &diagnostic, out);
+  if (op == 2) return turbo_agent_harness_record_job_delivery_receipt_json(f->harness,
+      "bound-job", 2, &config, "delivery-1", "fixture-remote-receipt", &diagnostic, out);
+  return turbo_agent_harness_get_job_delivery_json(f->harness, "bound-job", 2, &config, &diagnostic, out);
+}
+static int remote_receipt_valid(const json_value_t *receipt) {
+  return text_is(receipt, "idempotency_key", "bound-job:delivery-1") &&
+      text_is(receipt, "destination_ref", "fixture-destination") &&
+      text_is(receipt, "payload_ref", "fixture-payload") &&
+      text_is(receipt, "receipt_ref", "fixture-remote-receipt");
+}
+/* Test-only destination in a separate SQLite DB, never a real network send.
+ * The Host queries it during reconciliation; Runtime never invokes this path. */
+static int host_send(fixture_t *f, const json_value_t *intent) {
+  json_value_t *receipt = json_clone(intent);
+  int rc;
+  REQUIRE(receipt && text_is(intent, "idempotency_key", "bound-job:delivery-1") &&
+      text_is(intent, "destination_ref", "fixture-destination") && text_is(intent, "payload_ref", "fixture-payload"));
+  REQUIRE(!counter_add(f, "send_requests"));
+  REQUIRE(!turbo_runtime_json_object_set_string(receipt, "receipt_ref", "fixture-remote-receipt"));
+  rc = turbo_agent_runtime_store_create_json_if_absent(f->oracle, "destination_receipts", "delivery-1", receipt);
+  json_free(receipt);
+  REQUIRE(rc == SALTS_OK || rc == SALTS_EALREADY);
+  return rc == SALTS_OK ? counter_add(f, "delivery") : SALTS_OK;
+}
+static int exercise_delivery(fixture_t *f, const char *mode) {
+  turbo_agent_compile_diagnostic_t diagnostic;
+  turbo_tool_status_t status;
+  json_value_t *record = NULL, *result = NULL, *certificate = NULL, *remote = NULL, *runs = NULL;
+  int intent_cut = !strncmp(f->cut->name, "delivery_intent_", 16);
+  int receipt_committed = !strcmp(f->cut->name, "delivery_receipt_after") ||
+      !strcmp(f->cut->name, "delivery_receipt_lost_ack") || !strcmp(f->cut->name, "delivery_receipt_returned");
+  int deliveries = !strcmp(mode, "recover") || !strcmp(mode, "replay") || !intent_cut;
+  int rc, n;
+  if (!strcmp(mode, "init")) {
+    REQUIRE(!exercise(f, mode));
+    return counter_put(f, "send_requests", 0);
+  }
+  REQUIRE(!grant(f, strcmp(mode, "denied") != 0));
+  if (!strcmp(mode, "crash")) {
+    REQUIRE(!execute(f, source, &diagnostic, &status, &result, &certificate));
+    REQUIRE(result_valid(f, result) && certificate && f->execution_reference);
+    json_free(result); json_free(certificate);
+    REQUIRE(!acceptance_operation(f, 1, TURBO_AGENT_JOB_ACCEPTED, &record));
+    json_free(record); record = NULL;
+    f->inject = 1;
+    rc = delivery_operation(f, 0, &record);
+    if (!strcmp(f->cut->name, "delivery_intent_lost_ack")) {
+      REQUIRE(rc == SALTS_EIO && !record); _Exit(87);
+    }
+    REQUIRE(rc == SALTS_OK && record);
+    if (!strcmp(f->cut->name, "delivery_intent_returned")) _Exit(FIXTURE_CRASH);
+    REQUIRE(!host_send(f, record));
+    json_free(record); record = NULL;
+    if (!strcmp(f->cut->name, "delivery_after_send")) _Exit(FIXTURE_CRASH);
+    rc = delivery_operation(f, 2, &record);
+    if (!strcmp(f->cut->name, "delivery_receipt_lost_ack")) {
+      REQUIRE(rc == SALTS_EIO && !record); _Exit(87);
+    }
+    REQUIRE(!strcmp(f->cut->name, "delivery_receipt_returned") && rc == SALTS_OK && record);
+    _Exit(FIXTURE_CRASH);
+  }
+  if (!strcmp(mode, "denied") || !strcmp(mode, "stale")) {
+    if (!strcmp(mode, "stale")) REQUIRE(!grant(f, 1));
+    for (int op = 0; op < 3; ++op) {
+      REQUIRE(delivery_operation(f, op, &record) == SALTS_EPROTO && !record);
+    }
+  } else {
+    rc = delivery_operation(f, 1, &record);
+    if (!strcmp(mode, "inspect") && !strcmp(f->cut->name, "delivery_intent_before")) {
+      REQUIRE(rc == SALTS_ENOENT && !record);
+    } else {
+      if (!strcmp(mode, "recover") && !strcmp(f->cut->name, "delivery_intent_before")) {
+        REQUIRE(rc == SALTS_ENOENT && !record);
+        REQUIRE(!delivery_operation(f, 0, &record));
+        json_free(record); record = NULL;
+        REQUIRE(!delivery_operation(f, 1, &record));
+      } else REQUIRE(rc == SALTS_OK && record);
+      REQUIRE(text_is(record, "status", (!strcmp(mode, "replay") || receipt_committed) ? "delivered" : "outcome_unknown"));
+      if (!strcmp(mode, "recover") && !receipt_committed) {
+        /* Explicit Host reconciliation: query destination before choosing send.
+         * A post-send crash must find its remote receipt and issue no new send. */
+        rc = turbo_agent_runtime_store_get_json_status(f->oracle, "destination_receipts", "delivery-1", &remote);
+        if (rc == SALTS_ENOENT) {
+          REQUIRE(!host_send(f, json_object_get(record, "intent")));
+          REQUIRE(!turbo_agent_runtime_store_get_json_status(f->oracle, "destination_receipts", "delivery-1", &remote));
+        } else REQUIRE(rc == SALTS_OK);
+        REQUIRE(remote_receipt_valid(remote));
+        json_free(remote); remote = NULL;
+        json_free(record); record = NULL;
+        REQUIRE(!delivery_operation(f, 2, &record));
+        json_free(record); record = NULL;
+        REQUIRE(!delivery_operation(f, 1, &record) && text_is(record, "status", "delivered"));
+      }
+      json_free(record); record = NULL;
+      if (!strcmp(mode, "recover") || !strcmp(mode, "replay")) {
+        REQUIRE(delivery_operation(f, 0, &record) == SALTS_EALREADY && !record);
+        REQUIRE(delivery_operation(f, 2, &record) == SALTS_EALREADY && !record);
+      }
+    }
+  }
+  REQUIRE(!turbo_agent_runtime_store_list_json(f->runtime, "runs", NULL, NULL, &runs));
+  REQUIRE(json_array_size(runs) == 1 && !f->callbacks && !f->transports);
+  json_free(runs);
+  REQUIRE(!counter_get(f, "send_requests", &n) && n == deliveries);
+  rc = turbo_agent_runtime_store_get_json_status(f->oracle, "destination_receipts", "delivery-1", &remote);
+  REQUIRE(deliveries ? rc == SALTS_OK && remote_receipt_valid(remote) : rc == SALTS_ENOENT && !remote);
+  json_free(remote);
+  return evidence(f, "committed", 1, deliveries, 1);
+}
+
 int main(int argc, char **argv) {
   fixture_t fixture = {0};
   int rc;
   if (argc != 4 && argc != 5) return failure("mode/cut/private-directory/[job] required", __LINE__);
   if (argc == 5) {
-    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance"))
+    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery"))
       return failure("unknown execution mode", __LINE__);
     fixture.job_mode = 1;
-    fixture.acceptance_mode = !strcmp(argv[4], "acceptance");
+    fixture.delivery_mode = !strcmp(argv[4], "delivery");
+    fixture.acceptance_mode = !strcmp(argv[4], "acceptance") || fixture.delivery_mode;
   }
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
     if (!strcmp(argv[2], cases[i].name)) fixture.cut = &cases[i];
   if (!fixture.cut) return failure("unknown crash cut", __LINE__);
   rc = fixture_open(&fixture, argv[3], !strcmp(argv[1], "init"));
-  if (!rc) rc = fixture.acceptance_mode ? exercise_acceptance(&fixture, argv[1]) : exercise(&fixture, argv[1]);
+  if (!rc) rc = fixture.delivery_mode ? exercise_delivery(&fixture, argv[1]) :
+      fixture.acceptance_mode ? exercise_acceptance(&fixture, argv[1]) : exercise(&fixture, argv[1]);
   else fprintf(stderr, "Compiled Inspect fixture open failed: %d\n", rc);
   fixture_close(&fixture);
   return rc ? FIXTURE_FAILURE : 0;

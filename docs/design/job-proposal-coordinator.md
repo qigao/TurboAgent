@@ -166,3 +166,7 @@ canonical attempt, compiled journal and completed Runtime Run state snapshot bef
 publishing a separate immutable decision/evidence-reference record. It does not
 change Job v1 proposal history, copy a typed result or imply external delivery.
 Normal Run completion is joined through state_snapshot; no Checkpoint is assumed.
+
+[Delivery intents and Host receipts](job-delivery.md) now compose accepted Jobs
+with stable idempotency keys and explicit outcome reconciliation. They preserve
+Job v1 history and canonical result ownership; Harness never sends automatically.

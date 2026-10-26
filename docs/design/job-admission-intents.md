@@ -69,6 +69,10 @@ identities rather than accepting an unrelated observation under a reused ID.
 
 ## Recovery limits
 
+The optional [queue disposition receipt](job-queue-receipts.md) now observes
+native rejection or selected run/cancel callbacks. The admitted API itself keeps
+its original behavior; missing receipts still leave the pre-selection gap unknown.
+
 An intent is not an atomic transaction with a native queue. The same record can
 survive a crash immediately before enqueue or after successful enqueue. It does
 not attest queue acceptance, callback entry, Run creation, result delivery,

@@ -28,6 +28,12 @@ if(BUILD_TESTS)
     tests/test_turbo_agent_public_api.c
     LIBS TurboAgent::Harness Salts::TinyTest FOLDER "Harness/tests")
   set_tests_properties(test_turbo_agent_harness_compiled PROPERTIES TIMEOUT 60)
+elseif(TURBOAGENT_JOB_FILE_CONFORMANCE)
+  cmake_add_test(SOURCES tests/test_turbo_agent_job_file_verifier.c
+    LIBS TurboAgent::Harness Salts::TinyTest FOLDER "Harness/tests")
+endif()
+if(BUILD_TESTS OR TURBOAGENT_JOB_FILE_CONFORMANCE)
+  set_tests_properties(test_turbo_agent_job_file_verifier PROPERTIES TIMEOUT 60 LABELS "harness;job;file-verification")
   if(NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(tests/process_crash)
   endif()

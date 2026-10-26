@@ -119,6 +119,25 @@ Recovery keeps one original Inspect callback and one Run; a post-send crash adds
 no send request. This qualifies the local adapter and Host composition, not a
 production remote connector or arbitrary report's semantic quality.
 
+The macOS SDK profile now enables `TURBOAGENT_JOB_FILE_CONFORMANCE` while the full
+suite stays OFF. It builds the real file unit executable and compiled process
+fixture alongside the existing independent 58-case SQLite VFS gate. A required
+`ci-macos-job-files` step runs on actual Darwin arm64 and checks the build's arm64
+architecture and clean checkout commit. Android/cross builds cannot enable this
+native conformance option.
+
+`cmake/ci/run-job-file-conformance.py` requires an exact independent ten-test
+inventory, refuses disabled/missing/duplicate/extra tests, validates CTest exit and
+JUnit without skips/failures, and audits the nine cut traces for all ten ordered
+child exits (including 86/87 crash/lost-ack exits). Every child emits a separate
+log and stage exit record; the gate validates 90 application-process records.
+Fresh per-run/attempt evidence contains inventory, JUnit, CTest log, child logs,
+cache fingerprint, checkout/host identity and SHA-256 evidence fingerprints.
+Successful old artifacts cannot be reused; failed cases/logs remain available.
+CI uploads the evidence even on failure. SDK compilation or a Linux simulation
+cannot satisfy the macOS host/architecture requirement. The first macOS result
+for this added gate must be observed before claiming macOS adapter runtime coverage.
+
 Runtime schemas remain unchanged. Rollback retains manifests and all canonical
 Job/attempt/Run/review/delivery data; older/manual constructors retain their own
 verification responsibilities. M1, cancellation supervision, amendment/replanning,

@@ -1,5 +1,6 @@
 #include "tinytest.h"
 #include "turbo_agent_job_execution.h"
+#include "turbo_agent_job_observation.h"
 #include "turbo_agent_job_cancel.h"
 #include "turbo_agent_job_verifier.h"
 #include "turbo_agent_policy.h"
@@ -15,9 +16,12 @@ typedef struct probe_s {
   turbo_agent_runtime_t *runtime;
   turbo_agent_harness_t *harness;
   turbo_agent_job_execution_t *nested;
-  gate_t callback, publication;
+  gate_t callback, publication, observation;
   atomic_int calls, reads, claims, cancellation_claims, frees, sources, evidences;
   atomic_int reads_after_error, unacknowledged;
+  atomic_int observation_claims, observation_gets, observation_puts, observation_unacknowledged;
+  atomic_int reads_after_observation_error, cancel_gets_after_error;
+  int observation_error, observation_after_commit, observation_nested_status;
   int publication_error, after_commit, source_error, source_fail_at, nested_status;
   const char *read_failure;
 } probe_t;
@@ -37,12 +41,17 @@ static void block(void *user) {
 static int get(void *user, const char *collection, const char *id, char **out) {
   probe_t *p = user;
   atomic_fetch_add(&p->reads, 1);
+  if (!strcmp(collection, "agent_job_observations")) atomic_fetch_add(&p->observation_gets, 1);
+  if (!strcmp(collection, "agent_job_cancellations") && atomic_load(&p->unacknowledged))
+    atomic_fetch_add(&p->cancel_gets_after_error, 1);
+  if (atomic_load(&p->observation_unacknowledged)) atomic_fetch_add(&p->reads_after_observation_error, 1);
   if (atomic_load(&p->unacknowledged)) atomic_fetch_add(&p->reads_after_error, 1);
   if (p->read_failure && !strcmp(collection, p->read_failure)) { *out = NULL; return SALTS_EIO; }
   return p->inner.get(p->inner.user_data, collection, id, out);
 }
 static int put(void *user, const char *collection, const char *id, const char *value) {
   probe_t *p = user;
+  if (!strcmp(collection, "agent_job_observations")) atomic_fetch_add(&p->observation_puts, 1);
   return p->inner.put(p->inner.user_data, collection, id, value);
 }
 static int list(void *user, const char *collection, const char *key, const char *value, char **out) {
@@ -53,6 +62,21 @@ static int claim(void *user, const char *collection, const char *id, const char 
   probe_t *p = user;
   int rc;
   atomic_fetch_add(&p->claims, 1);
+  if (!strcmp(collection, "agent_job_observations")) {
+    atomic_fetch_add(&p->observation_claims, 1);
+    if (p->nested) {
+      int status;
+      p->observation_nested_status = turbo_agent_job_execution_observation_status(p->nested, &status);
+    }
+    block(&p->observation);
+    if (p->observation_error && !p->observation_after_commit) {
+      atomic_store(&p->observation_unacknowledged, 1); return p->observation_error;
+    }
+    rc = p->inner.create_if_absent(p->inner.user_data, collection, id, value);
+    if (rc == SALTS_OK && p->observation_error) rc = p->observation_error;
+    if (rc != SALTS_OK) atomic_store(&p->observation_unacknowledged, 1);
+    return rc;
+  }
   if (!strcmp(collection, "agent_job_cancellations")) {
     atomic_fetch_add(&p->cancellation_claims, 1);
     block(&p->publication);
@@ -115,6 +139,14 @@ static int submit(turbo_agent_harness_t *h, turbo_agent_job_execution_t **out, u
   config.allowed_capabilities = caps; config.allowed_capability_count = 1;
   return turbo_agent_harness_submit_job_inspect(h, "job", 2, &config, deadline, out);
 }
+static int submit_recorded(turbo_agent_harness_t *h, const char *observation,
+    turbo_agent_job_execution_t **out, uint64_t deadline) {
+  const char *caps[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = caps; config.allowed_capability_count = 1;
+  return turbo_agent_harness_submit_recorded_job_inspect(h, "job", 2, &config, deadline, observation, out);
+}
 typedef struct observer_s { turbo_agent_job_execution_t *execution; atomic_int ready, done, errors; } observer_t;
 typedef struct contender_s {
   turbo_agent_job_execution_t *execution;
@@ -163,10 +195,14 @@ spec("Bound Job asynchronous supervision") {
     memset(&p, 0, sizeof(p));
     atomic_init(&p.callback.entered, 0); atomic_init(&p.callback.open, 1);
     atomic_init(&p.publication.entered, 0); atomic_init(&p.publication.open, 1);
+    atomic_init(&p.observation.entered, 0); atomic_init(&p.observation.open, 1);
     atomic_init(&p.calls, 0); atomic_init(&p.reads, 0); atomic_init(&p.claims, 0);
     atomic_init(&p.cancellation_claims, 0); atomic_init(&p.frees, 0);
     atomic_init(&p.sources, 0); atomic_init(&p.evidences, 0);
     atomic_init(&p.reads_after_error, 0); atomic_init(&p.unacknowledged, 0);
+    atomic_init(&p.observation_claims, 0); atomic_init(&p.observation_gets, 0);
+    atomic_init(&p.observation_puts, 0); atomic_init(&p.observation_unacknowledged, 0);
+    atomic_init(&p.reads_after_observation_error, 0); atomic_init(&p.cancel_gets_after_error, 0);
     pool = cmeta_threadpool_create_with_config(&pool_config);
     registry = turbo_tool_registry_create();
     p.inner = turbo_agent_runtime_store_memory_create();
@@ -198,7 +234,7 @@ spec("Bound Job asynchronous supervision") {
     turbo_agent_job_execution_status_init(&status);
   }
   after_each() {
-    atomic_store(&p.callback.open, 1); atomic_store(&p.publication.open, 1);
+    atomic_store(&p.callback.open, 1); atomic_store(&p.publication.open, 1); atomic_store(&p.observation.open, 1);
     cmeta_threadpool_wait(pool);
     turbo_agent_job_destroy(job); job = NULL;
     turbo_agent_job_execution_release(execution); turbo_agent_job_execution_release(other);
@@ -499,5 +535,281 @@ spec("Bound Job asynchronous supervision") {
     check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_OK);
     check_equal(json_get_string(record, "request_id"), callers[0].rc == SALTS_OK ? "first" : "second");
     check_equal(atomic_load(&p.cancellation_claims), 1);
+  }
+
+  it("records settled execution metadata and canonical reference while preserving the v1 status layout") {
+    int publication;
+    check_equal(submit_recorded(harness, "observation-1", &execution, 0), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_id(execution), "observation-1");
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_status(execution, &publication), SALTS_OK);
+    check_equal(publication, SALTS_OK);
+    check_equal(turbo_agent_job_execution_get_status(execution, &status), SALTS_OK);
+    check_equal(status.state, TURBO_AGENT_EXECUTION_COMPLETED); check_equal(status.operation_status, SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "observation-1", &record), SALTS_OK);
+    check_equal(json_object_size(record), (size_t)17);
+    check_equal(json_get_string(record, "supervisor_id"), turbo_agent_job_execution_id(execution));
+    check_equal(json_get_string(record, "state"), "completed");
+    check_equal(json_get_string(record, "dispatch"), "inspect");
+    check_equal(json_get_string(json_object_get(record, "execution_reference"), "job_id"), "job");
+    check_equal(json_type(json_object_get(record, "cancellation_request")), JSON_NULL);
+    check_null(json_object_get(record, "result")); check_null(json_object_get(record, "certificate"));
+    check_null(json_object_get(record, "diagnostic"));
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_OK);
+    check_equal(json_get_string(result, "answer"), "canonical");
+    check_equal(json_get_string(reference, "run_id"), json_get_string(json_object_get(record, "execution_reference"), "run_id"));
+    check_equal(atomic_load(&p.observation_claims), 1); check_equal(atomic_load(&p.observation_puts), 0);
+    check_equal(atomic_load(&p.calls), 1);
+  }
+
+  it("keeps local wait nonterminal until observation publication and permits concurrent status queries") {
+    int publication;
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    atomic_store(&p.observation.open, 0);
+    check_equal(submit_recorded(harness, "observed-cancel", &execution, 0), SALTS_OK);
+    p.nested = execution;
+    check_equal(turbo_agent_job_execution_observation_status(execution, &publication), SALTS_EBUSY);
+    check_equal(publication, SALTS_EBUSY);
+    check_equal(turbo_agent_job_execution_cancel(execution, "stop-1", "reason"), SALTS_OK);
+    atomic_store(&queue.open, 1); check_true(await(&p.observation.entered));
+    check_equal(turbo_agent_job_execution_wait(execution, 1), SALTS_ETIMEDOUT);
+    check_equal(turbo_agent_job_execution_get_status(execution, &status), SALTS_OK);
+    check_equal(status.state, TURBO_AGENT_EXECUTION_RUNNING);
+    check_equal(p.observation_nested_status, SALTS_EBUSY);
+    check_equal(turbo_agent_job_execution_cancel(execution, "too-late", "reason"), SALTS_EALREADY);
+    atomic_store(&p.observation.open, 1);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK); p.nested = NULL;
+    check_equal(turbo_agent_job_execution_observation_status(execution, &publication), SALTS_OK);
+    check_equal(publication, SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "observed-cancel", &record), SALTS_OK);
+    check_equal(json_get_string(record, "state"), "cancelled");
+    check_equal(json_get_string(json_object_get(record, "cancellation_request"), "request_id"), "stop-1");
+    check_equal(json_type(json_object_get(record, "execution_reference")), JSON_NULL);
+    check_equal(atomic_load(&p.calls), 0);
+  }
+
+  it("reports observation write errors independently and never returns unacknowledged results") {
+    const int errors[] = {SALTS_ENOTSUP, SALTS_EIO, SALTS_EIO};
+    const char *ids[] = {"unsupported", "failed-before", "lost-ack"};
+    for (int i = 0; i < 3; ++i) {
+      int publication;
+      p.observation_error = errors[i]; p.observation_after_commit = i == 2;
+      atomic_store(&p.observation_unacknowledged, 0); atomic_store(&p.reads_after_observation_error, 0);
+      check_equal(submit_recorded(harness, ids[i], &execution, 0), SALTS_OK);
+      check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+      check_equal(turbo_agent_job_execution_observation_status(execution, &publication), SALTS_OK);
+      check_equal(publication, errors[i]);
+      check_equal(turbo_agent_job_execution_get_status(execution, &status), SALTS_OK);
+      check_equal(status.state, TURBO_AGENT_EXECUTION_COMPLETED); check_equal(status.operation_status, SALTS_OK);
+      check_equal(atomic_load(&p.reads_after_observation_error), 0);
+      check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), errors[i]);
+      check_null(result); check_null(certificate); check_null(reference);
+      check_equal(atomic_load(&p.reads_after_observation_error), 0);
+      atomic_store(&p.observation_unacknowledged, 0);
+      check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", ids[i], &record), i == 2 ? SALTS_OK : SALTS_ENOENT);
+      json_free(record); record = NULL;
+      turbo_agent_job_execution_release(execution); execution = NULL;
+    }
+    check_equal(atomic_load(&p.observation_claims), 3); check_equal(atomic_load(&p.observation_puts), 0);
+    check_equal(atomic_load(&p.calls), 1);
+  }
+
+  it("preserves duplicate observation identity and requires explicit supervisor reconciliation") {
+    int publication;
+    char first[37];
+    check_equal(submit_recorded(harness, "same-id", &execution, 0), SALTS_OK);
+    memcpy(first, turbo_agent_job_execution_id(execution), sizeof(first));
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_OK);
+    json_free(result); json_free(certificate); json_free(reference); result = certificate = reference = NULL;
+    check_equal(submit_recorded(harness, "same-id", &other, 0), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(other, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_status(other, &publication), SALTS_OK);
+    check_equal(publication, SALTS_EALREADY); check_equal(atomic_load(&p.reads_after_observation_error), 0);
+    check_equal(turbo_agent_job_execution_take_result(other, &diagnostic, &result, &certificate, &reference), SALTS_EALREADY);
+    check_null(result); check_null(certificate); check_null(reference);
+    atomic_store(&p.observation_unacknowledged, 0);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "same-id", &record), SALTS_OK);
+    check_equal(json_get_string(record, "supervisor_id"), first);
+    check_not_equal(json_get_string(record, "supervisor_id"), turbo_agent_job_execution_id(other));
+    check_equal(atomic_load(&p.calls), 1);
+  }
+
+  it("retains the original cancellation error in a separately acknowledged terminal observation") {
+    int publication;
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    p.publication_error = SALTS_EIO; p.after_commit = 1;
+    check_equal(submit_recorded(harness, "cancel-lost-ack", &execution, 0), SALTS_OK);
+    check_equal(turbo_agent_job_execution_cancel(execution, "stop-1", "reason"), SALTS_OK);
+    atomic_store(&queue.open, 1);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_status(execution, &publication), SALTS_OK);
+    check_equal(publication, SALTS_OK); check_equal(atomic_load(&p.cancel_gets_after_error), 0);
+    atomic_store(&p.unacknowledged, 0);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "cancel-lost-ack", &record), SALTS_OK);
+    check_equal(json_get_int(record, "cancellation_status", 0), SALTS_EIO);
+    json_free(record); record = NULL;
+    check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_OK);
+    check_equal(json_get_string(record, "request_id"), "stop-1");
+  }
+
+  it("validates every observation identity, status join and future schema") {
+    const char *keys[] = {"kind", "observation_id", "supervisor_id", "job_id", "thread_id", "attempt_id", "dispatch", "state"};
+    const char *numbers[] = {"job_revision", "proposal_version", "operation_status", "tool_status", "cancellation_status"};
+    json_value_t *original = NULL, *bad = NULL;
+    check_equal(submit_recorded(harness, "shape", &execution, 0), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "shape", &original), SALTS_OK);
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+      bad = json_clone(original);
+      check_equal(turbo_runtime_json_object_set_string(bad, keys[i], "wrong"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_observations", "job:shape", bad), SALTS_OK);
+      check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "shape", &record), SALTS_EPROTO);
+      check_null(record); json_free(bad);
+    }
+    for (size_t i = 0; i < sizeof(numbers) / sizeof(numbers[0]); ++i) {
+      bad = json_clone(original);
+      check_equal(turbo_runtime_json_object_set_int64(bad, numbers[i], INT64_C(2147483648)), 0);
+      check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_observations", "job:shape", bad), SALTS_OK);
+      check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "shape", &record), SALTS_EPROTO);
+      check_null(record); json_free(bad);
+    }
+    bad = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_int64(bad, "schema_version", 2), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_observations", "job:shape", bad), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "shape", &record), SALTS_ENOTSUP);
+    json_free(bad); bad = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_string(bad, "result", "forbidden"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_observations", "job:shape", bad), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "shape", &record), SALTS_EPROTO);
+    json_free(bad); json_free(original);
+  }
+
+  it("treats historical metadata as an observation rather than current result authority") {
+    check_equal(submit_recorded(harness, "historical", &execution, 0), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(policy(harness, 0), SALTS_OK); p.source_error = SALTS_EIO;
+    int sources = atomic_load(&p.sources);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "historical", &record), SALTS_OK);
+    check_equal(json_get_string(record, "state"), "completed");
+    check_equal(atomic_load(&p.sources), sources);
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_EIO);
+    check_null(result); check_null(certificate); check_null(reference);
+  }
+
+  it("records failed and timed-out local operations without inventing execution references") {
+    check_equal(submit_recorded(harness, "expired", &execution, cmeta_monotonic_ms()), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "expired", &record), SALTS_OK);
+    check_equal(json_get_string(record, "state"), "timed_out");
+    check_equal(json_type(json_object_get(record, "execution_reference")), JSON_NULL);
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_ETIMEDOUT);
+    json_free(record); record = NULL;
+    p.source_error = SALTS_EIO;
+    check_equal(submit_recorded(harness, "failed", &other, 0), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(other, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "failed", &record), SALTS_OK);
+    check_equal(json_get_string(record, "state"), "failed");
+    check_equal(json_get_int(record, "operation_status", 0), SALTS_EIO);
+    check_equal(json_type(json_object_get(record, "execution_reference")), JSON_NULL);
+    check_equal(atomic_load(&p.calls), 0);
+  }
+
+  it("keeps the legacy entry unrecorded and validates observation API inputs before Store access") {
+    int publication;
+    const char *caps[] = {"runtime_tools"};
+    turbo_agent_compiler_config_t config; turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = caps; config.allowed_capability_count = 1;
+    int reads = atomic_load(&p.reads);
+    check_equal(submit_recorded(harness, "../bad", &execution, 0), SALTS_EINVAL);
+    check_equal(submit_recorded(harness, NULL, &execution, 0), SALTS_EINVAL);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "../bad", &record), SALTS_EINVAL);
+    check_null(record); check_equal(atomic_load(&p.reads), reads);
+    check_equal(turbo_agent_harness_submit_recorded_job_inspect(harness, "job", 1, &config, 0, "stale", &execution), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_status(execution, &publication), SALTS_OK);
+    check_equal(publication, SALTS_EBUSY);
+    turbo_agent_job_execution_release(execution); execution = NULL; cmeta_threadpool_wait(pool);
+    check_equal(submit(harness, &execution, 0), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_null(turbo_agent_job_execution_observation_id(execution));
+    check_equal(turbo_agent_job_execution_observation_status(execution, &publication), SALTS_OK);
+    check_equal(publication, SALTS_ENOENT);
+    check_equal(atomic_load(&p.observation_claims), 0);
+  }
+
+  it("rejects recorded queue admission without reading or publishing an observation") {
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK);
+    int reads = atomic_load(&p.reads), claims = atomic_load(&p.claims);
+    check_equal(submit_recorded(harness, "rejected", &execution, 0), SALTS_ENOBUFS);
+    check_null(execution); check_equal(atomic_load(&p.reads), reads); check_equal(atomic_load(&p.claims), claims);
+    check_equal(atomic_load(&p.observation_claims), 0);
+    atomic_store(&queue.open, 1); cmeta_threadpool_wait(pool);
+    cmeta_threadpool_shutdown(pool);
+    check_equal(submit_recorded(harness, "closed", &execution, 0), SALTS_ESHUTDOWN);
+    check_null(execution); check_equal(atomic_load(&p.reads), reads);
+  }
+
+  it("records pool cancellation as local non-dispatch without a Host cancellation request") {
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    check_equal(submit_recorded(harness, "pool-cancelled", &execution, 0), SALTS_OK);
+    check_equal(cmeta_threadpool_shutdown_with_policy(pool, SALTS_THREADPOOL_SHUTDOWN_CANCEL_PENDING), SALTS_OK);
+    atomic_store(&queue.open, 1);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "pool-cancelled", &record), SALTS_OK);
+    check_equal(json_get_string(record, "dispatch"), "pool_cancelled");
+    check_equal(json_get_string(record, "state"), "cancelled");
+    check_equal(json_get_bool(record, "cancellation_requested", 1), 0);
+    check_equal(json_get_int(record, "cancellation_status", 0), SALTS_ENOENT);
+    check_equal(atomic_load(&p.calls), 0); check_equal(atomic_load(&p.cancellation_claims), 0);
+  }
+
+  it("retains Runtime and Store through observation publication after all client owners release") {
+    atomic_store(&p.callback.open, 0); atomic_store(&p.observation.open, 0);
+    check_equal(submit_recorded(harness, "released", &execution, 0), SALTS_OK);
+    check_true(await(&p.callback.entered));
+    turbo_agent_job_destroy(job); job = NULL;
+    turbo_agent_job_execution_release(execution); execution = NULL;
+    turbo_agent_harness_release(harness); harness = NULL;
+    atomic_store(&p.callback.open, 1); check_true(await(&p.observation.entered));
+    check_equal(atomic_load(&p.frees), 0); check_equal(atomic_load(&p.observation_claims), 1);
+    atomic_store(&p.observation.open, 1); cmeta_threadpool_wait(pool);
+    check_equal(atomic_load(&p.frees), 1);
+  }
+
+  it("rejects malformed nested reference and cancellation status fields and preserves read errors") {
+    json_value_t *original = NULL, *bad = NULL;
+    const char *keys[] = {"job_id", "thread_id", "attempt_id", "attempt_record_id"};
+    check_equal(submit_recorded(harness, "nested", &execution, 0), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "nested", &original), SALTS_OK);
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+      bad = json_clone(original);
+      check_equal(turbo_runtime_json_object_set_string(json_object_get(bad, "execution_reference"), keys[i], "wrong"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_observations", "job:nested", bad), SALTS_OK);
+      check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "nested", &record), SALTS_EPROTO);
+      check_null(record); json_free(bad);
+    }
+    bad = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_int64(json_object_get(bad, "execution_reference"), "schema_version", 2), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_observations", "job:nested", bad), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "nested", &record), SALTS_ENOTSUP);
+    json_free(bad); bad = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_string(bad, "cancellation_requested", "false"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_observations", "job:nested", bad), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "nested", &record), SALTS_EPROTO);
+    json_free(bad); bad = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_clone(bad, "execution_reference", json_object_get(original, "cancellation_request")), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_observations", "job:nested", bad), SALTS_OK);
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "nested", &record), SALTS_EPROTO);
+    json_free(bad);
+    p.read_failure = "agent_job_observations";
+    check_equal(turbo_agent_job_execution_observation_get(p.runtime, "job", "nested", &record), SALTS_EIO);
+    check_null(record); json_free(original);
   }
 }

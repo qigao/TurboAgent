@@ -53,7 +53,7 @@ static int json_equal(const json_value_t *left, const json_value_t *right) {
   json_serialize_free(a); json_serialize_free(b);
   return same;
 }
-static int reference_shape(const json_value_t *r) {
+int turbo_agent_harness_job_reference_shape(const json_value_t *r) {
   const char *keys[] = {"job_id", "thread_id", "attempt_id", "attempt_record_id",
       "run_id", "run_thread_id", "execution_id", "plan_hash"};
   const size_t bounds[] = {64, 80, 64, 149, 128, 128, 128, 16};
@@ -86,7 +86,7 @@ static int validate_reference_impl(const turbo_agent_job_proof_t *proof, const j
   const char *attempt_id = text(binding, "attempt_id", 64);
   const char *stage = "canonical attempt";
   char key[160];
-  int equal, rc = reference_shape(reference);
+  int equal, rc = turbo_agent_harness_job_reference_shape(reference);
   if (out_result) *out_result = NULL;
   if (rc != SALTS_OK) return rc;
   if (!is(reference, "job_id", json_get_string(proof->snapshot, "id")) ||

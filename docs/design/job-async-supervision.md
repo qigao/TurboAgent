@@ -46,7 +46,7 @@ queued handle/reservation by dropping its run callback.
 | cancel returns OK | First explicit request identity/reason copied in memory and cooperative token signalled |
 | wait returns ETIMEDOUT | Caller wait expired; operation may still own callback/Store access |
 | RUNNING with cancellation_requested=1 | Cancellation is requested; callback exit and persistence are not acknowledged |
-| terminal state | Inspect/pool-cancel callback has settled and any accepted cancellation publication attempt returned; no further callback/Store work remains |
+| terminal state | Inspect/pool-cancel operation and accepted cancellation publication have settled; owner/finalizer cleanup can follow |
 | cancellation_status=OK | Durable cancellation request publication acknowledged |
 | cancellation_status is another error | Original publication/open error; possible lost acknowledgement requires explicit reconciliation |
 | cancellation_requested=0, cancellation_status=ENOENT | No explicit persistent request was accepted |
@@ -123,3 +123,8 @@ Persistent admission before queueing, durable terminal acknowledgements, remote
 worker heartbeats/leases and recovery of in-memory cancellation intent remain
 open. This slice does not complete M1 or #213. Real-model quality/cost/latency
 remains #278; all fixtures use offline tools and a simulated destination.
+
+The additive [recorded submission](job-terminal-observations.md) now publishes a
+historical operation-settled observation before live notification. Its independent
+publication status does not change status-v1 or legacy submission. Durable queue
+admission and stronger finalizer/remote acknowledgements remain separate work.

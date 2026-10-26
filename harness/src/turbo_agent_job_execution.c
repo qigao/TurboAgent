@@ -1,6 +1,7 @@
 #include "turbo_agent_job_execution.h"
 #include "turbo_agent_job_cancel.h"
 #include "turbo_agent_harness_internal.h"
+#include "turbo_agent_job_observation_internal.h"
 
 #include <cmeta_uuid.h>
 #include <salts/clock.h>
@@ -20,6 +21,8 @@ struct turbo_agent_job_execution_s {
   const char *capabilities[32];
   char id[SALTS_UUID_STRING_SIZE], job_id[65];
   char request_id[65], reason_ref[1025];
+  char observation_id[65];
+  int observation_status;
   uint32_t revision;
   uint64_t deadline;
   int reserved, closing;
@@ -91,6 +94,20 @@ int turbo_agent_job_execution_get_status(const turbo_agent_job_execution_t *e,
   cmeta_mutex_unlock((cmeta_mutex_t *)&e->mutex);
   return SALTS_OK;
 }
+const char *turbo_agent_job_execution_observation_id(const turbo_agent_job_execution_t *e) {
+  return e && e->observation_id[0] ? e->observation_id : NULL;
+}
+int turbo_agent_job_execution_observation_status(const turbo_agent_job_execution_t *e, int *out) {
+  int rc;
+  if (!out) return SALTS_EINVAL;
+  *out = SALTS_EBUSY;
+  if (!e) return SALTS_EINVAL;
+  cmeta_mutex_lock((cmeta_mutex_t *)&e->mutex);
+  rc = terminal(e->status.state) ? SALTS_OK : SALTS_EBUSY;
+  if (rc == SALTS_OK) *out = e->observation_status;
+  cmeta_mutex_unlock((cmeta_mutex_t *)&e->mutex);
+  return rc;
+}
 int turbo_agent_job_execution_cancel(turbo_agent_job_execution_t *e,
     const char *request, const char *reason) {
   int rc;
@@ -142,6 +159,8 @@ static void settle(void *user, int dispatch) {
   turbo_tool_status_t tool_status = TURBO_TOOL_INVALID_ARGUMENT;
   json_value_t *result = NULL, *certificate = NULL, *reference = NULL;
   turbo_agent_job_t *job = NULL;
+  turbo_agent_job_execution_status_t observed;
+  int observation_rc = SALTS_ENOENT;
   int operation, cancel_rc = SALTS_ENOENT, delivery;
   cmeta_mutex_lock(&e->mutex);
   e->status.state = TURBO_AGENT_EXECUTION_RUNNING;
@@ -174,15 +193,25 @@ static void settle(void *user, int dispatch) {
     turbo_agent_job_destroy(job);
   }
   delivery = operation == SALTS_OK ? turbo_cancel_token_check(e->token) : operation;
-  if (delivery != SALTS_OK) { json_free(reference); reference = NULL; }
-  cmeta_mutex_lock(&e->mutex);
-  e->status.operation_status = operation;
-  e->status.tool_status = tool_status;
-  e->status.diagnostic = diagnostic;
-  e->status.cancellation_status = cancel_rc;
-  e->status.state = delivery == SALTS_OK ? TURBO_AGENT_EXECUTION_COMPLETED :
+  turbo_agent_job_execution_status_init(&observed);
+  observed.operation_status = operation;
+  observed.tool_status = tool_status;
+  observed.diagnostic = diagnostic;
+  observed.cancellation_requested = e->status.cancellation_requested;
+  observed.cancellation_status = cancel_rc;
+  observed.state = delivery == SALTS_OK ? TURBO_AGENT_EXECUTION_COMPLETED :
       delivery == SALTS_ECANCELED ? TURBO_AGENT_EXECUTION_CANCELLED :
       delivery == SALTS_ETIMEDOUT ? TURBO_AGENT_EXECUTION_TIMED_OUT : TURBO_AGENT_EXECUTION_FAILED;
+  if (e->observation_id[0]) {
+    turbo_agent_runtime_t *runtime = turbo_agent_session_runtime(
+        turbo_agent_app_session(turbo_agent_harness_app(e->harness)));
+    observation_rc = turbo_agent_job_observation_write(runtime, e->job_id, e->revision,
+        e->observation_id, e->id, dispatch, &observed, e->request_id, e->reason_ref, reference);
+  }
+  if (delivery != SALTS_OK) { json_free(reference); reference = NULL; }
+  cmeta_mutex_lock(&e->mutex);
+  e->status = observed;
+  e->observation_status = observation_rc;
   e->reference = reference;
   cmeta_cond_broadcast(&e->changed);
   cmeta_mutex_unlock(&e->mutex);
@@ -191,9 +220,9 @@ static void worker(void *user) { settle(user, 1); }
 static void cancel_pending(void *user) { settle(user, 0); }
 static void finalize(void *user) { turbo_agent_job_execution_release(user); }
 
-int turbo_agent_harness_submit_job_inspect(turbo_agent_harness_t *harness,
+static int submit(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
-    uint64_t deadline, turbo_agent_job_execution_t **out) {
+    uint64_t deadline, const char *observation, turbo_agent_job_execution_t **out) {
   turbo_agent_job_execution_t *e;
   turbo_cancel_source_config_t cancel_config = {sizeof(cancel_config), TURBO_RUNTIME_CONTROL_ABI_VERSION, 0, NULL, NULL};
   cmeta_uuid_t uuid;
@@ -202,6 +231,7 @@ int turbo_agent_harness_submit_job_inspect(turbo_agent_harness_t *harness,
   if (!out) return SALTS_EINVAL;
   *out = NULL;
   if (!harness || !identifier(id, 64) || revision > TURBO_AGENT_JOB_MAX_REVISIONS ||
+      (observation && !identifier(observation, 64)) ||
       !config || config->struct_size < sizeof(*config) ||
       config->abi_version != TURBO_AGENT_COMPILER_CONFIG_ABI_VERSION || !config->deny_unlisted_capabilities ||
       config->allowed_capability_count > 32 ||
@@ -215,6 +245,8 @@ int turbo_agent_harness_submit_job_inspect(turbo_agent_harness_t *harness,
   e->harness = turbo_agent_harness_retain(harness);
   if (!e->mutex || !e->changed || !e->harness) { rc = SALTS_ENOMEM; goto fail; }
   turbo_agent_job_execution_status_init(&e->status);
+  e->observation_status = observation ? SALTS_EBUSY : SALTS_ENOENT;
+  if (observation) memcpy(e->observation_id, observation, strlen(observation) + 1);
   memcpy(e->job_id, id, strlen(id) + 1);
   e->revision = revision; e->deadline = deadline; e->config = *config;
   for (size_t i = 0; i < config->allowed_capability_count; ++i) {
@@ -244,6 +276,18 @@ fail:
   return rc;
 }
 
+int turbo_agent_harness_submit_job_inspect(turbo_agent_harness_t *harness,
+    const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
+    uint64_t deadline, turbo_agent_job_execution_t **out) {
+  return submit(harness, id, revision, config, deadline, NULL, out);
+}
+int turbo_agent_harness_submit_recorded_job_inspect(turbo_agent_harness_t *harness,
+    const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
+    uint64_t deadline, const char *observation, turbo_agent_job_execution_t **out) {
+  if (!observation) { if (out) *out = NULL; return SALTS_EINVAL; }
+  return submit(harness, id, revision, config, deadline, observation, out);
+}
+
 int turbo_agent_job_execution_take_result(turbo_agent_job_execution_t *e,
     turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out_result,
     json_value_t **out_certificate, json_value_t **out_reference) {
@@ -270,6 +314,10 @@ int turbo_agent_job_execution_take_result(turbo_agent_job_execution_t *e,
   rc = e->status.operation_status;
   if (diagnostic) *diagnostic = e->status.diagnostic;
   if (rc != SALTS_OK) goto done;
+  if (e->observation_id[0] && e->observation_status != SALTS_OK) {
+    rc = e->observation_status;
+    goto done;
+  }
   rc = turbo_cancel_token_check(e->token);
   if (rc != SALTS_OK) goto done;
   rc = turbo_agent_harness_prepare_job_proof(e->harness, e->job_id, e->revision,

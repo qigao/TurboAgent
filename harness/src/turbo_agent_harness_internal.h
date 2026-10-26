@@ -51,6 +51,8 @@ int turbo_agent_harness_load_job_acceptance(const turbo_agent_job_proof_t *proof
  * Returns a clone of the sole canonical typed result. No writes or execution. */
 int turbo_agent_harness_load_job_result(const turbo_agent_job_proof_t *proof,
     const json_value_t *reference, turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out);
+/* Shared metadata shape only; does not establish canonical/current authority. */
+int turbo_agent_harness_job_reference_shape(const json_value_t *reference);
 int turbo_agent_harness_verify_job_source(turbo_agent_harness_t *harness,
     const json_value_t *snapshot, turbo_agent_compile_diagnostic_t *diagnostic);
 int turbo_agent_harness_verify_job_evidence(const turbo_agent_job_proof_t *proof,

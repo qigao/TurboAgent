@@ -3,6 +3,7 @@
 #include <turbo_agent_job.h>
 #include <turbo_agent_job_cancel.h>
 #include <turbo_agent_job_execution.h>
+#include <turbo_agent_job_observation.h>
 #include <turbo_agent_job_acceptance.h>
 #include <turbo_agent_job_delivery.h>
 #include <turbo_agent_job_verifier.h>
@@ -104,6 +105,10 @@ spec("installed C++17 SDK consumer") {
     turbo_agent_job_execution_t *job_execution = nullptr;
     check_equal(turbo_agent_harness_submit_job_inspect(harness, "../bad", 2, &compiler, 0, &job_execution), SALTS_EINVAL);
     check_null(job_execution);
+    check_equal(turbo_agent_harness_submit_recorded_job_inspect(harness, "../bad", 2,
+        &compiler, 0, "observation", &job_execution), SALTS_EINVAL);
+    int observation_status = 0;
+    check_equal(turbo_agent_job_execution_observation_status(nullptr, &observation_status), SALTS_EINVAL);
     turbo_tool_status_t tool_status = TURBO_TOOL_OK;
     json_value_t *result = nullptr, *certificate = nullptr, *reference = nullptr;
     check_equal(turbo_agent_harness_execute_job_inspect_json(harness, "../bad", 2,

@@ -53,6 +53,19 @@ if(NOT BUILD_TESTS)
   return()
 endif()
 
+foreach(outcome IN ITEMS completed cancelled pool)
+  foreach(boundary IN ITEMS before after lost_ack returned)
+    add_test(NAME test_job_observation_${outcome}_${boundary}
+      COMMAND "${CMAKE_COMMAND}"
+        "-DWORKER=$<TARGET_FILE:compiled_inspect_process_fixture>"
+        "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/cases"
+        "-DCUT=observation_${outcome}_${boundary}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_job_observation_crash.cmake")
+    set_tests_properties(test_job_observation_${outcome}_${boundary} PROPERTIES
+      TIMEOUT 90 LABELS "harness;job;async;observation;recovery;process")
+  endforeach()
+endforeach()
+
 add_executable(job_process_fixture job_process_fixture.c)
 target_link_libraries(job_process_fixture PRIVATE TurboAgent::Harness)
 set_target_properties(job_process_fixture PROPERTIES

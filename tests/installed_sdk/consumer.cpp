@@ -4,6 +4,7 @@
 #include <turbo_agent_job_acceptance.h>
 #include <turbo_agent_job_delivery.h>
 #include <turbo_agent_job_verifier.h>
+#include <turbo_agent_job_file_verifier.h>
 #include <turbo_agent_policy.h>
 #include <turbo_agent_state.h>
 #include <turbo_agent_harness.h>
@@ -15,6 +16,7 @@
 #include <turbo_graph.h>
 #include <turbo_state_graph.h>
 #include <tinytest.hpp>
+#include <string>
 
 static int reject_model_transport(const char *, char **response, void *) {
   if (response) *response = nullptr;
@@ -80,6 +82,14 @@ spec("installed C++17 SDK consumer") {
     turbo_agent_job_verifier_init(&verifier);
     check_equal(verifier.abi_version, TURBO_AGENT_JOB_VERIFIER_ABI_VERSION);
     check_equal(turbo_agent_harness_create_verified_with_store(&harness_config, &verifier, &harness), SALTS_EINVAL);
+    turbo_agent_job_file_verifier_config_t files_config{};
+    turbo_agent_job_file_verifier_config_init(&files_config);
+    turbo_agent_job_file_verifier_t *files = nullptr;
+    check_equal(turbo_agent_job_file_verifier_create(&files_config, &files), SALTS_EINVAL);
+    check_null(files);
+    char file_digest[65]{};
+    check_equal(turbo_agent_job_file_verifier_digest_bytes(nullptr, 0, file_digest), SALTS_OK);
+    check_equal(std::string(file_digest), std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
     config.runtime_store = turbo_agent_runtime_store_memory_create();
     check_equal(turbo_agent_harness_create_with_store(&harness_config, &harness), SALTS_OK);
     check_not_null(harness);

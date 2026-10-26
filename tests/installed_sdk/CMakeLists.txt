@@ -79,3 +79,8 @@ add_executable(installed_job_harness_c11 ../../harness/tests/test_turbo_agent_ha
 target_link_libraries(installed_job_harness_c11 PRIVATE TurboAgent::Harness Salts::TinyTest)
 add_test(NAME installed_job_harness_c11 COMMAND installed_job_harness_c11)
 set_tests_properties(installed_job_harness_c11 PROPERTIES TIMEOUT 60)
+
+add_executable(installed_job_files_c11 ../../harness/tests/test_turbo_agent_job_file_verifier.c)
+target_link_libraries(installed_job_files_c11 PRIVATE TurboAgent::Harness Salts::TinyTest)
+add_test(NAME installed_job_files_c11 COMMAND installed_job_files_c11)
+set_tests_properties(installed_job_files_c11 PROPERTIES TIMEOUT 60)

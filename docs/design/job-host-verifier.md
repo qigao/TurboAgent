@@ -29,8 +29,9 @@ produce effects. No dynamic DSO lease or hard timeout is added.
 This is a Host integration seam, not an evidence provider, network client or
 automatic assessment system. Library code cannot establish an independent truth
 about an arbitrary evidence identifier or prevent a trusted Host from supplying
-an incorrect verifier. Production source/evidence adapters still need their own
-qualification. Direct compiled-attempt and ordinary Session APIs retain their
+an incorrect verifier. [The rooted local file adapter](job-file-verifier.md) now
+checks pinned manifests and actual source/evidence bytes; additional adapters
+need their own qualification. Direct compiled-attempt and ordinary Session APIs retain their
 existing contracts; verification here applies only to bound Job APIs, and is not
 a process sandbox or universal admission hook.
 
@@ -100,6 +101,6 @@ survive; a post-send crash is reconciled against the test destination without a
 second send request. This qualifies the callback seam and local recovery ordering,
 not a production external provider's quality or remote consistency guarantees.
 
-Production adapters, cancellation supervision, amendment/replanning and broader
+Additional production adapters, cancellation supervision, amendment/replanning and broader
 Job scheduling remain open. M1 is not complete. Real-model quality/cost/latency
 stays in issue #278 and no paid model or real external messaging is used here.

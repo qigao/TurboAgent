@@ -3,6 +3,8 @@
 #include "turbo_agent_job_acceptance.h"
 #include "turbo_agent_job_delivery.h"
 #include "turbo_agent_job_verifier.h"
+#include "turbo_agent_job_file_verifier.h"
+#include <cmeta_fs.h>
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_runtime_json.h"
@@ -64,7 +66,9 @@ typedef struct fixture_s {
   turbo_agent_harness_t *harness;
   cmeta_threadpool_t *pool;
   int inject, callbacks, transports, attempt_reads, attempt_writes, reference_writes;
-  int job_mode, acceptance_mode, delivery_mode, verified_mode;
+  int job_mode, acceptance_mode, delivery_mode, verified_mode, file_mode;
+  turbo_agent_job_file_verifier_t *file_verifier;
+  char workspace_path[SALTS_FS_MAX_PATH], verification_path[SALTS_FS_MAX_PATH];
   json_value_t *execution_reference;
 } fixture_t;
 
@@ -187,6 +191,14 @@ static int inspect_callback(const json_value_t *arguments, json_value_t **out, v
   int valid;
   *out = NULL;
   ++f->callbacks;
+  if (f->file_mode) {
+    char path[SALTS_FS_MAX_PATH]; cmeta_fs_buf_t bytes = {0};
+    REQUIRE(!cmeta_fs_path_join(path, sizeof(path), f->workspace_path, "source.bin"));
+    REQUIRE(!cmeta_fs_read_file(path, &bytes));
+    valid = bytes.len == 3 && !memcmp(bytes.base, "a\0b", 3);
+    cmeta_fs_buf_free(&bytes);
+    REQUIRE(valid);
+  }
   if (!text_is(arguments, "value", "hello") ||
       turbo_agent_runtime_store_list_json(f->runtime, ATTEMPTS, NULL, NULL, &records)) return -1;
   valid = json_array_size(records) == 1 && text_is(json_array_get(records, 0), "phase", "started");
@@ -281,7 +293,19 @@ static int fixture_open(fixture_t *f, const char *directory, int create) {
   session.agent_config.tool_registry = f->registry;
   app.session_config = &session;
   turbo_agent_harness_config_init(&harness); harness.app_config = &app; harness.executor = f->pool;
-  if (f->verified_mode) {
+  if (f->file_mode) {
+    turbo_agent_job_file_verifier_config_t config;
+    turbo_agent_job_verifier_t verifier;
+    REQUIRE(!cmeta_fs_path_join(f->workspace_path, sizeof(f->workspace_path), directory, "workspace"));
+    REQUIRE(!cmeta_fs_path_join(f->verification_path, sizeof(f->verification_path), directory, "verification"));
+    if (create) { REQUIRE(!cmeta_fs_mkdir(f->workspace_path, 0700)); REQUIRE(!cmeta_fs_mkdir(f->verification_path, 0700)); }
+    turbo_agent_job_file_verifier_config_init(&config);
+    config.workspace_root = f->workspace_path; config.verification_root = f->verification_path;
+    rc = turbo_agent_job_file_verifier_create(&config, &f->file_verifier);
+    if (rc == SALTS_OK) rc = turbo_agent_job_file_verifier_callbacks(f->file_verifier, &verifier);
+    if (rc == SALTS_OK) rc = turbo_agent_harness_create_verified_with_store(&harness, &verifier, &f->harness);
+    if (rc != SALTS_OK) goto done;
+  } else if (f->verified_mode) {
     turbo_agent_job_verifier_t verifier;
     turbo_agent_job_verifier_init(&verifier);
     verifier.source = host_source; verifier.evidence = host_evidence; verifier.user_data = f;
@@ -300,6 +324,7 @@ done:
 static void fixture_close(fixture_t *f) {
   json_free(f->execution_reference);
   if (f->harness) turbo_agent_harness_release(f->harness);
+  turbo_agent_job_file_verifier_destroy(f->file_verifier);
   store_free(f); /* Cleared by Session destruction if it consumed the store. */
   turbo_tool_registry_destroy(f->registry);
   if (f->pool) cmeta_threadpool_destroy(f->pool);
@@ -411,6 +436,74 @@ static int evidence(fixture_t *f, const char *phase, int calls, int deliveries, 
   return 0;
 }
 
+static int write_host_file(const char *directory, const char *name, const void *bytes, size_t size) {
+  char path[SALTS_FS_MAX_PATH];
+  cmeta_fs_buf_t buffer = cmeta_fs_buf_init((char *)bytes, size);
+  REQUIRE(!cmeta_fs_path_join(path, sizeof(path), directory, name));
+  return cmeta_fs_write_file(path, &buffer);
+}
+static json_value_t *host_file_entry(const char *path, const void *bytes, size_t size) {
+  json_value_t *r = json_create_object(); char hash[65];
+  if (!r || turbo_agent_job_file_verifier_digest_bytes(bytes, size, hash) ||
+      turbo_runtime_json_object_set_string(r, "path", path) ||
+      turbo_runtime_json_object_set_int64(r, "byte_count", (int64_t)size) ||
+      turbo_runtime_json_object_set_string(r, "sha256", hash)) { json_free(r); return NULL; }
+  return r;
+}
+static int save_host_manifest(fixture_t *f, const char *name, const json_value_t *record, char *hash) {
+  size_t size;
+  char *bytes = json_serialize(record, &size);
+  int rc;
+  REQUIRE(bytes);
+  rc = write_host_file(f->verification_path, name, bytes, size);
+  if (!rc && hash) rc = turbo_agent_job_file_verifier_digest_bytes(bytes, size, hash);
+  json_serialize_free(bytes);
+  return rc;
+}
+static int file_sources_init(fixture_t *f, char revision[72]) {
+  char hash[65];
+  json_value_t *manifest = json_create_object(), *files = json_create_array();
+  REQUIRE(manifest && files);
+  REQUIRE(!write_host_file(f->workspace_path, "source.bin", "a\0b", 3));
+  REQUIRE(!write_host_file(f->verification_path, "check.txt", "pass\n", 5));
+  REQUIRE(!turbo_agent_job_file_verifier_digest_bytes(source, strlen(source), hash));
+  REQUIRE(!turbo_runtime_json_object_set_int64(manifest, "schema_version", 1) &&
+      !turbo_runtime_json_object_set_string(manifest, "kind", "job_file_sources") &&
+      !turbo_runtime_json_object_set_string(manifest, "job_id", "bound-job") &&
+      !turbo_runtime_json_object_set_string(manifest, "source_json_sha256", hash));
+  REQUIRE(!turbo_runtime_json_array_append(files, host_file_entry("source.bin", "a\0b", 3)));
+  REQUIRE(!turbo_runtime_json_object_set(manifest, "files", files));
+  REQUIRE(!save_host_manifest(f, "bound-job.sources.json", manifest, hash));
+  (void)snprintf(revision, 72, "sha256-%s", hash);
+  json_free(manifest);
+  return SALTS_OK;
+}
+static int publish_file_evidence(fixture_t *f, const json_value_t *result) {
+  turbo_agent_job_t *job = NULL;
+  json_value_t *snapshot = NULL, *manifest = json_create_object(), *files = json_create_array();
+  char criteria_hash[65], result_hash[65];
+  REQUIRE(manifest && files && !turbo_agent_job_open(f->runtime, "bound-job", &job));
+  REQUIRE(!turbo_agent_job_get_snapshot(job, &snapshot)); turbo_agent_job_destroy(job);
+  REQUIRE(!turbo_agent_job_file_verifier_digest_json(json_object_get(snapshot, "acceptance_criteria"), criteria_hash));
+  REQUIRE(!turbo_agent_job_file_verifier_digest_json(result, result_hash));
+  REQUIRE(!turbo_runtime_json_object_set_int64(manifest, "schema_version", 1) &&
+      !turbo_runtime_json_object_set_string(manifest, "kind", "job_file_evidence") &&
+      !turbo_runtime_json_object_set_string(manifest, "job_id", "bound-job") &&
+      !turbo_runtime_json_object_set_int64(manifest, "job_revision", 2) &&
+      !turbo_runtime_json_object_set_int64(manifest, "proposal_version", 1) &&
+      !turbo_runtime_json_object_set_string(manifest, "source_revision", json_get_string(json_object_get(snapshot, "proposal"), "source_revision")) &&
+      !turbo_runtime_json_object_set_string(manifest, "decision", "accepted") &&
+      !turbo_runtime_json_object_set_string(manifest, "evidence_ref", "host-evidence-v1") &&
+      !turbo_runtime_json_object_set_string(manifest, "criteria_sha256", criteria_hash) &&
+      !turbo_runtime_json_object_set_string(manifest, "result_sha256", result_hash) &&
+      !turbo_runtime_json_object_set_clone(manifest, "execution_reference", f->execution_reference));
+  REQUIRE(!turbo_runtime_json_array_append(files, host_file_entry("check.txt", "pass\n", 5)));
+  REQUIRE(!turbo_runtime_json_object_set(manifest, "files", files));
+  REQUIRE(!save_host_manifest(f, "host-evidence-v1.evidence.json", manifest, NULL));
+  json_free(manifest); json_free(snapshot);
+  return SALTS_OK;
+}
+
 static int exercise(fixture_t *f, const char *mode) {
   turbo_agent_compile_diagnostic_t diagnostic = {0};
   turbo_tool_status_t status = TURBO_TOOL_ERROR;
@@ -419,8 +512,10 @@ static int exercise(fixture_t *f, const char *mode) {
   if (!strcmp(mode, "init")) {
     if (f->job_mode) {
       turbo_agent_job_t *job = NULL;
+      char revision[72] = "fixture-source-v1";
+      if (f->file_mode) REQUIRE(!file_sources_init(f, revision));
       REQUIRE(!turbo_agent_job_create(f->runtime, "bound-job", "inspect repository", "Host verifies", &job));
-      REQUIRE(!turbo_agent_job_propose(job, 0, source, strlen(source), "fixture-source-v1"));
+      REQUIRE(!turbo_agent_job_propose(job, 0, source, strlen(source), revision));
       REQUIRE(!turbo_agent_job_bind_compiled_inspect(job, 1, THREAD_ID, ATTEMPT_ID));
       turbo_agent_job_destroy(job);
     }
@@ -629,6 +724,31 @@ static int verification_failure_stage(fixture_t *f, const char *mode) {
   json_free(original);
   return SALTS_OK;
 }
+static int file_failure_stage(fixture_t *f, const char *mode) {
+  int source_changed = !strcmp(mode, "verification_source_changed");
+  int missing = !strcmp(mode, "verification_evidence_missing");
+  const char *directory = source_changed ? f->workspace_path : f->verification_path;
+  const char *name = source_changed ? "source.bin" : missing ? "host-evidence-v1.evidence.json" : "check.txt";
+  cmeta_fs_buf_t original = {0};
+  char path[SALTS_FS_MAX_PATH];
+  json_value_t *record = NULL, *result = NULL, *certificate = NULL;
+  turbo_agent_compile_diagnostic_t diagnostic;
+  turbo_tool_status_t status;
+  int expected = missing ? SALTS_ENOENT : SALTS_EPROTO;
+  REQUIRE(!cmeta_fs_path_join(path, sizeof(path), directory, name));
+  REQUIRE(!cmeta_fs_read_file(path, &original));
+  if (missing) REQUIRE(!cmeta_fs_unlink(path));
+  else REQUIRE(!write_host_file(directory, name, source_changed ? "abc" : "fail\n", source_changed ? 3 : 5));
+  for (int op = 0; op < 3; ++op) REQUIRE(delivery_operation(f, op, &record) == expected && !record);
+  REQUIRE(acceptance_operation(f, 0, TURBO_AGENT_JOB_ACCEPTED, &record) == expected && !record);
+  if (source_changed) {
+    REQUIRE(execute(f, source, &diagnostic, &status, &result, &certificate) == expected);
+    REQUIRE(!result && !certificate && !f->execution_reference);
+  }
+  /* Only test Host restores the independently owned file after observing refusal. */
+  REQUIRE(!cmeta_fs_write_file(path, &original)); cmeta_fs_buf_free(&original);
+  return SALTS_OK;
+}
 static int exercise_delivery(fixture_t *f, const char *mode) {
   turbo_agent_compile_diagnostic_t diagnostic;
   turbo_tool_status_t status;
@@ -647,6 +767,7 @@ static int exercise_delivery(fixture_t *f, const char *mode) {
   if (!strcmp(mode, "crash")) {
     REQUIRE(!execute(f, source, &diagnostic, &status, &result, &certificate));
     REQUIRE(result_valid(f, result) && certificate && f->execution_reference);
+    if (f->file_mode) REQUIRE(!publish_file_evidence(f, result));
     json_free(result); json_free(certificate);
     if (f->verified_mode) REQUIRE(!publish_host_evidence(f));
     REQUIRE(!acceptance_operation(f, 1, TURBO_AGENT_JOB_ACCEPTED, &record));
@@ -668,8 +789,8 @@ static int exercise_delivery(fixture_t *f, const char *mode) {
     REQUIRE(!strcmp(f->cut->name, "delivery_receipt_returned") && rc == SALTS_OK && record);
     _Exit(FIXTURE_CRASH);
   }
-  if (f->verified_mode && !strncmp(mode, "verification_", 13)) {
-    REQUIRE(!verification_failure_stage(f, mode));
+  if ((f->verified_mode || f->file_mode) && !strncmp(mode, "verification_", 13)) {
+    REQUIRE(!(f->file_mode ? file_failure_stage(f, mode) : verification_failure_stage(f, mode)));
   } else if (!strcmp(mode, "denied") || !strcmp(mode, "stale")) {
     if (!strcmp(mode, "stale")) REQUIRE(!grant(f, 1));
     for (int op = 0; op < 3; ++op) {
@@ -724,11 +845,12 @@ int main(int argc, char **argv) {
   int rc;
   if (argc != 4 && argc != 5) return failure("mode/cut/private-directory/[job] required", __LINE__);
   if (argc == 5) {
-    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery") && strcmp(argv[4], "verified"))
+    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery") && strcmp(argv[4], "verified") && strcmp(argv[4], "files"))
       return failure("unknown execution mode", __LINE__);
     fixture.job_mode = 1;
     fixture.verified_mode = !strcmp(argv[4], "verified");
-    fixture.delivery_mode = !strcmp(argv[4], "delivery") || fixture.verified_mode;
+    fixture.file_mode = !strcmp(argv[4], "files");
+    fixture.delivery_mode = !strcmp(argv[4], "delivery") || fixture.verified_mode || fixture.file_mode;
     fixture.acceptance_mode = !strcmp(argv[4], "acceptance") || fixture.delivery_mode;
   }
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)

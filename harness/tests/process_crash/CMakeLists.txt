@@ -16,6 +16,19 @@ foreach(cut IN ITEMS before_claim after_claim before_run_started after_run_start
     TIMEOUT 90 LABELS "harness;recovery;process")
 endforeach()
 
+foreach(cut IN ITEMS delivery_intent_before delivery_intent_after delivery_intent_lost_ack
+    delivery_intent_returned delivery_after_send delivery_receipt_before delivery_receipt_after
+    delivery_receipt_lost_ack delivery_receipt_returned)
+  add_test(NAME test_job_${cut}
+    COMMAND "${CMAKE_COMMAND}"
+      "-DWORKER=$<TARGET_FILE:compiled_inspect_process_fixture>"
+      "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/cases"
+      "-DCUT=${cut}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_job_delivery_crash.cmake")
+  set_tests_properties(test_job_${cut} PROPERTIES
+    TIMEOUT 90 LABELS "harness;job;delivery;recovery;process")
+endforeach()
+
 add_executable(job_process_fixture job_process_fixture.c)
 target_link_libraries(job_process_fixture PRIVATE TurboAgent::Harness)
 set_target_properties(job_process_fixture PROPERTIES

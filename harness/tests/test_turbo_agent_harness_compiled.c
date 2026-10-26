@@ -3,6 +3,7 @@
 #include "turbo_agent_harness.h"
 #include "turbo_agent_job.h"
 #include "turbo_agent_job_acceptance.h"
+#include "turbo_agent_job_delivery.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_inbox.h"
@@ -138,6 +139,10 @@ typedef struct compiled_inspect_store_fault_s {
   int acceptance_status, acceptance_after_commit, acceptance_claims, acceptance_puts;
   int acceptance_unacknowledged, reads_after_acceptance_error;
   const char *proof_read_failure;
+  const char *delivery_collection;
+  int delivery_status, delivery_after_commit, delivery_claims, delivery_puts;
+  int delivery_unacknowledged, reads_after_delivery_error;
+  int delivery_compete;
 } compiled_inspect_store_fault_t;
 
 static int compiled_inspect_fault_store_put(void *user_data, const char *collection,
@@ -147,6 +152,8 @@ static int compiled_inspect_fault_store_put(void *user_data, const char *collect
   int length;
   if (!fault || !record_json) return -1;
   if (!strcmp(collection, "agent_job_acceptance")) ++fault->acceptance_puts;
+  if (!strcmp(collection, "agent_job_delivery_intents") || !strcmp(collection, "agent_job_delivery_receipts"))
+    ++fault->delivery_puts;
   length = snprintf(phase_token, sizeof(phase_token), "\"phase\":\"%s\"",
                     fault->failed_phase ? fault->failed_phase : "");
   if (fault->failed_phase && strcmp(fault->failed_phase, "inbox_applied") == 0 &&
@@ -162,6 +169,25 @@ static int compiled_inspect_fault_store_create_if_absent(
     const char *record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
   if (!fault || !fault->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, "agent_job_delivery_intents") || !strcmp(collection, "agent_job_delivery_receipts")) {
+    int rc, inject = fault->delivery_collection && !strcmp(collection, fault->delivery_collection);
+    ++fault->delivery_claims;
+    if (fault->delivery_compete) {
+      fault->delivery_compete = 0;
+      rc = fault->inner.create_if_absent(fault->inner.user_data, collection, id, record_json);
+      if (rc != SALTS_OK) return rc;
+    }
+    if (inject && fault->delivery_status && !fault->delivery_after_commit) {
+      fault->delivery_unacknowledged = 1;
+      return fault->delivery_status;
+    }
+    rc = fault->inner.create_if_absent(fault->inner.user_data, collection, id, record_json);
+    if (!rc && inject && fault->delivery_status) {
+      fault->delivery_unacknowledged = 1;
+      return fault->delivery_status;
+    }
+    return rc;
+  }
   if (!strcmp(collection, "agent_job_acceptance")) {
     int rc;
     ++fault->acceptance_claims;
@@ -184,6 +210,7 @@ static int compiled_inspect_fault_store_get(void *user_data, const char *collect
                                             const char *id, char **out_record_json) {
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
   if (fault && fault->acceptance_unacknowledged) ++fault->reads_after_acceptance_error;
+  if (fault && fault->delivery_unacknowledged) ++fault->reads_after_delivery_error;
   if (fault && fault->proof_read_failure && !strcmp(collection, fault->proof_read_failure)) {
     *out_record_json = NULL;
     return SALTS_EIO;
@@ -1375,6 +1402,28 @@ static int read_acceptance(turbo_agent_harness_t *harness,
   return turbo_agent_harness_get_job_acceptance_json(harness, "job-bound", 2, &config, diagnostic, out);
 }
 
+static int delivery_operation(turbo_agent_harness_t *harness, int op, const char *delivery,
+    turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out) {
+  const char *allowed[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+  if (op == 0) return turbo_agent_harness_prepare_job_delivery_json(harness, "job-bound", 2,
+      &config, delivery, "host-destination-v1", "host-payload-v1", diagnostic, out);
+  if (op == 2) return turbo_agent_harness_record_job_delivery_receipt_json(harness, "job-bound", 2,
+      &config, delivery, "host-receipt-v1", diagnostic, out);
+  return turbo_agent_harness_get_job_delivery_json(harness, "job-bound", 2, &config, diagnostic, out);
+}
+static int accept_job_for_delivery(turbo_agent_harness_t *harness,
+    turbo_agent_job_acceptance_decision_t decision, turbo_agent_compile_diagnostic_t *diagnostic) {
+  json_value_t *result = NULL, *certificate = NULL, *reference = NULL, *record = NULL;
+  turbo_tool_status_t status;
+  int rc = run_job_inspect(harness, "job-bound", 2, diagnostic, &status, &result, &certificate, &reference);
+  if (rc == SALTS_OK) rc = record_acceptance(harness, reference, decision, diagnostic, &record);
+  json_free(result); json_free(certificate); json_free(reference); json_free(record);
+  return rc;
+}
+
 spec("Harness persisted Job dispatch") {
   static cmeta_threadpool_t *pool;
   static turbo_tool_registry_t *registry;
@@ -1752,6 +1801,226 @@ spec("Harness persisted Job dispatch") {
     json_free(record); record = NULL;
     check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_ENOTSUP);
     check_null(record);
+    check_equal(probe.calls, 1);
+  }
+
+  it("persists one delivery intent and an explicit matching Host receipt without execution") {
+    const json_value_t *intent;
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_ENOENT);
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_OK);
+    check_equal(json_object_size(record), (size_t)9);
+    check_equal(json_get_string(record, "idempotency_key"), "job-bound:delivery-1");
+    check_null(json_object_get(record, "result"));
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 0, "different", &diagnostic, &record), SALTS_EALREADY);
+    check_null(record);
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "status"), "outcome_unknown");
+    check_null(json_object_get(record, "receipt"));
+    intent = json_object_get(record, "intent");
+    check_equal(json_get_string(intent, "destination_ref"), "host-destination-v1");
+    check_equal(json_get_string(intent, "payload_ref"), "host-payload-v1");
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 2, "different", &diagnostic, &record), SALTS_EPROTO);
+    check_equal(delivery_operation(harness, 2, "delivery-1", &diagnostic, &record), SALTS_OK);
+    check_equal(json_object_size(record), (size_t)7);
+    check_equal(json_get_string(record, "receipt_ref"), "host-receipt-v1");
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 2, "delivery-1", &diagnostic, &record), SALTS_EALREADY);
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "status"), "delivered");
+    check_not_null(json_object_get(record, "receipt"));
+    check_equal(fault->delivery_claims, 2);
+    check_equal(fault->delivery_puts, 0);
+    check_equal(probe.calls, 1);
+  }
+
+  it("requires explicit acceptance before any delivery publication") {
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_ENOENT);
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_REJECTED, &diagnostic), SALTS_OK);
+    for (int op = 0; op < 3; ++op) {
+      check_equal(delivery_operation(harness, op, "delivery-1", &diagnostic, &record), SALTS_EPERM);
+      check_null(record);
+    }
+    check_equal(fault->delivery_claims, 0);
+    check_equal(probe.calls, 1);
+  }
+
+  it("preserves lost intent and receipt acknowledgements without retry or readback") {
+    const char *collections[] = {"agent_job_delivery_intents", "agent_job_delivery_receipts"};
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    for (int i = 0; i < 2; ++i) {
+      fault->delivery_collection = collections[i];
+      fault->delivery_status = SALTS_EIO; fault->delivery_after_commit = 1;
+      check_equal(delivery_operation(harness, i ? 2 : 0, "delivery-1", &diagnostic, &record), SALTS_EIO);
+      check_null(record);
+      check_equal(fault->reads_after_delivery_error, 0);
+      check_equal(fault->delivery_claims, i + 1);
+      fault->delivery_unacknowledged = 0; fault->delivery_status = 0;
+      check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_OK);
+      check_equal(json_get_string(record, "status"), i ? "delivered" : "outcome_unknown");
+      json_free(record); record = NULL;
+      check_equal(delivery_operation(harness, i ? 2 : 0, "delivery-1", &diagnostic, &record), SALTS_EALREADY);
+    }
+    check_equal(fault->delivery_puts, 0);
+    check_equal(probe.calls, 1);
+  }
+
+  it("preserves unsupported, storage and atomic-claim errors with no put fallback") {
+    const char *collections[] = {"agent_job_delivery_intents", "agent_job_delivery_receipts"};
+    const int statuses[] = {SALTS_ENOTSUP, SALTS_ENOSPC, SALTS_EIO};
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    for (int i = 0; i < 2; ++i) {
+      fault->delivery_collection = collections[i];
+      for (size_t j = 0; j < sizeof(statuses) / sizeof(statuses[0]); ++j) {
+        fault->delivery_status = statuses[j];
+        check_equal(delivery_operation(harness, i ? 2 : 0, "delivery-1", &diagnostic, &record), statuses[j]);
+        check_null(record);
+        check_equal(fault->reads_after_delivery_error, 0);
+        fault->delivery_unacknowledged = 0;
+      }
+      fault->delivery_status = 0;
+      fault->delivery_compete = 1; /* Another publisher wins after our read. */
+      check_equal(delivery_operation(harness, i ? 2 : 0, "delivery-1", &diagnostic, &record), SALTS_EALREADY);
+      check_null(record);
+    }
+    check_equal(fault->delivery_claims, 8);
+    check_equal(fault->delivery_puts, 0);
+    check_equal(probe.calls, 1);
+  }
+
+  it("revalidates canonical acceptance and preserves every delivery read failure") {
+    const char *collections[] = {"agent_job_acceptance", "compiled_inspect_attempts",
+        "agent_compiled_execution_journal", "runs", "agent_job_delivery_intents", "agent_job_delivery_receipts"};
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    for (size_t i = 0; i < sizeof(collections) / sizeof(collections[0]); ++i) {
+      fault->proof_read_failure = collections[i];
+      for (int op = 0; op < 3; ++op) {
+        check_equal(delivery_operation(harness, op, "delivery-1", &diagnostic, &record), SALTS_EIO);
+        check_null(record);
+      }
+    }
+    fault->proof_read_failure = NULL;
+    check_equal(fault->delivery_claims, 0);
+    check_equal(probe.calls, 1);
+  }
+
+  it("does not publish or expose delivery after same-grant policy replacement") {
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    for (int op = 0; op < 3; ++op) {
+      check_equal(delivery_operation(harness, op, "delivery-1", &diagnostic, &record), SALTS_EPROTO);
+      check_null(record);
+    }
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime,
+        "agent_job_delivery_intents", "job-bound", &record), SALTS_OK);
+    check_equal(json_get_string(record, "delivery_id"), "delivery-1");
+    check_equal(fault->delivery_claims, 1);
+    check_equal(probe.calls, 1);
+  }
+
+  it("rechecks typed canonical evidence even after acceptance and intent committed") {
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime, "compiled_inspect_attempts",
+        json_get_string(json_object_get(record, "execution_reference"), "attempt_record_id"), &snapshot), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(turbo_runtime_json_object_set_string(snapshot, "result", "invalid typed result"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "compiled_inspect_attempts",
+        json_get_string(snapshot, "id"), snapshot), SALTS_OK);
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_EPROTO);
+    check_null(record);
+    check_equal(turbo_runtime_json_object_set_string(snapshot, "phase", "started"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "compiled_inspect_attempts",
+        json_get_string(snapshot, "id"), snapshot), SALTS_OK);
+    check_equal(delivery_operation(harness, 2, "delivery-1", &diagnostic, &record), SALTS_EBUSY);
+    check_null(record);
+    check_equal(fault->delivery_claims, 1);
+    check_equal(probe.calls, 1);
+  }
+
+  it("refuses orphan receipts without repairing them") {
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    record = json_create_object();
+    check_equal(turbo_runtime_json_object_set_int64(record, "schema_version", 1), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "agent_job_delivery_receipts", "job-bound", record), SALTS_OK);
+    json_free(record); record = NULL;
+    for (int op = 0; op < 3; ++op)
+      check_equal(delivery_operation(harness, op, "delivery-1", &diagnostic, &record), SALTS_EPROTO);
+    check_equal(fault->delivery_claims, 0);
+    check_equal(probe.calls, 1);
+  }
+
+  it("rejects each intent identity, unknown schema and extra result payload") {
+    const char *fields[] = {"kind", "job_id", "job_revision", "proposal_version", "delivery_id",
+        "idempotency_key", "destination_ref", "payload_ref", "result"};
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_OK);
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+      snapshot = json_clone(record);
+      check_equal(turbo_runtime_json_object_set_string(snapshot, fields[i], i == 4 ? "../bad" : ""), 0);
+      check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "agent_job_delivery_intents", "job-bound", snapshot), SALTS_OK);
+      json_free(snapshot); snapshot = NULL;
+      check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &snapshot), SALTS_EPROTO);
+      check_null(snapshot);
+    }
+    check_equal(turbo_runtime_json_object_set_int64(record, "schema_version", 2), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "agent_job_delivery_intents", "job-bound", record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_ENOTSUP);
+    check_equal(probe.calls, 1);
+  }
+
+  it("rejects each receipt identity and unknown receipt schema") {
+    const char *fields[] = {"kind", "job_id", "job_revision", "delivery_id", "idempotency_key", "receipt_ref", "result"};
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    check_equal(delivery_operation(harness, 2, "delivery-1", &diagnostic, &record), SALTS_ENOENT);
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 2, "delivery-1", &diagnostic, &record), SALTS_OK);
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+      snapshot = json_clone(record);
+      check_equal(turbo_runtime_json_object_set_string(snapshot, fields[i], ""), 0);
+      check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "agent_job_delivery_receipts", "job-bound", snapshot), SALTS_OK);
+      json_free(snapshot); snapshot = NULL;
+      check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &snapshot), SALTS_EPROTO);
+      check_null(snapshot);
+    }
+    check_equal(turbo_runtime_json_object_set_int64(record, "schema_version", 2), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "agent_job_delivery_receipts", "job-bound", record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_ENOTSUP);
+    check_equal(probe.calls, 1);
+  }
+
+  it("clears delivery outputs for invalid arguments and rejects nested admission") {
+    char oversized[1026];
+    const char *allowed[] = {"runtime_tools"};
+    turbo_agent_compiler_config_t config;
+    memset(oversized, 'x', sizeof(oversized) - 1); oversized[sizeof(oversized) - 1] = '\0';
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+    check_equal(delivery_operation(harness, 0, "../bad", &diagnostic, &record), SALTS_EINVAL);
+    check_equal(delivery_operation(harness, 2, NULL, &diagnostic, &record), SALTS_EINVAL);
+    check_equal(turbo_agent_harness_prepare_job_delivery_json(harness, "job-bound", 2, &config,
+        "delivery-1", oversized, "payload", &diagnostic, &record), SALTS_EINVAL);
+    check_equal(turbo_agent_harness_prepare_job_delivery_json(harness, "job-bound", 2, &config,
+        "delivery-1", "destination", "", &diagnostic, &record), SALTS_EINVAL);
+    check_equal(turbo_agent_harness_record_job_delivery_receipt_json(harness, "job-bound", 2, &config,
+        "delivery-1", oversized, &diagnostic, &record), SALTS_EINVAL);
+    record = (json_value_t *)&status;
+    check_equal(turbo_agent_harness_get_job_delivery_json(harness, "../bad", 2, &config,
+        &diagnostic, &record), SALTS_EINVAL);
+    check_null(record);
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    fault->nested_harness = harness;
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_OK);
+    check_equal(fault->nested_status, SALTS_EBUSY);
     check_equal(probe.calls, 1);
   }
 

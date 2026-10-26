@@ -9,7 +9,8 @@ exports now belong to RuntimeData rather than Runtime. No record schema changes.
 ## Construction
 
 Production hosts can use `turbo_agent_session_create_with_store` or
-`turbo_agent_app_create_with_store` to reject incomplete backend configuration.
+`turbo_agent_app_create_with_store`, or
+`turbo_agent_harness_create_with_store` to reject incomplete backend configuration.
 These APIs validate all three required callbacks before consuming resources,
 clear their output on rejection, and never select a substitute backend.
 An explicitly supplied memory backend is valid; callback completeness is not a
@@ -19,7 +20,9 @@ The existing pointer-returning constructors preserve their documented memory
 fallback for source compatibility. Once a complete backend is selected, Session
 consumes RuntimeStore even if subsequent construction fails. MemoryStore only
 transfers on success. App allocation failure before Session construction leaves
-both stores with the caller. Agent construction rejection maps to SALTS_EIO;
+both stores with the caller. Harness allocates its stable thread scope before
+App construction, so no fallible allocation remains after Session success.
+Agent construction rejection maps to SALTS_EIO;
 the underlying pointer-returning Agent constructor cannot distinguish its causes.
 
 ## Mutable state

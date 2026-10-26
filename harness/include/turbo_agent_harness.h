@@ -182,6 +182,13 @@ CXX_C_API int turbo_agent_harness_execute_compiled_inspect_attempt_json(
  * freshness remains a Host responsibility: source_revision is only a stored
  * label. The opt-in create_verified_with_store constructor additionally requires
  * and invokes Host source/evidence callbacks; see turbo_agent_job_verifier.h.
+ * A durable cancellation request (turbo_agent_job_cancel.h) fences Job dispatch
+ * and replay with ECANCELED/TURBO_TOOL_CANCELLED. Control-read errors fail closed.
+ * The supplied token is checked again before Job result delivery: late cancel
+ * or deadline withholds result/reference even when the canonical attempt/Run
+ * committed. It does not rewrite that successful execution as cancelled or
+ * implicitly persist a cancellation request. Host must quiesce before recording
+ * durable cancellation; this API cannot force a blocking callback to terminate.
  *
  * On success, the three distinct output slots own independent JSON values:
  * typed result, certificate and execution reference. The reference contains

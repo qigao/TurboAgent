@@ -1,5 +1,6 @@
 #include "tinytest.h"
 #include "turbo_agent_job.h"
+#include "turbo_agent_job_cancel.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -151,7 +152,7 @@ spec("Job proposal coordination") {
     store.after_claim = 1;
     check_equal(turbo_agent_job_create(runtime, "lost-job", "goal", "criteria", &other), SALTS_EIO);
     check_null(other);
-    check_equal(store.reads - reads, TURBO_AGENT_JOB_MAX_REVISIONS);
+    check_equal(store.reads - reads, TURBO_AGENT_JOB_MAX_REVISIONS + 1);
     store.fail_claim = 0;
     check_equal(turbo_agent_job_open(runtime, "lost-job", &other), SALTS_OK);
     check_equal(turbo_agent_job_get_snapshot(other, &snapshot), SALTS_OK);
@@ -163,7 +164,7 @@ spec("Job proposal coordination") {
     store.fail_claim = SALTS_EBUSY;
     store.after_claim = 1;
     check_equal(turbo_agent_job_propose(job, 0, "x", 1, "source"), SALTS_EBUSY);
-    check_equal(store.reads - reads, TURBO_AGENT_JOB_MAX_REVISIONS + 1);
+    check_equal(store.reads - reads, TURBO_AGENT_JOB_MAX_REVISIONS + 2);
     check_equal(store.claims, 2);
     store.fail_claim = 0;
     check_equal(turbo_agent_job_open(runtime, "job-1", &other), SALTS_OK);
@@ -314,5 +315,134 @@ spec("Job proposal coordination") {
                 "thread", "attempt"), SALTS_ENOSPC);
     check_equal(turbo_agent_job_propose(job, TURBO_AGENT_JOB_MAX_REVISIONS, "x", 1, "source"), SALTS_ENOSPC);
     check_equal(store.claims, TURBO_AGENT_JOB_MAX_REVISIONS + 1);
+    check_equal(turbo_agent_job_request_cancel(job, TURBO_AGENT_JOB_MAX_REVISIONS,
+        "request-1", "reason"), SALTS_OK);
+    check_equal(turbo_agent_job_propose(job, TURBO_AGENT_JOB_MAX_REVISIONS,
+        "x", 1, "source"), SALTS_ECANCELED);
+  }
+
+  it("durably fences created, proposed and bound Jobs without rewriting their snapshots") {
+    for (uint32_t revision = 0; revision <= 2; ++revision) {
+      const char *id = revision == 0 ? "cancel-created" : revision == 1 ? "cancel-proposed" : "cancel-bound";
+      check_equal(turbo_agent_job_create(runtime, id, "goal", "criteria", &other), SALTS_OK);
+      if (revision) check_equal(turbo_agent_job_propose(other, 0, "{}", 2, "source"), SALTS_OK);
+      if (revision == 2) check_equal(turbo_agent_job_bind_compiled_inspect(other, 1, "thread", "attempt"), SALTS_OK);
+      check_equal(turbo_agent_job_get_cancellation(other, &record), SALTS_ENOENT);
+      check_null(record);
+      check_equal(turbo_agent_job_request_cancel(other, revision, "request-1", "host-reason"), SALTS_OK);
+      check_equal(turbo_agent_job_request_cancel(other, revision, "request-1", "host-reason"), SALTS_EALREADY);
+      check_equal(turbo_agent_job_request_cancel(other, revision, "different", "different"), SALTS_EALREADY);
+      check_equal(turbo_agent_job_get_cancellation(other, &record), SALTS_OK);
+      check_equal(json_object_size(record), (size_t)6);
+      check_equal(json_get_string(record, "kind"), "job_cancellation");
+      check_equal(json_get_string(record, "job_id"), id);
+      check_equal(json_get_int(record, "job_revision", -1), revision);
+      check_equal(json_get_string(record, "request_id"), "request-1");
+      check_equal(json_get_string(record, "reason_ref"), "host-reason");
+      json_free(record); record = NULL;
+      check_equal(turbo_agent_job_propose(other, revision, "{}", 2, "new-source"), SALTS_ECANCELED);
+      check_equal(turbo_agent_job_bind_compiled_inspect(other, revision, "thread", "attempt"), SALTS_ECANCELED);
+      check_equal(turbo_agent_job_get_snapshot(other, &snapshot), SALTS_OK);
+      check_equal(json_get_int(snapshot, "revision", -1), revision);
+      check_equal(json_get_string(snapshot, "state"), revision == 0 ? "created" : revision == 1 ? "proposed" : "attempt_bound");
+      check_null(json_object_get(snapshot, "result"));
+      json_free(snapshot); snapshot = NULL;
+      turbo_agent_job_destroy(other); other = NULL;
+      check_equal(turbo_agent_job_open(runtime, id, &other), SALTS_OK);
+      check_equal(turbo_agent_job_get_cancellation(other, &record), SALTS_OK);
+      json_free(record); record = NULL;
+      turbo_agent_job_destroy(other); other = NULL;
+    }
+    check_equal(store.puts, 0); check_equal(store.lists, 0);
+  }
+
+  it("preserves cancellation publication failures without readback or overwrite fallback") {
+    const int errors[] = {SALTS_EIO, SALTS_ENOTSUP, SALTS_ENOSPC};
+    for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+      int reads = store.reads, claims = store.claims;
+      store.fail_claim = errors[i];
+      check_equal(turbo_agent_job_request_cancel(job, 0, "request-1", "reason"), errors[i]);
+      check_equal(store.reads - reads, TURBO_AGENT_JOB_MAX_REVISIONS + 1);
+      check_equal(store.claims, claims + 1);
+    }
+    store.fail_claim = SALTS_EIO; store.after_claim = 1;
+    int reads = store.reads;
+    check_equal(turbo_agent_job_request_cancel(job, 0, "lost-ack", "reason"), SALTS_EIO);
+    check_equal(store.reads - reads, TURBO_AGENT_JOB_MAX_REVISIONS + 1);
+    store.fail_claim = 0;
+    check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_OK);
+    check_equal(json_get_string(record, "request_id"), "lost-ack");
+    check_equal(turbo_agent_job_propose(job, 0, "{}", 2, "source"), SALTS_ECANCELED);
+    check_equal(store.puts, 0); check_equal(store.lists, 0);
+  }
+
+  it("rejects stale cancellation requests and propagates read errors without publishing") {
+    int claims = store.claims;
+    check_equal(turbo_agent_job_request_cancel(job, 1, "request-1", "reason"), SALTS_EBUSY);
+    store.fail_read = SALTS_EIO;
+    check_equal(turbo_agent_job_request_cancel(job, 0, "request-1", "reason"), SALTS_EIO);
+    check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_EIO);
+    check_null(record); check_equal(store.claims, claims);
+    store.fail_read = 0;
+  }
+
+  it("validates cancellation shape, exact head join and all bounded identity fields") {
+    const char *keys[] = {"kind", "job_id", "request_id", "reason_ref", "extra"};
+    check_equal(turbo_agent_job_request_cancel(job, 0, "request-1", "reason"), SALTS_OK);
+    check_equal(turbo_agent_job_get_cancellation(job, &original), SALTS_OK);
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+      record = json_clone(original);
+      check_equal(turbo_runtime_json_object_set_string(record, keys[i], i == 2 ? "../bad" : ""), 0);
+      check_equal(turbo_agent_runtime_store_put_json(runtime, "agent_job_cancellations", "job-1", record), SALTS_OK);
+      check_equal(turbo_agent_job_get_cancellation(job, &snapshot), SALTS_EPROTO);
+      check_null(snapshot);
+      check_equal(turbo_agent_job_propose(job, 0, "{}", 2, "source"), SALTS_EPROTO);
+      json_free(record); record = NULL;
+    }
+    record = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_int64(record, "job_revision", 1), 0);
+    check_equal(turbo_agent_runtime_store_put_json(runtime, "agent_job_cancellations", "job-1", record), SALTS_OK);
+    check_equal(turbo_agent_job_get_cancellation(job, &snapshot), SALTS_EPROTO);
+    json_free(record); record = json_clone(original);
+    check_equal(turbo_runtime_json_object_set_int64(record, "schema_version", 2), 0);
+    check_equal(turbo_agent_runtime_store_put_json(runtime, "agent_job_cancellations", "job-1", record), SALTS_OK);
+    check_equal(turbo_agent_job_get_cancellation(job, &snapshot), SALTS_ENOTSUP);
+    check_equal(turbo_agent_job_propose(job, 0, "{}", 2, "source"), SALTS_ENOTSUP);
+    json_free(record); record = json_clone(original);
+    const char encoded[] = "\"x\\u0000y\"";
+    check_equal(turbo_runtime_json_object_set(record, "reason_ref", json_parse(encoded, sizeof(encoded) - 1)), 0);
+    check_equal(turbo_agent_runtime_store_put_json(runtime, "agent_job_cancellations", "job-1", record), SALTS_OK);
+    check_equal(turbo_agent_job_get_cancellation(job, &snapshot), SALTS_EPROTO);
+  }
+
+  it("refuses identity reuse when only a cancellation survives") {
+    check_equal(turbo_agent_job_request_cancel(job, 0, "request-1", "reason"), SALTS_OK);
+    check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_OK);
+    check_equal(turbo_runtime_json_object_set_string(record, "job_id", "orphan-cancel"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(runtime, "agent_job_cancellations", "orphan-cancel", record), SALTS_OK);
+    int claims = store.claims;
+    check_equal(turbo_agent_job_create(runtime, "orphan-cancel", "new-goal", "criteria", &other), SALTS_EALREADY);
+    check_null(other); check_equal(store.claims, claims);
+  }
+
+  it("enforces cancellation API and byte limits before store access") {
+    char request[66], reason[1026];
+    memset(request, 'r', sizeof(request)); request[65] = 0;
+    memset(reason, 'r', sizeof(reason)); reason[1025] = 0;
+    int reads = store.reads, claims = store.claims;
+    check_equal(turbo_agent_job_request_cancel(NULL, 0, "request", "reason"), SALTS_EINVAL);
+    check_equal(turbo_agent_job_get_cancellation(NULL, &record), SALTS_EINVAL);
+    check_null(record);
+    check_equal(turbo_agent_job_get_cancellation(job, NULL), SALTS_EINVAL);
+    check_equal(turbo_agent_job_request_cancel(job, 0, "../bad", "reason"), SALTS_EINVAL);
+    check_equal(turbo_agent_job_request_cancel(job, 0, request, "reason"), SALTS_EINVAL);
+    check_equal(turbo_agent_job_request_cancel(job, 0, "request", reason), SALTS_EINVAL);
+    check_equal(turbo_agent_job_request_cancel(job, 0, "request", ""), SALTS_EINVAL);
+    check_equal(store.reads, reads); check_equal(store.claims, claims);
+    request[64] = 0; reason[1024] = 0;
+    check_equal(turbo_agent_job_request_cancel(job, 0, request, reason), SALTS_OK);
+    check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_OK);
+    check_equal(json_get_string(record, "request_id"), request);
+    check_equal(json_get_string(record, "reason_ref"), reason);
   }
 }

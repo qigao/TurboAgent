@@ -121,7 +121,7 @@ static int operate(turbo_agent_harness_t *harness, const char *id, uint32_t revi
       (op == RECEIPT && !bounded(receipt_ref, 1024))) return SALTS_EINVAL;
   rc = turbo_agent_harness_begin_submit(harness);
   if (rc != SALTS_OK) return rc;
-  rc = turbo_agent_harness_prepare_job_proof(harness, id, revision, config, diagnostic, &proof);
+  rc = turbo_agent_harness_prepare_job_proof(harness, id, revision, op == PREPARE, config, diagnostic, &proof);
   if (rc != SALTS_OK) goto done;
   rc = turbo_agent_harness_load_job_acceptance(&proof, diagnostic, &acceptance);
   if (rc != SALTS_OK) goto done;
@@ -157,11 +157,17 @@ static int operate(turbo_agent_harness_t *harness, const char *id, uint32_t revi
   }
   rc = current(&proof);
   if (rc != SALTS_OK) goto done;
+  if (op == PREPARE) {
+    rc = turbo_agent_harness_require_job_active(proof.runtime, proof.snapshot, diagnostic);
+    if (rc != SALTS_OK) goto done;
+  }
   if (op != READ) {
     rc = turbo_agent_runtime_store_create_json_if_absent(proof.runtime, op == PREPARE ? INTENTS : RECEIPTS, id, record);
     if (rc != SALTS_OK) goto done;
   }
   rc = current(&proof);
+  if (rc == SALTS_OK && op == PREPARE)
+    rc = turbo_agent_harness_require_job_active(proof.runtime, proof.snapshot, diagnostic);
   if (rc == SALTS_OK) { *out = record; record = NULL; }
 done:
   if (rc != SALTS_OK && diagnostic && diagnostic->status == TURBO_AGENT_COMPILE_OK) {

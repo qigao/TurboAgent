@@ -30,10 +30,12 @@ void turbo_agent_harness_end_submit(turbo_agent_harness_t *harness);
 /* Caller holds Harness submission exclusion and the documented quiescent policy
  * and Job ownership. This only compiles/validates, never dispatches or writes. */
 int turbo_agent_harness_prepare_job_proof(turbo_agent_harness_t *harness,
-    const char *id, uint32_t expected_revision,
+    const char *id, uint32_t expected_revision, int require_active,
     const turbo_agent_compiler_config_t *config,
     turbo_agent_compile_diagnostic_t *diagnostic, turbo_agent_job_proof_t *out);
 void turbo_agent_harness_job_proof_destroy(turbo_agent_job_proof_t *proof);
+int turbo_agent_harness_require_job_active(turbo_agent_runtime_t *runtime,
+    const json_value_t *snapshot, turbo_agent_compile_diagnostic_t *diagnostic);
 /* Caller holds submission exclusion and owns a prepared proof. Revalidates the
  * immutable Host decision, including its canonical execution records. */
 int turbo_agent_harness_load_job_acceptance(const turbo_agent_job_proof_t *proof,

@@ -2,6 +2,7 @@
 
 #include "turbo_agent_harness.h"
 #include "turbo_agent_job.h"
+#include "turbo_agent_job_cancel.h"
 #include "turbo_agent_job_acceptance.h"
 #include "turbo_agent_job_delivery.h"
 #include "turbo_agent_job_verifier.h"
@@ -33,6 +34,8 @@ typedef struct compiled_inspect_probe_s {
   turbo_agent_runtime_t *runtime;
   char last_value[32];
   const char *thread_id;
+  turbo_cancel_source_t *cancel_in_callback;
+  uint64_t *advance_clock;
 } compiled_inspect_probe_t;
 
 static int compiled_harness_transport(const char *request, char **response, void *user) {
@@ -85,6 +88,9 @@ static int compiled_inspect_handler(const json_value_t *arguments,
   if (!probe || !out_result || !arguments ||
       !json_get_string(arguments, "value")) return -1;
   ++probe->calls;
+  if (probe->cancel_in_callback && turbo_cancel_source_cancel(probe->cancel_in_callback,
+      TURBO_CANCEL_USER) != SALTS_OK) return -1;
+  if (probe->advance_clock) *probe->advance_clock = 20;
   snprintf(probe->last_value, sizeof(probe->last_value), "%s", json_get_string(arguments, "value"));
   if (probe->runtime && probe->thread_id) {
     if (!compiled_journal_has_phase(probe->runtime, probe->thread_id, "started")) return -1;
@@ -144,6 +150,7 @@ typedef struct compiled_inspect_store_fault_s {
   int delivery_status, delivery_after_commit, delivery_claims, delivery_puts;
   int delivery_unacknowledged, reads_after_delivery_error;
   int delivery_compete;
+  int cancel_reads, cancel_fail_at, cancel_read_status;
 } compiled_inspect_store_fault_t;
 
 static int compiled_inspect_fault_store_put(void *user_data, const char *collection,
@@ -212,6 +219,13 @@ static int compiled_inspect_fault_store_get(void *user_data, const char *collect
   compiled_inspect_store_fault_t *fault = (compiled_inspect_store_fault_t *)user_data;
   if (fault && fault->acceptance_unacknowledged) ++fault->reads_after_acceptance_error;
   if (fault && fault->delivery_unacknowledged) ++fault->reads_after_delivery_error;
+  if (fault && !strcmp(collection, "agent_job_cancellations")) {
+    ++fault->cancel_reads;
+    if (fault->cancel_fail_at && fault->cancel_reads == fault->cancel_fail_at) {
+      *out_record_json = NULL;
+      return fault->cancel_read_status;
+    }
+  }
   if (fault && fault->proof_read_failure && !strcmp(collection, fault->proof_read_failure)) {
     *out_record_json = NULL;
     return SALTS_EIO;
@@ -1433,6 +1447,8 @@ static int accept_job_for_delivery(turbo_agent_harness_t *harness,
   return rc;
 }
 
+static uint64_t job_cancel_clock(void *user) { return *(uint64_t *)user; }
+
 spec("Harness persisted Job dispatch") {
   static cmeta_threadpool_t *pool;
   static turbo_tool_registry_t *registry;
@@ -1474,6 +1490,176 @@ spec("Harness persisted Job dispatch") {
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);
+  }
+
+  it("fences cancelled Jobs before callbacks, Runs, acceptance or new delivery") {
+    json_value_t *candidate = json_create_object();
+    check_equal(turbo_agent_job_request_cancel(job, 2, "request-1", "host-reason"), SALTS_OK);
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_ECANCELED);
+    check_equal(status, TURBO_TOOL_CANCELLED);
+    check_null(result); check_null(certificate); check_null(reference);
+    check_equal(record_acceptance(harness, candidate, TURBO_AGENT_JOB_ACCEPTED,
+        &diagnostic, &record), SALTS_ECANCELED);
+    check_null(record);
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_ECANCELED);
+    check_null(record); check_equal(probe.calls, 0);
+    check_equal(fault->acceptance_claims, 0); check_equal(fault->delivery_claims, 0);
+    check_equal(turbo_agent_runtime_store_list_json(probe.runtime, "runs", NULL, NULL, &record), SALTS_OK);
+    check_equal(json_array_size(record), (size_t)0);
+    json_free(candidate);
+  }
+
+  it("keeps existing acceptance and unknown delivery available for explicit reconciliation after cancellation") {
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(turbo_agent_job_request_cancel(job, 2, "request-1", "host-reason"), SALTS_OK);
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "decision"), "accepted");
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "status"), "outcome_unknown");
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 0, "replacement", &diagnostic, &record), SALTS_ECANCELED);
+    check_null(record);
+    check_equal(delivery_operation(harness, 2, "delivery-1", &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "status"), "delivered");
+    check_equal(probe.calls, 1);
+    json_free(record); record = NULL;
+    check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_OK);
+    check_equal(json_get_string(record, "request_id"), "request-1");
+  }
+
+  it("preserves cancellation read errors before admission and immediately before attempt lookup") {
+    const int errors[] = {SALTS_EIO, SALTS_EBUSY, SALTS_ENOTSUP};
+    for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+      fault->cancel_reads = 0; fault->cancel_fail_at = 1; fault->cancel_read_status = errors[i];
+      check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+          &result, &certificate, &reference), errors[i]);
+      check_null(result); check_null(certificate); check_null(reference);
+    }
+    fault->cancel_reads = 0; fault->cancel_fail_at = 2; fault->cancel_read_status = SALTS_EIO;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_EIO);
+    check_null(result); check_null(reference); check_equal(probe.calls, 0);
+    check_equal(turbo_agent_runtime_store_list_json(probe.runtime, "compiled_inspect_attempts", NULL, NULL, &record), SALTS_OK);
+    check_equal(json_array_size(record), (size_t)0);
+  }
+
+  it("withholds committed results on final cancellation-read errors without losing canonical success") {
+    fault->cancel_reads = 0; fault->cancel_fail_at = 3; fault->cancel_read_status = SALTS_EIO;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_EIO);
+    check_null(result); check_null(reference); check_not_null(certificate); check_equal(probe.calls, 1);
+    json_free(certificate); certificate = NULL;
+    fault->cancel_fail_at = 0;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(turbo_agent_job_request_cancel(job, 2, "request-1", "host-reason"), SALTS_OK);
+    json_free(result); json_free(certificate); json_free(reference);
+    result = certificate = reference = NULL;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_ECANCELED);
+    check_null(result); check_null(reference); check_equal(probe.calls, 1);
+  }
+
+  it("checks cancellation evidence before and after acceptance and intent publication") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_OK);
+    fault->cancel_reads = 0; fault->cancel_fail_at = 2; fault->cancel_read_status = SALTS_EIO;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+        &diagnostic, &record), SALTS_EIO);
+    check_null(record); check_equal(fault->acceptance_claims, 0);
+    fault->cancel_reads = 0; fault->cancel_fail_at = 3;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+        &diagnostic, &record), SALTS_EIO);
+    check_null(record); check_equal(fault->acceptance_claims, 1);
+    fault->cancel_fail_at = 0;
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    fault->cancel_reads = 0; fault->cancel_fail_at = 2;
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_EIO);
+    check_null(record); check_equal(fault->delivery_claims, 0);
+    fault->cancel_reads = 0; fault->cancel_fail_at = 3;
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_EIO);
+    check_null(record); check_equal(fault->delivery_claims, 1);
+    fault->cancel_fail_at = 0;
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "status"), "outcome_unknown");
+  }
+
+  it("withholds late cancelled or expired results while retaining committed callback facts") {
+    for (int deadline = 0; deadline <= 1; ++deadline) {
+      turbo_cancel_source_t *source = NULL;
+      turbo_cancel_token_t *token = NULL;
+      uint64_t now = 0;
+      turbo_cancel_source_config_t cancel_config = {sizeof(cancel_config),
+          TURBO_RUNTIME_CONTROL_ABI_VERSION, deadline ? 10u : 0u, job_cancel_clock, &now};
+      turbo_tool_execution_context_t context = {0};
+      context.struct_size = sizeof(context);
+      context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+      const char *allowed[] = {"runtime_tools"};
+      turbo_agent_compiler_config_t config;
+      turbo_agent_compiler_config_init(&config);
+      config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+      check_equal(turbo_cancel_source_create(&cancel_config, &source), SALTS_OK);
+      check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+      context.cancel_token = token;
+      if (deadline) probe.advance_clock = &now;
+      else probe.cancel_in_callback = source;
+      /* Use a fresh Job/attempt for each callback; shared Harness policy stays quiescent. */
+      const char *id = deadline ? "deadline-job" : "cancel-job";
+      check_equal(turbo_agent_job_create(probe.runtime, id, "goal", "criteria", &other), SALTS_OK);
+      check_equal(turbo_agent_job_propose(other, 0, compiled_inspect_source, strlen(compiled_inspect_source), "source"), SALTS_OK);
+      check_equal(turbo_agent_job_bind_compiled_inspect(other, 1, COMPILED_INSPECT_TEST_THREAD_ID, id), SALTS_OK);
+      check_equal(turbo_agent_harness_execute_job_inspect_json(harness, id, 2, &config, &context,
+          &diagnostic, &status, &result, &certificate, &reference), deadline ? SALTS_ETIMEDOUT : SALTS_ECANCELED);
+      check_equal(status, deadline ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED);
+      check_null(result); check_null(reference); check_not_null(certificate);
+      check_equal(turbo_agent_job_get_cancellation(other, &record), SALTS_ENOENT);
+      check_null(record); /* A token signal does not fabricate a durable request. */
+      check_equal(turbo_agent_job_request_cancel(other, 2, "request-1", "reason"), SALTS_OK);
+      probe.cancel_in_callback = NULL; probe.advance_clock = NULL;
+      turbo_cancel_token_release(token); turbo_cancel_source_destroy(source);
+      turbo_agent_job_destroy(other); other = NULL;
+      json_free(certificate); certificate = NULL;
+    }
+    check_equal(probe.calls, 2);
+    check_equal(turbo_agent_runtime_store_list_json(probe.runtime, "compiled_inspect_attempts", NULL, NULL, &record), SALTS_OK);
+    check_equal(json_array_size(record), (size_t)2);
+    for (size_t i = 0; i < json_array_size(record); ++i) {
+      check_equal(json_get_string(json_array_get(record, i), "phase"), "committed");
+      check_equal(json_get_int(json_array_get(record, i), "tool_status", -1), TURBO_TOOL_OK);
+      check_not_null(json_object_get(json_array_get(record, i), "result"));
+    }
+  }
+
+  it("rejects pre-signalled Job tokens before Run creation and leaves persistence explicit") {
+    turbo_cancel_source_t *source = NULL;
+    turbo_cancel_token_t *token = NULL;
+    turbo_tool_execution_context_t context = {0};
+    const char *allowed[] = {"runtime_tools"};
+    turbo_agent_compiler_config_t config;
+    turbo_agent_compiler_config_init(&config);
+    config.allowed_capabilities = allowed; config.allowed_capability_count = 1;
+    context.struct_size = sizeof(context); context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
+    check_equal(turbo_cancel_source_create(NULL, &source), SALTS_OK);
+    check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+    check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
+    context.cancel_token = token;
+    check_equal(turbo_agent_harness_execute_job_inspect_json(harness, "job-bound", 2, &config, &context,
+        &diagnostic, &status, &result, &certificate, &reference), SALTS_ECANCELED);
+    check_equal(status, TURBO_TOOL_CANCELLED); check_null(result); check_null(reference);
+    check_equal(probe.calls, 0);
+    check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_ENOENT);
+    check_null(record);
+    check_equal(turbo_agent_runtime_store_list_json(probe.runtime, "runs", NULL, NULL, &record), SALTS_OK);
+    check_equal(json_array_size(record), (size_t)0);
+    turbo_cancel_token_release(token); turbo_cancel_source_destroy(source);
   }
 
   it("executes the frozen source and returns exact attempt, journal and Runtime Run references") {
@@ -2136,6 +2322,19 @@ spec("Harness mandatory Host Job verification") {
     turbo_agent_harness_release(harness);
     turbo_tool_registry_destroy(registry);
     cmeta_threadpool_destroy(pool);
+  }
+
+  it("fences verified Jobs before source/evidence callbacks without disabling recovery reads") {
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    int sources = verification.sources, evidences = verification.evidences;
+    check_equal(turbo_agent_job_request_cancel(job, 2, "request-1", "reason"), SALTS_OK);
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_ECANCELED);
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_ECANCELED);
+    check_null(record); check_equal(verification.sources, sources); check_equal(verification.evidences, evidences);
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    check_true(verification.sources > sources); check_equal(verification.evidences, evidences + 1);
+    check_equal(probe.calls, 1);
   }
 
   it("copies mandatory callbacks and rechecks evidence throughout the delivery composition") {

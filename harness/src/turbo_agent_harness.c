@@ -2,6 +2,7 @@
 #include "turbo_agent_harness.h"
 #include "turbo_agent_job.h"
 #include "turbo_agent_harness_internal.h"
+#include "turbo_agent_job_internal.h"
 #include <json_parser.h>
 
 #include "turbo_agent_session_execution.h"
@@ -442,6 +443,7 @@ typedef struct turbo_agent_compiled_inspect_run_s {
   const char *thread_id;
   const char *tool_name;
   const char *attempt_id;
+  const json_value_t *job_snapshot;
   const char *result_schema_json;
   turbo_tool_effect_flags_t effects;
   char attempt_record_id[192];
@@ -790,7 +792,7 @@ static int turbo_agent_compiled_inspect_start_node(
   if (cancel_status != SALTS_OK) {
     run->tool_status = cancel_status == SALTS_ETIMEDOUT
         ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
-    run->failure_rc = SALTS_EIO;
+    run->failure_rc = run->job_snapshot ? cancel_status : SALTS_EIO;
     snprintf(run->failure_message, sizeof(run->failure_message), "%s",
              "compiled Inspect was cancelled before callback dispatch");
     if (run->diagnostic) {
@@ -843,7 +845,7 @@ static int turbo_agent_compiled_inspect_execute_node(
   if (cancel_status != SALTS_OK) {
     run->tool_status = cancel_status == SALTS_ETIMEDOUT
         ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
-    run->failure_rc = SALTS_EIO;
+    run->failure_rc = run->job_snapshot ? cancel_status : SALTS_EIO;
     snprintf(run->failure_message, sizeof(run->failure_message), "%s",
              "compiled Inspect was cancelled before journaled callback dispatch");
     if (run->diagnostic) {
@@ -858,6 +860,15 @@ static int turbo_agent_compiled_inspect_execute_node(
   /* Look up the stable attempt only after a fresh authority check. A COMMITTED
    * attempt is replayed through this Run's Session finalization; STARTED and
    * outcome_unknown never redispatch a callback. */
+  if (run->job_snapshot) {
+    int active = turbo_agent_harness_require_job_active(run->runtime,
+        run->job_snapshot, run->diagnostic);
+    if (active != SALTS_OK) {
+      run->tool_status = active == SALTS_ECANCELED ? TURBO_TOOL_CANCELLED : TURBO_TOOL_ERROR;
+      run->failure_rc = active;
+      return -1;
+    }
+  }
   attempt_read_status = turbo_agent_runtime_store_get_json_status(
       run->runtime, TURBO_AGENT_COMPILED_INSPECT_ATTEMPT_COLLECTION,
       run->attempt_record_id, &stored_attempt);
@@ -1244,8 +1255,20 @@ void turbo_agent_harness_job_proof_destroy(turbo_agent_job_proof_t *proof) {
   memset(proof, 0, sizeof(*proof));
 }
 
+int turbo_agent_harness_require_job_active(turbo_agent_runtime_t *runtime,
+    const json_value_t *snapshot, turbo_agent_compile_diagnostic_t *diagnostic) {
+  int rc = turbo_agent_job_check_active(runtime, json_get_string(snapshot, "id"),
+      (uint32_t)turbo_runtime_json_value_as_int64(json_object_get(snapshot, "revision"), -1));
+  if (rc != SALTS_OK && diagnostic) {
+    diagnostic->status = TURBO_AGENT_COMPILE_SOURCE_INVALID;
+    (void)snprintf(diagnostic->message, sizeof(diagnostic->message),
+        "Job progress fenced by cancellation or unreadable control evidence (status %d)", rc);
+  }
+  return rc;
+}
+
 int turbo_agent_harness_prepare_job_proof(turbo_agent_harness_t *harness,
-    const char *id, uint32_t expected, const turbo_agent_compiler_config_t *config,
+    const char *id, uint32_t expected, int require_active, const turbo_agent_compiler_config_t *config,
     turbo_agent_compile_diagnostic_t *diagnostic, turbo_agent_job_proof_t *out) {
   turbo_agent_session_t *session = turbo_agent_app_session(harness->app);
   const json_value_t *proposal;
@@ -1265,6 +1288,10 @@ int turbo_agent_harness_prepare_job_proof(turbo_agent_harness_t *harness,
   rc = turbo_agent_harness_job_snapshot(out->runtime, id, expected,
       harness->compiled_attempt_thread_id, &out->snapshot, diagnostic);
   if (rc != SALTS_OK) goto fail;
+  if (require_active) {
+    rc = turbo_agent_harness_require_job_active(out->runtime, out->snapshot, diagnostic);
+    if (rc != SALTS_OK) goto fail;
+  }
   proposal = json_object_get(out->snapshot, "proposal");
   rc = turbo_agent_harness_verify_job_source(harness, out->snapshot, diagnostic);
   if (rc != SALTS_OK) goto fail;
@@ -1391,6 +1418,8 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
     rc = turbo_agent_harness_job_snapshot(runtime, job_id, expected_job_revision,
         harness->compiled_attempt_thread_id, &job_snapshot, out_diagnostic);
     if (rc != SALTS_OK) goto done;
+    rc = turbo_agent_harness_require_job_active(runtime, job_snapshot, out_diagnostic);
+    if (rc != SALTS_OK) goto done;
     rc = turbo_agent_harness_verify_job_source(harness, job_snapshot, out_diagnostic);
     if (rc != SALTS_OK) goto done;
     proposal = json_object_get(job_snapshot, "proposal");
@@ -1480,6 +1509,7 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
   compiled_run.thread_id = thread_id;
   compiled_run.tool_name = name;
   compiled_run.attempt_id = attempt_id;
+  compiled_run.job_snapshot = job_snapshot;
   compiled_run.result_schema_json = result_schema_json;
   compiled_run.effects = effects;
   snprintf(compiled_run.plan_hash, sizeof(compiled_run.plan_hash), "%s", plan_hash);
@@ -1543,6 +1573,19 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
   if (job_snapshot) {
     rc = turbo_agent_harness_verify_job_source(harness, job_snapshot, out_diagnostic);
     if (rc != SALTS_OK) goto done;
+    rc = turbo_agent_harness_require_job_active(runtime, job_snapshot, out_diagnostic);
+    if (rc != SALTS_OK) goto done;
+    if (context && context->cancel_token) {
+      rc = turbo_cancel_token_check(context->cancel_token);
+      if (rc != SALTS_OK) {
+        if (out_diagnostic) {
+          out_diagnostic->status = TURBO_AGENT_COMPILE_SOURCE_INVALID;
+          (void)snprintf(out_diagnostic->message, sizeof(out_diagnostic->message),
+              "Job result withheld after cancellation/deadline; canonical attempt remains unchanged");
+        }
+        goto done;
+      }
+    }
     const char *run_id = json_get_string(summary, "run_id");
     const char *run_thread_id = json_get_string(summary, "thread_id");
     const char *run_status = json_get_string(summary, "status");
@@ -1571,6 +1614,8 @@ done:
   if (out_tool_status && compiled_run.plan &&
       compiled_run.tool_status != TURBO_TOOL_INVALID_ARGUMENT)
     *out_tool_status = compiled_run.tool_status;
+  if (job_id && out_tool_status && (rc == SALTS_ECANCELED || rc == SALTS_ETIMEDOUT))
+    *out_tool_status = rc == SALTS_ETIMEDOUT ? TURBO_TOOL_DEADLINE_EXCEEDED : TURBO_TOOL_CANCELLED;
   json_free(job_reference);
   turbo_runtime_json_destroy(compiled_run.result);
   turbo_runtime_json_destroy(result_state);

@@ -3,6 +3,7 @@
 #include <turbo_agent_job.h>
 #include <turbo_agent_job_acceptance.h>
 #include <turbo_agent_job_delivery.h>
+#include <turbo_agent_job_verifier.h>
 #include <turbo_agent_policy.h>
 #include <turbo_agent_state.h>
 #include <turbo_agent_harness.h>
@@ -74,6 +75,11 @@ spec("installed C++17 SDK consumer") {
     turbo_agent_harness_t *harness = nullptr;
     config.runtime_store = {};
     check_equal(turbo_agent_harness_create_with_store(&harness_config, &harness), SALTS_EINVAL);
+    check_equal(turbo_agent_harness_create_verified_with_store(&harness_config, nullptr, &harness), SALTS_EINVAL);
+    turbo_agent_job_verifier_t verifier{};
+    turbo_agent_job_verifier_init(&verifier);
+    check_equal(verifier.abi_version, TURBO_AGENT_JOB_VERIFIER_ABI_VERSION);
+    check_equal(turbo_agent_harness_create_verified_with_store(&harness_config, &verifier, &harness), SALTS_EINVAL);
     config.runtime_store = turbo_agent_runtime_store_memory_create();
     check_equal(turbo_agent_harness_create_with_store(&harness_config, &harness), SALTS_OK);
     check_not_null(harness);

@@ -1,5 +1,16 @@
 #include "tinytest.h"
 #include "turbo_agent_harness.h"
+#include "turbo_agent_job_verifier.h"
+
+static int verify_source(const json_value_t *snapshot, void *user) {
+  (void)snapshot; (void)user; return SALTS_OK;
+}
+static int verify_evidence(const json_value_t *snapshot, const json_value_t *reference,
+    const json_value_t *result, turbo_agent_job_acceptance_decision_t decision,
+    const char *evidence, void *user) {
+  (void)snapshot; (void)reference; (void)result; (void)decision; (void)evidence; (void)user;
+  return SALTS_OK;
+}
 
 /* Real memory storage behind a release probe, not an emulated Session. */
 typedef struct harness_store_probe_s {
@@ -133,5 +144,36 @@ spec("Harness explicit RuntimeStore ownership") {
     harness = NULL;
     check_equal(runtime.releases, 0);
     check_equal(memory.releases, 1);
+  }
+
+  it("rejects every incomplete verifier before transferring stores") {
+    turbo_agent_job_verifier_t verifier;
+    turbo_agent_job_verifier_init(&verifier);
+    check_equal(turbo_agent_harness_create_verified_with_store(&config, NULL, &harness), SALTS_EINVAL);
+    for (int i = 0; i < 4; ++i) {
+      turbo_agent_job_verifier_init(&verifier);
+      verifier.source = verify_source; verifier.evidence = verify_evidence;
+      if (i == 0) verifier.source = NULL;
+      if (i == 1) verifier.evidence = NULL;
+      if (i == 2) verifier.struct_size = sizeof(verifier) - 1;
+      if (i == 3) verifier.abi_version = 0;
+      harness = (turbo_agent_harness_t *)&config;
+      check_equal(turbo_agent_harness_create_verified_with_store(&config, &verifier, &harness), SALTS_EINVAL);
+      check_null(harness);
+      check_equal(runtime.releases, 0); check_equal(memory.releases, 0);
+    }
+  }
+
+  it("retains explicit-store failure ownership with a complete verifier") {
+    turbo_agent_job_verifier_t verifier;
+    turbo_agent_job_verifier_init(&verifier);
+    verifier.source = verify_source; verifier.evidence = verify_evidence;
+    session.runtime_store.list = NULL;
+    check_equal(turbo_agent_harness_create_verified_with_store(&config, &verifier, &harness), SALTS_EINVAL);
+    check_null(harness); check_equal(runtime.releases, 0); check_equal(memory.releases, 0);
+    session.runtime_store.list = store_list;
+    session.agent_config.model = "model-without-transport-or-credentials";
+    check_equal(turbo_agent_harness_create_verified_with_store(&config, &verifier, &harness), SALTS_EIO);
+    check_null(harness); check_equal(runtime.releases, 1); check_equal(memory.releases, 0);
   }
 }

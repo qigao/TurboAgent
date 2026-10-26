@@ -29,6 +29,7 @@ struct turbo_agent_harness_s {
   cmeta_threadpool_t *executor;
   turbo_agent_execution_t *active_execution;
   int submitting;
+  turbo_agent_job_verifier_t job_verifier;
 };
 
 struct turbo_agent_harness_execution_s {
@@ -71,7 +72,8 @@ void turbo_agent_harness_run_options_init(turbo_agent_harness_run_options_t *opt
 }
 
 static int turbo_agent_harness_construct(const turbo_agent_harness_config_t *config,
-    int explicit_store, turbo_agent_harness_t **out_harness) {
+    int explicit_store, const turbo_agent_job_verifier_t *verifier,
+    turbo_agent_harness_t **out_harness) {
   turbo_agent_harness_t *harness;
   const turbo_agent_session_config_t *session_config;
   const char *thread_id;
@@ -86,6 +88,7 @@ static int turbo_agent_harness_construct(const turbo_agent_harness_config_t *con
     return SALTS_EINVAL;
   harness = (turbo_agent_harness_t *)calloc(1, sizeof(*harness));
   if (!harness) return SALTS_ENOMEM;
+  if (verifier) harness->job_verifier = *verifier;
   atomic_init(&harness->ref_count, 1);
   cmeta_mutex_init(&harness->mutex);
   if (!harness->mutex) {
@@ -125,13 +128,58 @@ static int turbo_agent_harness_construct(const turbo_agent_harness_config_t *con
 
 turbo_agent_harness_t *turbo_agent_harness_create(const turbo_agent_harness_config_t *config) {
   turbo_agent_harness_t *harness = NULL;
-  (void)turbo_agent_harness_construct(config, 0, &harness);
+  (void)turbo_agent_harness_construct(config, 0, NULL, &harness);
   return harness;
 }
 
 int turbo_agent_harness_create_with_store(const turbo_agent_harness_config_t *config,
     turbo_agent_harness_t **out_harness) {
-  return turbo_agent_harness_construct(config, 1, out_harness);
+  return turbo_agent_harness_construct(config, 1, NULL, out_harness);
+}
+
+void turbo_agent_job_verifier_init(turbo_agent_job_verifier_t *verifier) {
+  if (!verifier) return;
+  memset(verifier, 0, sizeof(*verifier));
+  verifier->struct_size = sizeof(*verifier);
+  verifier->abi_version = TURBO_AGENT_JOB_VERIFIER_ABI_VERSION;
+}
+
+int turbo_agent_harness_create_verified_with_store(const turbo_agent_harness_config_t *config,
+    const turbo_agent_job_verifier_t *verifier, turbo_agent_harness_t **out_harness) {
+  if (out_harness) *out_harness = NULL;
+  if (!verifier || verifier->struct_size < sizeof(*verifier) ||
+      verifier->abi_version != TURBO_AGENT_JOB_VERIFIER_ABI_VERSION ||
+      !verifier->source || !verifier->evidence) return SALTS_EINVAL;
+  return turbo_agent_harness_construct(config, 1, verifier, out_harness);
+}
+
+static int turbo_agent_harness_verification_status(int rc, const char *stage,
+    turbo_agent_compile_diagnostic_t *diagnostic) {
+  if (rc != SALTS_OK && diagnostic && diagnostic->status == TURBO_AGENT_COMPILE_OK) {
+    diagnostic->status = rc == SALTS_ENOMEM ? TURBO_AGENT_COMPILE_OUT_OF_MEMORY : TURBO_AGENT_COMPILE_SOURCE_INVALID;
+    (void)snprintf(diagnostic->message, sizeof(diagnostic->message),
+        "Host Job %s verification failed (status %d); no fallback or retry", stage, rc);
+  }
+  return rc;
+}
+
+int turbo_agent_harness_verify_job_source(turbo_agent_harness_t *harness,
+    const json_value_t *snapshot, turbo_agent_compile_diagnostic_t *diagnostic) {
+  int rc = harness->job_verifier.source ?
+      harness->job_verifier.source(snapshot, harness->job_verifier.user_data) : SALTS_OK;
+  return turbo_agent_harness_verification_status(rc, "source", diagnostic);
+}
+
+int turbo_agent_harness_verify_job_evidence(const turbo_agent_job_proof_t *proof,
+    const json_value_t *reference, const json_value_t *result,
+    turbo_agent_job_acceptance_decision_t decision, const char *evidence_ref,
+    turbo_agent_compile_diagnostic_t *diagnostic) {
+  const turbo_agent_job_verifier_t *verifier = &proof->harness->job_verifier;
+  int rc = verifier->evidence ? verifier->evidence(proof->snapshot, reference, result,
+      decision, evidence_ref, verifier->user_data) : SALTS_OK;
+  rc = turbo_agent_harness_verification_status(rc, "evidence", diagnostic);
+  if (rc == SALTS_OK) rc = turbo_agent_harness_verify_job_source(proof->harness, proof->snapshot, diagnostic);
+  return rc;
 }
 
 turbo_agent_harness_t *turbo_agent_harness_retain(turbo_agent_harness_t *harness) {
@@ -1203,6 +1251,7 @@ int turbo_agent_harness_prepare_job_proof(turbo_agent_harness_t *harness,
   const json_value_t *proposal;
   int rc;
   memset(out, 0, sizeof(*out));
+  out->harness = harness;
   out->runtime = turbo_agent_session_runtime(session);
   out->agent = turbo_agent_session_agent(session);
   rc = turbo_agent_harness_require_scope(harness, session, diagnostic);
@@ -1217,6 +1266,8 @@ int turbo_agent_harness_prepare_job_proof(turbo_agent_harness_t *harness,
       harness->compiled_attempt_thread_id, &out->snapshot, diagnostic);
   if (rc != SALTS_OK) goto fail;
   proposal = json_object_get(out->snapshot, "proposal");
+  rc = turbo_agent_harness_verify_job_source(harness, out->snapshot, diagnostic);
+  if (rc != SALTS_OK) goto fail;
   rc = turbo_agent_harness_compile_inspect(harness, config,
       json_get_string(proposal, "source_json"),
       json_string_len(json_object_get(proposal, "source_json")), &out->authority,
@@ -1339,6 +1390,8 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
     const json_value_t *binding;
     rc = turbo_agent_harness_job_snapshot(runtime, job_id, expected_job_revision,
         harness->compiled_attempt_thread_id, &job_snapshot, out_diagnostic);
+    if (rc != SALTS_OK) goto done;
+    rc = turbo_agent_harness_verify_job_source(harness, job_snapshot, out_diagnostic);
     if (rc != SALTS_OK) goto done;
     proposal = json_object_get(job_snapshot, "proposal");
     binding = json_object_get(job_snapshot, "attempt");
@@ -1488,6 +1541,8 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
     goto done;
   }
   if (job_snapshot) {
+    rc = turbo_agent_harness_verify_job_source(harness, job_snapshot, out_diagnostic);
+    if (rc != SALTS_OK) goto done;
     const char *run_id = json_get_string(summary, "run_id");
     const char *run_thread_id = json_get_string(summary, "thread_id");
     const char *run_status = json_get_string(summary, "status");

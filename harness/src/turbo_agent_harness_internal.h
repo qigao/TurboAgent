@@ -3,6 +3,7 @@
 
 #include "turbo_agent_harness.h"
 #include "turbo_agent_policy.h"
+#include "turbo_agent_job_verifier.h"
 
 /* Internal DSO composition only; never installed as public ABI. */
 typedef struct turbo_agent_inspect_admission_s {
@@ -15,6 +16,7 @@ typedef struct turbo_agent_inspect_admission_s {
 } turbo_agent_inspect_admission_t;
 
 typedef struct turbo_agent_job_proof_s {
+  turbo_agent_harness_t *harness;
   turbo_agent_runtime_t *runtime;
   turbo_agent_t *agent;
   json_value_t *snapshot;
@@ -36,5 +38,11 @@ void turbo_agent_harness_job_proof_destroy(turbo_agent_job_proof_t *proof);
  * immutable Host decision, including its canonical execution records. */
 int turbo_agent_harness_load_job_acceptance(const turbo_agent_job_proof_t *proof,
     turbo_agent_compile_diagnostic_t *diagnostic, json_value_t **out);
+int turbo_agent_harness_verify_job_source(turbo_agent_harness_t *harness,
+    const json_value_t *snapshot, turbo_agent_compile_diagnostic_t *diagnostic);
+int turbo_agent_harness_verify_job_evidence(const turbo_agent_job_proof_t *proof,
+    const json_value_t *reference, const json_value_t *result,
+    turbo_agent_job_acceptance_decision_t decision, const char *evidence_ref,
+    turbo_agent_compile_diagnostic_t *diagnostic);
 
 #endif

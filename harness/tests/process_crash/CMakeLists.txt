@@ -27,6 +27,14 @@ foreach(cut IN ITEMS delivery_intent_before delivery_intent_after delivery_inten
       -P "${CMAKE_CURRENT_SOURCE_DIR}/run_job_delivery_crash.cmake")
   set_tests_properties(test_job_${cut} PROPERTIES
     TIMEOUT 90 LABELS "harness;job;delivery;recovery;process")
+  add_test(NAME test_job_verified_${cut}
+    COMMAND "${CMAKE_COMMAND}"
+      "-DWORKER=$<TARGET_FILE:compiled_inspect_process_fixture>"
+      "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/cases"
+      "-DCUT=${cut}" "-DMODE=verified"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_job_delivery_crash.cmake")
+  set_tests_properties(test_job_verified_${cut} PROPERTIES
+    TIMEOUT 90 LABELS "harness;job;verification;delivery;recovery;process")
 endforeach()
 
 add_executable(job_process_fixture job_process_fixture.c)

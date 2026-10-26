@@ -12,7 +12,9 @@ compile the persisted Job proposal under the caller's compiler restrictions
 intersected with current Host grants. The compilation/result-contract gate is
 shared with ordinary compiled Inspect execution. No tool/model callback, graph
 execution or new Run is started by review. Host must serialize Job access, keep
-policy/registry/code stable until return, and validate source freshness itself.
+policy/registry/code stable until return. The opt-in [verified constructor](job-host-verifier.md)
+requires Host source/evidence callbacks and rechecks them on every operation;
+existing constructors keep manual source/evidence verification preconditions.
 
 A candidate is the execution-reference JSON returned by the bound Job adapter.
 It is an observation, not an authorization token: the review API reads the actual
@@ -88,6 +90,8 @@ Runtime Run; external delivery count stays zero.
 
 Acceptance evidence remains Host-authored. [Delivery intent/receipt metadata](job-delivery.md)
 now composes this decision with explicit Host reconciliation, without sending.
-External evidence verification, source freshness, amendment/replanning,
+The [Host verification seam](job-host-verifier.md) now enforces installed source
+and external evidence callbacks; production adapters still require qualification.
+Amendment/replanning,
 production delivery connectors and cancellation supervision remain future product work. Real-model quality and
 cost qualification stays independently tracked in issue #278. M1 is not complete.

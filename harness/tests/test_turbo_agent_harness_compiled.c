@@ -4,6 +4,7 @@
 #include "turbo_agent_job.h"
 #include "turbo_agent_job_acceptance.h"
 #include "turbo_agent_job_delivery.h"
+#include "turbo_agent_job_verifier.h"
 #include "turbo_agent_policy.h"
 #include "turbo_agent_session.h"
 #include "turbo_agent_inbox.h"
@@ -274,9 +275,10 @@ static turbo_agent_runtime_store_t compiled_inspect_store_fail_phase(const char 
   return store;
 }
 
-static turbo_agent_harness_t *make_compiled_harness_with_transport(
+static turbo_agent_harness_t *make_compiled_harness_configured(
     cmeta_threadpool_t *pool, turbo_tool_registry_t *registry,
-    turbo_agent_runtime_store_t runtime_store, turbo_agent_transport_fn transport) {
+    turbo_agent_runtime_store_t runtime_store, turbo_agent_transport_fn transport,
+    const turbo_agent_job_verifier_t *verifier) {
   turbo_agent_session_config_t session_config = {0};
   turbo_agent_app_config_t app_config = {0};
   turbo_agent_harness_config_t config;
@@ -290,8 +292,15 @@ static turbo_agent_harness_t *make_compiled_harness_with_transport(
   config.app_config = &app_config;
   config.executor = pool;
   turbo_agent_harness_t *harness = NULL;
-  (void)turbo_agent_harness_create_with_store(&config, &harness);
+  if (verifier) (void)turbo_agent_harness_create_verified_with_store(&config, verifier, &harness);
+  else (void)turbo_agent_harness_create_with_store(&config, &harness);
   return harness;
+}
+
+static turbo_agent_harness_t *make_compiled_harness_with_transport(
+    cmeta_threadpool_t *pool, turbo_tool_registry_t *registry,
+    turbo_agent_runtime_store_t runtime_store, turbo_agent_transport_fn transport) {
+  return make_compiled_harness_configured(pool, registry, runtime_store, transport, NULL);
 }
 
 static turbo_agent_harness_t *make_compiled_harness_with_store(
@@ -2037,5 +2046,214 @@ spec("Harness persisted Job dispatch") {
                 &result, &certificate, &result), SALTS_EINVAL);
     check_null(result); check_null(certificate); check_null(reference);
     check_equal(probe.calls, 0);
+  }
+}
+
+/* These callbacks observe borrowed real Job/canonical data; no synthetic result
+ * or verifier-created authorization is passed into the production path. */
+typedef struct job_verifier_probe_s {
+  int sources, evidences, source_status, evidence_status, source_fail_at;
+  int invalidate_during_evidence, last_decision, saw_typed_result;
+  int source_nested_status, evidence_nested_status;
+  turbo_agent_harness_t *nested;
+} job_verifier_probe_t;
+static int verifier_nested(turbo_agent_harness_t *harness) {
+  turbo_agent_compile_diagnostic_t diagnostic;
+  json_value_t *record = NULL;
+  int rc = read_acceptance(harness, &diagnostic, &record);
+  json_free(record);
+  return rc;
+}
+static int verify_job_source(const json_value_t *snapshot, void *user) {
+  job_verifier_probe_t *p = user;
+  const json_value_t *proposal = json_object_get(snapshot, "proposal");
+  ++p->sources;
+  if (p->nested) p->source_nested_status = verifier_nested(p->nested);
+  if (p->source_status) return p->source_status;
+  if (p->source_fail_at == p->sources) return SALTS_EIO;
+  if (!json_get_string(proposal, "source_revision") ||
+      strcmp(json_get_string(proposal, "source_revision"), "source-v1") ||
+      !json_get_string(proposal, "source_json") ||
+      strcmp(json_get_string(proposal, "source_json"), compiled_inspect_source)) return SALTS_EPROTO;
+  return SALTS_OK;
+}
+static int verify_job_evidence(const json_value_t *snapshot, const json_value_t *reference,
+    const json_value_t *result, turbo_agent_job_acceptance_decision_t decision,
+    const char *evidence_ref, void *user) {
+  job_verifier_probe_t *p = user;
+  ++p->evidences;
+  p->last_decision = (int)decision;
+  p->saw_typed_result = json_type(result) == JSON_OBJECT && json_get_bool(result, "ok", false);
+  if (p->nested) p->evidence_nested_status = verifier_nested(p->nested);
+  if (p->evidence_status) return p->evidence_status;
+  if (!p->saw_typed_result || strcmp(evidence_ref, "host-evidence-v1") ||
+      strcmp(json_get_string(snapshot, "id"), json_get_string(reference, "job_id")) ||
+      !json_get_string(reference, "run_id") || !json_get_string(reference, "execution_id") ||
+      json_get_int(snapshot, "revision", -1) != json_get_int(reference, "job_revision", -2)) return SALTS_EPROTO;
+  if (p->invalidate_during_evidence) p->source_status = SALTS_EPROTO;
+  return SALTS_OK;
+}
+
+spec("Harness mandatory Host Job verification") {
+  static cmeta_threadpool_t *pool;
+  static turbo_tool_registry_t *registry;
+  static turbo_agent_harness_t *harness;
+  static turbo_agent_job_t *job;
+  static compiled_inspect_probe_t probe;
+  static compiled_inspect_store_fault_t *fault;
+  static job_verifier_probe_t verification;
+  static turbo_agent_job_verifier_t verifier;
+  static turbo_agent_compile_diagnostic_t diagnostic;
+  static turbo_tool_status_t status;
+  static json_value_t *result, *certificate, *reference, *record, *snapshot;
+
+  before_each() {
+    cmeta_threadpool_config_t options = {.num_threads = 1, .queue_capacity = 1};
+    turbo_agent_runtime_store_t callbacks = compiled_inspect_store_fail_phase(NULL);
+    pool = cmeta_threadpool_create_with_config(&options);
+    registry = turbo_tool_registry_create();
+    probe = (compiled_inspect_probe_t){0};
+    verification = (job_verifier_probe_t){0};
+    fault = callbacks.user_data;
+    check_not_null(pool); check_not_null(registry); check_not_null(fault);
+    check_equal(register_compiled_inspect(registry, &probe, TURBO_TOOL_EFFECT_READ, 1), TURBO_TOOL_OK);
+    turbo_agent_job_verifier_init(&verifier);
+    verifier.source = verify_job_source; verifier.evidence = verify_job_evidence; verifier.user_data = &verification;
+    harness = make_compiled_harness_configured(pool, registry, callbacks, compiled_harness_transport, &verifier);
+    check_not_null(harness);
+    attach_compiled_probe_runtime(harness, &probe);
+    check_equal(set_compiled_host_policy(harness, 1), 0);
+    check_equal(turbo_agent_job_create(probe.runtime, "job-bound", "inspect", "Host verifies", &job), SALTS_OK);
+    check_equal(turbo_agent_job_propose(job, 0, compiled_inspect_source,
+        strlen(compiled_inspect_source), "source-v1"), SALTS_OK);
+    check_equal(turbo_agent_job_bind_compiled_inspect(job, 1, COMPILED_INSPECT_TEST_THREAD_ID,
+        "bound-attempt"), SALTS_OK);
+  }
+  after_each() {
+    json_free(result); json_free(certificate); json_free(reference); json_free(record); json_free(snapshot);
+    result = certificate = reference = record = snapshot = NULL;
+    turbo_agent_job_destroy(job); job = NULL;
+    turbo_agent_harness_release(harness);
+    turbo_tool_registry_destroy(registry);
+    cmeta_threadpool_destroy(pool);
+  }
+
+  it("copies mandatory callbacks and rechecks evidence throughout the delivery composition") {
+    memset(&verifier, 0, sizeof(verifier)); /* Original config cannot disable the copied verifier. */
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    check_equal(verification.sources, 4);
+    check_equal(verification.evidences, 1);
+    check_equal(verification.last_decision, (int)TURBO_AGENT_JOB_ACCEPTED);
+    check_equal(verification.saw_typed_result, 1);
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "status"), "outcome_unknown");
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 2, "delivery-1", &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 1, NULL, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "status"), "delivered");
+    check_equal(verification.evidences, 6);
+    check_equal(verification.sources, 14);
+    check_equal(probe.calls, 1);
+  }
+
+  it("preserves stale, missing, unavailable and timed-out source errors before Run creation") {
+    const int errors[] = {SALTS_EPROTO, SALTS_ENOENT, SALTS_EIO, SALTS_ETIMEDOUT};
+    for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+      verification.source_status = errors[i];
+      check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+          &result, &certificate, &reference), errors[i]);
+      check_null(result); check_null(certificate); check_null(reference);
+    }
+    check_equal(turbo_agent_runtime_store_list_json(probe.runtime, "runs", NULL, NULL, &record), SALTS_OK);
+    check_equal(json_array_size(record), (size_t)0);
+    check_equal(probe.calls, 0); check_equal(verification.evidences, 0);
+  }
+
+  it("withholds a committed result when the final source check fails and replays only the attempt") {
+    verification.source_fail_at = 2;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_EIO);
+    check_null(result); check_null(reference); check_not_null(certificate);
+    json_free(certificate); certificate = NULL;
+    check_equal(probe.calls, 1);
+    verification.source_fail_at = 0;
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_OK);
+    check_equal(probe.calls, 1);
+    check_equal(turbo_agent_runtime_store_list_json(probe.runtime, "runs", NULL, NULL, &record), SALTS_OK);
+    check_equal(json_array_size(record), (size_t)2);
+  }
+
+  it("never caches external evidence success or falls back after verification errors") {
+    const int errors[] = {SALTS_ENOENT, SALTS_EPROTO, SALTS_EIO, SALTS_ETIMEDOUT};
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_OK);
+    for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+      verification.evidence_status = errors[i];
+      check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+          &diagnostic, &record), errors[i]);
+      check_null(record);
+    }
+    check_equal(fault->acceptance_claims, 0);
+    verification.evidence_status = 0;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED, &diagnostic, &record), SALTS_OK);
+    json_free(record); record = NULL;
+    verification.evidence_status = SALTS_EIO;
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_EIO);
+    for (int op = 0; op < 3; ++op) {
+      check_equal(delivery_operation(harness, op, "delivery-1", &diagnostic, &record), SALTS_EIO);
+      check_null(record);
+    }
+    check_equal(fault->delivery_claims, 0); check_equal(probe.calls, 1);
+  }
+
+  it("does not call external evidence verification before canonical validation") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_OK);
+    check_equal(turbo_agent_runtime_store_get_json_status(probe.runtime, "compiled_inspect_attempts",
+        json_get_string(reference, "attempt_record_id"), &snapshot), SALTS_OK);
+    check_equal(turbo_runtime_json_object_set_string(snapshot, "phase", "started"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(probe.runtime, "compiled_inspect_attempts",
+        json_get_string(reference, "attempt_record_id"), snapshot), SALTS_OK);
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+        &diagnostic, &record), SALTS_EBUSY);
+    check_equal(verification.evidences, 0);
+    check_equal(fault->acceptance_claims, 0); check_equal(probe.calls, 1);
+  }
+
+  it("verifies explicit quality rejection without promoting it to acceptance") {
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_REJECTED, &diagnostic), SALTS_OK);
+    check_equal(verification.last_decision, (int)TURBO_AGENT_JOB_REJECTED);
+    check_equal(read_acceptance(harness, &diagnostic, &record), SALTS_OK);
+    check_equal(json_get_string(record, "decision"), "rejected");
+    json_free(record); record = NULL;
+    check_equal(delivery_operation(harness, 0, "delivery-1", &diagnostic, &record), SALTS_EPERM);
+    check_equal(fault->delivery_claims, 0); check_equal(probe.calls, 1);
+  }
+
+  it("holds submission exclusion through source and evidence callbacks") {
+    verification.nested = harness;
+    check_equal(accept_job_for_delivery(harness, TURBO_AGENT_JOB_ACCEPTED, &diagnostic), SALTS_OK);
+    check_equal(verification.source_nested_status, SALTS_EBUSY);
+    check_equal(verification.evidence_nested_status, SALTS_EBUSY);
+    check_equal(probe.calls, 1);
+  }
+
+  it("rechecks source after evidence verification before publishing a decision") {
+    check_equal(run_job_inspect(harness, "job-bound", 2, &diagnostic, &status,
+        &result, &certificate, &reference), SALTS_OK);
+    verification.invalidate_during_evidence = 1;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+        &diagnostic, &record), SALTS_EPROTO);
+    check_null(record); check_equal(fault->acceptance_claims, 0);
+    verification.invalidate_during_evidence = 0; verification.source_status = 0;
+    check_equal(record_acceptance(harness, reference, TURBO_AGENT_JOB_ACCEPTED,
+        &diagnostic, &record), SALTS_OK);
+    check_equal(probe.calls, 1);
   }
 }

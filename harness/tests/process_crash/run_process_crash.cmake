@@ -4,6 +4,14 @@ if(NOT DEFINED WORKER OR NOT EXISTS "${WORKER}" OR
   message(FATAL_ERROR "Invalid compiled Inspect crash test configuration")
 endif()
 
+if(DEFINED MODE AND NOT MODE STREQUAL "job")
+  message(FATAL_ERROR "Unsupported Inspect execution mode")
+endif()
+set(mode_args)
+if(MODE STREQUAL "job")
+  list(APPEND mode_args job)
+endif()
+
 string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef nonce)
 set(work "${ROOT}/${CUT}-${nonce} with spaces")
 if(EXISTS "${work}")
@@ -12,7 +20,7 @@ endif()
 file(MAKE_DIRECTORY "${work}")
 
 function(run_stage stage expected)
-  execute_process(COMMAND "${WORKER}" "${stage}" "${CUT}" "${work}"
+  execute_process(COMMAND "${WORKER}" "${stage}" "${CUT}" "${work}" ${mode_args}
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
   if(NOT "${result}" STREQUAL "${expected}")
     message(FATAL_ERROR
@@ -25,7 +33,9 @@ run_stage(crash 86)
 run_stage(inspect 0)
 run_stage(denied 0)
 if(NOT CUT STREQUAL "before_claim")
-  run_stage(mismatch 0)
+  if(NOT MODE STREQUAL "job")
+    run_stage(mismatch 0)
+  endif()
   run_stage(stale 0)
 endif()
 run_stage(recover 0)

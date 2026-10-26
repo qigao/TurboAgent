@@ -75,6 +75,14 @@ spec("installed C++17 SDK consumer") {
     config.runtime_store = turbo_agent_runtime_store_memory_create();
     check_equal(turbo_agent_harness_create_with_store(&harness_config, &harness), SALTS_OK);
     check_not_null(harness);
+    turbo_agent_compiler_config_t compiler{};
+    turbo_agent_compiler_config_init(&compiler);
+    turbo_agent_compile_diagnostic_t diagnostic{};
+    turbo_tool_status_t tool_status = TURBO_TOOL_OK;
+    json_value_t *result = nullptr, *certificate = nullptr, *reference = nullptr;
+    check_equal(turbo_agent_harness_execute_job_inspect_json(harness, "../bad", 2,
+        &compiler, nullptr, &diagnostic, &tool_status, &result, &certificate, &reference), SALTS_EINVAL);
+    check_null(result); check_null(certificate); check_null(reference);
     turbo_agent_harness_release(harness);
     cmeta_threadpool_destroy(pool);
   }

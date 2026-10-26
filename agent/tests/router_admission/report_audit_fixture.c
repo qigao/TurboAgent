@@ -27,7 +27,8 @@ struct fixture_s {
 static const char *names[] = {"writer", "reviewer", "planner", "executor"};
 static const char *endpoint_ids[] = {"draft", "review", "synthesis", "delivery"};
 static const char *files[] = {"draft.db", "review.db", "synthesis.db", "delivery.db"};
-static int stop_cut(const fixture_t *f) { return !strncmp(f->cut, "stop_", 5); }
+static int cleanup_cut(const fixture_t *f) { return !strncmp(f->cut, "cleanup_", 8); }
+static int stop_cut(const fixture_t *f) { return !strncmp(f->cut, "stop_", 5) || cleanup_cut(f); }
 static int gate_cut(const fixture_t *f) { return !strncmp(f->cut, "gate_", 5); }
 static void crash_now(fixture_t *f, const char *boundary) {
   fprintf(stderr, "REPORT_CRASH cut=%s boundary=%s\n", f->cut, boundary); fflush(stderr); _Exit(86);
@@ -80,6 +81,8 @@ static int host_create(void *u, const char *c, const char *id, const char *text)
     if (stop && !strcmp(f->cut, "stop_before_record")) crash_now(f, "after_terminal_observation_before_stop_record");
     if (gate_failure && !strcmp(f->cut, "gate_before_record")) crash_now(f, "after_drain_before_gate_failure_record");
     if (fan_in && !strcmp(f->cut, "gate_unwritten")) return SALTS_ENOSPC;
+    if (stopped_task && !strcmp(f->cut, "cleanup_unwritten")) return SALTS_ENOSPC;
+    if (gate_failure && !strcmp(f->cut, "cleanup_before_failure")) crash_now(f, "after_cleanup_error_before_failure_record");
   }
   rc = f->base.create_if_absent(f->base.user_data, c, id, text);
   if (!rc && f->inject) {
@@ -93,6 +96,10 @@ static int host_create(void *u, const char *c, const char *id, const char *text)
     if (fan_in && gate_cut(f)) return SALTS_EIO;
     if (gate_failure && !strcmp(f->cut, "gate_after_record")) crash_now(f, "after_gate_failure_record_before_error_return");
     if (gate_failure && !strcmp(f->cut, "gate_lost_ack")) return SALTS_ENOSPC;
+    if (stopped_task && (!strcmp(f->cut, "cleanup_before_failure") || !strcmp(f->cut, "cleanup_after_failure"))) return SALTS_EIO;
+    if (stop && (!strcmp(f->cut, "cleanup_after_return") || !strcmp(f->cut, "cleanup_lost_ack"))) return SALTS_ENOSPC;
+    if (gate_failure && !strcmp(f->cut, "cleanup_after_failure")) crash_now(f, "after_cleanup_failure_record_before_return");
+    if (gate_failure && !strcmp(f->cut, "cleanup_lost_ack")) return SALTS_EBUSY;
   }
   return rc;
 }
@@ -218,12 +225,22 @@ static int crash_stage(fixture_t *f) {
     REQUIRE(unwritten || lost_ack || !strcmp(f->cut, "gate_after_return"));
     crash_now(f, unwritten ? "after_unwritten_gate_error_return" : lost_ack ? "after_gate_failure_lost_ack_return" : "after_gate_error_return");
   }
+  if (cleanup_cut(f)) {
+    int lost = !strcmp(f->cut, "cleanup_lost_ack"), unwritten = !strcmp(f->cut, "cleanup_unwritten");
+    REQUIRE(rc == SALTS_ENOSPC && !delivery && !strcmp(phase, "stop-audit"));
+    REQUIRE(f->diagnostics.operation_code == SALTS_EIO && !strcmp(f->diagnostics.operation_phase, "aggregation"));
+    REQUIRE(f->diagnostics.stop_audit_attempted && f->diagnostics.stop_audit_code == SALTS_ENOSPC);
+    REQUIRE(f->diagnostics.gate_audit_attempted && f->diagnostics.gate_audit_code == (lost ? SALTS_EBUSY : 0));
+    REQUIRE(!counter_add(f, "stop-return") && (lost || unwritten || !strcmp(f->cut, "cleanup_after_return")));
+    crash_now(f, lost ? "after_cleanup_diagnostic_lost_ack_return" : unwritten ? "after_unwritten_cleanup_error_return" : "after_cleanup_error_return");
+  }
   if (stop_cut(f)) {
     int lost_ack = !strcmp(f->cut, "stop_lost_ack");
     REQUIRE(rc == SALTS_EIO && !delivery);
     REQUIRE(!strcmp(phase, lost_ack ? "stop-audit" : "aggregation"));
     REQUIRE(f->diagnostics.operation_code == SALTS_EIO && !strcmp(f->diagnostics.operation_phase, "aggregation"));
     REQUIRE(f->diagnostics.stop_audit_attempted && f->diagnostics.stop_audit_code == (lost_ack ? SALTS_EIO : 0));
+    REQUIRE(f->diagnostics.gate_audit_attempted == lost_ack && !f->diagnostics.gate_audit_code);
     REQUIRE(!counter_add(f, "stop-return"));
     REQUIRE(lost_ack || !strcmp(f->cut, "stop_after_return"));
     crash_now(f, lost_ack ? "after_stop_lost_ack_return" : "after_stop_error_return");
@@ -266,7 +283,8 @@ static int inspect(fixture_t *f, int healthy) {
   REQUIRE(!counter_get(f, "healthy-tool", &n) && n == healthy);
   REQUIRE(!counter_get(f, "healthy-handoff", &n) && n == healthy);
   REQUIRE(!counter_get(f, "healthy-delivery", &n) && n == healthy);
-  int stop_returned = !strcmp(f->cut, "stop_after_return") || !strcmp(f->cut, "stop_lost_ack");
+  int stop_returned = !strcmp(f->cut, "stop_after_return") || !strcmp(f->cut, "stop_lost_ack") ||
+      !strcmp(f->cut, "cleanup_after_return") || !strcmp(f->cut, "cleanup_lost_ack") || !strcmp(f->cut, "cleanup_unwritten");
   REQUIRE(!counter_get(f, "subject-stop-return", &n) && n == stop_returned);
   REQUIRE(!counter_get(f, "healthy-stop-return", &n) && n == 0);
   int gate_returned = !strcmp(f->cut, "gate_after_return") || !strcmp(f->cut, "gate_lost_ack") || !strcmp(f->cut, "gate_unwritten");
@@ -305,8 +323,8 @@ static int inspect(fixture_t *f, int healthy) {
   }
   if (stopped) {
     json_value_t *intent = NULL, *observation = NULL, *stop = NULL, *run = NULL;
-    int observed = strcmp(f->cut, "stop_before_observation") != 0;
-    int recorded = !strcmp(f->cut, "stop_after_record") || stop_returned;
+    int observed = strcmp(f->cut, "stop_before_observation") && strcmp(f->cut, "cleanup_unwritten");
+    int recorded = !strcmp(f->cut, "stop_after_record") || (stop_returned && strcmp(f->cut, "cleanup_unwritten"));
     REQUIRE(turbo_agent_router_load_intent(f->host, "subject-aggregate", &intent) == SALTS_OK);
     REQUIRE(turbo_agent_router_load_observation(f->host, "subject-stop-aggregate", &observation) == (observed ? SALTS_OK : SALTS_ENOENT));
     if (observation) {
@@ -333,10 +351,11 @@ static int inspect(fixture_t *f, int healthy) {
     json_free(intent); json_free(observation); json_free(stop); json_free(run);
   }
   json_value_t *failure = NULL;
-  int recorded = gate_cut(f) && strcmp(f->cut, "gate_before_record");
+  int cleanup_failure = !strcmp(f->cut, "stop_lost_ack") || (cleanup_cut(f) && strcmp(f->cut, "cleanup_before_failure"));
+  int recorded = (gate_cut(f) && strcmp(f->cut, "gate_before_record")) || cleanup_failure;
   REQUIRE(turbo_agent_runtime_store_get_json_status(f->host, SINGLE_AGENT_REPORT_GATE_FAILURES, "subject-gate-failure", &failure) ==
       (recorded ? SALTS_OK : SALTS_ENOENT));
-  if (failure) {
+  if (failure && !cleanup_failure) {
     REQUIRE(!strcmp(json_get_string(failure, "gate_id"), "subject-fan-in"));
     REQUIRE(!strcmp(json_get_string(failure, "gate_outcome"), "unresolved"));
     REQUIRE(!strcmp(json_get_string(failure, "operation_phase"), "workers"));
@@ -344,6 +363,19 @@ static int inspect(fixture_t *f, int healthy) {
     REQUIRE(turbo_runtime_json_value_as_int64(json_object_get(failure, "gate_return_code"), 0) ==
         (!strcmp(f->cut, "gate_unwritten") ? SALTS_ENOSPC : SALTS_EIO));
     REQUIRE(json_array_size(json_object_get(failure, "acknowledged_gates")) == 3);
+  }
+  if (failure && cleanup_failure) {
+    int task_gate = !strcmp(f->cut, "cleanup_after_failure") || !strcmp(f->cut, "cleanup_unwritten");
+    REQUIRE(turbo_runtime_json_value_as_int64(json_object_get(failure, "schema_version"), 0) == 2);
+    REQUIRE(!strcmp(json_get_string(failure, "gate_id"), task_gate ? "subject-stop-aggregate" : "subject-stop"));
+    REQUIRE(!strcmp(json_get_string(failure, "semantics"), "post_drain_report_cleanup_failure_observation"));
+    REQUIRE(!strcmp(json_get_string(failure, "operation_phase"), "aggregation"));
+    REQUIRE(!strcmp(json_get_string(failure, "gate_outcome"), "unresolved"));
+    REQUIRE(turbo_runtime_json_value_as_int64(json_object_get(failure, "operation_code"), 0) == SALTS_EIO);
+    REQUIRE(turbo_runtime_json_value_as_int64(json_object_get(failure, "gate_return_code"), 0) ==
+        (!strcmp(f->cut, "stop_lost_ack") || !strcmp(f->cut, "cleanup_after_failure") ? SALTS_EIO : SALTS_ENOSPC));
+    REQUIRE(json_array_size(json_object_get(failure, "acknowledged_gates")) == 5);
+    REQUIRE(json_array_size(json_object_get(failure, "acknowledged_cleanup")) == (task_gate ? 0 : 1));
   }
   json_free(failure);
   json_free(manifest);

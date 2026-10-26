@@ -25,7 +25,8 @@ set_target_properties(report_audit_process_fixture PROPERTIES
   C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "Agent/tests")
 foreach(cut IN ITEMS before_manifest after_manifest after_fan_in after_review before_ready after_ready after_return after_delivery
     stop_before_observation stop_after_observation stop_before_record stop_after_record stop_after_return stop_lost_ack
-    gate_before_record gate_after_record gate_after_return gate_lost_ack gate_unwritten)
+    gate_before_record gate_after_record gate_after_return gate_lost_ack gate_unwritten
+    cleanup_before_failure cleanup_after_failure cleanup_after_return cleanup_lost_ack cleanup_unwritten)
   add_test(NAME test_report_audit_crash_${cut}
     COMMAND "${CMAKE_COMMAND}"
       "-DWORKER=$<TARGET_FILE:report_audit_process_fixture>"

@@ -3,6 +3,7 @@
 #include "turbo_model_provider.h"
 #include "turbo_agent_knowledge_store.h"
 #include "turbo_runtime_store_sqlite.h"
+#include "turbo_runtime_segment.h"
 #include <fmt.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -147,6 +148,10 @@ static char *report_copy(const char *text) {
   if (copy) memcpy(copy, text, strlen(text) + 1);
   return copy;
 }
+static int report_unentered_node(turbo_graph_exec_ctx_t *ctx, void *user) {
+  (void)ctx; ++*(int *)user; return 0;
+}
+static uint64_t report_expired_clock(void *user) { (void)user; return 100; }
 
 static int report_authority_transport(const char *request, char **out, void *user) {
   report_fixture_t *f = user;
@@ -584,6 +589,41 @@ spec("one Host goal composed from different model workers") {
     }
   }
 
+  for (int deadline = 0; deadline < 2; ++deadline) {
+    it("joins a real cancelled or timed-out Run to its interrupted checkpoint, deadline=%d", deadline) {
+      turbo_cancel_source_t *source = NULL; turbo_cancel_token_t *token = NULL;
+      turbo_cancel_source_config_t control = {sizeof(control), TURBO_RUNTIME_CONTROL_ABI_VERSION, 100, report_expired_clock, NULL};
+      check_equal(turbo_cancel_source_create(deadline ? &control : NULL, &source), SALTS_OK);
+      check_equal(turbo_cancel_source_token(source, &token), SALTS_OK);
+      if (!deadline) check_equal(turbo_cancel_source_cancel(source, TURBO_CANCEL_USER), SALTS_OK);
+      int entered = 0; turbo_graph_t *graph = turbo_graph_create("report-anchor-cancellation"); check_not_null(graph);
+      check_equal(turbo_graph_add_json_value_node(graph, "start", report_unentered_node, &entered), TURBO_GRAPH_EXEC_OK);
+      check_equal(turbo_graph_set_entry(graph, "start"), TURBO_GRAPH_EXEC_OK);
+      json_value_t *input = json_create_object(), *summary = NULL, *state = NULL, *record = NULL, *observation = json_create_object();
+      check_not_null(input); check_not_null(observation);
+      turbo_runtime_segment_t segment; turbo_runtime_segment_init(&segment);
+      segment.runtime = f.runtimes[0]; segment.graph = graph; segment.thread_id = "report-anchor-thread";
+      segment.run_id = "report-anchor-run"; segment.parent_agent_run_id = f.config.parent_run_id;
+      segment.start_state = input; segment.cancel_token = token;
+      check_equal(turbo_runtime_segment_execute(&segment, &summary, &state), 0); check_equal(entered, 0);
+      const char *status = deadline ? "timed_out" : "cancelled", *checkpoint = json_get_string(summary, "checkpoint_id");
+      check_equal(json_get_string(summary, "status"), status); check_not_null(checkpoint);
+      check_equal(turbo_runtime_json_object_set_string(observation, "runtime_run_id", segment.run_id), 0);
+      check_equal(turbo_runtime_json_object_set_string(observation, "runtime_checkpoint_id", checkpoint), 0);
+      check_equal(turbo_runtime_json_object_set_string(observation, "runtime_status", status), 0);
+      check_equal(turbo_runtime_json_object_set_string(observation, "thread_id", segment.thread_id), 0);
+      check_equal(turbo_runtime_json_object_set_string(observation, "parent_run_id", segment.parent_agent_run_id), 0);
+      check_equal(turbo_agent_runtime_store_get_json_status(f.runtimes[0], "checkpoints", checkpoint, &record), SALTS_OK);
+      check_equal(json_get_string(record, "status"), "interrupted");
+      check_equal(report_inspect_anchors(observation, f.runtimes[0]), SALTS_OK);
+      check_equal(turbo_runtime_json_object_set_string(record, "status", status), 0);
+      check_equal(turbo_agent_runtime_store_put_json(f.runtimes[0], "checkpoints", checkpoint, record), SALTS_OK);
+      check_equal(report_inspect_anchors(observation, f.runtimes[0]), SALTS_EPROTO);
+      json_free(record); json_free(observation); json_free(summary); json_free(state); json_free(input);
+      turbo_graph_destroy(graph); turbo_cancel_token_release(token); turbo_cancel_source_destroy(source);
+    }
+  }
+
   for (int fault = 0; fault < 4; ++fault) {
     it("propagates exact canonical read errors without head/list fallback, case=%d", fault) {
       report_enable_audit(&f, 1); check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
@@ -759,7 +799,8 @@ spec("one Host goal composed from different model workers") {
         check_true(f.diagnostics.stop_audit_attempted); check_equal(f.diagnostics.stop_audit_code, rc);
         check_equal(f.diagnostics.operation_code, failure == 7 ? SALTS_ECANCELED : SALTS_EIO);
         check_equal(f.diagnostics.operation_phase, failure < 3 ? "workers" : failure < 5 ? "aggregation" : failure < 7 ? "execution" : "approval");
-        check_equal(f.audit.creates, writes[failure]);
+        check_equal(f.audit.creates, writes[failure] + 1);
+        check_true(f.diagnostics.gate_audit_attempted); check_equal(f.diagnostics.gate_audit_code, 0);
         check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 0); check_equal(f.audit.lists, 0);
         json_value_t *record = NULL;
         const char *collection = !strcmp(ids[failure], "sample-stop") ? SINGLE_AGENT_REPORT_STOPS : TURBO_AGENT_ROUTER_OBSERVATION_COLLECTION;
@@ -769,6 +810,16 @@ spec("one Host goal composed from different model workers") {
           check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_STOPS, "sample-stop", &record), SALTS_ENOENT);
           check_null(record);
         }
+        check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES, "sample-gate-failure", &record), SALTS_OK);
+        check_equal(turbo_runtime_json_value_as_int64(json_object_get(record, "schema_version"), 0), 2);
+        check_equal(json_get_string(record, "semantics"), "post_drain_report_cleanup_failure_observation");
+        check_equal(json_get_string(record, "gate_id"), ids[failure]);
+        check_equal(json_get_string(record, "gate_outcome"), "unresolved");
+        check_equal(turbo_runtime_json_value_as_int64(json_object_get(record, "gate_return_code"), 0), rc);
+        check_equal(turbo_runtime_json_value_as_int64(json_object_get(record, "operation_code"), 0), f.diagnostics.operation_code);
+        check_equal(json_get_string(record, "operation_phase"), f.diagnostics.operation_phase); json_free(record);
+        json_value_t *view = NULL;
+        check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK); json_free(view);
         int before = f.audit.creates; f.audit.fault_id = NULL;
         check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EALREADY);
         check_equal(f.audit.creates, before + 1); check_false(f.diagnostics.stop_audit_attempted);
@@ -787,7 +838,8 @@ spec("one Host goal composed from different model workers") {
       check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EALREADY);
       check_null(delivery); check_equal(phase, "stop-audit"); check_equal(f.diagnostics.operation_code, SALTS_EIO);
       check_equal(f.diagnostics.stop_audit_code, SALTS_EALREADY); check_true(f.diagnostics.stop_audit_attempted);
-      check_equal(f.audit.creates, conflict ? 7 : 6); check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 1); check_equal(f.audit.lists, 0);
+      check_equal(f.audit.creates, conflict ? 8 : 7); check_equal(f.audit.gets, 0); check_equal(f.audit.puts, 1); check_equal(f.audit.lists, 0);
+      check_true(f.diagnostics.gate_audit_attempted); check_equal(f.diagnostics.gate_audit_code, 0);
       check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, collection, id, &old), SALTS_OK);
       check_equal(json_get_string(old, "owner"), "different-operation"); check_null(json_object_get(old, "operation_code")); json_free(old);
     }
@@ -1015,6 +1067,149 @@ spec("one Host goal composed from different model workers") {
     check_equal(single_agent_report_gate_failure(&f.config, &trace, "workers", SALTS_EIO), SALTS_OK);
     json_value_t *view = (json_value_t *)1;
     check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view);
+  }
+
+  for (int lost = 0; lost < 2; ++lost) {
+    for (int diagnostic = 0; diagnostic < 3; ++diagnostic) {
+      it("retains the original stop and cleanup error without recursively retrying a failed diagnostic, lost=%d diagnostic=%d", lost, diagnostic) {
+        report_enable_audit(&f, 1); f.fail_index = 2;
+        f.audit.fault_id = "sample-stop"; f.audit.lost_ack = lost;
+        f.audit.fault2_id = "sample-gate-failure"; f.audit.lost_ack2 = diagnostic == 1;
+        if (diagnostic == 2) {
+          json_value_t *old = json_create_object(); check_not_null(old);
+          check_equal(turbo_runtime_json_object_set_string(old, "owner", "previous-diagnostic"), 0);
+          check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES, "sample-gate-failure", old), SALTS_OK);
+          json_free(old); f.audit.fault2_id = NULL;
+        }
+        int code = lost ? SALTS_EIO : SALTS_ENOSPC;
+        check_equal(single_agent_report_run(&f.config, &delivery, &phase), code); check_null(delivery);
+        check_equal(phase, "stop-audit"); check_equal(f.diagnostics.operation_code, SALTS_EIO);
+        check_equal(f.diagnostics.operation_phase, "aggregation"); check_equal(f.diagnostics.stop_audit_code, code);
+        check_true(f.diagnostics.gate_audit_attempted);
+        check_equal(f.diagnostics.gate_audit_code, diagnostic == 2 ? SALTS_EALREADY : diagnostic == 1 ? SALTS_EIO : SALTS_ENOSPC);
+        check_equal(f.audit.creates, 8); check_equal(f.audit.gets, 0); check_equal(f.audit.lists, 0); check_equal(f.audit.puts, diagnostic == 2);
+        check_equal(atomic_load(&f.tool_calls), 0); check_equal(atomic_load(&f.models[3].calls), 0);
+        json_value_t *record = NULL;
+        check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES,
+            "sample-gate-failure", &record), diagnostic ? SALTS_OK : SALTS_ENOENT);
+        if (record) check_equal(json_get_string(record, diagnostic == 2 ? "owner" : "semantics"),
+            diagnostic == 2 ? "previous-diagnostic" : "post_drain_report_cleanup_failure_observation");
+        json_free(record); f.audit.fault_id = f.audit.fault2_id = NULL;
+        check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EALREADY);
+        check_equal(f.audit.creates, 9); check_false(f.diagnostics.gate_audit_attempted);
+      }
+    }
+  }
+
+  for (int broken = 0; broken < 22; ++broken) {
+    it("rejects inconsistent cleanup failure errors, phase, nullable gate and acknowledgement prefix, case=%d", broken) {
+      report_enable_audit(&f, 1); f.fail_index = 2; f.audit.fault_id = "sample-stop";
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOSPC);
+      json_value_t *record = NULL, *value;
+      check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES, "sample-gate-failure", &record), SALTS_OK);
+      switch (broken) {
+        case 0: check_equal(turbo_runtime_json_object_set_int64(record, "operation_code", 0), 0); break;
+        case 1: check_equal(turbo_runtime_json_object_set_int64(record, "gate_return_code", 0), 0); break;
+        case 2: check_equal(turbo_runtime_json_object_set_string(record, "semantics", "post_drain_report_gate_failure_observation"), 0); break;
+        case 3: check_equal(turbo_runtime_json_object_set_int64(record, "schema_version", 3), 0); break;
+        case 4: check_equal(turbo_runtime_json_object_set_string(record, "parent_run_id", "different"), 0); break;
+        case 5: check_equal(turbo_runtime_json_object_set_string(record, "report_id", "different"), 0); break;
+        case 6: check_equal(turbo_runtime_json_object_set_string(record, "operation_phase", "workers"), 0); break;
+        case 7: check_equal(turbo_runtime_json_object_set_string(record, "gate_id", "sample-stop-execute"), 0); break;
+        case 8: check_equal(turbo_runtime_json_object_set_string(record, "gate_outcome", "committed"), 0); break;
+        case 9: check_equal(turbo_runtime_json_object_set(record, "gate_id", json_create_null()), 0); break;
+        case 10: check_equal(turbo_runtime_json_object_set(record, "acknowledged_cleanup", json_create_array()), 0); break;
+        case 11:
+          value = json_create_array(); check_not_null(value);
+          check_equal(turbo_runtime_json_array_append(value, json_create_string("sample-stop-execute")), 0);
+          check_equal(turbo_runtime_json_object_set(record, "acknowledged_cleanup", value), 0); break;
+        case 12: check_equal(turbo_runtime_json_object_set(record, "acknowledged_gates", json_create_array()), 0); break;
+        case 13: check_equal(turbo_runtime_json_object_set_int64(record, "observed_mono_ms", -1), 0); break;
+        case 14: check_equal(turbo_runtime_json_object_set_string(record, "clock_domain", "utc"), 0); break;
+        case 15: check_equal(turbo_runtime_json_object_set_string(record, "extra", "unknown"), 0); break;
+        case 16:
+          { const char *raw = "\"unresolved\\u0000committed\""; value = json_parse(raw, strlen(raw)); check_not_null(value); }
+          check_equal(turbo_runtime_json_object_set(record, "gate_outcome", value), 0); break;
+        case 17: value = json_parse("1.5", 3); check_not_null(value); check_equal(turbo_runtime_json_object_set(record, "operation_code", value), 0); break;
+        case 18: check_equal(turbo_runtime_json_object_set_string(record, "gate_id", "sample-stop-aggregate"), 0); break;
+        case 19: check_equal(turbo_runtime_json_object_set_string(record, "gate_outcome", "not_attempted"), 0); break;
+        case 20: check_equal(turbo_runtime_json_object_set_int64(record, "observed_mono_ms", INT64_C(9007199254740992)), 0); break;
+        default: check_equal(turbo_runtime_json_object_set_string(record, "operation_phase", "approval"), 0); break;
+      }
+      check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, SINGLE_AGENT_REPORT_GATE_FAILURES, "sample-gate-failure", record), SALTS_OK); json_free(record);
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view);
+    }
+  }
+
+  for (int mismatch = 0; mismatch < 2; ++mismatch) {
+    it("joins a committed but unacknowledged stop row to its original operation and clock, mismatch=%d", mismatch) {
+      report_enable_audit(&f, 1); f.fail_index = 2; f.audit.fault_id = "sample-stop"; f.audit.lost_ack = 1;
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_EIO);
+      json_value_t *record = NULL;
+      check_equal(turbo_agent_runtime_store_get_json_status(f.audit_runtime, mismatch ? SINGLE_AGENT_REPORT_STOPS : SINGLE_AGENT_REPORT_GATE_FAILURES,
+          mismatch ? "sample-stop" : "sample-gate-failure", &record), SALTS_OK);
+      if (!mismatch) check_equal(turbo_runtime_json_object_set_int64(record, "operation_code", SALTS_ECANCELED), 0);
+      else check_equal(turbo_runtime_json_object_set_int64(record, "observed_mono_ms", INT64_C(9007199254740991)), 0);
+      check_equal(turbo_agent_runtime_store_put_json(f.audit_runtime, mismatch ? SINGLE_AGENT_REPORT_STOPS : SINGLE_AGENT_REPORT_GATE_FAILURES,
+          mismatch ? "sample-stop" : "sample-gate-failure", record), SALTS_OK); json_free(record);
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_EPROTO); check_null(view);
+    }
+  }
+
+  it("projects a cleanup construction error with a null gate and no invented persistence attempt") {
+    report_enable_audit(&f, 1);
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_OK);
+    single_agent_report_trace_t trace = {.acknowledged = 2047u};
+    single_agent_report_cleanup_trace_t cleanup = {0};
+    check_equal(single_agent_report_cleanup_failure(&f.config, &trace, &cleanup, "delivery-audit", SALTS_ETIMEDOUT, SALTS_ENOMEM), SALTS_OK);
+    json_value_t *view = NULL;
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK);
+    const json_value_t *record = json_object_get(json_object_get(view, "records"), "gate-failure");
+    check_equal(json_type(json_object_get(record, "gate_id")), JSON_NULL);
+    check_equal(json_get_string(record, "gate_outcome"), "not_attempted");
+    check_false(json_get_bool(view, "delivery_proven", 1)); json_free(view);
+  }
+
+  it("records a cleanup failure with the optional in-memory diagnostics omitted") {
+    report_enable_audit(&f, 1); f.config.diagnostics = NULL; f.fail_index = 2; f.audit.fault_id = "sample-stop-aggregate";
+    check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOSPC); check_equal(phase, "stop-audit"); check_null(delivery);
+    json_value_t *view = NULL;
+    check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), SALTS_OK);
+    const json_value_t *record = json_object_get(json_object_get(view, "records"), "gate-failure");
+    check_equal(turbo_runtime_json_value_as_int64(json_object_get(record, "operation_code"), 0), SALTS_EIO); json_free(view);
+  }
+
+  for (int lost = 0; lost < 2; ++lost) {
+    it("distinguishes earlier acknowledged cleanup from an unacknowledged row in a construction-error projection, lost=%d", lost) {
+      report_enable_audit(&f, 1); f.fail_index = 2;
+      f.audit.fault_id = lost ? "sample-stop-aggregate" : "sample-stop"; f.audit.lost_ack = lost;
+      f.audit.fault2_id = "sample-gate-failure";
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), lost ? SALTS_EIO : SALTS_ENOSPC);
+      check_equal(f.diagnostics.gate_audit_code, SALTS_ENOSPC); f.audit.fault_id = f.audit.fault2_id = NULL;
+      single_agent_report_trace_t trace = {.acknowledged = 31u};
+      single_agent_report_cleanup_trace_t cleanup = {.acknowledged = lost ? 0u : 4u};
+      check_equal(single_agent_report_cleanup_failure(&f.config, &trace, &cleanup, "aggregation", SALTS_EIO, SALTS_ENOMEM), SALTS_OK);
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), lost ? SALTS_EPROTO : SALTS_OK);
+      if (lost) check_null(view);
+      else {
+        const json_value_t *record = json_object_get(json_object_get(view, "records"), "gate-failure");
+        check_equal(json_array_size(json_object_get(record, "acknowledged_cleanup")), 1u); json_free(view);
+      }
+    }
+  }
+
+  for (int missing = 0; missing < 2; ++missing) {
+    it("requires acknowledged cleanup anchors and preserves diagnostic read errors, missing=%d", missing) {
+      report_enable_audit(&f, 1); f.fail_index = 2; f.audit.fault_id = "sample-stop";
+      check_equal(single_agent_report_run(&f.config, &delivery, &phase), SALTS_ENOSPC);
+      f.audit.get_fault_id = missing ? "sample-stop-aggregate" : "sample-gate-failure";
+      f.audit.get_fault_code = missing ? SALTS_ENOENT : SALTS_EIO;
+      json_value_t *view = (json_value_t *)1;
+      check_equal(report_inspect_fixture(&f, f.config.parent_run_id, &view), missing ? SALTS_EPROTO : SALTS_EIO); check_null(view);
+    }
   }
 
   for (int late = 0; late < 3; ++late) {

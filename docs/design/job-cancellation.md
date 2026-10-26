@@ -111,3 +111,8 @@ This completes the durable cancellation-request slice. Asynchronous scheduling,
 terminal cancellation acknowledgement, remote worker supervision, bound-Job
 amendment/replanning and production delivery connectors remain open. M1 remains
 incomplete; real-model quality/cost/latency is tracked separately in #278.
+
+[Local asynchronous supervision](job-async-supervision.md) now retains a bound
+Inspect owner through actual callback exit and serial cancellation publication,
+with explicit status/wait/result retirement. Durable terminal acknowledgements
+and remote supervision remain separate work.

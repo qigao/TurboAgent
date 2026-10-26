@@ -368,6 +368,10 @@ void turbo_agent_harness_end_submit(turbo_agent_harness_t *harness) {
   cmeta_mutex_unlock(&harness->mutex);
 }
 
+cmeta_threadpool_t *turbo_agent_harness_executor(turbo_agent_harness_t *harness) {
+  return harness->executor;
+}
+
 static int turbo_agent_harness_compiled_reject(
     turbo_agent_compile_diagnostic_t *diagnostic,
     turbo_agent_compile_status_t status, const char *message) {
@@ -1349,7 +1353,7 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
     turbo_agent_compile_diagnostic_t *out_diagnostic,
     turbo_tool_status_t *out_tool_status,
     json_value_t **out_result,
-    json_value_t **out_certificate, json_value_t **out_reference) {
+    json_value_t **out_certificate, json_value_t **out_reference, int reserved) {
   turbo_agent_inspect_admission_t admission = {0};
   json_value_t *job_snapshot = NULL;
   json_value_t *job_reference = NULL;
@@ -1397,8 +1401,10 @@ static int turbo_agent_harness_execute_compiled_inspect_attempt_impl(
     return SALTS_EINVAL;
   }
 
-  rc = turbo_agent_harness_begin_submit(harness);
-  if (rc != SALTS_OK) return rc;
+  if (!reserved) {
+    rc = turbo_agent_harness_begin_submit(harness);
+    if (rc != SALTS_OK) return rc;
+  }
 
   session = turbo_agent_app_session(harness->app);
   agent = turbo_agent_session_agent(session);
@@ -1627,7 +1633,7 @@ done:
   free(execution_id);
   turbo_agent_executable_plan_destroy(plan);
   json_free(job_snapshot);
-  turbo_agent_harness_end_submit(harness);
+  if (!reserved) turbo_agent_harness_end_submit(harness);
   return rc;
 }
 
@@ -1643,7 +1649,7 @@ int turbo_agent_harness_execute_compiled_inspect_attempt_json(
     json_value_t **out_certificate) {
   return turbo_agent_harness_execute_compiled_inspect_attempt_impl(
       harness, compiler_config, source_json, source_json_size, context, attempt_id, NULL, 0,
-      out_diagnostic, out_tool_status, out_result, out_certificate, NULL);
+      out_diagnostic, out_tool_status, out_result, out_certificate, NULL, 0);
 }
 
 int turbo_agent_harness_execute_compiled_inspect_json(
@@ -1660,7 +1666,7 @@ int turbo_agent_harness_execute_compiled_inspect_json(
   if (!attempt_id) return SALTS_ENOMEM;
   rc = turbo_agent_harness_execute_compiled_inspect_attempt_impl(
       harness, compiler_config, source_json, source_json_size, context, attempt_id, NULL, 0,
-      out_diagnostic, out_tool_status, out_result, out_certificate, NULL);
+      out_diagnostic, out_tool_status, out_result, out_certificate, NULL, 0);
   free(attempt_id);
   return rc;
 }
@@ -1676,7 +1682,15 @@ int turbo_agent_harness_execute_job_inspect_json(
   return turbo_agent_harness_execute_compiled_inspect_attempt_impl(
       harness, compiler_config, NULL, 0, context, NULL, job_id ? job_id : "",
       expected_job_revision, out_diagnostic, out_tool_status, out_result,
-      out_certificate, out_reference);
+      out_certificate, out_reference, 0);
+}
+
+int turbo_agent_harness_execute_job_reserved(turbo_agent_harness_t *harness,
+    const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
+    const turbo_tool_execution_context_t *context, turbo_agent_compile_diagnostic_t *diagnostic,
+    turbo_tool_status_t *status, json_value_t **result, json_value_t **certificate, json_value_t **reference) {
+  return turbo_agent_harness_execute_compiled_inspect_attempt_impl(harness, config,
+      NULL, 0, context, NULL, id, revision, diagnostic, status, result, certificate, reference, 1);
 }
 
 static int turbo_agent_harness_submit(turbo_agent_harness_t *harness,

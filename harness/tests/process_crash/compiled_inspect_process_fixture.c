@@ -1,6 +1,7 @@
 #include "turbo_agent_harness.h"
 #include "turbo_agent_job.h"
 #include "turbo_agent_job_cancel.h"
+#include "turbo_agent_job_execution.h"
 #include "turbo_agent_job_acceptance.h"
 #include "turbo_agent_job_delivery.h"
 #include "turbo_agent_job_verifier.h"
@@ -17,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 
 enum {
   FIXTURE_FAILURE = 2, FIXTURE_CRASH = 86,
@@ -79,7 +81,7 @@ typedef struct fixture_s {
   turbo_agent_harness_t *harness;
   cmeta_threadpool_t *pool;
   int inject, callbacks, transports, attempt_reads, attempt_writes, reference_writes;
-  int job_mode, acceptance_mode, delivery_mode, verified_mode, file_mode, cancellation_mode;
+  int job_mode, acceptance_mode, delivery_mode, verified_mode, file_mode, cancellation_mode, async_mode;
   turbo_agent_job_file_verifier_t *file_verifier;
   char workspace_path[SALTS_FS_MAX_PATH], verification_path[SALTS_FS_MAX_PATH];
   json_value_t *execution_reference;
@@ -860,6 +862,37 @@ static int exercise_delivery(fixture_t *f, const char *mode) {
   return evidence(f, "committed", 1, deliveries, 1);
 }
 
+typedef struct async_queue_s { atomic_int entered, open; } async_queue_t;
+static void block_async_queue(void *user) {
+  async_queue_t *queue = user;
+  atomic_store_explicit(&queue->entered, 1, memory_order_release);
+  while (!atomic_load_explicit(&queue->open, memory_order_acquire)) cmeta_thread_yield();
+}
+static int crash_async_cancellation(fixture_t *f) {
+  async_queue_t queue;
+  const char *caps[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_job_execution_t *execution = NULL;
+  turbo_agent_job_execution_status_t status;
+  atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+  REQUIRE(!cmeta_threadpool_try_submit(f->pool, block_async_queue, &queue));
+  while (!atomic_load_explicit(&queue.entered, memory_order_acquire)) cmeta_thread_yield();
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = caps; config.allowed_capability_count = 1;
+  REQUIRE(!turbo_agent_harness_submit_job_inspect(f->harness, "bound-job", 2, &config, 0, &execution));
+  REQUIRE(!turbo_agent_job_execution_cancel(execution, "host-stop", "fixture-reason"));
+  atomic_store_explicit(&queue.open, 1, memory_order_release);
+  REQUIRE(!turbo_agent_job_execution_wait(execution, 10000));
+  turbo_agent_job_execution_status_init(&status);
+  REQUIRE(!turbo_agent_job_execution_get_status(execution, &status));
+  REQUIRE(status.state == TURBO_AGENT_EXECUTION_CANCELLED && status.operation_status == SALTS_ECANCELED);
+  REQUIRE(!f->callbacks && !f->transports);
+  if (strstr(f->cut->name, "_lost_ack")) {
+    REQUIRE(status.cancellation_status == SALTS_EIO); _Exit(87);
+  }
+  REQUIRE(strstr(f->cut->name, "_returned") && status.cancellation_status == SALTS_OK);
+  _Exit(FIXTURE_CRASH);
+}
 static int exercise_cancellation(fixture_t *f, const char *mode) {
   turbo_agent_compile_diagnostic_t diagnostic;
   turbo_tool_status_t status;
@@ -890,6 +923,7 @@ static int exercise_cancellation(fixture_t *f, const char *mode) {
   REQUIRE(!turbo_agent_job_open(f->runtime, "bound-job", &job));
   if (!strcmp(mode, "crash")) {
     f->inject = 1;
+    if (f->async_mode) return crash_async_cancellation(f);
     rc = turbo_agent_job_request_cancel(job, 2, "host-stop", "fixture-reason");
     if (strstr(f->cut->name, "_lost_ack")) {
       REQUIRE(rc == SALTS_EIO); _Exit(87);
@@ -955,12 +989,13 @@ int main(int argc, char **argv) {
   int rc;
   if (argc != 4 && argc != 5) return failure("mode/cut/private-directory/[job] required", __LINE__);
   if (argc == 5) {
-    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery") && strcmp(argv[4], "verified") && strcmp(argv[4], "files") && strcmp(argv[4], "cancellation"))
+    if (strcmp(argv[4], "job") && strcmp(argv[4], "acceptance") && strcmp(argv[4], "delivery") && strcmp(argv[4], "verified") && strcmp(argv[4], "files") && strcmp(argv[4], "cancellation") && strcmp(argv[4], "async"))
       return failure("unknown execution mode", __LINE__);
     fixture.job_mode = 1;
     fixture.verified_mode = !strcmp(argv[4], "verified");
     fixture.file_mode = !strcmp(argv[4], "files");
-    fixture.cancellation_mode = !strcmp(argv[4], "cancellation");
+    fixture.async_mode = !strcmp(argv[4], "async");
+    fixture.cancellation_mode = !strcmp(argv[4], "cancellation") || fixture.async_mode;
     fixture.delivery_mode = !strcmp(argv[4], "delivery") || fixture.verified_mode || fixture.file_mode;
     fixture.acceptance_mode = !strcmp(argv[4], "acceptance") || fixture.delivery_mode || fixture.cancellation_mode;
   }

@@ -67,6 +67,14 @@ foreach(phase IN ITEMS pending committed sent)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_job_cancel_crash.cmake")
     set_tests_properties(test_job_cancel_${phase}_${boundary} PROPERTIES
       TIMEOUT 90 LABELS "harness;job;cancellation;recovery;process")
+    add_test(NAME test_job_async_cancel_${phase}_${boundary}
+      COMMAND "${CMAKE_COMMAND}"
+        "-DWORKER=$<TARGET_FILE:compiled_inspect_process_fixture>"
+        "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/cases"
+        "-DCUT=cancel_${phase}_${boundary}" "-DMODE=async"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_job_cancel_crash.cmake")
+    set_tests_properties(test_job_async_cancel_${phase}_${boundary} PROPERTIES
+      TIMEOUT 90 LABELS "harness;job;async;cancellation;recovery;process")
   endforeach()
 endforeach()
 foreach(cut IN ITEMS root_before root_after proposal_before proposal_after

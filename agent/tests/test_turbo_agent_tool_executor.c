@@ -54,6 +54,14 @@ static int tool_executor_fault_put(void *user_data, const char *collection, cons
   return fault->inner.put(fault->inner.user_data, collection, id, record_json);
 }
 
+static int tool_executor_fault_create(void *user_data, const char *collection, const char *id,
+                                        const char *record_json) {
+  tool_executor_fault_store_t *fault = user_data;
+  if (!fault->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, "agent_tool_journal")) ++fault->puts;
+  return fault->inner.create_if_absent(fault->inner.user_data, collection, id, record_json);
+}
+
 static int tool_executor_fault_get(void *user_data, const char *collection, const char *id,
                                    char **out_record_json) {
   tool_executor_fault_store_t *fault = (tool_executor_fault_store_t *)user_data;
@@ -843,6 +851,7 @@ spec("turbo agent tool executor") {
     store.list = tool_executor_fault_list;
     store.user_data = fault;
     store.user_data_free = tool_executor_fault_destroy;
+    store.create_if_absent = tool_executor_fault_create;
     runtime = turbo_agent_runtime_create(&store);
     check_not_null(runtime);
     check_equal(turbo_tool_registry_add(registry, &definition), TURBO_TOOL_OK);

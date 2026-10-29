@@ -464,12 +464,8 @@ static int turbo_agent_tool_prepare_journal(turbo_agent_tool_executor_t *executo
     call->status = TURBO_TOOL_OK;
     rc = turbo_agent_tool_journal_create(runtime, TURBO_AGENT_TOOL_JOURNAL_COLLECTION,
                                          journal_id, thread_id, run_id, call, "planned");
-    if (rc == SALTS_ENOTSUP) {
-      rc = turbo_agent_tool_journal_write(runtime, journal_id, thread_id, run_id, call,
-                                          "planned");
-      free(journal_id);
-      return rc;
-    }
+    /* Runtime-bound effect admission requires an atomic planned claim.
+     * A plain put cannot arbitrate independent executors or processes. */
     if (rc == SALTS_OK) {
       free(journal_id);
       return SALTS_OK;
@@ -540,8 +536,7 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
   turbo_agent_execution_context_t saved = {0};
   turbo_tool_status_t cancel_status;
   char *journal_id = NULL;
-  int claim_rc = SALTS_ENOTSUP;
-  int has_durable_claim = 0;
+  int claim_rc;
   if (!task || !task->call || task->call->replayed) return;
   turbo_agent_execution_context_get(&saved);
   turbo_agent_execution_context_set(&task->context);
@@ -578,20 +573,21 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
       }
       goto cleanup;
     }
-    if (claim_rc != SALTS_OK && claim_rc != SALTS_ENOTSUP) {
-      /* A backend error may follow a committed create. Never risk a second
-       * automatic effect admission when the fence result is uncertain. */
-      task->call->status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+    if (claim_rc != SALTS_OK) {
+      /* Unsupported atomic admission enters no callback. Other create errors
+       * can hide a committed fence, so their disposition remains UNKNOWN. */
+      task->call->status = claim_rc == SALTS_ENOTSUP
+                               ? TURBO_TOOL_ERROR
+                               : TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
       task->call->replayed = 1;
       goto cleanup;
     }
-    has_durable_claim = claim_rc == SALTS_OK;
     if (turbo_agent_tool_journal_write(task->runtime, journal_id,
                                        task->context.thread_id, task->context.run_id,
                                        task->call, "started") != SALTS_OK) {
-      task->call->status = has_durable_claim ? TURBO_TOOL_UNKNOWN_SIDE_EFFECT
-                                             : TURBO_TOOL_ERROR;
-      if (has_durable_claim) task->call->replayed = 1;
+      /* The durable claim may already be visible to another owner. */
+      task->call->status = TURBO_TOOL_UNKNOWN_SIDE_EFFECT;
+      task->call->replayed = 1;
       goto cleanup;
     }
   }

@@ -143,6 +143,13 @@ static int loop_store_list(void *user, const char *collection, const char *key,
   loop_fixture_t *f = user;
   return f->store.list(f->store.user_data, collection, key, value, out);
 }
+static int loop_store_create(void *user, const char *collection, const char *id,
+                             const char *text) {
+  loop_fixture_t *f = user;
+  if (!f->store.create_if_absent) return SALTS_ENOTSUP;
+  return f->store.create_if_absent(f->store.user_data, collection, id, text);
+}
+
 static void loop_store_free(void *user) {
   loop_fixture_t *f = user;
   f->store.user_data_free(f->store.user_data);
@@ -297,6 +304,7 @@ spec("supervised tiered Router tool loop") {
       f[i+1].store = turbo_agent_runtime_store_memory_create();
       store.put = loop_store_put; store.get = loop_store_get; store.list = loop_store_list;
       store.user_data_free = loop_store_free; store.user_data = &f[i+1];
+      store.create_if_absent = loop_store_create;
       runtimes[i] = turbo_agent_runtime_create(&store);
       check_not_null(runtimes[i]);
       f[i+1].runtime = runtimes[i];

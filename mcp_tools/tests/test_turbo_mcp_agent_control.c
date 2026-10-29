@@ -80,6 +80,14 @@ static int mcp_control_put(void *user, const char *collection, const char *id, c
   return probe->inner.put(probe->inner.user_data, collection, id, text);
 }
 
+static int mcp_control_create(void *user, const char *collection, const char *id,
+                              const char *text) {
+  mcp_control_probe_t *probe = user;
+  if (!probe->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, "agent_tool_journal")) ++probe->writes;
+  return probe->inner.create_if_absent(probe->inner.user_data, collection, id, text);
+}
+
 static int mcp_control_get(void *user, const char *collection, const char *id, char **out) {
   mcp_control_probe_t *probe = user;
   if (!strcmp(collection, "agent_tool_journal")) ++probe->reads;
@@ -224,7 +232,8 @@ spec("MCP Agent and context admission") {
     turbo_mcp_tool_pack_config_t mcp;
     turbo_agent_execution_context_t context = {0};
     turbo_agent_runtime_store_t store = {.put = mcp_control_put, .get = mcp_control_get,
-        .list = mcp_control_list, .user_data = &probe};
+        .list = mcp_control_list, .user_data = &probe,
+        .create_if_absent = mcp_control_create};
     turbo_cancel_source_config_t cancellation = {.struct_size = sizeof(cancellation),
         .abi_version = TURBO_RUNTIME_CONTROL_ABI_VERSION, .monotonic_ms = mcp_control_clock,
         .clock_user_data = &probe};

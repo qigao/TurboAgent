@@ -53,6 +53,14 @@ static int identity_list(void *user, const char *collection, const char *key,
   return probe->inner.list(probe->inner.user_data, collection, key, value, out);
 }
 
+static int identity_create(void *user, const char *collection, const char *id,
+                           const char *text) {
+  identity_probe_t *probe = user;
+  if (!probe->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, "agent_tool_journal")) ++probe->writes;
+  return probe->inner.create_if_absent(probe->inner.user_data, collection, id, text);
+}
+
 /* Count only: this fixture never starts a process or modifies a file. */
 static int identity_action(const json_value_t *args, json_value_t **out, void *user) {
   identity_probe_t *probe = user;
@@ -118,7 +126,8 @@ spec("exact Tool approval identity") {
     turbo_agent_policy_t policy = turbo_agent_policy_default();
     turbo_agent_execution_context_t context = {0};
     turbo_agent_runtime_store_t callbacks = {.put = identity_put, .get = identity_get,
-        .list = identity_list, .user_data = &probe};
+        .list = identity_list, .user_data = &probe,
+        .create_if_absent = identity_create};
     turbo_action_tool_definition_t definition = {.name = "identity.effect",
         .description = "Count a precisely approved invocation",
         .parameters_json = "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},"

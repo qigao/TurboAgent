@@ -73,6 +73,22 @@ static int nested_approval_list(void *user, const char *collection, const char *
   return probe->inner.list(probe->inner.user_data, collection, key, value, out);
 }
 
+static int nested_approval_create(void *user, const char *collection,
+                                  const char *id, const char *text) {
+  nested_approval_probe_t *probe = user;
+  if (!probe->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, "agent_tool_journal")) {
+    json_value_t *record = json_parse(text, strlen(text));
+    const char *phase = record ? json_get_string(record, "phase") : NULL;
+    int fail = probe->fail_phase && phase && !strcmp(phase, probe->fail_phase);
+    json_free(record);
+    ++probe->writes;
+    nested_approval_observe(probe);
+    if (fail) return SALTS_EIO;
+  }
+  return probe->inner.create_if_absent(probe->inner.user_data, collection, id, text);
+}
+
 /* This action counts invocations only; no command or filesystem action runs. */
 static int nested_approval_action(const json_value_t *args, json_value_t **out, void *user) {
   nested_approval_probe_t *probe = user;
@@ -188,7 +204,8 @@ spec("nested Tool approval consumption") {
         .kind = TURBO_ACTION_DANGEROUS, .requires_approval = 1,
         .handler = nested_approval_action, .user_data = &probe};
     turbo_agent_runtime_store_t callbacks = {.put = nested_approval_put,
-        .get = nested_approval_get, .list = nested_approval_list, .user_data = &probe};
+        .get = nested_approval_get, .list = nested_approval_list,
+        .user_data = &probe, .create_if_absent = nested_approval_create};
     turbo_agent_execution_context_t context = {0};
     turbo_agent_middleware_t middleware = {.before_tool = nested_approval_rewrite,
         .after_tool = nested_approval_after, .user_data = &probe};
@@ -357,8 +374,11 @@ spec("nested Tool approval consumption") {
         check_equal(probe.reads, reads_before);
         check_equal(turbo_agent_state_set_review_approved(probe.root, 1), 0);
         check_equal(nested_approval_dispatch(&ctx, agent, planner), 0);
-        check_equal(probe.calls, 1); check_equal(probe.approved_calls, 1);
-        check_equal(probe.writes, failure < 2 ? 4 : 3);
+        /* An acknowledged entry claim plus failed STARTED write remains
+         * UNKNOWN even though the callback did not enter. */
+        check_equal(probe.calls, failure == 1 ? 0 : 1);
+        check_equal(probe.approved_calls, failure == 1 ? 0 : 1);
+        check_equal(probe.writes, failure == 0 ? 4 : failure == 1 ? 2 : 3);
         check_equal(probe.live_grant_observed, 0);
         check_false(turbo_agent_state_review_approved(probe.root));
         check_false(turbo_agent_state_review_approved(probe.child));
@@ -369,8 +389,9 @@ spec("nested Tool approval consumption") {
             "call_id", "same-call", &records), SALTS_OK);
         check_equal(json_array_size(records), 1);
         const json_value_t *record = json_array_get(records, 0);
-        check_equal(json_get_string(record, "phase"), failure == 2 ? "started" : "committed");
-        if (failure == 2) {
+        check_equal(json_get_string(record, "phase"),
+                    failure == 1 ? "planned" : failure == 2 ? "started" : "committed");
+        if (failure == 1 || failure == 2) {
           check_null(json_get_string(record, "output"));
           check_not_null(strstr(json_get_string(output, "output"), "tool_side_effect_unknown"));
           check_null(strstr(json_get_string(output, "output"), "fixture result"));

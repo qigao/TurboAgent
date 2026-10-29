@@ -35,6 +35,18 @@ static int event_list(void *user, const char *collection, const char *key, const
   return probe->inner.list(probe->inner.user_data, collection, key, value, out);
 }
 
+static int event_create(void *user, const char *collection, const char *id,
+                        const char *text) {
+  event_probe_t *probe = user;
+  if (!probe->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (probe->fail_collection && strcmp(collection, probe->fail_collection) == 0) {
+    ++probe->store_failures;
+    return -1;
+  }
+  if (strcmp(collection, "agent_tool_journal") == 0) ++probe->journal_writes;
+  return probe->inner.create_if_absent(probe->inner.user_data, collection, id, text);
+}
+
 static void event_store_destroy(void *user) {
   event_probe_t *probe = user;
   if (probe->inner.user_data_free) probe->inner.user_data_free(probe->inner.user_data);
@@ -119,7 +131,7 @@ spec("tool event publication and recovery") {
     probe.inner = turbo_agent_runtime_store_memory_create();
     check_not_null(probe.inner.put);
     callbacks = (turbo_agent_runtime_store_t){event_put, event_get, event_list, &probe,
-                                              event_store_destroy};
+                                              event_store_destroy, event_create};
     runtime = turbo_agent_runtime_create(&callbacks);
     check_not_null(runtime);
     registry = turbo_tool_registry_create();

@@ -30,6 +30,16 @@ effect identity. The same rule applies without a Runtime. Distinct turns/calls
 remain independent; later serialized batches may replay committed outcomes.
 This batch check adds no cross-executor/process claim or policy synchronization.
 
+When a Runtime is bound, admission of a **new** tool effect requires the selected
+Store's atomic `create_if_absent` for both the PLANNED Journal entry and its
+backend-entry claim. If the primitive is unavailable, PLANNED admission returns
+`SALTS_ENOTSUP` before any callback or Journal put; a backend that rejects only
+the claim marks that call as an error without entering the callback. There is no
+put-based fallback. Existing committed records remain readable for policy-checked
+replay; a NULL Runtime still allows explicitly non-durable Host-controlled calls.
+Atomic creation is only as strong as the backend's documented ownership scope,
+not a global exactly-once or cross-process lease guarantee.
+
 The existing mutex on one owned ToolExecutor serializes separate callers through
 Journal lookup, callback completion and commit. With a shared Runtime and frozen
 registry/policy, a same-identity waiter replays the committed outcome; conflicting

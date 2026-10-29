@@ -16,7 +16,7 @@ typedef struct journal_store_s {
   turbo_agent_runtime_store_t inner;
   const char *fail_phase;
   int fail_get, fail_list, get_error;
-  int writes, failures, calls, lists;
+  int writes, failures, calls, lists, reject_claim;
   const char *get_error_id;
 } journal_store_t;
 
@@ -34,6 +34,23 @@ static int journal_put(void *user, const char *collection, const char *id, const
     }
   }
   return store->inner.put(store->inner.user_data, collection, id, text);
+}
+
+static int journal_create(void *user, const char *collection, const char *id,
+                          const char *text) {
+  journal_store_t *store = user;
+  if (!store->inner.create_if_absent ||
+      (store->reject_claim && strcmp(collection, "agent_tool_claims") == 0))
+    return SALTS_ENOTSUP;
+  if (strcmp(collection, journal_collection) == 0) {
+    json_value_t *record = json_parse(text, strlen(text));
+    const char *phase = record ? json_get_string(record, "phase") : NULL;
+    int fail = store->fail_phase && phase && strcmp(phase, store->fail_phase) == 0;
+    json_free(record);
+    ++store->writes;
+    if (fail) { ++store->failures; return SALTS_EIO; }
+  }
+  return store->inner.create_if_absent(store->inner.user_data, collection, id, text);
 }
 
 static int journal_get(void *user, const char *collection, const char *id, char **out) {
@@ -140,7 +157,7 @@ spec("durable tool journal across SQLite reopen") {
     config.max_list_records = 1;
     store = (journal_store_t){0};
     check_equal(turbo_runtime_store_sqlite_open(&config, &store.inner), SALTS_OK);
-    callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list, &store, journal_destroy};
+    callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list, &store, journal_destroy, journal_create};
     runtime = turbo_agent_runtime_create(&callbacks);
     check_not_null(runtime);
     registry = turbo_tool_registry_create();
@@ -194,7 +211,7 @@ spec("durable tool journal across SQLite reopen") {
       store.fail_phase = NULL;
       config.create_if_missing = 0;
       check_equal(turbo_runtime_store_sqlite_open(&config, &store.inner), SALTS_OK);
-      callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list, &store, journal_destroy};
+      callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list, &store, journal_destroy, journal_create};
       runtime = turbo_agent_runtime_create(&callbacks);
       check_not_null(runtime);
       check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
@@ -233,7 +250,7 @@ spec("legacy file tool journal recovery") {
     check_not_null(store.inner.list);
     check_null(store.inner.create_if_absent);
     callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list,
-                                              &store, journal_destroy};
+                                              &store, journal_destroy, journal_create};
     runtime = turbo_agent_runtime_create(&callbacks);
     check_not_null(runtime);
     registry = turbo_tool_registry_create();
@@ -259,56 +276,35 @@ spec("legacy file tool journal recovery") {
     free(directory); directory = NULL;
   }
 
-  for (int scoped = 0; scoped < 2; ++scoped) for (int fail_commit = 0; fail_commit < 2; ++fail_commit) {
-    it("does not repeat %s side effects after file reopen when committed write %s",
-        scoped ? "nested" : "root", fail_commit ? "fails" : "succeeds") {
-      turbo_agent_runtime_store_t callbacks;
-      json_value_t *records = NULL;
-      store.fail_phase = fail_commit ? "committed" : NULL;
-      first = journal_call("file-durable-call");
-      if (scoped) { first.turn_key = "executor:0:0"; first.legacy_turn_key = "0"; }
-      check_equal(journal_execute(executor, runtime, registry, &first, 1), SALTS_OK);
-      check_equal(store.calls, 1);
-      check_equal(first.status, fail_commit ? TURBO_TOOL_UNKNOWN_SIDE_EFFECT : TURBO_TOOL_OK);
-      check_equal(turbo_agent_runtime_store_list_json(
-                      runtime, "agent_tool_claims", NULL, NULL, &records),
-                  SALTS_OK);
-      check_equal(json_array_size(records), 0);
-      json_free(records); records = NULL;
+  it("rejects new file-store effects without atomic admission, including after reopen") {
+    turbo_agent_runtime_store_t callbacks;
+    json_value_t *records = NULL;
+    first = journal_call("file-no-atomic-claim");
+    check_equal(journal_execute(executor, runtime, registry, &first, 1), SALTS_ENOTSUP);
+    check_equal(store.calls, 0);
+    check_equal(store.writes, 0);
+    check_false(first.replayed);
+    check_null(first.output);
+    check_equal(turbo_agent_runtime_store_list_json(
+        runtime, journal_collection, NULL, NULL, &records), SALTS_OK);
+    check_equal(json_array_size(records), 0);
+    json_free(records); records = NULL;
 
-      turbo_agent_tool_executor_destroy(executor); executor = NULL;
-      turbo_agent_runtime_destroy(runtime); runtime = NULL;
-      store.fail_phase = NULL;
-      store.inner = turbo_agent_runtime_store_file_create(directory);
-      check_not_null(store.inner.put);
-      check_null(store.inner.create_if_absent);
-      callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list,
-                                                &store, journal_destroy};
-      runtime = turbo_agent_runtime_create(&callbacks);
-      check_not_null(runtime);
-      check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
-      second = journal_call("file-durable-call");
-      if (scoped) { second.turn_key = "executor:0:0"; second.legacy_turn_key = "0"; }
-      check_equal(journal_execute(executor, runtime, registry, &second, 1), SALTS_OK);
-      check_equal(store.calls, 1);
-      check_true(second.replayed);
-      check_equal(second.status,
-                  fail_commit ? TURBO_TOOL_UNKNOWN_SIDE_EFFECT : TURBO_TOOL_OK);
-      if (fail_commit) {
-        check_null(second.output);
-      } else {
-        check_equal(second.output, journal_output);
-        check_equal(json_get_string(second.detail, "host"), "retained detail");
-      }
-      check_equal(turbo_agent_runtime_store_list_json(
-                      runtime, journal_collection, "call_id", "file-durable-call",
-                      &records),
-                  SALTS_OK);
-      check_equal(json_array_size(records), 1);
-      check_equal(json_get_string(json_array_get(records, 0), "phase"),
-                  fail_commit ? "started" : "committed");
-      json_free(records);
-    }
+    turbo_agent_tool_executor_destroy(executor); executor = NULL;
+    turbo_agent_runtime_destroy(runtime); runtime = NULL;
+    store.inner = turbo_agent_runtime_store_file_create(directory);
+    check_not_null(store.inner.put);
+    check_null(store.inner.create_if_absent);
+    callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list,
+                                              &store, journal_destroy, journal_create};
+    runtime = turbo_agent_runtime_create(&callbacks);
+    check_not_null(runtime);
+    check_equal(turbo_agent_tool_executor_create(NULL, &executor), SALTS_OK);
+    second = journal_call("file-no-atomic-claim");
+    check_equal(journal_execute(executor, runtime, registry, &second, 1), SALTS_ENOTSUP);
+    check_equal(store.calls, 0);
+    check_equal(store.writes, 0);
+    check_null(second.output);
   }
 }
 
@@ -613,8 +609,7 @@ spec("tool journal admission and persistence failures") {
     store = (journal_store_t){0};
     store.inner = turbo_agent_runtime_store_memory_create();
     check_not_null(store.inner.put);
-    callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list, &store,
-                                              journal_destroy};
+    callbacks = (turbo_agent_runtime_store_t){journal_put, journal_get, journal_list, &store, journal_destroy, journal_create};
     runtime = turbo_agent_runtime_create(&callbacks);
     check_not_null(runtime);
     registry = turbo_tool_registry_create();
@@ -669,6 +664,27 @@ spec("tool journal admission and persistence failures") {
     json_serialize_free(expected);
     json_serialize_free(actual);
     expected = actual = NULL;
+  }
+
+  it("refuses an unsupported backend-entry claim before invoking a tool") {
+    json_value_t *claims = NULL;
+    store.reject_claim = 1;
+    calls[0] = journal_call("claim-unsupported");
+    check_equal(journal_execute(executor, runtime, registry, calls, 1), SALTS_OK);
+    check_equal(calls[0].status, TURBO_TOOL_ERROR);
+    check_true(calls[0].replayed);
+    check_null(calls[0].output);
+    check_equal(store.calls, 1);
+    check_equal(turbo_agent_runtime_store_list_json(
+        runtime, "agent_tool_claims", NULL, NULL, &claims), SALTS_OK);
+    check_equal(json_array_size(claims), 1); /* seed's claim only */
+    json_free(claims);
+    claims = NULL;
+    check_equal(turbo_agent_runtime_store_list_json(
+        runtime, journal_collection, "call_id", "claim-unsupported", &claims), SALTS_OK);
+    check_equal(json_array_size(claims), 1);
+    check_equal(json_get_string(json_array_get(claims, 0), "phase"), "planned");
+    json_free(claims);
   }
 
   const char *legacy_phases[] = {"planned", "started", "committed"};
@@ -866,14 +882,16 @@ spec("tool journal admission and persistence failures") {
       check_equal(store.failures, 1);
       check_equal(store.calls, i == 2 ? 2 : 1);
       if (i != 0)
-        check_equal(calls[0].status, i == 1 ? TURBO_TOOL_ERROR : TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+        check_equal(calls[0].status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      if (i == 1) check_true(calls[0].replayed);
       check_null(calls[0].output);
       store.fail_phase = NULL;
       calls[1] = journal_call("fault");
       check_equal(journal_execute(executor, runtime, registry, calls + 1, 1), SALTS_OK);
-      check_equal(store.calls, 2);
-      check_equal(calls[1].status, i == 2 ? TURBO_TOOL_UNKNOWN_SIDE_EFFECT : TURBO_TOOL_OK);
-      check_equal(calls[1].replayed, i == 2 ? 1 : 0);
+      check_equal(store.calls, i == 1 ? 1 : 2);
+      check_equal(calls[1].status,
+                  i == 0 ? TURBO_TOOL_OK : TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      check_equal(calls[1].replayed, i != 0);
     }
   }
 }

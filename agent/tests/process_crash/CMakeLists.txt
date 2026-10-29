@@ -18,6 +18,20 @@ foreach(cut IN ITEMS before_planned after_planned before_admitted after_admitted
     TIMEOUT 90 LABELS "agent;recovery;process")
 endforeach()
 
+# Separate OS-process SQLite owner contention followed by a fresh-process
+# Tool Journal replay. This does not permit concurrent SQLite writers.
+add_executable(sqlite_owner_process_fixture sqlite_owner_process_fixture.c)
+target_link_libraries(sqlite_owner_process_fixture PRIVATE TurboAgent::Agent)
+set_target_properties(sqlite_owner_process_fixture PROPERTIES
+  C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "Agent/tests")
+add_test(NAME test_tool_journal_sqlite_cross_process_owner
+  COMMAND "${CMAKE_COMMAND}"
+    "-DWORKER=$<TARGET_FILE:sqlite_owner_process_fixture>"
+    "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/sqlite_owner_cases"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_sqlite_owner_process.cmake")
+set_tests_properties(test_tool_journal_sqlite_cross_process_owner PROPERTIES
+  TIMEOUT 60 LABELS "agent;recovery;sqlite;process;owner")
+
 add_executable(session_inbox_process_fixture session_inbox_process_fixture.c)
 target_link_libraries(session_inbox_process_fixture PRIVATE TurboAgent::Agent)
 set_target_properties(session_inbox_process_fixture PROPERTIES

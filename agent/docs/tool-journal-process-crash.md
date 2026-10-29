@@ -141,6 +141,19 @@ write but an unsupported backend-entry claim stops before callback and leaves
 the original PLANNED evidence. Callers with no Runtime remain explicitly
 non-durable, subject to their Host serialization and policy contract.
 
+The `test_tool_journal_sqlite_cross_process_owner` executes separate seed,
+holder, contender, and fresh-reopen applications using the production SQLite
+Store. The holder's READY stdout is piped to the contender's stdin; each
+process's exact exit code is required. The contending second OS process must
+receive `SALTS_EBUSY` with cleared Store outputs while the first owns the
+SQLite database. After both processes exit, a third owner must replay the
+committed Tool Journal without repeating the external effect marker, then admit
+one distinct identity with precisely two committed journals, two claims and
+two independent effect markers. This proves actual OS-process exclusive-owner
+locking and deterministic normal-close reopening, **not** concurrent SQLite
+writers, lease takeover after abrupt crash, power-loss durability or remote
+external-effect reconciliation.
+
 The adjacent Journal suite also runs the Executor over the real bounded SQLite Store.
 An over-quota or database-full PLANNED record returns `SALTS_ENOSPC` before any callback and
 leaves both Journal and claim collections empty. If PLANNED fits but the admitted-fence

@@ -73,6 +73,22 @@ static int nested_approval_list(void *user, const char *collection, const char *
   return probe->inner.list(probe->inner.user_data, collection, key, value, out);
 }
 
+static int nested_approval_create(void *user, const char *collection,
+                                  const char *id, const char *text) {
+  nested_approval_probe_t *probe = user;
+  if (!probe->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, "agent_tool_journal")) {
+    json_value_t *record = json_parse(text, strlen(text));
+    const char *phase = record ? json_get_string(record, "phase") : NULL;
+    int fail = probe->fail_phase && phase && !strcmp(phase, probe->fail_phase);
+    json_free(record);
+    ++probe->writes;
+    nested_approval_observe(probe);
+    if (fail) return SALTS_EIO;
+  }
+  return probe->inner.create_if_absent(probe->inner.user_data, collection, id, text);
+}
+
 /* This action counts invocations only; no command or filesystem action runs. */
 static int nested_approval_action(const json_value_t *args, json_value_t **out, void *user) {
   nested_approval_probe_t *probe = user;
@@ -188,7 +204,8 @@ spec("nested Tool approval consumption") {
         .kind = TURBO_ACTION_DANGEROUS, .requires_approval = 1,
         .handler = nested_approval_action, .user_data = &probe};
     turbo_agent_runtime_store_t callbacks = {.put = nested_approval_put,
-        .get = nested_approval_get, .list = nested_approval_list, .user_data = &probe};
+        .get = nested_approval_get, .list = nested_approval_list,
+        .user_data = &probe, .create_if_absent = nested_approval_create};
     turbo_agent_execution_context_t context = {0};
     turbo_agent_middleware_t middleware = {.before_tool = nested_approval_rewrite,
         .after_tool = nested_approval_after, .user_data = &probe};

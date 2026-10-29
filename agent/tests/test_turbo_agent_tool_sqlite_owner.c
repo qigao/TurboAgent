@@ -2,6 +2,7 @@
 #include "../src/turbo_agent_tool_journal_internal.h"
 #include "tinytest.h"
 #include "turbo_runtime_store_sqlite.h"
+#include <fmt.h>
 #include <stdlib.h>
 #include <string.h>
 #include <tstr.h>

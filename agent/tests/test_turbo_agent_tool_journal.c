@@ -48,7 +48,7 @@ static int journal_create(void *user, const char *collection, const char *id,
     int fail = store->fail_phase && phase && strcmp(phase, store->fail_phase) == 0;
     json_free(record);
     ++store->writes;
-    if (fail) { ++store->failures; return -1; }
+    if (fail) { ++store->failures; return SALTS_EIO; }
   }
   return store->inner.create_if_absent(store->inner.user_data, collection, id, text);
 }

@@ -374,8 +374,11 @@ spec("nested Tool approval consumption") {
         check_equal(probe.reads, reads_before);
         check_equal(turbo_agent_state_set_review_approved(probe.root, 1), 0);
         check_equal(nested_approval_dispatch(&ctx, agent, planner), 0);
-        check_equal(probe.calls, 1); check_equal(probe.approved_calls, 1);
-        check_equal(probe.writes, failure < 2 ? 4 : 3);
+        /* An acknowledged entry claim plus failed STARTED write remains
+         * UNKNOWN even though the callback did not enter. */
+        check_equal(probe.calls, failure == 1 ? 0 : 1);
+        check_equal(probe.approved_calls, failure == 1 ? 0 : 1);
+        check_equal(probe.writes, failure == 0 ? 4 : failure == 1 ? 2 : 3);
         check_equal(probe.live_grant_observed, 0);
         check_false(turbo_agent_state_review_approved(probe.root));
         check_false(turbo_agent_state_review_approved(probe.child));
@@ -386,8 +389,9 @@ spec("nested Tool approval consumption") {
             "call_id", "same-call", &records), SALTS_OK);
         check_equal(json_array_size(records), 1);
         const json_value_t *record = json_array_get(records, 0);
-        check_equal(json_get_string(record, "phase"), failure == 2 ? "started" : "committed");
-        if (failure == 2) {
+        check_equal(json_get_string(record, "phase"),
+                    failure == 1 ? "planned" : failure == 2 ? "started" : "committed");
+        if (failure == 1 || failure == 2) {
           check_null(json_get_string(record, "output"));
           check_not_null(strstr(json_get_string(output, "output"), "tool_side_effect_unknown"));
           check_null(strstr(json_get_string(output, "output"), "fixture result"));

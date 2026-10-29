@@ -882,14 +882,16 @@ spec("tool journal admission and persistence failures") {
       check_equal(store.failures, 1);
       check_equal(store.calls, i == 2 ? 2 : 1);
       if (i != 0)
-        check_equal(calls[0].status, i == 1 ? TURBO_TOOL_ERROR : TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+        check_equal(calls[0].status, TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      if (i == 1) check_true(calls[0].replayed);
       check_null(calls[0].output);
       store.fail_phase = NULL;
       calls[1] = journal_call("fault");
       check_equal(journal_execute(executor, runtime, registry, calls + 1, 1), SALTS_OK);
-      check_equal(store.calls, 2);
-      check_equal(calls[1].status, i == 2 ? TURBO_TOOL_UNKNOWN_SIDE_EFFECT : TURBO_TOOL_OK);
-      check_equal(calls[1].replayed, i == 2 ? 1 : 0);
+      check_equal(store.calls, i == 1 ? 1 : 2);
+      check_equal(calls[1].status,
+                  i == 0 ? TURBO_TOOL_OK : TURBO_TOOL_UNKNOWN_SIDE_EFFECT);
+      check_equal(calls[1].replayed, i != 0);
     }
   }
 }

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #define ADMISSIONS "agent_job_admissions"
+#define QUEUE_RECEIPTS "agent_job_queue_receipts"
 
 static int identifier(const char *s) {
   if (!s || !s[0]) return 0;
@@ -110,5 +111,66 @@ int turbo_agent_job_admission_get(turbo_agent_runtime_t *runtime, const char *id
   if (rc == SALTS_OK) rc = record_valid(record, id, admission, snapshot);
   if (rc == SALTS_OK) { *out = record; record = NULL; }
   json_free(snapshot); json_free(record);
+  return rc;
+}
+
+static int receipt_valid(const json_value_t *r, const json_value_t *intent) {
+  static const char *const strings[] = {"admission_id", "observation_id", "supervisor_id",
+      "job_id", "thread_id", "attempt_id"};
+  int64_t schema, status;
+  if (!r || json_type(r) != JSON_OBJECT) return SALTS_EPROTO;
+  schema = number(r, "schema_version");
+  if (schema != 1) return schema > 0 ? SALTS_ENOTSUP : SALTS_EPROTO;
+  if (json_object_size(r) != 12 || !is(r, "kind", "job_inspect_queue_receipt") ||
+      number(r, "job_revision") != number(intent, "job_revision") ||
+      number(r, "proposal_version") != number(intent, "proposal_version")) return SALTS_EPROTO;
+  for (size_t i = 0; i < sizeof(strings) / sizeof(strings[0]); ++i)
+    if (!is(r, strings[i], json_get_string(intent, strings[i]))) return SALTS_EPROTO;
+  status = number(r, "queue_status");
+  if (status < INT32_MIN || status > INT32_MAX) return SALTS_EPROTO;
+  return (status == SALTS_OK ? is(r, "selection", "run") || is(r, "selection", "pool_cancelled") :
+      is(r, "selection", "rejected")) ? SALTS_OK : SALTS_EPROTO;
+}
+
+int turbo_agent_job_queue_receipt_write(turbo_agent_runtime_t *runtime, const char *id,
+    uint32_t revision, const char *admission, const char *supervisor, int queue_status, int dispatched) {
+  json_value_t *intent = NULL, *r = NULL;
+  char key[130];
+  int rc;
+  if (!supervisor || (dispatched != 0 && dispatched != 1)) return SALTS_EINVAL;
+  rc = turbo_agent_job_admission_get(runtime, id, admission, &intent);
+  if (rc != SALTS_OK) return rc;
+  if (number(intent, "job_revision") != revision || !is(intent, "supervisor_id", supervisor)) {
+    rc = SALTS_EPROTO; goto done;
+  }
+  r = json_clone(intent);
+  rc = SALTS_ENOMEM;
+  if (!r || turbo_runtime_json_object_set_string(r, "kind", "job_inspect_queue_receipt") ||
+      turbo_runtime_json_object_set_int64(r, "queue_status", queue_status) ||
+      turbo_runtime_json_object_set_string(r, "selection", queue_status != SALTS_OK ? "rejected" :
+        dispatched ? "run" : "pool_cancelled")) goto done;
+  rc = receipt_valid(r, intent);
+  if (rc != SALTS_OK) goto done;
+  (void)snprintf(key, sizeof(key), "%s:%s", id, admission);
+  rc = turbo_agent_runtime_store_create_json_if_absent(runtime, QUEUE_RECEIPTS, key, r);
+done:
+  json_free(intent); json_free(r);
+  return rc;
+}
+
+int turbo_agent_job_queue_receipt_get(turbo_agent_runtime_t *runtime, const char *id,
+    const char *admission, json_value_t **out) {
+  json_value_t *intent = NULL, *r = NULL;
+  char key[130];
+  int rc;
+  if (!out) return SALTS_EINVAL;
+  *out = NULL;
+  rc = turbo_agent_job_admission_get(runtime, id, admission, &intent);
+  if (rc != SALTS_OK) return rc;
+  (void)snprintf(key, sizeof(key), "%s:%s", id, admission);
+  rc = turbo_agent_runtime_store_get_json_status(runtime, QUEUE_RECEIPTS, key, &r);
+  if (rc == SALTS_OK) rc = receipt_valid(r, intent);
+  if (rc == SALTS_OK) { *out = r; r = NULL; }
+  json_free(intent); json_free(r);
   return rc;
 }

@@ -5,6 +5,7 @@
 #include <turbo_agent_job_execution.h>
 #include <turbo_agent_job_observation.h>
 #include <turbo_agent_job_admission.h>
+#include <turbo_agent_job_queue_receipt.h>
 #include <turbo_agent_job_acceptance.h>
 #include <turbo_agent_job_delivery.h>
 #include <turbo_agent_job_verifier.h>
@@ -109,6 +110,11 @@ spec("installed C++17 SDK consumer") {
     check_equal(turbo_agent_harness_submit_recorded_job_inspect(harness, "../bad", 2,
         &compiler, 0, "observation", &job_execution), SALTS_EINVAL);
     int observation_status = 0;
+    int rejected_receipt = 0;
+    check_equal(turbo_agent_harness_submit_receipted_job_inspect(harness, "../bad", 2,
+        &compiler, 0, "admission", &rejected_receipt, &job_execution), SALTS_EINVAL);
+    check_equal(rejected_receipt, SALTS_ENOENT); check_null(job_execution);
+    check_equal(turbo_agent_job_execution_queue_receipt_status(nullptr, &rejected_receipt), SALTS_EINVAL);
     check_equal(turbo_agent_harness_submit_admitted_job_inspect(harness, "../bad", 2,
         &compiler, 0, "admission", &job_execution), SALTS_EINVAL);
     check_null(job_execution);
@@ -150,6 +156,8 @@ spec("installed C++17 SDK consumer") {
     check_equal(json_get_string(snapshot, "state"), "attempt_bound");
     json_free(snapshot); snapshot = nullptr;
     check_equal(turbo_agent_job_admission_get(runtime, "cpp-job", "admission", &snapshot), SALTS_ENOENT);
+    check_null(snapshot);
+    check_equal(turbo_agent_job_queue_receipt_get(runtime, "cpp-job", "admission", &snapshot), SALTS_ENOENT);
     check_null(snapshot);
     check_equal(turbo_agent_job_request_cancel(job, 2, "cpp-stop", "host-reason"), SALTS_OK);
     check_equal(turbo_agent_job_get_cancellation(job, &snapshot), SALTS_OK);

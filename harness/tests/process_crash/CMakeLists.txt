@@ -53,6 +53,22 @@ if(NOT BUILD_TESTS)
   return()
 endif()
 
+set(queue_receipt_cuts receipt_pending)
+foreach(selection IN ITEMS run pool rejected)
+  foreach(boundary IN ITEMS before after lost_ack returned)
+    list(APPEND queue_receipt_cuts receipt_${selection}_${boundary})
+  endforeach()
+endforeach()
+foreach(cut IN LISTS queue_receipt_cuts)
+  add_test(NAME test_job_${cut}
+    COMMAND "${CMAKE_COMMAND}"
+      "-DWORKER=$<TARGET_FILE:compiled_inspect_process_fixture>"
+      "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/cases" "-DCUT=${cut}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_job_queue_receipt_crash.cmake")
+  set_tests_properties(test_job_${cut} PROPERTIES
+    TIMEOUT 105 LABELS "harness;job;async;queue-receipt;recovery;process")
+endforeach()
+
 foreach(boundary IN ITEMS before after lost_ack queued full closed pool completed)
   add_test(NAME test_job_admission_${boundary}
     COMMAND "${CMAKE_COMMAND}"

@@ -2,6 +2,7 @@
 #include "turbo_agent_job_execution.h"
 #include "turbo_agent_job_observation.h"
 #include "turbo_agent_job_admission.h"
+#include "turbo_agent_job_queue_receipt.h"
 #include "turbo_agent_job_cancel.h"
 #include "turbo_agent_job_verifier.h"
 #include "turbo_agent_policy.h"
@@ -17,7 +18,7 @@ typedef struct probe_s {
   turbo_agent_runtime_t *runtime;
   turbo_agent_harness_t *harness;
   turbo_agent_job_execution_t *nested;
-  gate_t callback, publication, observation, admission;
+  gate_t callback, publication, observation, admission, queue_receipt;
   atomic_int calls, reads, claims, cancellation_claims, frees, sources, evidences;
   atomic_int reads_after_error, unacknowledged;
   atomic_int observation_claims, observation_gets, observation_puts, observation_unacknowledged;
@@ -25,6 +26,9 @@ typedef struct probe_s {
   atomic_int admission_claims, admission_gets, admission_puts, admission_unacknowledged;
   atomic_int reads_after_admission_error;
   int admission_error, admission_after_commit;
+  atomic_int queue_receipt_claims, queue_receipt_gets, queue_receipt_puts;
+  atomic_int queue_receipt_unacknowledged, queue_receipt_error_gets;
+  int queue_receipt_error, queue_receipt_after_commit, queue_receipt_nested_status;
   int observation_error, observation_after_commit, observation_nested_status;
   int publication_error, after_commit, source_error, source_fail_at, nested_status;
   const char *read_failure;
@@ -45,6 +49,10 @@ static void block(void *user) {
 static int get(void *user, const char *collection, const char *id, char **out) {
   probe_t *p = user;
   atomic_fetch_add(&p->reads, 1);
+  if (!strcmp(collection, "agent_job_queue_receipts")) {
+    atomic_fetch_add(&p->queue_receipt_gets, 1);
+    if (atomic_load(&p->queue_receipt_unacknowledged)) atomic_fetch_add(&p->queue_receipt_error_gets, 1);
+  }
   if (!strcmp(collection, "agent_job_admissions")) atomic_fetch_add(&p->admission_gets, 1);
   if (atomic_load(&p->admission_unacknowledged)) atomic_fetch_add(&p->reads_after_admission_error, 1);
   if (!strcmp(collection, "agent_job_observations")) atomic_fetch_add(&p->observation_gets, 1);
@@ -57,6 +65,7 @@ static int get(void *user, const char *collection, const char *id, char **out) {
 }
 static int put(void *user, const char *collection, const char *id, const char *value) {
   probe_t *p = user;
+  if (!strcmp(collection, "agent_job_queue_receipts")) atomic_fetch_add(&p->queue_receipt_puts, 1);
   if (!strcmp(collection, "agent_job_admissions")) atomic_fetch_add(&p->admission_puts, 1);
   if (!strcmp(collection, "agent_job_observations")) atomic_fetch_add(&p->observation_puts, 1);
   return p->inner.put(p->inner.user_data, collection, id, value);
@@ -69,6 +78,21 @@ static int claim(void *user, const char *collection, const char *id, const char 
   probe_t *p = user;
   int rc;
   atomic_fetch_add(&p->claims, 1);
+  if (!strcmp(collection, "agent_job_queue_receipts")) {
+    atomic_fetch_add(&p->queue_receipt_claims, 1);
+    if (p->nested) {
+      int status;
+      p->queue_receipt_nested_status = turbo_agent_job_execution_queue_receipt_status(p->nested, &status);
+    }
+    block(&p->queue_receipt);
+    if (p->queue_receipt_error && !p->queue_receipt_after_commit) {
+      atomic_store(&p->queue_receipt_unacknowledged, 1); return p->queue_receipt_error;
+    }
+    rc = p->inner.create_if_absent(p->inner.user_data, collection, id, value);
+    if (rc == SALTS_OK && p->queue_receipt_error) rc = p->queue_receipt_error;
+    if (rc != SALTS_OK) atomic_store(&p->queue_receipt_unacknowledged, 1);
+    return rc;
+  }
   if (!strcmp(collection, "agent_job_admissions")) {
     atomic_fetch_add(&p->admission_claims, 1);
     block(&p->admission);
@@ -178,6 +202,21 @@ typedef struct admission_submit_s {
   turbo_agent_job_execution_t *execution;
   int rc;
 } admission_submit_t;
+static int submit_receipted(turbo_agent_harness_t *h, const char *id,
+    int *out_rejection, turbo_agent_job_execution_t **out) {
+  const char *caps[] = {"runtime_tools"};
+  turbo_agent_compiler_config_t config;
+  turbo_agent_compiler_config_init(&config);
+  config.allowed_capabilities = caps; config.allowed_capability_count = 1;
+  return turbo_agent_harness_submit_receipted_job_inspect(h, "job", 2, &config, 0, id, out_rejection, out);
+}
+typedef struct receipt_submit_s { turbo_agent_harness_t *harness; int rc, rejection; } receipt_submit_t;
+static void submit_receipt_thread(void *user) {
+  receipt_submit_t *s = user;
+  turbo_agent_job_execution_t *e = NULL;
+  s->rc = submit_receipted(s->harness, "shutdown-overlap", &s->rejection, &e);
+  turbo_agent_job_execution_release(e);
+}
 static void submit_admission_thread(void *user) {
   admission_submit_t *s = user;
   s->rc = submit_admitted(s->harness, "blocked-admission", &s->execution);
@@ -232,6 +271,7 @@ spec("Bound Job asynchronous supervision") {
     atomic_init(&p.publication.entered, 0); atomic_init(&p.publication.open, 1);
     atomic_init(&p.observation.entered, 0); atomic_init(&p.observation.open, 1);
     atomic_init(&p.admission.entered, 0); atomic_init(&p.admission.open, 1);
+    atomic_init(&p.queue_receipt.entered, 0); atomic_init(&p.queue_receipt.open, 1);
     atomic_init(&p.calls, 0); atomic_init(&p.reads, 0); atomic_init(&p.claims, 0);
     atomic_init(&p.cancellation_claims, 0); atomic_init(&p.frees, 0);
     atomic_init(&p.sources, 0); atomic_init(&p.evidences, 0);
@@ -242,6 +282,9 @@ spec("Bound Job asynchronous supervision") {
     atomic_init(&p.admission_claims, 0); atomic_init(&p.admission_gets, 0);
     atomic_init(&p.admission_puts, 0); atomic_init(&p.admission_unacknowledged, 0);
     atomic_init(&p.reads_after_admission_error, 0);
+    atomic_init(&p.queue_receipt_claims, 0); atomic_init(&p.queue_receipt_gets, 0);
+    atomic_init(&p.queue_receipt_puts, 0); atomic_init(&p.queue_receipt_unacknowledged, 0);
+    atomic_init(&p.queue_receipt_error_gets, 0);
     pool = cmeta_threadpool_create_with_config(&pool_config);
     registry = turbo_tool_registry_create();
     p.inner = turbo_agent_runtime_store_memory_create();
@@ -273,6 +316,7 @@ spec("Bound Job asynchronous supervision") {
     turbo_agent_job_execution_status_init(&status);
   }
   after_each() {
+    atomic_store(&p.queue_receipt.open, 1);
     atomic_store(&p.admission.open, 1);
     atomic_store(&p.callback.open, 1); atomic_store(&p.publication.open, 1); atomic_store(&p.observation.open, 1);
     cmeta_threadpool_wait(pool);
@@ -283,6 +327,215 @@ spec("Bound Job asynchronous supervision") {
     turbo_tool_registry_destroy(registry); cmeta_threadpool_destroy(pool);
     json_free(result); json_free(certificate); json_free(reference); json_free(record);
     result = certificate = reference = record = NULL;
+  }
+
+  it("acknowledges the selected native queue callback before Inspect without holding the status mutex") {
+    int publication, rejection;
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    atomic_store(&p.queue_receipt.open, 0);
+    check_equal(submit_receipted(harness, "queue-run", &rejection, &execution), SALTS_OK);
+    check_equal(rejection, SALTS_ENOENT);
+    check_equal(turbo_agent_job_execution_queue_receipt_status(execution, &publication), SALTS_EBUSY);
+    check_equal(publication, SALTS_EBUSY);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "queue-run", &record), SALTS_ENOENT);
+    p.nested = execution; atomic_store(&queue.open, 1);
+    check_true(await(&p.queue_receipt.entered));
+    check_equal(p.queue_receipt_nested_status, SALTS_EBUSY);
+    check_equal(atomic_load(&p.calls), 0); check_equal(atomic_load(&p.sources), 0);
+    check_equal(turbo_agent_job_execution_wait(execution, 1), SALTS_ETIMEDOUT);
+    atomic_store(&p.queue_receipt.open, 1);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK); p.nested = NULL;
+    check_equal(turbo_agent_job_execution_queue_receipt_status(execution, &publication), SALTS_OK);
+    check_equal(publication, SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "queue-run", &record), SALTS_OK);
+    check_equal(json_object_size(record), (size_t)12);
+    check_equal(json_get_string(record, "kind"), "job_inspect_queue_receipt");
+    check_equal(json_get_string(record, "selection"), "run"); check_equal(json_get_int(record, "queue_status", 1), SALTS_OK);
+    check_equal(json_get_string(record, "supervisor_id"), turbo_agent_job_execution_id(execution));
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_OK);
+    check_equal(atomic_load(&p.calls), 1); check_equal(atomic_load(&p.queue_receipt_claims), 1);
+    check_equal(atomic_load(&p.queue_receipt_puts), 0);
+  }
+
+  it("withholds Inspect and returns original queue-receipt errors including lost acknowledgements") {
+    const int errors[] = {SALTS_ENOTSUP, SALTS_EIO, SALTS_EIO, SALTS_EBUSY, SALTS_EALREADY};
+    const char *ids[] = {"q-unsupported", "q-before", "q-lost", "q-busy", "q-conflict"};
+    for (int i = 0; i < 5; ++i) {
+      int rejection, publication;
+      p.queue_receipt_error = errors[i]; p.queue_receipt_after_commit = i == 2;
+      atomic_store(&p.queue_receipt_unacknowledged, 0);
+      check_equal(submit_receipted(harness, ids[i], &rejection, &execution), SALTS_OK);
+      check_equal(rejection, SALTS_ENOENT);
+      check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+      check_equal(turbo_agent_job_execution_queue_receipt_status(execution, &publication), SALTS_OK);
+      check_equal(publication, errors[i]);
+      check_equal(turbo_agent_job_execution_get_status(execution, &status), SALTS_OK);
+      check_equal(status.state, TURBO_AGENT_EXECUTION_FAILED); check_equal(status.operation_status, SALTS_EPROTO);
+      check_equal(status.tool_status, TURBO_TOOL_ERROR);
+      check_equal(turbo_agent_job_execution_observation_status(execution, &publication), SALTS_OK);
+      check_equal(publication, SALTS_ENOENT);
+      check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), errors[i]);
+      check_null(result); check_null(certificate); check_null(reference);
+      check_equal(atomic_load(&p.calls), 0); check_equal(atomic_load(&p.sources), 0);
+      check_equal(atomic_load(&p.queue_receipt_error_gets), 0);
+      atomic_store(&p.queue_receipt_unacknowledged, 0);
+      check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", ids[i], &record), i == 2 ? SALTS_OK : SALTS_ENOENT);
+      json_free(record); record = NULL; turbo_agent_job_execution_release(execution); execution = NULL;
+    }
+    check_equal(atomic_load(&p.observation_claims), 0); check_equal(atomic_load(&p.queue_receipt_puts), 0);
+  }
+
+  it("keeps native rejection and rejection-receipt publication as separate outcomes") {
+    int rejection;
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK);
+    p.queue_receipt_error = SALTS_EIO; p.queue_receipt_after_commit = 1;
+    check_equal(submit_receipted(harness, "q-full", &rejection, &execution), SALTS_ENOBUFS);
+    check_null(execution); check_equal(rejection, SALTS_EIO);
+    check_equal(atomic_load(&p.queue_receipt_error_gets), 0);
+    atomic_store(&p.queue_receipt_unacknowledged, 0);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-full", &record), SALTS_OK);
+    check_equal(json_get_string(record, "selection"), "rejected");
+    check_equal(json_get_int(record, "queue_status", 0), SALTS_ENOBUFS);
+    json_free(record); record = NULL;
+    atomic_store(&queue.open, 1); cmeta_threadpool_wait(pool); cmeta_threadpool_shutdown(pool);
+    p.queue_receipt_error = 0;
+    check_equal(submit_receipted(harness, "q-closed", &rejection, &execution), SALTS_ESHUTDOWN);
+    check_null(execution); check_equal(rejection, SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-closed", &record), SALTS_OK);
+    check_equal(json_get_int(record, "queue_status", 0), SALTS_ESHUTDOWN);
+    check_equal(atomic_load(&p.calls), 0); check_equal(atomic_load(&p.observation_claims), 0);
+  }
+
+  it("publishes an accepted Host cancellation even when its preceding queue receipt loses acknowledgement") {
+    int rejection, publication;
+    atomic_store(&p.queue_receipt.open, 0); p.queue_receipt_error = SALTS_EIO; p.queue_receipt_after_commit = 1;
+    check_equal(submit_receipted(harness, "q-cancel-error", &rejection, &execution), SALTS_OK);
+    check_true(await(&p.queue_receipt.entered));
+    check_equal(turbo_agent_job_execution_cancel(execution, "stop", "reason"), SALTS_OK);
+    atomic_store(&p.queue_receipt.open, 1);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_get_status(execution, &status), SALTS_OK);
+    check_equal(status.cancellation_status, SALTS_OK); check_equal(status.operation_status, SALTS_EPROTO);
+    check_equal(turbo_agent_job_execution_queue_receipt_status(execution, &publication), SALTS_OK);
+    check_equal(publication, SALTS_EIO); check_equal(atomic_load(&p.queue_receipt_error_gets), 0);
+    check_equal(atomic_load(&p.cancellation_claims), 1); check_equal(atomic_load(&p.calls), 0);
+    check_equal(turbo_agent_job_get_cancellation(job, &record), SALTS_OK);
+    check_equal(json_get_string(record, "request_id"), "stop");
+  }
+
+  it("receipts pool cancellation without selecting Inspect or inventing a Host request") {
+    int rejection, publication;
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    check_equal(submit_receipted(harness, "q-pool", &rejection, &execution), SALTS_OK);
+    check_equal(cmeta_threadpool_shutdown_with_policy(pool, SALTS_THREADPOOL_SHUTDOWN_CANCEL_PENDING), SALTS_OK);
+    atomic_store(&queue.open, 1);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_queue_receipt_status(execution, &publication), SALTS_OK); check_equal(publication, SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-pool", &record), SALTS_OK);
+    check_equal(json_get_string(record, "selection"), "pool_cancelled");
+    check_equal(json_get_int(record, "queue_status", 1), SALTS_OK);
+    check_equal(atomic_load(&p.calls), 0); check_equal(atomic_load(&p.cancellation_claims), 0);
+  }
+
+  it("does not let a native acceptance receipt bypass current authority") {
+    int rejection;
+    gate_t queue; atomic_init(&queue.entered, 0); atomic_init(&queue.open, 0);
+    check_equal(cmeta_threadpool_try_submit(pool, block, &queue), SALTS_OK); check_true(await(&queue.entered));
+    check_equal(submit_receipted(harness, "q-policy", &rejection, &execution), SALTS_OK);
+    check_equal(policy(harness, 0), SALTS_OK); atomic_store(&queue.open, 1);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-policy", &record), SALTS_OK);
+    check_equal(json_get_string(record, "selection"), "run");
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_EPROTO);
+    check_null(result); check_null(certificate); check_null(reference); check_equal(atomic_load(&p.calls), 0);
+  }
+
+  it("rejects malformed receipts and intent mismatches and preserves historical read errors") {
+    const char *keys[] = {"kind", "admission_id", "observation_id", "supervisor_id", "job_id", "thread_id", "attempt_id", "selection"};
+    const char *numbers[] = {"job_revision", "proposal_version", "queue_status"};
+    json_value_t *original = NULL, *bad = NULL, *intent = NULL;
+    int rejection;
+    check_equal(submit_receipted(harness, "q-shape", &rejection, &execution), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-shape", &original), SALTS_OK);
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+      bad = json_clone(original); check_equal(turbo_runtime_json_object_set_string(bad, keys[i], "wrong"), 0);
+      check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_queue_receipts", "job:q-shape", bad), SALTS_OK);
+      check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-shape", &record), SALTS_EPROTO); check_null(record); json_free(bad);
+    }
+    for (size_t i = 0; i < sizeof(numbers) / sizeof(numbers[0]); ++i) {
+      bad = json_clone(original); check_equal(turbo_runtime_json_object_set_int64(bad, numbers[i], INT64_MAX), 0);
+      check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_queue_receipts", "job:q-shape", bad), SALTS_OK);
+      check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-shape", &record), SALTS_EPROTO); check_null(record); json_free(bad);
+    }
+    bad = json_clone(original); check_equal(turbo_runtime_json_object_set_int64(bad, "queue_status", SALTS_EIO), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_queue_receipts", "job:q-shape", bad), SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-shape", &record), SALTS_EPROTO); json_free(bad);
+    bad = json_clone(original); check_equal(turbo_runtime_json_object_set_int64(bad, "schema_version", INT64_MAX), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_queue_receipts", "job:q-shape", bad), SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-shape", &record), SALTS_ENOTSUP); json_free(bad);
+    bad = json_clone(original); check_equal(turbo_runtime_json_object_set_string(bad, "result", "forbidden"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_queue_receipts", "job:q-shape", bad), SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-shape", &record), SALTS_EPROTO); json_free(bad);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_queue_receipts", "job:q-shape", original), SALTS_OK);
+    check_equal(turbo_agent_job_admission_get(p.runtime, "job", "q-shape", &intent), SALTS_OK);
+    check_equal(turbo_runtime_json_object_set_string(intent, "supervisor_id", "00000000-0000-0000-0000-000000000000"), 0);
+    check_equal(turbo_agent_runtime_store_put_json(p.runtime, "agent_job_admissions", "job:q-shape", intent), SALTS_OK);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-shape", &record), SALTS_EPROTO);
+    p.read_failure = "agent_job_queue_receipts";
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-shape", &record), SALTS_EIO); check_null(record);
+    json_free(original); json_free(intent);
+  }
+
+  it("validates required receipt outputs and keeps older handles unreceipted") {
+    int rejection = 0, publication;
+    check_equal(submit_receipted(harness, "bad:id", &rejection, &execution), SALTS_EINVAL);
+    check_null(execution); check_equal(rejection, SALTS_ENOENT);
+    check_equal(submit_receipted(harness, "q-missing-output", NULL, &execution), SALTS_EINVAL); check_null(execution);
+    check_equal(submit_receipted(harness, NULL, &rejection, &execution), SALTS_EINVAL);
+    check_equal(turbo_agent_job_execution_queue_receipt_status(NULL, &publication), SALTS_EINVAL);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q-missing", &record), SALTS_ENOENT);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "../bad", "q", &record), SALTS_EINVAL);
+    check_equal(turbo_agent_job_queue_receipt_get(p.runtime, "job", "q", NULL), SALTS_EINVAL);
+    check_equal(submit_admitted(harness, "q-old", &execution), SALTS_OK);
+    check_equal(turbo_agent_job_execution_wait(execution, 5000), SALTS_OK);
+    check_equal(turbo_agent_job_execution_queue_receipt_status(execution, &publication), SALTS_OK);
+    check_equal(publication, SALTS_ENOENT);
+    check_equal(turbo_agent_job_execution_take_result(execution, &diagnostic, &result, &certificate, &reference), SALTS_OK);
+    check_equal(submit_receipted(harness, "q-old", &rejection, &other), SALTS_EALREADY);
+    check_null(other); check_equal(rejection, SALTS_ENOENT); check_equal(atomic_load(&p.queue_receipt_claims), 0);
+  }
+
+  it("retains Runtime owners until a blocked queue receipt and its selected worker settle") {
+    int rejection;
+    atomic_store(&p.queue_receipt.open, 0);
+    check_equal(submit_receipted(harness, "q-owners", &rejection, &execution), SALTS_OK);
+    check_true(await(&p.queue_receipt.entered));
+    turbo_agent_job_destroy(job); job = NULL;
+    turbo_agent_job_execution_release(execution); execution = NULL;
+    turbo_agent_harness_release(harness); harness = NULL;
+    check_equal(atomic_load(&p.frees), 0);
+    atomic_store(&p.queue_receipt.open, 1); cmeta_threadpool_wait(pool);
+    check_equal(atomic_load(&p.frees), 1);
+  }
+
+  it("receipts shutdown overlapping pre-queue intent without retaining a rejected task") {
+    receipt_submit_t s = {harness, SALTS_EBUSY, SALTS_EBUSY}; cmeta_thread_t thread = {0};
+    atomic_store(&p.admission.open, 0);
+    check_equal(cmeta_thread_create(&thread, submit_receipt_thread, &s), SALTS_OK); check_true(await(&p.admission.entered));
+    check_equal(cmeta_threadpool_shutdown_with_policy(pool, SALTS_THREADPOOL_SHUTDOWN_CANCEL_PENDING), SALTS_OK);
+    turbo_agent_job_destroy(job); job = NULL;
+    turbo_agent_harness_release(harness); harness = NULL;
+    check_equal(atomic_load(&p.frees), 0);
+    atomic_store(&p.admission.open, 1);
+    check_equal(cmeta_thread_join(&thread), SALTS_OK); cmeta_thread_destroy(&thread);
+    check_equal(s.rc, SALTS_ESHUTDOWN); check_equal(s.rejection, SALTS_OK);
+    check_equal(atomic_load(&p.queue_receipt_claims), 1); check_equal(atomic_load(&p.calls), 0);
+    check_equal(atomic_load(&p.frees), 1);
   }
 
   it("persists admission before enqueue and joins the eventual observation to the same supervisor") {

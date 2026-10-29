@@ -24,6 +24,7 @@ struct turbo_agent_job_execution_s {
   char request_id[65], reason_ref[1025];
   char observation_id[65];
   int observation_status;
+  int queue_receipted, queue_receipt_status;
   uint32_t revision;
   uint64_t deadline;
   int reserved, closing;
@@ -131,6 +132,17 @@ int turbo_agent_job_execution_cancel(turbo_agent_job_execution_t *e,
   cmeta_mutex_unlock(&e->mutex);
   return rc;
 }
+int turbo_agent_job_execution_queue_receipt_status(const turbo_agent_job_execution_t *e, int *out) {
+  int rc;
+  if (!out) return SALTS_EINVAL;
+  *out = SALTS_EBUSY;
+  if (!e) return SALTS_EINVAL;
+  cmeta_mutex_lock((cmeta_mutex_t *)&e->mutex);
+  rc = terminal(e->status.state) ? SALTS_OK : SALTS_EBUSY;
+  if (rc == SALTS_OK) *out = e->queue_receipt_status;
+  cmeta_mutex_unlock((cmeta_mutex_t *)&e->mutex);
+  return rc;
+}
 int turbo_agent_job_execution_wait(turbo_agent_job_execution_t *e, uint64_t timeout) {
   uint64_t now, deadline = UINT64_MAX;
   int rc = SALTS_OK;
@@ -162,6 +174,7 @@ static void settle(void *user, int dispatch) {
   turbo_agent_job_t *job = NULL;
   turbo_agent_job_execution_status_t observed;
   int observation_rc = SALTS_ENOENT;
+  int receipt_rc = SALTS_ENOENT;
   int operation, cancel_rc = SALTS_ENOENT, delivery;
   cmeta_mutex_lock(&e->mutex);
   e->status.state = TURBO_AGENT_EXECUTION_RUNNING;
@@ -169,7 +182,16 @@ static void settle(void *user, int dispatch) {
   cmeta_mutex_unlock(&e->mutex);
   context.struct_size = sizeof(context); context.abi_version = TURBO_TOOL_EXECUTION_CONTEXT_ABI_VERSION;
   context.cancel_token = e->token; context.deadline_mono_ms = e->deadline;
-  if (dispatch) {
+  if (e->queue_receipted) {
+    turbo_agent_runtime_t *runtime = turbo_agent_session_runtime(
+        turbo_agent_app_session(turbo_agent_harness_app(e->harness)));
+    receipt_rc = turbo_agent_job_queue_receipt_write(runtime, e->job_id, e->revision,
+        e->observation_id, e->id, SALTS_OK, dispatch);
+  }
+  if (e->queue_receipted && receipt_rc != SALTS_OK) {
+    operation = SALTS_EPROTO;
+    tool_status = TURBO_TOOL_ERROR;
+  } else if (dispatch) {
     operation = turbo_agent_harness_execute_job_reserved(e->harness, e->job_id,
         e->revision, &e->config, &context, &diagnostic, &tool_status, &result, &certificate, &reference);
   } else {
@@ -203,7 +225,7 @@ static void settle(void *user, int dispatch) {
   observed.state = delivery == SALTS_OK ? TURBO_AGENT_EXECUTION_COMPLETED :
       delivery == SALTS_ECANCELED ? TURBO_AGENT_EXECUTION_CANCELLED :
       delivery == SALTS_ETIMEDOUT ? TURBO_AGENT_EXECUTION_TIMED_OUT : TURBO_AGENT_EXECUTION_FAILED;
-  if (e->observation_id[0]) {
+  if (e->observation_id[0] && (!e->queue_receipted || receipt_rc == SALTS_OK)) {
     turbo_agent_runtime_t *runtime = turbo_agent_session_runtime(
         turbo_agent_app_session(turbo_agent_harness_app(e->harness)));
     observation_rc = turbo_agent_job_observation_write(runtime, e->job_id, e->revision,
@@ -213,6 +235,7 @@ static void settle(void *user, int dispatch) {
   cmeta_mutex_lock(&e->mutex);
   e->status = observed;
   e->observation_status = observation_rc;
+  e->queue_receipt_status = receipt_rc;
   e->reference = reference;
   cmeta_cond_broadcast(&e->changed);
   cmeta_mutex_unlock(&e->mutex);
@@ -221,14 +244,17 @@ static void worker(void *user) { settle(user, 1); }
 static void cancel_pending(void *user) { settle(user, 0); }
 static void finalize(void *user) { turbo_agent_job_execution_release(user); }
 
+typedef enum submit_mode_e { SUBMIT_VOLATILE, SUBMIT_ADMITTED, SUBMIT_RECEIPTED } submit_mode_t;
 static int submit(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
-    uint64_t deadline, const char *observation, int admitted, turbo_agent_job_execution_t **out) {
+    uint64_t deadline, const char *observation, submit_mode_t mode,
+    int *out_rejection_receipt_status, turbo_agent_job_execution_t **out) {
   turbo_agent_job_execution_t *e;
   turbo_cancel_source_config_t cancel_config = {sizeof(cancel_config), TURBO_RUNTIME_CONTROL_ABI_VERSION, 0, NULL, NULL};
   cmeta_uuid_t uuid;
   cmeta_threadpool_task_t task = {worker, cancel_pending, finalize, NULL};
   int rc;
+  if (out_rejection_receipt_status) *out_rejection_receipt_status = SALTS_ENOENT;
   if (!out) return SALTS_EINVAL;
   *out = NULL;
   if (!harness || !identifier(id, 64) || revision > TURBO_AGENT_JOB_MAX_REVISIONS ||
@@ -247,6 +273,8 @@ static int submit(turbo_agent_harness_t *harness,
   if (!e->mutex || !e->changed || !e->harness) { rc = SALTS_ENOMEM; goto fail; }
   turbo_agent_job_execution_status_init(&e->status);
   e->observation_status = observation ? SALTS_EBUSY : SALTS_ENOENT;
+  e->queue_receipted = mode == SUBMIT_RECEIPTED;
+  e->queue_receipt_status = e->queue_receipted ? SALTS_EBUSY : SALTS_ENOENT;
   if (observation) memcpy(e->observation_id, observation, strlen(observation) + 1);
   memcpy(e->job_id, id, strlen(id) + 1);
   e->revision = revision; e->deadline = deadline; e->config = *config;
@@ -266,7 +294,7 @@ static int submit(turbo_agent_harness_t *harness,
   rc = turbo_agent_harness_begin_submit(harness);
   if (rc != SALTS_OK) goto fail;
   e->reserved = 1;
-  if (admitted) {
+  if (mode != SUBMIT_VOLATILE) {
     turbo_agent_runtime_t *runtime = turbo_agent_session_runtime(
         turbo_agent_app_session(turbo_agent_harness_app(harness)));
     rc = turbo_agent_job_admission_write(runtime, e->job_id, e->revision, e->observation_id, e->id);
@@ -275,7 +303,15 @@ static int submit(turbo_agent_harness_t *harness,
   if (!turbo_agent_job_execution_retain(e)) { rc = SALTS_ERANGE; goto fail; }
   task.arg = e;
   rc = cmeta_threadpool_try_submit_task(turbo_agent_harness_executor(harness), &task);
-  if (rc != SALTS_OK) { turbo_agent_job_execution_release(e); goto fail; }
+  if (rc != SALTS_OK) {
+    if (e->queue_receipted) {
+      turbo_agent_runtime_t *runtime = turbo_agent_session_runtime(
+          turbo_agent_app_session(turbo_agent_harness_app(e->harness)));
+      *out_rejection_receipt_status = turbo_agent_job_queue_receipt_write(runtime, e->job_id,
+          e->revision, e->observation_id, e->id, rc, 0);
+    }
+    turbo_agent_job_execution_release(e); goto fail;
+  }
   *out = e;
   return SALTS_OK;
 fail:
@@ -286,20 +322,28 @@ fail:
 int turbo_agent_harness_submit_job_inspect(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
     uint64_t deadline, turbo_agent_job_execution_t **out) {
-  return submit(harness, id, revision, config, deadline, NULL, 0, out);
+  return submit(harness, id, revision, config, deadline, NULL, SUBMIT_VOLATILE, NULL, out);
 }
 int turbo_agent_harness_submit_recorded_job_inspect(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
     uint64_t deadline, const char *observation, turbo_agent_job_execution_t **out) {
   if (!observation) { if (out) *out = NULL; return SALTS_EINVAL; }
-  return submit(harness, id, revision, config, deadline, observation, 0, out);
+  return submit(harness, id, revision, config, deadline, observation, SUBMIT_VOLATILE, NULL, out);
 }
 
 int turbo_agent_harness_submit_admitted_job_inspect(turbo_agent_harness_t *harness,
     const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
     uint64_t deadline, const char *admission, turbo_agent_job_execution_t **out) {
   if (!admission) { if (out) *out = NULL; return SALTS_EINVAL; }
-  return submit(harness, id, revision, config, deadline, admission, 1, out);
+  return submit(harness, id, revision, config, deadline, admission, SUBMIT_ADMITTED, NULL, out);
+}
+
+int turbo_agent_harness_submit_receipted_job_inspect(turbo_agent_harness_t *harness,
+    const char *id, uint32_t revision, const turbo_agent_compiler_config_t *config,
+    uint64_t deadline, const char *admission, int *out_rejection, turbo_agent_job_execution_t **out) {
+  if (out_rejection) *out_rejection = SALTS_ENOENT;
+  if (!admission || !out_rejection) { if (out) *out = NULL; return SALTS_EINVAL; }
+  return submit(harness, id, revision, config, deadline, admission, SUBMIT_RECEIPTED, out_rejection, out);
 }
 
 int turbo_agent_job_execution_take_result(turbo_agent_job_execution_t *e,
@@ -327,6 +371,10 @@ int turbo_agent_job_execution_take_result(turbo_agent_job_execution_t *e,
    * take/release interval exclusively; the Harness reservation remains held. */
   rc = e->status.operation_status;
   if (diagnostic) *diagnostic = e->status.diagnostic;
+  if (e->queue_receipted && e->queue_receipt_status != SALTS_OK) {
+    rc = e->queue_receipt_status;
+    goto done;
+  }
   if (rc != SALTS_OK) goto done;
   if (e->observation_id[0] && e->observation_status != SALTS_OK) {
     rc = e->observation_status;

@@ -41,10 +41,12 @@ CXX_C_API void turbo_agent_tool_executor_destroy(turbo_agent_tool_executor_t *ex
  * dispatch and commit; each caller owns its call buffers and keeps the shared
  * registry/policy immutable until all callers drain. Existing outcome replay
  * preserves durable status; successful model delivery cancellation is checked
- * by ToolNode. Stores with atomic create_if_absent additionally fence automatic
- * effect admission across executor/Runtime owners sharing that backend's atomic
- * scope. Other stores retain only the per-executor guarantee. This does not add
- * concurrent Agent/Router operation or any broader backend synchronization.
+ * by ToolNode. New Runtime-bound effects require atomic create_if_absent for
+ * both PLANNED Journal and backend-entry claims. A Store without that primitive
+ * cannot admit new effects; NULL Runtime remains an explicitly non-durable call.
+ * Claims are limited to the backend's scope: production SQLite has one exclusive
+ * connection owner, not concurrent writers. No global exactly-once effect or
+ * concurrent Agent/Router guarantee is implied by the atomic fence.
  * Queue time behind another batch is part of the supplied cancel/deadline
  * context: a queued caller can finish CANCELLED/DEADLINE_EXCEEDED before Journal
  * admission. An in-flight callback remains cooperatively cancellable only. */

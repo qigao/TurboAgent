@@ -49,6 +49,15 @@ static int identity_list(void *user, const char *collection, const char *key,
   return probe->inner.list(probe->inner.user_data, collection, key, value, out);
 }
 
+static int identity_create(void *user, const char *collection, const char *id,
+                           const char *text) {
+  identity_probe_t *probe = user;
+  if (!probe->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, identity_collection))
+    atomic_fetch_add_explicit(&probe->journal_writes, 1, memory_order_relaxed);
+  return probe->inner.create_if_absent(probe->inner.user_data, collection, id, text);
+}
+
 static turbo_tool_status_t identity_invoke(const char *arguments,
     const turbo_tool_execution_context_t *context, char **out, void *user) {
   identity_probe_t *probe = user;
@@ -133,6 +142,7 @@ spec("ToolExecutor effect identity admission and replay") {
     callbacks.put = identity_put;
     callbacks.get = identity_get;
     callbacks.list = identity_list;
+    callbacks.create_if_absent = identity_create;
     callbacks.user_data = &probe;
     runtime = turbo_agent_runtime_create(&callbacks);
     check_not_null(runtime);

@@ -123,15 +123,17 @@ dependency between distinct identities. The same regression composes the atomic 
 with nested identity: two owners in one Run/turn/call admit one callback, while parent
 and explicit-fork Run IDs keep otherwise identical nested calls independent and replay
 each lineage without another callback. This is bounded by the backend primitive; the
-legacy file/custom fallback does not gain a cross-owner guarantee.
+file/custom backends without `create_if_absent` can no longer admit new
+Runtime-bound tool effects through a put fallback.
 
-The Journal suite separately exercises the real legacy file Store, whose callback table has
-no `create_if_absent`. For both root and nested identities, a committed result survives a
-close/reopen and replays without another callback. If the callback completed but the
-COMMITTED write failed, the persisted STARTED record reopens as UNKNOWN and still does not
-dispatch again. No admitted claim is created. This qualifies only single-owner lifecycle
-recovery; the file backend still provides no cross-owner/process admission, atomic replace,
-or crash-durability guarantee.
+The Journal suite also verifies that a real file Store with no atomic primitive
+returns `SALTS_ENOTSUP` **before** a new callback, journal write or claim,
+including after process-local close/reopen. Historical committed records may
+still be read and validated for replay, but they do not grant permission to
+re-dispatch an absent or UNKNOWN effect. A custom backend with an atomic PLANNED
+write but an unsupported backend-entry claim stops before callback and leaves
+the original PLANNED evidence. Callers with no Runtime remain explicitly
+non-durable, subject to their Host serialization and policy contract.
 
 The adjacent Journal suite also runs the Executor over the real bounded SQLite Store.
 An over-quota or database-full PLANNED record returns `SALTS_ENOSPC` before any callback and

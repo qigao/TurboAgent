@@ -52,6 +52,14 @@ static int planner_journal_list(void *user, const char *collection, const char *
   return state->inner.list(state->inner.user_data, collection, key, value, out);
 }
 
+static int planner_journal_create(void *user, const char *collection, const char *id,
+                                  const char *text) {
+  planner_tool_test_state_t *state = user;
+  if (!state->inner.create_if_absent) return SALTS_ENOTSUP;
+  if (!strcmp(collection, "agent_tool_journal")) ++state->journal_writes;
+  return state->inner.create_if_absent(state->inner.user_data, collection, id, text);
+}
+
 static void planner_journal_destroy(void *user) {
   planner_tool_test_state_t *state = user;
   if (state->inner.user_data_free) state->inner.user_data_free(state->inner.user_data);
@@ -289,7 +297,8 @@ spec("planner step tool journal identity") {
     check_not_null(state.inner.put);
     session.runtime_store = (turbo_agent_runtime_store_t){.put = planner_journal_put,
         .get = planner_journal_get, .list = planner_journal_list, .user_data = &state,
-        .user_data_free = planner_journal_destroy};
+        .user_data_free = planner_journal_destroy,
+        .create_if_absent = planner_journal_create};
     session.workflow_kind = TURBO_AGENT_SESSION_WORKFLOW_ENGINEERING;
     config.session_config = &session;
     app = turbo_agent_app_create(&config); check_not_null(app);

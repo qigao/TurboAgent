@@ -128,8 +128,14 @@ Runtime-bound tool effects through a put fallback.
 
 The Journal suite also verifies that a real file Store with no atomic primitive
 returns `SALTS_ENOTSUP` **before** a new callback, journal write or claim,
-including after process-local close/reopen. Historical committed records may
-still be read and validated for replay, but they do not grant permission to
+including after process-local close/reopen. The real SQLite Store
+`test_turbo_agent_tool_sqlite_owner` separately checks exclusive open rejection,
+reopen after the first Runtime closes, current-policy denial, exact committed
+result replay, mismatched arguments rejection and an independent new effect.
+This is single-active-owner SQLite evidence within one application process,
+not concurrent cross-process writer, distributed lease or power-loss proof.
+Historical committed records may still be read and validated for replay, but
+they do not grant permission to
 re-dispatch an absent or UNKNOWN effect. A custom backend with an atomic PLANNED
 write but an unsupported backend-entry claim stops before callback and leaves
 the original PLANNED evidence. Callers with no Runtime remain explicitly

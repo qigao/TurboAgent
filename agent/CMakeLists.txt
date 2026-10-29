@@ -52,6 +52,8 @@ if(BUILD_TESTS)
   # The wakeup regression compiles the real executor with a test-only condition
   # scheduler; its private crypto includes are supplied by the canonical SDK.
   target_link_libraries(test_turbo_agent_tool_batch_wakeup PRIVATE Salts::CMeta)
+  # Selected Policy/ToolExecutor vs AgentCompiler authority conformance.
+  target_link_libraries(test_turbo_agent_authority_parity PRIVATE TurboAgent::AgentCompiler)
   set_tests_properties(test_turbo_agent_tool_batch_wakeup PROPERTIES TIMEOUT 15)
 
   # Real installed-SDK Typed RPC fixture: generated C11 client/server plus a

@@ -68,6 +68,18 @@ an admitted compiled plan instead. A Chain step has no Agent policy/approval
 owner and cannot manufacture that authority. Existing direct registry entry
 points remain available for trusted host composition.
 
+## Selected Agent/Compiler authority parity fixture
+
+`agent/tests/test_turbo_agent_authority_parity.c` uses the same V6 RuntimeTools
+registrations for Agent ToolExecutor (explicitly **non-durable**, NULL Runtime)
+and Compiler Inspect. It qualifies default denial for a READ tool, explicitly
+admitted READ and READ|NETWORK capability metadata, unknown Host capability
+denial when not granted, and the intended mode difference: a Host-authorized
+mutation may execute through the ordinary ToolExecutor but is rejected by
+Inspect's independent READ_ONLY/effect gate. A compiled plan is not a Host
+policy lease or an approval grant. These cases do not claim general backend,
+approval, Journal, Provider, cancellation or remote parity (#73 remains open).
+
 ## No-fallback rule
 
 The compiled path must never do this:

@@ -41,3 +41,20 @@ The standalone regression includes normal FNV-shaped rows, caller-supplied
 opaque hashes, path/URI alias separation, malformed/noncontiguous chunks,
 zero-length documents and overlong IDs. GCC, Clang and ASan/UBSan pass together
 with all current private revision tests before this candidate is pushed.
+
+## On-disk audit
+
+A separate private SQLite reader now qualifies the exact current legacy
+`documents` and `chunks` column layouts before planning any row. It requires
+an autocommit connection, opens one deferred read transaction, applies explicit
+document/chunk/copied-byte bounds and invokes the planner synchronously. It
+rejects extra/altered columns and triggers on the authoritative legacy tables.
+
+The reader deliberately never queries `chunks_fts`. The on-disk fixture
+inserts a stale FTS row and still produces plans solely from the structurally
+validated `chunks.text`; the new index will rebuild its own FTS projection.
+
+The fixture also proves the audit performs no data migration in place: it reads
+two legacy documents (including the one-empty-chunk representation), leaves
+their row count unchanged, rejects an already-active transaction, trips finite
+document bounds and fails closed after a schema injection.

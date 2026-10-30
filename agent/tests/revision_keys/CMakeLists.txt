@@ -96,3 +96,30 @@ else()
 endif()
 add_test(NAME test_turbo_agent_legacy_knowledge_migration COMMAND test_turbo_agent_legacy_knowledge_migration)
 set_tests_properties(test_turbo_agent_legacy_knowledge_migration PROPERTIES TIMEOUT 20)
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  find_package(SQLite3 REQUIRED)
+  set(_ta_revision_sqlite_target SQLite::SQLite3)
+elseif(TARGET unofficial::sqlite3::sqlite3)
+  set(_ta_revision_sqlite_target unofficial::sqlite3::sqlite3)
+endif()
+if(_ta_revision_sqlite_target)
+  add_executable(test_turbo_agent_legacy_knowledge_sqlite
+    legacy_knowledge_sqlite_test.c ../../src/turbo_agent_legacy_knowledge_sqlite.c
+    ../../src/turbo_agent_legacy_knowledge_migration.c ../../src/turbo_agent_source_revision_record.c
+    ../../src/turbo_agent_revision_generation.c ../../src/turbo_agent_revision_keys.c)
+  target_include_directories(test_turbo_agent_legacy_knowledge_sqlite PRIVATE ../../src)
+  target_link_libraries(test_turbo_agent_legacy_knowledge_sqlite PRIVATE ${_ta_revision_sqlite_target})
+  set_target_properties(test_turbo_agent_legacy_knowledge_sqlite PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  if(MSVC)
+    target_compile_options(test_turbo_agent_legacy_knowledge_sqlite PRIVATE /W4 /WX)
+  else()
+    target_compile_options(test_turbo_agent_legacy_knowledge_sqlite PRIVATE
+      -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  add_test(NAME test_turbo_agent_legacy_knowledge_sqlite
+    COMMAND test_turbo_agent_legacy_knowledge_sqlite
+      "${CMAKE_CURRENT_BINARY_DIR}/legacy-knowledge.db")
+  set_tests_properties(test_turbo_agent_legacy_knowledge_sqlite PROPERTIES TIMEOUT 20)
+endif()

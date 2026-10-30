@@ -3,15 +3,17 @@
 **Status:** design candidate, not implemented or published. **Date:** 2026-10-30.
 **Canonical tracker:** [#306](https://github.com/qigao/TurboAgent/issues/306).
 **Delivery trackers:** [FTS5 #307](https://github.com/qigao/TurboAgent/issues/307), [CodeGraph #308](https://github.com/qigao/TurboAgent/issues/308), [identity #294](https://github.com/qigao/TurboAgent/issues/294), [ingest #295](https://github.com/qigao/TurboAgent/issues/295), [retrieval #297](https://github.com/qigao/TurboAgent/issues/297), [publication #298](https://github.com/qigao/TurboAgent/issues/298), [LocalDB #300](https://github.com/qigao/TurboAgent/issues/300).
-**Upstream dependency:** [TurboDB #220](https://github.com/qigao/turbodb/issues/220) and [same-transaction projections #222](https://github.com/qigao/turbodb/issues/222).
+**SQLite owner:** the existing `turbo_agent_knowledge_store_t` connection/transaction owner and native SQLite3/FTS5 API. The optional `TurboDB::SqliteRevision` design ([TurboDB #220](https://github.com/qigao/turbodb/issues/220)/[#222](https://github.com/qigao/turbodb/issues/222), Draft PRs #221/#223/#224) has been **superseded and retired**; none of it is an implementation prerequisite. Do not introduce per-key MVCC or a new SQLite/KV wrapper.
 **Filesystem prerequisite:** [SaltsCore FS #108](https://github.com/qigao/salts-core/issues/108) — durable no-replace directory publication; the existing file-only replacement API is insufficient.
+
+**Retired prototypes:** LEANN [Agent #299](https://github.com/qigao/TurboAgent/issues/299) / Draft [#305](https://github.com/qigao/TurboAgent/pull/305), and the `SqliteRevision`-bound Agent Draft [#304](https://github.com/qigao/TurboAgent/pull/304). Their source and tests remain available as Git history for selective porting, not as accepted production dependencies. [New search #306](https://github.com/qigao/TurboAgent/issues/306), [FTS5 #307](https://github.com/qigao/TurboAgent/issues/307), [CodeGraph #308](https://github.com/qigao/TurboAgent/issues/308) and [publication #298](https://github.com/qigao/TurboAgent/issues/298) own the remaining work.
 
 This ADR supersedes ANN-first or independent authoritative graph/file index-store designs for this product. It does **not** delete an existing vector API, approve production migration or a release, merge Draft PR #304/#305, or claim implementation/CI acceptance.
 
 ## 1. Decision and owner boundaries
 
 - Original bytes and historical file material: **immutable generation folders**, with content checksums and explicit retention. A version folder contains only changed original objects; unchanged SourceRevisions reference previously retained files. A materialized full-tree export is optional, not required for every generation.
-- Identity, selected source/revision membership, extracted UTF-8 chunks, metadata, full-text token postings, code symbols/relations and published generation pointer: **one logical SQLite KnowledgeStore** owned by TurboAgent application semantics and the TurboDB revision transaction primitive.
+- Identity, selected source/revision membership, extracted UTF-8 chunks, metadata, full-text token postings, code symbols/relations and published generation pointer: **one logical SQLite KnowledgeStore** owned by TurboAgent application semantics and the existing native SQLite3 connection/transaction layer (no new Revisioned SQLite target).
 - File discovery, ignore/glob and bounded live change enumeration: **fd-like C11**, reusing the existing Host-authorized Salts/CMeta filesystem-root capability rather than shelling out to fd.
 - Byte-accurate literal, regex, line/column and bounded original-file scan: **rg-like C11**. Its exact matcher is an explicit query plan. A matching indexed token is never treated as proof of an exact source-byte span.
 - **SQLite FTS5** is the primary indexed lexical retrieval path: chunk text plus symbol names/qualified names/signatures/docstrings. An optional Trigram posting index is only a candidate accelerator with proved superset semantics.
@@ -32,7 +34,7 @@ flowchart TB
   Root["Host-bound file root"] --> FD["fd-C11 live discovery"]
   FD --> Stage["SourceRevision staging"]
   Stage --> Tree["Immutable version folder"]
-  Tree --> S["TurboDB owner / staged generation"]
+  Tree --> S["KnowledgeStore SQLite transaction / staged generation"]
   S --> Cat
   S --> FTS
   S --> Graph
@@ -55,15 +57,15 @@ knowledge/
   .staging/<request-id>/
 ```
 
-Stable `source_id` is not a path or content hash. A `revision_id` belongs to one source and is immutable; an identical byte blob in two logical sources does **not** merge their identities. `extraction_id` records parser/grammar/preprocess/config versions. `generation_id` represents one published search view; TurboDB `commit_seq` is a distinct durability order. Old evidence must resolve old bytes or return an explicit missing/not-retained status.
+Stable `source_id` is not a path or content hash. A `revision_id` belongs to one source and is immutable; an identical byte blob in two logical sources does **not** merge their identities. `extraction_id` records parser/grammar/preprocess/config versions. `generation_id` represents one published search view. `commit_seq` is **not** a required new storage-engine concept; any local commit ordering or `request_id` inspection is application-level metadata in the same SQLite database, not an extra revision KV database. Old evidence must resolve old bytes or return an explicit missing/not-retained status.
 
 **Filesystem publication is not a SQLite transaction.** A safe production protocol must:
 
 1. Stage bytes and manifests under a bounded unique request ID, hash exact input bytes, fsync content and staging directory.
 2. Durably publish a **new**, previously absent immutable directory on the same volume (no replacement and no symlink traversal), and persist parent directory metadata where the platform guarantees it. If the platform cannot establish that contract, reject publication; do not silently downgrade.
-3. With the sole TurboDB revision writer, write SourceRevision/path/Chunk/extracted text, FTS5 posting update, graph edges and membership, then CAS publish one Generation HEAD **in one SQLite commit**. Only committed generations are query-visible.
-4. On known pre-commit failure, old HEAD is visible; the unreferenced folder is an orphan. On `COMMIT_UNKNOWN`, inspect by exact request ID after clean reopen; never re-execute automatically.
-5. Readers pin a single SQLite snapshot + generation and a retention lease, enforce current Host ACL, then read **immutable** version bytes under the retained root. Validate digest and parse/extraction identity. Do not load a historical document from the current mutable path.
+3. With the **existing KnowledgeStore SQLite write owner**, use an explicit `BEGIN IMMEDIATE` transaction (or an exactly equivalent existing owner-managed transaction) to insert immutable SourceRevision/path/Chunk/extracted text, synchronize FTS5 postings, publish graph edges and generation membership, record the idempotent `request_id`, and CAS the Generation HEAD, followed by **one SQLite COMMIT**. No separate `RevisionStore`, generic `revision_values`/`revision_heads` or unrestricted raw SQL plugin is introduced. Only committed generations are query-visible.
+4. On known pre-commit failure, old HEAD is visible; the unreferenced folder is an orphan. When SQLite COMMIT return/durability is ambiguous, treat the outcome as `COMMIT_UNKNOWN`: reopen a clean connection and inspect a UNIQUE `request_id` in the application generation-commit table. The record and HEAD must be modified in the **same transaction**. Never re-execute automatically.
+5. Readers pin a **normal SQLite read transaction** (`BEGIN` and the first read establish its snapshot), resolve an immutable application Generation membership and a retention lease on that one owner, enforce current Host ACL, then read **immutable** version bytes under the retained root. This is not persistent SQLite `snapshot_get`/per-key MVCC. Validate digest and parse/extraction identity. Do not load a historical document from the current mutable path.
 6. GC observes archived Generations, evidence, live readers, pending request inspection and retention. Orphan cleanup must never remove a folder referenced by any committed or pinned Generation.
 
 **Important API gap:** SaltsCore `salts_fs_replace_durable()` is a *file* replacement API. It is not proof of cross-platform no-replace durable **directory** publication. Qualification belongs to #298 and [SaltsCore #108](https://github.com/qigao/salts-core/issues/108). No raw runtime SQLite schema changes, private SQLite B-tree use, or fake cross-system ACID claim.
@@ -113,11 +115,24 @@ CREATE TABLE generation_chunk_membership (
   chunk_pk INTEGER NOT NULL,
   PRIMARY KEY(generation_id, chunk_pk)
 ) WITHOUT ROWID;
+
+-- Illustrative application-level durable publication, within this SAME DB.
+-- Generation members and retained external files are application-versioned.
+-- No per-key SQLite revision store or sqlite3_snapshot handle is required.
+CREATE TABLE index_generation_commits (
+  request_id BLOB PRIMARY KEY,
+  generation_id INTEGER NOT NULL UNIQUE,
+  manifest_digest BLOB NOT NULL CHECK(length(manifest_digest)=32)
+);
+CREATE TABLE index_generation_heads (
+  scope_id BLOB PRIMARY KEY,
+  generation_id INTEGER NOT NULL
+);
 ```
 
 - `extracted_chunks` and `symbol_occurrences` are **ROWID** tables because FTS5 External Content lookup needs a stable integer rowid. The separately keyed `generation_*_membership` and bounded graph adjacency can use `WITHOUT ROWID`.
 - FTS5 stores **inverted postings**, not the original source files. External content fetches text from the corresponding SQLite content table; it does not read version folders. This avoids a second stored copy of extracted text inside the FTS5 table, not a second content index or total disk cost.
-- Use fixed trusted C11 projection operations or exact schema triggers in the **same write transaction**. Existing TurboDB #222 evaluates this boundary; no ad hoc model-generated SQL/DDL or separate FTS writer. Deletions must update External Content FTS before base values become inaccessible.
+- Use prepared, fixed-schema C11 writes or versioned SQLite triggers in the **same existing KnowledgeStore write transaction**. The retired TurboDB #222/PR #224 prototype is not a prerequisite; no ad hoc model-generated SQL/DDL, new versioning wrapper or separate FTS writer. Deletions must update External Content FTS before base values become inaccessible.
 - New FTS tables + triggers **do not backfill** old rows; explicit schema-version migration and FTS5 rebuild/readback are required. Legacy `documents.content_hash` may be FNV64 over extracted text; never rename it original-source SHA-256.
 - Historical base rows and posting entries are retention-bound; deleting old-generation indexed rows before releasing pinned readers/evidence breaks historical queries.
 
@@ -166,15 +181,15 @@ Graph read uses forward and reverse composite B-tree indexes, explicit hop/node/
 
 ## 6. Delivery and verification gates
 
-1. **S0, design and provenance**: #306 + #293/#294/#300, define folder no-replace publish, retention, schema and SQL projection contracts. Current PR #304 remains Draft; no production migration.
+1. **S0, design and provenance**: #306 + #293/#294, define folder no-replace publish, retention, native SQLite schema and request-ID/Generation contracts. Old LocalDB #300 and Revisioned SQLite/LEANN prototype PRs are archived as superseded; salvage identity/provenance tests in new, scoped PRs only. No production migration.
 2. **S1, C11 fd discovery**: reuse existing Host root FS, deterministic bounded recursion, ignore/glob/no-follow symlink policy, file change coverage.
 3. **S2, C11 rg-like exact search**: bounded literal and PCRE2 regex, cross-buffer matches, original byte offsets, cancellation, compare to real rg/fd on the same selected input version.
 4. **S3, SQLite FTS5 [#307](https://github.com/qigao/TurboAgent/issues/307)**: external content chunk/symbol tables, same-owner update/backfill, version/scoped query planner and exhaustive exact-reference false-negative regression.
 5. **S4, CodeGraph C11 [#308](https://github.com/qigao/TurboAgent/issues/308)**: Tree-sitter C symbols, unresolved references and versioned edges with precise provenance and C/C++ build-config identity.
-6. **S5, durable generation [#298](https://github.com/qigao/TurboAgent/issues/298)**: filesystem-before-DB, fixed pinned read, same-transaction chunk/FTS/Graph/HEAD, request_id COMMIT_UNKNOWN inspection and process-kill/VFS fault tests.
+6. **S5, durable generation [#298](https://github.com/qigao/TurboAgent/issues/298)**: filesystem-before-DB, fixed read-only SQLite transaction and immutable historical membership, same-transaction chunk/FTS/Graph/HEAD/request_id, `COMMIT_UNKNOWN` inspection and process-kill/VFS fault tests. **No `TurboDB::SqliteRevision` gate.**
 7. **S6, migration and benchmarks**: preserve old KnowledgeStore URI/kind/title/metadata, compare versioned queries and impacts, old content absent/retained cases; 1K/10K/100K+ real repo corpora, cold/warm p50/p95/p99 latency, disk/RSS, churn, correctness; separately measure Agent tool calls/tokens/quality.
 
-No speculative fallback parser/provider; no installer/consumer projects, separate probe workflows, new CI files or unfounded performance claims. Reuse existing project tests/CTest and cached toolchains. No merge, release or production switch until the exact HEAD and cross-repo TurboDB SDK + Host ACL + crash recovery are proven.
+No speculative fallback parser/provider; no installer/consumer projects, separate probe workflows, new CI files or unfounded performance claims. Reuse existing project tests/CTest and cached toolchains. No merge, release or production switch until exact-HEAD native SQLite/FTS5, Host ACL, filesystem publication and crash-recovery acceptance are proven. The retired TurboDB revision SDK is not a build dependency.
 
 ## References
 

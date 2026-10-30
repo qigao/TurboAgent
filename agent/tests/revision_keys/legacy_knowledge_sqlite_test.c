@@ -37,4 +37,41 @@ CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;
 CHECK(sqlite3_open(path,&db)==SQLITE_OK);
 CHECK(exec(db,"DELETE FROM chunks WHERE document_id='missing';"));
 CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;
-CHECK(sqlite3_open_v2(path,&db,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)==SQLITE_OK);CHECK(sqlite3_prepare_v2(db,"SELECT count(*) FROM documents",-1,&st,NULL)==SQLITE_OK&&sqlite3_step(st)==SQLITE_ROW);docs=sqlite3_column_int64(st,0);sqlite3_finalize(st);st=NULL;CHECK(docs==2);lim.max_documents=1;count=99;memset(&seen,0,sizeof(seen));CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_LIMIT);CHECK(count==0);lim.max_documents=8;CHECK(exec(db,"BEGIN"));CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_BUSY);CHECK(exec(db,"ROLLBACK"));lim.max_documents=TA_LEGACY_SQLITE_MAX_DOCUMENTS+1u;CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_INVALID);lim.max_documents=8;CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;CHECK(sqlite3_open(path,&db)==SQLITE_OK);CHECK(exec(db,"ALTER TABLE documents ADD COLUMN injected TEXT"));CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;CHECK(sqlite3_open_v2(path,&db,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)==SQLITE_OK);CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_SCHEMA);CHECK(sqlite3_close(db)==SQLITE_OK);(void)remove(path);puts("TurboAgent on-disk legacy KnowledgeStore audit PASS");return 0;}
+CHECK(sqlite3_open_v2(path,&db,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)==SQLITE_OK);CHECK(sqlite3_prepare_v2(db,"SELECT count(*) FROM documents",-1,&st,NULL)==SQLITE_OK&&sqlite3_step(st)==SQLITE_ROW);docs=sqlite3_column_int64(st,0);sqlite3_finalize(st);st=NULL;CHECK(docs==2);lim.max_documents=1;count=99;memset(&seen,0,sizeof(seen));CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_LIMIT);CHECK(count==0);lim.max_documents=8;CHECK(exec(db,"BEGIN"));CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_BUSY);CHECK(exec(db,"ROLLBACK"));lim.max_documents=TA_LEGACY_SQLITE_MAX_DOCUMENTS+1u;CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_INVALID);lim.max_documents=8;CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;/* A missing document_id B-tree access path must fail admission. */
+CHECK(sqlite3_open(path,&db)==SQLITE_OK);
+CHECK(exec(db,"DROP INDEX idx_chunks_document_id;"));
+CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;
+CHECK(sqlite3_open_v2(path,&db,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)==SQLITE_OK);
+memset(&seen,0,sizeof(seen));count=99;
+CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_SCHEMA);
+CHECK(seen.count==0&&count==0);
+CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;
+CHECK(sqlite3_open(path,&db)==SQLITE_OK);
+CHECK(exec(db,"CREATE INDEX idx_chunks_document_id ON chunks(document_id);"));
+CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;
+
+/* Forged same-name tables with identical column types/PK but no FK must
+ * never be accepted as the authoritative legacy KnowledgeStore schema. */
+{
+  char fake_path[1024];
+  CHECK(strlen(path)<sizeof(fake_path)-24u);
+  (void)snprintf(fake_path,sizeof(fake_path),"%s-no-fk.db",path);
+  (void)remove(fake_path);
+  CHECK(sqlite3_open(fake_path,&db)==SQLITE_OK);
+  CHECK(exec(db,"CREATE TABLE documents("
+      "id TEXT PRIMARY KEY,uri TEXT NOT NULL UNIQUE,kind TEXT NOT NULL,"
+      "title TEXT,mtime INTEGER NOT NULL DEFAULT 0,size INTEGER NOT NULL DEFAULT 0,"
+      "content_hash TEXT NOT NULL,metadata_json TEXT,"
+      "updated_at INTEGER NOT NULL DEFAULT (unixepoch()));"
+      "CREATE TABLE chunks(id TEXT PRIMARY KEY,document_id TEXT NOT NULL,"
+      "ordinal INTEGER NOT NULL,text TEXT NOT NULL,metadata_json TEXT);"
+      "CREATE INDEX idx_chunks_document_id ON chunks(document_id);"));
+  CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;
+  CHECK(sqlite3_open_v2(fake_path,&db,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)==SQLITE_OK);
+  memset(&seen,0,sizeof(seen));count=99;
+  CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_SCHEMA);
+  CHECK(seen.count==0&&count==0);
+  CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;
+  (void)remove(fake_path);
+}
+CHECK(sqlite3_open(path,&db)==SQLITE_OK);CHECK(exec(db,"ALTER TABLE documents ADD COLUMN injected TEXT"));CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;CHECK(sqlite3_open_v2(path,&db,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)==SQLITE_OK);CHECK(ta_legacy_knowledge_sqlite_plan_all(db,&lim,visit,&seen,&count)==TA_LEGACY_SQLITE_SCHEMA);CHECK(sqlite3_close(db)==SQLITE_OK);(void)remove(path);puts("TurboAgent on-disk legacy KnowledgeStore audit PASS");return 0;}

@@ -90,3 +90,21 @@ The two passes share the same deferred read transaction, so validation and
 emission observe the same source snapshot. This does not itself make the target
 migration atomic; the target writer must still use the one-owner publication
 contract and abort on visitor/backend failure.
+
+
+## Exact relational-schema admission
+
+The reader pins the read transaction **before** schema admission. It verifies
+SQLite `NOT NULL` flags (including the legacy rowid-table exception for
+`TEXT PRIMARY KEY`), a single-column unique URI index, the chunk
+`document_id` B-tree index, and the exact
+`chunks(document_id) REFERENCES documents(id) ON DELETE CASCADE` foreign key.
+A forged same-name schema with otherwise matching column names/types/PK but
+without the FK fails before any migration visitor. Removing the authoritative
+chunk lookup index also fails; the scanner does not silently substitute an
+unbounded scan. Schema inspection, orphan coverage, complete validation and
+emission now share one pinned source transaction.
+
+These constraints admit the actual existing legacy KnowledgeStore DDL; they do
+not assert that historical extracted text is original-source content, establish
+path authority, or prove that a target migration was atomically published.

@@ -102,9 +102,10 @@ static int roundtrip_and_publish(void) {
   CHECK(c2.metadata_json.size == c.metadata_json.size &&
         !memcmp(c2.metadata_json.data,c.metadata_json.data,c.metadata_json.size));
   CHECK(c2.ordinal == 0 && c2.text.data == NULL && c2.text.size == 0);
-  d2.title = (ta_legacy_migration_text_t){NULL,0};
-  d2.metadata_json = (ta_legacy_migration_text_t){NULL,0};
-  CHECK(ta_legacy_provenance_document_encode(&d2,&dp)==TA_LEGACY_PROVENANCE_OK);
+  /* Decode views borrow dp.data; never encode back into their own buffer. */
+  d.title = (ta_legacy_migration_text_t){NULL,0};
+  d.metadata_json = (ta_legacy_migration_text_t){NULL,0};
+  CHECK(ta_legacy_provenance_document_encode(&d,&dp)==TA_LEGACY_PROVENANCE_OK);
   CHECK(ta_legacy_provenance_document_decode(dp.data,dp.size,&d2)==TA_LEGACY_PROVENANCE_OK);
   CHECK(d2.title.data == NULL && d2.metadata_json.data == NULL);
   d.title = (ta_legacy_migration_text_t){empty,0};

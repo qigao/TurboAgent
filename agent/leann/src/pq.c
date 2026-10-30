@@ -1,4 +1,4 @@
-#include "turbo_leann_compact.h"
+#include "turbo_leann_compact_internal.h"
 #include "turbo_leann_internal.h"
 
 #include <float.h>
@@ -9,16 +9,7 @@
 #define PQ_HEADER 176u
 static const uint8_t pq_magic[8] = {'T','L','C','1','P','Q','0','2'};
 
-struct turbo_leann_compact_s {
-  uint32_t dimensions, count, degree, edge_count, m, k, iterations;
-  uint64_t generation;
-  uint8_t model[32], scope[32];
-  uint8_t *ids;       /* n x (chunk_label[16], revision_label[16]) */
-  uint32_t *offsets;  /* (n+1) CSR offsets */
-  uint32_t *edges;    /* CSR neighbor node ordinals */
-  float *codebook;    /* m * k * (dim/m) normalized-space centroids */
-  uint8_t *codes;     /* n * m byte codes; no FP32 vectors in compact */
-};
+
 
 static void pq_release(turbo_leann_compact_t *s) {
   if (!s) return;

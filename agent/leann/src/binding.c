@@ -1,7 +1,9 @@
 #include "turbo_leann_binding.h"
 #include "turbo_leann_internal.h"
+#include "turbo_leann_compact_internal.h"
 
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 
 /* Canonical node map format v1, little endian.
@@ -148,6 +150,67 @@ static turbo_leann_status_t tl_hash_blob(turbo_leann_sha256_fn fn, void *owner,
   return TURBO_LEANN_OK;
 }
 
+/* The ONLY decoder/admission path for both FP32 and PQ segment labels.
+ * Verify complete canonical-key map before any query or recompute callback;
+ * all bindings borrow the signed node_map_blob until the pinned read ends. */
+static turbo_leann_status_t tl_decode_admit_map(
+    const turbo_leann_manifest_t *manifest,
+    const turbo_leann_pinned_read_t *read,
+    const uint8_t *ids, uint32_t count,
+    const uint8_t *node_map_blob, size_t node_map_bytes,
+    turbo_leann_binding_entry_t *bindings) {
+  if (node_map_bytes < TURBO_LEANN_NODE_MAP_HEADER_BYTES ||
+      memcmp(node_map_blob,tl_map_magic,8) ||
+      tl_read32(node_map_blob+8)!=1u ||
+      tl_read32(node_map_blob+12)!=TURBO_LEANN_NODE_MAP_HEADER_BYTES ||
+      tl_read64(node_map_blob+16)!=manifest->generation ||
+      tl_read32(node_map_blob+24)!=manifest->node_count ||
+      tl_read32(node_map_blob+28)!=0 ||
+      memcmp(node_map_blob+32,manifest->model_fingerprint,32) ||
+      memcmp(node_map_blob+64,manifest->scope_fingerprint,32) ||
+      tl_read64(node_map_blob+96)!=(uint64_t)node_map_bytes)
+    return TURBO_LEANN_CORRUPT;
+  tl_key_view_t *keys=(tl_key_view_t *)calloc(count,sizeof(*keys));
+  if (!keys) return TURBO_LEANN_NO_MEMORY;
+  turbo_leann_status_t status=TURBO_LEANN_OK;
+  size_t cursor=TURBO_LEANN_NODE_MAP_HEADER_BYTES;
+  for (uint32_t i=0; i<count; ++i) {
+    if (node_map_bytes-cursor < 36u) { status=TURBO_LEANN_CORRUPT; goto done; }
+    const uint8_t *entry=node_map_blob+cursor;
+    uint16_t clen=tl_read16(entry+32), rlen=tl_read16(entry+34);
+    if (!clen || !rlen || clen>TURBO_LEANN_NODE_KEY_MAX_BYTES ||
+        rlen>TURBO_LEANN_NODE_KEY_MAX_BYTES ||
+        memcmp(entry,ids+(size_t)i*32u,32) ||
+        (size_t)clen+(size_t)rlen > node_map_bytes-cursor-36u) {
+      status=TURBO_LEANN_CORRUPT; goto done;
+    }
+    memcpy(bindings[i].chunk_label,entry,16);
+    memcpy(bindings[i].revision_label,entry+16,16);
+    cursor+=36u;
+    bindings[i].chunk_key.data=node_map_blob+cursor;
+    bindings[i].chunk_key.size=clen;
+    cursor+=clen;
+    bindings[i].revision_key.data=node_map_blob+cursor;
+    bindings[i].revision_key.size=rlen;
+    cursor+=rlen;
+    keys[i].chunk=bindings[i].chunk_key;
+  }
+  if (cursor!=node_map_bytes) {status=TURBO_LEANN_CORRUPT;goto done;}
+  qsort(keys,count,sizeof(*keys),tl_key_compare);
+  for (uint32_t i=1; i<count; ++i)
+    if (!tl_key_compare(&keys[i-1],&keys[i])) {
+      status=TURBO_LEANN_CORRUPT; goto done;
+    }
+  for (uint32_t i=0; i<count; ++i) {
+    status=read->admit_node(read->pinned_owner,bindings[i].chunk_key,
+                            bindings[i].revision_key);
+    if (status!=TURBO_LEANN_OK) goto done;
+  }
+done:
+  free(keys);
+  return status;
+}
+
 turbo_leann_status_t turbo_leann_search_pinned_exact(
     const turbo_leann_manifest_t *manifest,
     const turbo_leann_pinned_read_t *read,
@@ -192,7 +255,6 @@ turbo_leann_status_t turbo_leann_search_pinned_exact(
   turbo_leann_segment_t *segment=NULL;
   status=turbo_leann_deserialize(segment_blob,segment_bytes,limits,&segment);
   if (status!=TURBO_LEANN_OK) return status;
-  tl_key_view_t *keys=NULL;
   turbo_leann_binding_entry_t *bindings=NULL;
   turbo_leann_hit_t *scores=NULL;
   turbo_leann_verified_hit_t *verified=NULL;
@@ -204,59 +266,11 @@ turbo_leann_status_t turbo_leann_search_pinned_exact(
     status=TURBO_LEANN_CORRUPT;
     goto cleanup;
   }
-  if (node_map_bytes < TURBO_LEANN_NODE_MAP_HEADER_BYTES ||
-      memcmp(node_map_blob,tl_map_magic,8) ||
-      tl_read32(node_map_blob+8)!=1u ||
-      tl_read32(node_map_blob+12)!=TURBO_LEANN_NODE_MAP_HEADER_BYTES ||
-      tl_read64(node_map_blob+16)!=manifest->generation ||
-      tl_read32(node_map_blob+24)!=manifest->node_count ||
-      tl_read32(node_map_blob+28)!=0 ||
-      memcmp(node_map_blob+32,manifest->model_fingerprint,32) ||
-      memcmp(node_map_blob+64,manifest->scope_fingerprint,32) ||
-      tl_read64(node_map_blob+96)!=(uint64_t)node_map_bytes) {
-    status=TURBO_LEANN_CORRUPT;
-    goto cleanup;
-  }
-
   bindings=(turbo_leann_binding_entry_t *)calloc(segment->count,sizeof(*bindings));
-  keys=(tl_key_view_t *)calloc(segment->count,sizeof(*keys));
-  if (!bindings || !keys) { status=TURBO_LEANN_NO_MEMORY; goto cleanup; }
-  size_t cursor=TURBO_LEANN_NODE_MAP_HEADER_BYTES;
-  for (uint32_t i=0; i<segment->count; ++i) {
-    if (node_map_bytes-cursor < 36u) { status=TURBO_LEANN_CORRUPT; goto cleanup; }
-    const uint8_t *entry=node_map_blob+cursor;
-    uint16_t clen=tl_read16(entry+32), rlen=tl_read16(entry+34);
-    if (!clen || !rlen || clen>TURBO_LEANN_NODE_KEY_MAX_BYTES ||
-        rlen>TURBO_LEANN_NODE_KEY_MAX_BYTES ||
-        memcmp(entry,segment->ids+(size_t)i*32u,32) ||
-        (size_t)clen+(size_t)rlen > node_map_bytes-cursor-36u) {
-      status=TURBO_LEANN_CORRUPT;
-      goto cleanup;
-    }
-    memcpy(bindings[i].chunk_label,entry,16);
-    memcpy(bindings[i].revision_label,entry+16,16);
-    cursor+=36u;
-    bindings[i].chunk_key.data=node_map_blob+cursor;
-    bindings[i].chunk_key.size=clen;
-    cursor+=clen;
-    bindings[i].revision_key.data=node_map_blob+cursor;
-    bindings[i].revision_key.size=rlen;
-    cursor+=rlen;
-    keys[i].chunk=bindings[i].chunk_key;
-  }
-  if (cursor!=node_map_bytes) { status=TURBO_LEANN_CORRUPT; goto cleanup; }
-  /* A label cannot alias two canonical chunks: map uniqueness must be
-   * checked before any Host callback or vector access. */
-  qsort(keys,segment->count,sizeof(*keys),tl_key_compare);
-  for (uint32_t i=1; i<segment->count; ++i)
-    if (!tl_key_compare(&keys[i-1],&keys[i])) {
-      status=TURBO_LEANN_CORRUPT; goto cleanup;
-    }
-  for (uint32_t i=0; i<segment->count; ++i) {
-    status=read->admit_node(read->pinned_owner,bindings[i].chunk_key,
-                            bindings[i].revision_key);
-    if (status!=TURBO_LEANN_OK) goto cleanup;
-  }
+  if (!bindings) {status=TURBO_LEANN_NO_MEMORY;goto cleanup;}
+  status=tl_decode_admit_map(manifest,read,segment->ids,segment->count,
+                             node_map_blob,node_map_bytes,bindings);
+  if (status!=TURBO_LEANN_OK) goto cleanup;
 
   scores=(turbo_leann_hit_t *)calloc(query->top_k,sizeof(*scores));
   verified=(turbo_leann_verified_hit_t *)calloc(query->top_k,sizeof(*verified));
@@ -288,8 +302,223 @@ turbo_leann_status_t turbo_leann_search_pinned_exact(
 cleanup:
   free(verified);
   free(scores);
-  free(keys);
   free(bindings);
   turbo_leann_segment_destroy(segment);
+  return status;
+}
+
+/* One admission pipeline for both L1 compressed query modes. The v1 L0.5
+ * exact search above shares tl_decode_admit_map; no second Node Map parser. */
+typedef struct tl_verified_pq_s {
+  turbo_leann_compact_t *segment;
+  turbo_leann_binding_entry_t *bindings;
+  uint32_t count;
+} tl_verified_pq_t;
+
+static void tl_verified_pq_close(tl_verified_pq_t *ctx) {
+  free(ctx->bindings);
+  turbo_leann_compact_destroy(ctx->segment);
+  memset(ctx,0,sizeof(*ctx));
+}
+
+static turbo_leann_status_t tl_open_verified_pq(
+    const turbo_leann_manifest_t *manifest,
+    const turbo_leann_pinned_read_t *read,
+    const uint8_t *segment_blob, size_t segment_bytes,
+    const uint8_t *node_map_blob, size_t node_map_bytes,
+    const turbo_leann_limits_t *limits, uint64_t max_node_map_bytes,
+    const turbo_leann_query_t *query, tl_verified_pq_t *out) {
+  memset(out,0,sizeof(*out));
+  if(!manifest || !read || !segment_blob || !segment_bytes ||
+     !node_map_blob || !node_map_bytes || !limits || !query ||
+     manifest->struct_size!=sizeof(*manifest) ||
+     manifest->abi_version!=TURBO_LEANN_ABI_VERSION ||
+     read->struct_size!=sizeof(*read) ||
+     read->abi_version!=TURBO_LEANN_ABI_VERSION ||
+     limits->struct_size!=sizeof(*limits) ||
+     limits->abi_version!=TURBO_LEANN_ABI_VERSION ||
+     query->struct_size!=sizeof(*query) ||
+     query->abi_version!=TURBO_LEANN_ABI_VERSION ||
+     !read->pinned_owner || !read->sha256 || !read->admit_node ||
+     !query->top_k || query->top_k>1024u || !query->components)
+    return TURBO_LEANN_INVALID;
+  if(!tl_manifest_matches(manifest,read,query))
+    return TURBO_LEANN_SCOPE_MISMATCH;
+  if(manifest->node_count>limits->max_nodes ||
+     manifest->dimensions>limits->max_dimensions ||
+     query->max_distance_evaluations<query->top_k ||
+     segment_bytes>limits->max_segment_bytes ||
+     node_map_bytes>max_node_map_bytes)return TURBO_LEANN_LIMIT;
+  if(!tl_valid_fingerprint(manifest->segment_sha256) ||
+     !tl_valid_fingerprint(manifest->node_map_sha256))
+    return TURBO_LEANN_INVALID;
+  turbo_leann_status_t status=tl_hash_blob(read->sha256,read->pinned_owner,
+      segment_blob,segment_bytes,manifest->segment_sha256);
+  if(status!=TURBO_LEANN_OK)return status;
+  status=tl_hash_blob(read->sha256,read->pinned_owner,
+      node_map_blob,node_map_bytes,manifest->node_map_sha256);
+  if(status!=TURBO_LEANN_OK)return status;
+  status=turbo_leann_pq_deserialize(segment_blob,segment_bytes,limits,&out->segment);
+  if(status!=TURBO_LEANN_OK)return status;
+  turbo_leann_compact_t *s=out->segment;
+  if(s->count!=manifest->node_count || s->dimensions!=manifest->dimensions ||
+     s->generation!=manifest->generation ||
+     memcmp(s->model,manifest->model_fingerprint,32) ||
+     memcmp(s->scope,manifest->scope_fingerprint,32)) {
+    tl_verified_pq_close(out);
+    return TURBO_LEANN_CORRUPT;
+  }
+  out->count=s->count;
+  out->bindings=(turbo_leann_binding_entry_t *)calloc(s->count,sizeof(*out->bindings));
+  if(!out->bindings) {
+    tl_verified_pq_close(out);
+    return TURBO_LEANN_NO_MEMORY;
+  }
+  status=tl_decode_admit_map(manifest,read,s->ids,s->count,
+      node_map_blob,node_map_bytes,out->bindings);
+  if(status!=TURBO_LEANN_OK) tl_verified_pq_close(out);
+  return status;
+}
+
+static const turbo_leann_binding_entry_t *tl_find_verified_label(
+    const tl_verified_pq_t *ctx,const uint8_t *chunk,const uint8_t *revision) {
+  size_t l=0,r=ctx->count;
+  while(l<r) {
+    size_t mid=l+(r-l)/2;
+    if(memcmp(ctx->bindings[mid].chunk_label,chunk,16)<0)l=mid+1;
+    else r=mid;
+  }
+  if(l>=ctx->count || memcmp(ctx->bindings[l].chunk_label,chunk,16) ||
+     memcmp(ctx->bindings[l].revision_label,revision,16))return NULL;
+  return &ctx->bindings[l];
+}
+
+turbo_leann_status_t turbo_leann_search_pinned_adc(
+    const turbo_leann_manifest_t *manifest,
+    const turbo_leann_pinned_read_t *read,
+    const uint8_t *compact_blob,size_t compact_bytes,
+    const uint8_t *node_map_blob,size_t node_map_bytes,
+    const turbo_leann_limits_t *limits,uint64_t max_node_map_bytes,
+    const turbo_leann_query_t *query,
+    turbo_leann_verified_adc_hit_t *out_hits,size_t hits_capacity,
+    size_t *out_count) {
+  if(!out_count)return TURBO_LEANN_INVALID;
+  *out_count=0;
+  if(!query || !out_hits || !query->top_k || query->top_k>hits_capacity ||
+     query->top_k>1024u)return TURBO_LEANN_INVALID;
+  tl_verified_pq_t ctx={0};
+  turbo_leann_status_t status=tl_open_verified_pq(manifest,read,
+      compact_blob,compact_bytes,node_map_blob,node_map_bytes,limits,
+      max_node_map_bytes,query,&ctx);
+  if(status!=TURBO_LEANN_OK)return status;
+  turbo_leann_adc_hit_t *adc=(turbo_leann_adc_hit_t *)calloc(query->top_k,sizeof(*adc));
+  turbo_leann_verified_adc_hit_t *verified=(turbo_leann_verified_adc_hit_t *)
+      calloc(query->top_k,sizeof(*verified));
+  if(!adc || !verified) {status=TURBO_LEANN_NO_MEMORY;goto done;}
+  size_t n=0;
+  status=turbo_leann_search_adc(ctx.segment,query,adc,query->top_k,&n);
+  if(status!=TURBO_LEANN_OK)goto done;
+  for(size_t i=0;i<n;i++) {
+    const turbo_leann_binding_entry_t *b=tl_find_verified_label(
+        &ctx,adc[i].chunk_label,adc[i].revision_label);
+    if(!b) {status=TURBO_LEANN_CORRUPT;goto done;}
+    verified[i].scored=adc[i];
+    verified[i].chunk_key=b->chunk_key;
+    verified[i].revision_key=b->revision_key;
+  }
+  memcpy(out_hits,verified,n*sizeof(*verified));
+  *out_count=n;
+done:
+  free(adc);free(verified);tl_verified_pq_close(&ctx);
+  return status;
+}
+
+static int tl_rerank_better(const turbo_leann_verified_hit_t *a,
+                            const turbo_leann_verified_hit_t *b) {
+  return a->scored.cosine_similarity>b->scored.cosine_similarity ||
+         (a->scored.cosine_similarity==b->scored.cosine_similarity &&
+          memcmp(a->scored.chunk_label,b->scored.chunk_label,16)<0);
+}
+
+turbo_leann_status_t turbo_leann_search_pinned_recompute(
+    const turbo_leann_manifest_t *manifest,
+    const turbo_leann_pinned_read_t *read,
+    const uint8_t *compact_blob,size_t compact_bytes,
+    const uint8_t *node_map_blob,size_t node_map_bytes,
+    const turbo_leann_limits_t *limits,uint64_t max_node_map_bytes,
+    const turbo_leann_query_t *query,uint32_t candidate_k,
+    uint64_t max_recompute_source_bytes,turbo_leann_recompute_fn recompute,
+    turbo_leann_verified_hit_t *out_hits,size_t hits_capacity,
+    size_t *out_count) {
+  if(!out_count)return TURBO_LEANN_INVALID;
+  *out_count=0;
+  if(!query || !out_hits || !read || !recompute || !candidate_k ||
+     candidate_k>1024u || !query->top_k || query->top_k>candidate_k ||
+     query->top_k>hits_capacity || !max_recompute_source_bytes)
+    return TURBO_LEANN_INVALID;
+  if(query->max_distance_evaluations<candidate_k)return TURBO_LEANN_LIMIT;
+  tl_verified_pq_t ctx={0};
+  turbo_leann_status_t status=tl_open_verified_pq(manifest,read,
+      compact_blob,compact_bytes,node_map_blob,node_map_bytes,limits,
+      max_node_map_bytes,query,&ctx);
+  if(status!=TURBO_LEANN_OK)return status;
+  turbo_leann_adc_hit_t *candidates=(turbo_leann_adc_hit_t *)
+      calloc(candidate_k,sizeof(*candidates));
+  turbo_leann_verified_hit_t *best=(turbo_leann_verified_hit_t *)
+      calloc(query->top_k,sizeof(*best));
+  float *embedding=(float *)malloc((size_t)ctx.segment->dimensions*sizeof(float));
+  if(!candidates || !best || !embedding){status=TURBO_LEANN_NO_MEMORY;goto done;}
+  turbo_leann_query_t q2=*query;
+  q2.top_k=candidate_k;
+  size_t n=0;
+  status=turbo_leann_search_adc(ctx.segment,&q2,candidates,candidate_k,&n);
+  if(status!=TURBO_LEANN_OK)goto done;
+  double query_norm=0.0;
+  if(!tl_valid_vector(query->components,query->dimensions,&query_norm)) {
+    status=TURBO_LEANN_INVALID;goto done;
+  }
+  size_t used=0;
+  uint64_t remaining=max_recompute_source_bytes;
+  for(size_t i=0;i<n;i++) {
+    const turbo_leann_binding_entry_t *b=tl_find_verified_label(
+        &ctx,candidates[i].chunk_label,candidates[i].revision_label);
+    if(!b) {status=TURBO_LEANN_CORRUPT;goto done;}
+    if(remaining==0){status=TURBO_LEANN_LIMIT;goto done;}
+    /* A successful provider MUST overwrite all components. A partial/stale
+     * callback buffer is never admissible as a candidate embedding. */
+    for(uint32_t j=0;j<query->dimensions;j++)embedding[j]=NAN;
+    uint64_t consumed=0;
+    status=recompute(read->pinned_owner,b->chunk_key,b->revision_key,
+         query->dimensions,remaining,embedding,&consumed);
+    if(status!=TURBO_LEANN_OK)goto done;
+    if(consumed>remaining){status=TURBO_LEANN_LIMIT;goto done;}
+    remaining-=consumed;
+    double norm=0.0;
+    if(!tl_valid_vector(embedding,query->dimensions,&norm)) {
+      status=TURBO_LEANN_INVALID;goto done;
+    }
+    double dot=0.0;
+    for(uint32_t j=0;j<query->dimensions;j++)
+      dot+=(double)query->components[j]*(double)embedding[j];
+    double cosine=dot/(query_norm*norm);
+    if(cosine>1.0)cosine=1.0;
+    if(cosine< -1.0)cosine= -1.0;
+    turbo_leann_verified_hit_t item={0};
+    memcpy(item.scored.chunk_label,candidates[i].chunk_label,16);
+    memcpy(item.scored.revision_label,candidates[i].revision_label,16);
+    item.scored.cosine_similarity=(float)cosine;
+    item.chunk_key=b->chunk_key;
+    item.revision_key=b->revision_key;
+    size_t pos=0;
+    while(pos<used && !tl_rerank_better(&item,&best[pos]))pos++;
+    if(pos>=query->top_k)continue;
+    if(used<query->top_k)used++;
+    for(size_t j=used-1;j>pos;j--)best[j]=best[j-1];
+    best[pos]=item;
+  }
+  memcpy(out_hits,best,used*sizeof(*best));
+  *out_count=used;
+done:
+  free(candidates);free(best);free(embedding);tl_verified_pq_close(&ctx);
   return status;
 }

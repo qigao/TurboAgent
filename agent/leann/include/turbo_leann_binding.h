@@ -2,6 +2,7 @@
 #define TURBO_LEANN_BINDING_H
 
 #include "turbo_leann.h"
+#include "turbo_leann_compact.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,6 +108,60 @@ turbo_leann_status_t turbo_leann_search_pinned_exact(
     const uint8_t *node_map_blob, size_t node_map_bytes,
     const turbo_leann_limits_t *limits, uint64_t max_node_map_bytes,
     const turbo_leann_query_t *query,
+    turbo_leann_verified_hit_t *out_hits, size_t hits_capacity,
+    size_t *out_count);
+
+/* L1b private pinned PQ result: ADC distance is approximate squared L2.
+ * Keys borrow node_map_blob, and remain valid only during the pinned read. */
+typedef struct turbo_leann_verified_adc_hit_s {
+  turbo_leann_adc_hit_t scored;
+  turbo_leann_bytes_t chunk_key;
+  turbo_leann_bytes_t revision_key;
+} turbo_leann_verified_adc_hit_t;
+
+/* Uses the SAME validated full Node Map decoder and Host admission path as
+ * turbo_leann_search_pinned_exact(). Every traversal node must be admitted
+ * before ADC; labels/CRC never authorize data access. No implicit fallback. */
+turbo_leann_status_t turbo_leann_search_pinned_adc(
+    const turbo_leann_manifest_t *manifest,
+    const turbo_leann_pinned_read_t *read,
+    const uint8_t *compact_blob, size_t compact_bytes,
+    const uint8_t *node_map_blob, size_t node_map_bytes,
+    const turbo_leann_limits_t *limits, uint64_t max_node_map_bytes,
+    const turbo_leann_query_t *query,
+    turbo_leann_verified_adc_hit_t *out_hits, size_t hits_capacity,
+    size_t *out_count);
+
+/* Recompute exactly one candidate's embedding from the selected immutable
+ * SourceRevision/extraction/Chunk under the borrowed pinned read. It MUST use
+ * the exact model/preprocessing identity admitted by the Host; no current
+ * source-path access, model fallback or reference to newer revisions.
+ * max_source_bytes is a strict per-call remaining quota. Report actual bytes
+ * consumed in out_source_bytes; non-OK status invalidates the entire query.
+ */
+typedef turbo_leann_status_t (*turbo_leann_recompute_fn)(
+    void *pinned_owner, turbo_leann_bytes_t chunk_key,
+    turbo_leann_bytes_t revision_key, uint32_t dimensions,
+    uint64_t max_source_bytes, float *out_embedding,
+    uint64_t *out_source_bytes);
+
+/* Two-stage search: bounded ADC candidate collection, then EXACT cosine
+ * reranking of only candidate_k nodes. All nodes are first Host-admitted.
+ * Recompute failures, missing historical content, quota exhaustion, invalid
+ * model embeddings and digest errors return no partial hits; no ADC-score
+ * substitute or fallback. Returned score is exact cosine OF THE RECOMPUTED
+ * candidate embeddings, not exact corpus-wide nearest-neighbor recall.
+ * candidate_k >= query->top_k, <=1024 and <= evaluation budget.
+ */
+turbo_leann_status_t turbo_leann_search_pinned_recompute(
+    const turbo_leann_manifest_t *manifest,
+    const turbo_leann_pinned_read_t *read,
+    const uint8_t *compact_blob, size_t compact_bytes,
+    const uint8_t *node_map_blob, size_t node_map_bytes,
+    const turbo_leann_limits_t *limits, uint64_t max_node_map_bytes,
+    const turbo_leann_query_t *query,
+    uint32_t candidate_k, uint64_t max_recompute_source_bytes,
+    turbo_leann_recompute_fn recompute,
     turbo_leann_verified_hit_t *out_hits, size_t hits_capacity,
     size_t *out_count);
 

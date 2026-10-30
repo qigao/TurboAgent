@@ -95,9 +95,9 @@ int main(int argc,char **argv) {
     "FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE);"
     "CREATE INDEX idx_chunks_document_id ON chunks(document_id);"
     "INSERT INTO documents(id,uri,kind,title,mtime,size,content_hash,metadata_json,updated_at)"
-    " VALUES('first','memory://old','note','Original',8,12,'abcd1234','{""x"":1}',10),"
+    " VALUES('first','memory://old','note','Original',8,12,'abcd1234','{\"x\":1}',10),"
     " ('zero','memory://zero','note',NULL,0,0,'opaque',NULL,11);"
-    "INSERT INTO chunks VALUES('first#0','first',0,'hello world','{""i"":0}'),"
+    "INSERT INTO chunks VALUES('first#0','first',0,'hello world','{\"i\":0}'),"
     "('zero#0','zero',0,'',NULL);"));
   CHECK(sqlite3_close(db)==SQLITE_OK);db=NULL;
   CHECK(sqlite3_open_v2(path,&db,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)==SQLITE_OK);

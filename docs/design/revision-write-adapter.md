@@ -107,8 +107,10 @@ fixtures before any production cutover.
 ## SourceRevision record semantics
 
 SourceRevision metadata is no longer an opaque write payload. The private
-`ta_source_revision_record_t` encodes original-content length, explicit digest
-semantics and retention state into a fixed versioned record.
+`ta_source_revision_record_t` TAR v2 encodes original-content length, explicit digest
+semantics, retention state, source mtime and observation time into a fixed 64-byte
+versioned record. Both timestamps are Unix seconds and are provenance only; they
+are never used as unchanged-content proof or authorization.
 
 `UNVERIFIED_LEGACY` means the legacy KnowledgeStore hash cannot be proven to
 be SHA-256 of the original source bytes (the current legacy path includes

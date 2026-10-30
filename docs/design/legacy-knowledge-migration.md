@@ -18,7 +18,9 @@ plus a typed SourceRevision record:
   legacy content_hash bytes, legacy updated_at and chunk count. It is a tagged
   row identity, **not a cryptographic content digest**.
 - SourceRevision digest semantics are always `UNVERIFIED_LEGACY`, retention is
-  `CONTENT_UNAVAILABLE`, and SHA-256 is zero. A 16-hex hash is reported only
+  `CONTENT_UNAVAILABLE`, and SHA-256 is zero. TAR v2 additionally preserves the
+  legacy row's nonnegative `mtime` as `source_mtime_seconds` and `updated_at` as
+  `observed_at_seconds`; neither timestamp proves that current path bytes are unchanged. A 16-hex hash is reported only
   as `HEX64_SHAPE_UNVERIFIED`, never promoted to SHA-256.
 - chunks must be contiguous from ordinal zero and have the exact legacy
   `<document-id>#<ordinal>` identity. Embedded NUL, malformed ownership,

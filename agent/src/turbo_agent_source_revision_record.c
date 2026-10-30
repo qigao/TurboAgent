@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-static const unsigned char magic[4] = {'T','A','R',1};
+static const unsigned char magic[4] = {'T','A','R',2};
 
 static int all_zero(const unsigned char digest[32]) {
   unsigned char accum = 0;
@@ -43,7 +43,9 @@ ta_source_revision_record_status_t ta_source_revision_record_encode(
   out->data[12] = (unsigned char)record->digest_kind;
   out->data[13] = (unsigned char)record->retention;
   /* bytes 14..15 reserved and zero */
-  memcpy(out->data + 16u, record->sha256, 32u);
+  put_u64(out->data + 16u, record->source_mtime_seconds);
+  put_u64(out->data + 24u, record->observed_at_seconds);
+  memcpy(out->data + 32u, record->sha256, 32u);
   out->size = sizeof(out->data);
   return TA_SOURCE_REVISION_RECORD_OK;
 }
@@ -61,7 +63,9 @@ ta_source_revision_record_status_t ta_source_revision_record_decode(
   r.content_length = get_u64(data + 4u);
   r.digest_kind = (ta_source_revision_digest_kind_t)data[12];
   r.retention = (ta_source_revision_retention_t)data[13];
-  memcpy(r.sha256, data + 16u, 32u);
+  r.source_mtime_seconds = get_u64(data + 16u);
+  r.observed_at_seconds = get_u64(data + 24u);
+  memcpy(r.sha256, data + 32u, 32u);
   if (!valid_record(&r)) return TA_SOURCE_REVISION_RECORD_MALFORMED;
   *out = r;
   return TA_SOURCE_REVISION_RECORD_OK;

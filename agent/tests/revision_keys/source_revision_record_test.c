@@ -14,10 +14,10 @@ static int basics(void){
   CHECK(p.size==TA_SOURCE_REVISION_RECORD_BYTES);
   CHECK(ta_source_revision_record_decode(p.data,p.size,&d)==TA_SOURCE_REVISION_RECORD_OK);
   CHECK(d.content_length==0&&d.digest_kind==TA_SOURCE_REVISION_DIGEST_UNVERIFIED_LEGACY&&d.retention==TA_SOURCE_REVISION_CONTENT_UNAVAILABLE&&zero(d.sha256,32));
-  memset(&r,0,sizeof(r));r.content_length=1234;r.digest_kind=TA_SOURCE_REVISION_DIGEST_SHA256_ORIGINAL;r.retention=TA_SOURCE_REVISION_CONTENT_RETAINED_VERIFIED;for(size_t i=0;i<32;++i)r.sha256[i]=(unsigned char)(i+1u);
+  memset(&r,0,sizeof(r));r.content_length=1234;r.source_mtime_seconds=7;r.observed_at_seconds=11;r.digest_kind=TA_SOURCE_REVISION_DIGEST_SHA256_ORIGINAL;r.retention=TA_SOURCE_REVISION_CONTENT_RETAINED_VERIFIED;for(size_t i=0;i<32;++i)r.sha256[i]=(unsigned char)(i+1u);
   CHECK(ta_source_revision_record_encode(&r,&p)==TA_SOURCE_REVISION_RECORD_OK);
   CHECK(ta_source_revision_record_decode(p.data,p.size,&d)==TA_SOURCE_REVISION_RECORD_OK);
-  CHECK(d.content_length==1234&&!memcmp(d.sha256,r.sha256,32)&&d.retention==TA_SOURCE_REVISION_CONTENT_RETAINED_VERIFIED);
+  CHECK(d.content_length==1234&&d.source_mtime_seconds==7&&d.observed_at_seconds==11&&!memcmp(d.sha256,r.sha256,32)&&d.retention==TA_SOURCE_REVISION_CONTENT_RETAINED_VERIFIED);
   return 0;
 }
 static int reject_claims(void){
@@ -37,7 +37,7 @@ static int reject_claims(void){
 }
 static int randomized(void){
   uint32_t seed=UINT32_C(0x29530001);ta_source_revision_record_t r,d;ta_source_revision_record_payload_t p;
-  for(size_t it=0;it<10000u;++it){memset(&r,0,sizeof(r));r.content_length=((uint64_t)rnd(&seed)<<32)|rnd(&seed);if(rnd(&seed)&1u){r.digest_kind=TA_SOURCE_REVISION_DIGEST_SHA256_ORIGINAL;r.retention=(rnd(&seed)&1u)?TA_SOURCE_REVISION_CONTENT_RETAINED_VERIFIED:TA_SOURCE_REVISION_CONTENT_UNAVAILABLE;for(size_t i=0;i<32;++i)r.sha256[i]=(unsigned char)(rnd(&seed)>>24);}CHECK(ta_source_revision_record_encode(&r,&p)==TA_SOURCE_REVISION_RECORD_OK);CHECK(ta_source_revision_record_decode(p.data,p.size,&d)==TA_SOURCE_REVISION_RECORD_OK);CHECK(d.content_length==r.content_length&&d.digest_kind==r.digest_kind&&d.retention==r.retention&&!memcmp(d.sha256,r.sha256,32));}
+  for(size_t it=0;it<10000u;++it){memset(&r,0,sizeof(r));r.content_length=((uint64_t)rnd(&seed)<<32)|rnd(&seed);r.source_mtime_seconds=((uint64_t)rnd(&seed)<<32)|rnd(&seed);r.observed_at_seconds=((uint64_t)rnd(&seed)<<32)|rnd(&seed);if(rnd(&seed)&1u){r.digest_kind=TA_SOURCE_REVISION_DIGEST_SHA256_ORIGINAL;r.retention=(rnd(&seed)&1u)?TA_SOURCE_REVISION_CONTENT_RETAINED_VERIFIED:TA_SOURCE_REVISION_CONTENT_UNAVAILABLE;for(size_t i=0;i<32;++i)r.sha256[i]=(unsigned char)(rnd(&seed)>>24);}CHECK(ta_source_revision_record_encode(&r,&p)==TA_SOURCE_REVISION_RECORD_OK);CHECK(ta_source_revision_record_decode(p.data,p.size,&d)==TA_SOURCE_REVISION_RECORD_OK);CHECK(d.content_length==r.content_length&&d.source_mtime_seconds==r.source_mtime_seconds&&d.observed_at_seconds==r.observed_at_seconds&&d.digest_kind==r.digest_kind&&d.retention==r.retention&&!memcmp(d.sha256,r.sha256,32));}
   return 0;
 }
 int main(void){if(basics()||reject_claims()||randomized())return 1;puts("TurboAgent SourceRevision record PASS (10000 roundtrips)");return 0;}

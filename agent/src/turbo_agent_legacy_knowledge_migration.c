@@ -50,6 +50,8 @@ ta_legacy_migration_status_t ta_legacy_knowledge_plan_document(
   memcpy(p.extraction_id.data,extraction_id_bytes,sizeof(extraction_id_bytes)-1u);
   p.extraction_id.size=sizeof(extraction_id_bytes)-1u;
   p.revision_record.content_length=(uint64_t)d->size;
+  p.revision_record.source_mtime_seconds=(uint64_t)d->mtime;
+  p.revision_record.observed_at_seconds=(uint64_t)d->updated_at;
   p.revision_record.digest_kind=TA_SOURCE_REVISION_DIGEST_UNVERIFIED_LEGACY;
   p.revision_record.retention=TA_SOURCE_REVISION_CONTENT_UNAVAILABLE;
   memset(p.revision_record.sha256,0,sizeof(p.revision_record.sha256));

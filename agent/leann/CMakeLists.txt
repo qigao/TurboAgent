@@ -2,6 +2,7 @@
 # No new installer/consumer project, downloaded ML runtime or probing CMake.
 add_library(turbo_leann_core STATIC
   src/graph.c
+  src/binding.c
   src/search.c
   src/segment.c)
 target_compile_features(turbo_leann_core PUBLIC c_std_11)
@@ -17,5 +18,8 @@ if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
   add_executable(test_turbo_leann_core tests/test_turbo_leann_core.c)
   target_link_libraries(test_turbo_leann_core PRIVATE turbo_leann_core)
   add_test(NAME turbo-leann-core COMMAND test_turbo_leann_core)
+  add_executable(test_turbo_leann_binding tests/test_turbo_leann_binding.c)
+  target_link_libraries(test_turbo_leann_binding PRIVATE turbo_leann_core)
+  add_test(NAME turbo-leann-binding COMMAND test_turbo_leann_binding)
   set_target_properties(test_turbo_leann_core PROPERTIES FOLDER "Agent/tests")
 endif()

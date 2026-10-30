@@ -209,3 +209,57 @@ Do not merge a production switch until the upstream dependency chain (#221 -> #2
 - A separate database engine, a rewrite of the SQLite pager/B-tree, Adventure DB allocator, FAISS/FFI fallback, an independent hosted Embedding service, a second query authority, arbitrary graph traversal over forbidden content.
 - Copying unrelated Run/Journal/Memory rows into KnowledgeStore; permission changes still belong to their Host authority.
 - A new public C11 ABI or registered schema-extension API until existing TurboDB and TurboAgent version/ownership specs are accepted.
+
+## L0.5: pinned Node Map / SHA-256 manifest boundary
+
+The private C11 core now provides \`turbo_leann_binding.h\` and \`binding.c\`.
+This is a **prototype contract**, not a live TurboDB adapter or installed ABI.
+
+- A separate, immutable v1 binary Node Map contains entries ordered by the segment's
+  canonical 128-bit local labels. Each entry stores the COMPLETE opaque canonical
+  Agent #304 Chunk Key and SourceRevision Key as bounded length-delimited bytes.
+  It does **not** reimplement #304's key codec. The map refuses duplicate full
+  Chunk Keys even if they use different local labels.
+- A manifest binds exact Agent generation, publication \`commit_seq\`, model/scope
+  fingerprints, dimensions, node count, and **independent SHA-256 digests** of the
+  immutable segment and Node Map blobs.
+- \`turbo_leann_search_pinned_exact\` accepts a Host-supplied **already pinned**
+  read owner, separately supplied published manifest, immutable buffers, bounded
+  limits, and SHA-256/admission callbacks. It performs cryptographic digest
+  comparison **before** decoding, checks both binary formats, maps every graph
+  node to exactly one complete Chunk Key, and calls admission for **all** nodes
+  before computing or publishing any result.
+- The callback is REQUIRED to authenticate exact SourceRevision/extraction
+  membership through Agent #304 in the **same** pinned TurboDB read and
+  revalidate current Host grants. Scope fingerprints and cryptographic hashes
+  are not grants. The private algorithm kernel cannot open SQLite or use a
+  second runtime store. A denied/missing source fails closed.
+- Results borrow full canonical key views from the supplied immutable Node Map;
+  the owner must keep the Node Map and pinned read alive until results are
+  consumed. No automatic fallback, implicit retry, current-file reopening,
+  or commit on destruction.
+- \`commit_seq\` and Agent \`generation\` remain distinct. L0.5 requires the
+  caller's selected pinned publication tuple to exactly match the manifest.
+  A durable live bridge using TurboDB #220/#222 and Agent #304 remains blocked
+  until the upstream contracts qualify; this C11 callback seam is **not** a
+  substitute for atomic write/publication or for a true Host ACL.
+- SHA-256 is provided by the canonical Crypto provider callback, **not**
+  reimplemented inside LEANN-C11. The unit test uses a deliberately NON-
+  cryptographic fake digest callback, and does not claim to qualify SHA-256
+  cryptography or a real pinned TurboDB connection.
+- L0.5 in-tree test covers generation/commit/scope/model mismatch, two digest
+  mismatches, a substituted map label, forged duplicate full keys, an admission
+  refusal on the last node, truncation at every Map length, single-bit mutations
+  of each Map byte, size/computation budgets, and successful exact retrieval.
+  Local GCC C11 Release and Clang ASan/UBSan pass; CI must execute exact-head
+  tests before acceptance.
+
+## CI issue held separate from LEANN
+
+Native SDK #41036027499 failed on macOS ARM64 at upstream NuGet cache
+restore: \`gmssl_arm64-osx\` package returned HTTP 404. Linux x64, Windows x64,
+Android ARM64 and metadata jobs succeeded at that exact HEAD. The failure is
+external to LEANN C11 compile/test and must not be hidden by disabling tests,
+a second package source, or an unrelated CI probe. The full PR CI remains
+RED until qualified against a future exact HEAD.
+

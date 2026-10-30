@@ -133,29 +133,49 @@ static ta_revision_write_status_t validate_request(
     const ta_revision_write_source_t *staged =
         find_staged(r->staged_sources, r->staged_source_count, m->source);
     int unchanged = old && member_equal(old, m);
+    int same_revision = old && id_equal(old->revision, m->revision);
+    int same_extractor = old && id_equal(old->extraction, m->extraction);
     if (unchanged) {
       if (staged) return TA_REVISION_WRITE_INVALID;
       continue;
     }
+    /* One extractor identity maps to one immutable chunk set. Changing its
+     * chunk count under the same revision/extractor would collide with keys
+     * already retained by the previous generation. */
+    if (same_revision && same_extractor) return TA_REVISION_WRITE_INVALID;
     ++expected_staged;
-    if (!staged || !id_equal(staged->revision, m->revision) ||
+    if (!staged || staged->reuse_revision_metadata != (same_revision ? 1 : 0) ||
+        !id_equal(staged->revision, m->revision) ||
         !id_equal(staged->extraction, m->extraction) ||
         staged->chunk_count != (size_t)m->chunk_count ||
         (staged->chunk_count && !staged->chunks))
       return TA_REVISION_WRITE_INVALID;
-    ta_source_revision_record_payload_t revision_record_payload;
-    if (ta_source_revision_record_encode(&staged->revision_record,
-                                         &revision_record_payload) !=
-        TA_SOURCE_REVISION_RECORD_OK)
-      return TA_REVISION_WRITE_INVALID;
+    if (!same_revision) {
+      ta_source_revision_record_payload_t revision_record_payload;
+      if (ta_source_revision_record_encode(&staged->revision_record,
+                                           &revision_record_payload) !=
+          TA_SOURCE_REVISION_RECORD_OK)
+        return TA_REVISION_WRITE_INVALID;
+      if (ta_revision_source_revision_key(&r->scope, m->source, m->revision, &key) !=
+          TA_REVISION_KEY_OK ||
+          !add_bytes(&bytes, key.size, r->budget.max_payload_bytes) ||
+          !add_bytes(&bytes, revision_record_payload.size, r->budget.max_payload_bytes))
+        return TA_REVISION_WRITE_LIMIT;
+    } else {
+      /* Reuse an existing immutable record only when the Host supplied the
+       * previous exact revision in the generation manifest. No new metadata
+       * claim is accepted in this branch. */
+      const ta_source_revision_record_t *rec = &staged->revision_record;
+      size_t d;
+      if (rec->content_length || rec->digest_kind || rec->retention ||
+          rec->source_mtime_seconds || rec->observed_at_seconds)
+        return TA_REVISION_WRITE_INVALID;
+      for (d = 0; d < sizeof(rec->sha256); ++d)
+        if (rec->sha256[d]) return TA_REVISION_WRITE_INVALID;
+    }
     if (m->chunk_count > r->budget.max_chunks - chunks)
       return TA_REVISION_WRITE_LIMIT;
     chunks += m->chunk_count;
-    if (ta_revision_source_revision_key(&r->scope, m->source, m->revision, &key) !=
-        TA_REVISION_KEY_OK ||
-        !add_bytes(&bytes, key.size, r->budget.max_payload_bytes) ||
-        !add_bytes(&bytes, revision_record_payload.size, r->budget.max_payload_bytes))
-      return TA_REVISION_WRITE_LIMIT;
     for (j = 0; j < staged->chunk_count; ++j) {
       ta_revision_ref_t ref = {r->scope, m->source, m->revision, m->extraction};
       const ta_revision_write_chunk_t *chunk = &staged->chunks[j];
@@ -220,16 +240,20 @@ ta_revision_write_status_t ta_revision_write_publish_generation(
 
   for (i = 0; i < r->staged_source_count; ++i) {
     const ta_revision_write_source_t *src = &r->staged_sources[i];
-    ta_source_revision_record_payload_t revision_record_payload;
-    if (ta_revision_source_revision_key(&r->scope, src->source, src->revision, &key) != TA_REVISION_KEY_OK ||
-        ta_source_revision_record_encode(&src->revision_record, &revision_record_payload) !=
-          TA_SOURCE_REVISION_RECORD_OK)
-      return abort_with(backend, TA_REVISION_WRITE_INVALID);
-    brc = backend->ops->put(backend->write_owner, TA_REVISION_NS_SOURCE_REVISION,
-        (ta_revision_id_t){key.data, key.size},
-        (ta_revision_blob_t){revision_record_payload.data, revision_record_payload.size},
-        TA_REVISION_WRITE_EXPECT_ABSENT);
-    if (brc != TA_REVISION_WRITE_BACKEND_OK) return abort_with(backend, stage_status(brc));
+    if (!src->reuse_revision_metadata) {
+      ta_source_revision_record_payload_t revision_record_payload;
+      if (ta_revision_source_revision_key(&r->scope, src->source, src->revision, &key) !=
+            TA_REVISION_KEY_OK ||
+          ta_source_revision_record_encode(&src->revision_record,
+                                           &revision_record_payload) != TA_SOURCE_REVISION_RECORD_OK)
+        return abort_with(backend, TA_REVISION_WRITE_INVALID);
+      brc = backend->ops->put(backend->write_owner, TA_REVISION_NS_SOURCE_REVISION,
+          (ta_revision_id_t){key.data, key.size},
+          (ta_revision_blob_t){revision_record_payload.data, revision_record_payload.size},
+          TA_REVISION_WRITE_EXPECT_ABSENT);
+      if (brc != TA_REVISION_WRITE_BACKEND_OK)
+        return abort_with(backend, stage_status(brc));
+    }
     for (j = 0; j < src->chunk_count; ++j) {
       ta_revision_ref_t ref = {r->scope, src->source, src->revision, src->extraction};
       const ta_revision_write_chunk_t *chunk = &src->chunks[j];

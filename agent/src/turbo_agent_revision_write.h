@@ -60,6 +60,11 @@ typedef struct ta_revision_write_source_s {
   ta_source_revision_record_t revision_record;
   const ta_revision_write_chunk_t *chunks;
   size_t chunk_count;
+  /* Set ONLY when prior published membership selects this same SourceRevision,
+   * but a DIFFERENT extractor. Never put EXPECT_ABSENT on the retained
+   * immutable metadata again. This does not authorize historical resurrection
+   * of a source absent from the previous generation. */
+  int reuse_revision_metadata;
 } ta_revision_write_source_t;
 
 typedef struct ta_revision_write_edge_s {

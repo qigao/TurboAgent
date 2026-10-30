@@ -50,6 +50,16 @@ head requires a valid previous manifest, and the new Agent generation ID must be
 strictly greater. Removed sources simply disappear from the new complete
 manifest.
 
+If only the **extractor** changes while SourceRevision is unchanged, the
+caller explicitly sets `reuse_revision_metadata=1` and supplies no new
+SourceRevision metadata claim (all fields zero). The old immutable metadata
+is retained; only new extractor-specific Chunk/FTS records are staged.
+The flag is invalid for a new SourceRevision. If source, revision and extractor
+are unchanged, a different chunk count is rejected instead of rewriting the
+already-published chunk keys. A source re-added after removal cannot implicitly
+reuse historical metadata: it requires a future exact retained-record check
+against the same write owner, not silent resurrection.
+
 This relies on the retention rule already required by #298: records referenced
 by the currently published generation cannot be garbage-collected while that
 generation remains current. The exact head CAS prevents publishing a candidate

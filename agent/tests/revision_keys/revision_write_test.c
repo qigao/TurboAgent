@@ -56,7 +56,7 @@ static ta_revision_blob_t manifest_blob(ta_revision_generation_payload_t *p){ret
 static int initial_generation(void){
   ta_revision_write_chunk_t ac[2]={{blob("chunk-a0"),blob("lake zero")},{blob("chunk-a1"),blob("lake one")}},bc[1]={{blob("chunk-b0"),blob("river")}};
   ta_revision_generation_member_t members[2]={member("A","rev1","ext1",2),member("B","rev7","ext2",1)};
-  ta_revision_write_source_t staged[2]={{text("A"),text("rev1"),text("ext1"),source_record(10),ac,2},{text("B"),text("rev7"),text("ext2"),source_record(20),bc,1}};
+  ta_revision_write_source_t staged[2]={{text("A"),text("rev1"),text("ext1"),source_record(10),ac,2,0},{text("B"),text("rev7"),text("ext2"),source_record(20),bc,1,0}};
   ta_revision_write_edge_t edge={text("A"),text("rev1"),text("B"),text("rev7"),text("READS"),text("edge-1"),blob("evidence")};
   ta_revision_write_request_t req=make_request(77,members,2,staged,2,(ta_revision_blob_t){NULL,0},0,&edge,1);
   fake_writer_t w={0};w.publish_seq=101;ta_revision_write_backend_t b=backend(&w);ta_revision_write_result_t out={0};
@@ -74,7 +74,7 @@ static int incremental_generation(void){
   ta_revision_generation_member_t newm[2]={member("A","rev1","ext1",2),member("B","rev8","ext3",1)};
   CHECK(ta_revision_generation_encode(&s,77,oldm,2,&previous)==TA_REVISION_GENERATION_OK);
   ta_revision_write_chunk_t bc[1]={{blob("chunk-b-new"),blob("river new")}};
-  ta_revision_write_source_t staged[1]={{text("B"),text("rev8"),text("ext3"),source_record(30),bc,1}};
+  ta_revision_write_source_t staged[1]={{text("B"),text("rev8"),text("ext3"),source_record(30),bc,1,0}};
   ta_revision_write_edge_t edge={text("A"),text("rev1"),text("B"),text("rev8"),text("READS"),text("edge-2"),blob("evidence-2")};
   ta_revision_write_request_t req=make_request(78,newm,2,staged,1,manifest_blob(&previous),101,&edge,1);
   fake_writer_t w={0};w.publish_seq=102;ta_revision_write_backend_t b=backend(&w);ta_revision_write_result_t out={0};
@@ -85,8 +85,64 @@ static int incremental_generation(void){
   return 0;
 }
 
+static int extractor_only_reuses_source_revision(void){
+  ta_revision_scope_t s=scope();
+  ta_revision_generation_payload_t previous;
+  ta_revision_generation_member_t oldm=member("A","revision-1","extractor-1",1);
+  ta_revision_generation_member_t newm=member("A","revision-1","extractor-2",1);
+  ta_revision_write_chunk_t chunk={blob("new extraction"),blob("new search text")};
+  ta_revision_write_source_t staged={text("A"),text("revision-1"),text("extractor-2"),
+                                     {0},&chunk,1,1};
+  ta_revision_write_request_t req;
+  ta_revision_write_result_t out={0};
+  ta_revision_ref_t decoded={0};
+  uint64_t ordinal=0;
+  fake_writer_t w={0};
+  ta_revision_write_backend_t b=backend(&w);
+  CHECK(ta_revision_generation_encode(&s,10,&oldm,1,&previous)==TA_REVISION_GENERATION_OK);
+  req=make_request(11,&newm,1,&staged,1,manifest_blob(&previous),57,NULL,0);
+  w.publish_seq=58;
+  CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_OK);
+  CHECK(w.count==3&&w.publishes==1&&w.aborts==0);
+  CHECK(out.generation_id==11&&out.commit_seq==58);
+  CHECK(!strcmp(w.ops[0].ns,TA_REVISION_NS_CHUNK)&&w.ops[0].expected==0);
+  CHECK(w.ops[1].kind==OP_TEXT&&!strcmp(w.ops[1].ns,TA_REVISION_NS_CHUNK));
+  CHECK(!strcmp(w.ops[2].ns,TA_REVISION_NS_GENERATION)&&w.ops[2].expected==57);
+  CHECK(ta_revision_chunk_decode((ta_revision_id_t){w.ops[0].key.data,w.ops[0].key.size},
+                                 &decoded,&ordinal)==TA_REVISION_KEY_OK);
+  CHECK(ordinal==0&&decoded.extraction.size==11&&
+        !memcmp(decoded.extraction.data,"extractor-2",11));
+  /* Reusing metadata requires explicit opt-in. */
+  staged.reuse_revision_metadata=0;memset(&w,0,sizeof(w));b=backend(&w);
+  CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_INVALID);
+  CHECK(w.count==0&&w.aborts==1);
+  /* A new SourceRevision assertion cannot accompany a reuse request. */
+  staged.reuse_revision_metadata=1;staged.revision_record=source_record(9);
+  memset(&w,0,sizeof(w));b=backend(&w);
+  CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_INVALID);
+  CHECK(w.count==0&&w.aborts==1);
+  /* Same revision AND extractor cannot be silently rechunked. */
+  staged.revision_record=(ta_source_revision_record_t){0};
+  newm.extraction=text("extractor-1");newm.chunk_count=2;
+  ta_revision_write_chunk_t chunks[2]={chunk,chunk};
+  staged.extraction=newm.extraction;staged.chunks=chunks;staged.chunk_count=2;
+  req=make_request(11,&newm,1,&staged,1,manifest_blob(&previous),57,NULL,0);
+  memset(&w,0,sizeof(w));b=backend(&w);
+  CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_INVALID);
+  CHECK(w.count==0&&w.aborts==1);
+  /* Reusing metadata from another revision is forbidden. */
+  newm.revision=text("revision-2");newm.extraction=text("extractor-2");
+  staged.revision=newm.revision;staged.extraction=newm.extraction;
+  staged.chunks=&chunk;staged.chunk_count=1;newm.chunk_count=1;
+  req=make_request(11,&newm,1,&staged,1,manifest_blob(&previous),57,NULL,0);
+  memset(&w,0,sizeof(w));b=backend(&w);
+  CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_INVALID);
+  CHECK(w.count==0&&w.aborts==1);
+  return 0;
+}
+
 static int failures(void){
-  ta_revision_generation_member_t m=member("A","rev1","ext1",1);ta_revision_write_chunk_t ch={blob("p"),blob("t")};ta_revision_write_source_t staged={text("A"),text("rev1"),text("ext1"),source_record(40),&ch,1};ta_revision_write_request_t req=make_request(1,&m,1,&staged,1,(ta_revision_blob_t){NULL,0},0,NULL,0);ta_revision_write_result_t out;fake_writer_t w={0};w.publish_seq=9;ta_revision_write_backend_t b=backend(&w);
+  ta_revision_generation_member_t m=member("A","rev1","ext1",1);ta_revision_write_chunk_t ch={blob("p"),blob("t")};ta_revision_write_source_t staged={text("A"),text("rev1"),text("ext1"),source_record(40),&ch,1,0};ta_revision_write_request_t req=make_request(1,&m,1,&staged,1,(ta_revision_blob_t){NULL,0},0,NULL,0);ta_revision_write_result_t out;fake_writer_t w={0};w.publish_seq=9;ta_revision_write_backend_t b=backend(&w);
   w.fail_at=3;w.fail_status=TA_REVISION_WRITE_BACKEND_BUSY;CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_BUSY);CHECK(w.aborts==1&&w.publishes==0&&out.commit_seq==0);
   memset(&w,0,sizeof(w));w.fail_at=2;w.fail_status=TA_REVISION_WRITE_BACKEND_COMMIT_UNKNOWN;b=backend(&w);CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_BACKEND_CONTRACT);CHECK(w.aborts==1&&w.publishes==0);
   memset(&w,0,sizeof(w));w.publish_status=TA_REVISION_WRITE_BACKEND_COMMIT_UNKNOWN;b=backend(&w);CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_COMMIT_UNKNOWN);CHECK(w.publishes==1&&w.aborts==1&&out.commit_seq==0);
@@ -96,18 +152,18 @@ static int failures(void){
 
 static int incremental_validation(void){
   ta_revision_scope_t s=scope();ta_revision_generation_payload_t prev;ta_revision_generation_member_t oldm[2]={member("A","r1","e1",1),member("B","r2","e2",1)};CHECK(ta_revision_generation_encode(&s,5,oldm,2,&prev)==TA_REVISION_GENERATION_OK);
-  ta_revision_generation_member_t newm[2]={member("A","r1","e1",1),member("B","r3","e3",1)};ta_revision_write_chunk_t ch={blob("p"),blob("t")};ta_revision_write_source_t bnew={text("B"),text("r3"),text("e3"),source_record(2),&ch,1};ta_revision_write_request_t req=make_request(6,newm,2,NULL,0,manifest_blob(&prev),10,NULL,0);fake_writer_t w={0};ta_revision_write_backend_t be=backend(&w);ta_revision_write_result_t out;
+  ta_revision_generation_member_t newm[2]={member("A","r1","e1",1),member("B","r3","e3",1)};ta_revision_write_chunk_t ch={blob("p"),blob("t")};ta_revision_write_source_t bnew={text("B"),text("r3"),text("e3"),source_record(2),&ch,1,0};ta_revision_write_request_t req=make_request(6,newm,2,NULL,0,manifest_blob(&prev),10,NULL,0);fake_writer_t w={0};ta_revision_write_backend_t be=backend(&w);ta_revision_write_result_t out;
   CHECK(ta_revision_write_publish_generation(&be,&req,&out)==TA_REVISION_WRITE_INVALID);CHECK(w.count==0&&w.aborts==1); /* changed B not staged */
-  req=make_request(6,newm,2,&bnew,1,manifest_blob(&prev),10,NULL,0);ta_revision_write_source_t astale={text("A"),text("r1"),text("e1"),source_record(1),&ch,1};req.staged_sources=&astale;memset(&w,0,sizeof(w));be=backend(&w);CHECK(ta_revision_write_publish_generation(&be,&req,&out)==TA_REVISION_WRITE_INVALID);CHECK(w.count==0&&w.aborts==1); /* unchanged A rewritten */
+  req=make_request(6,newm,2,&bnew,1,manifest_blob(&prev),10,NULL,0);ta_revision_write_source_t astale={text("A"),text("r1"),text("e1"),source_record(1),&ch,1,0};req.staged_sources=&astale;memset(&w,0,sizeof(w));be=backend(&w);CHECK(ta_revision_write_publish_generation(&be,&req,&out)==TA_REVISION_WRITE_INVALID);CHECK(w.count==0&&w.aborts==1); /* unchanged A rewritten */
   req=make_request(5,newm,2,&bnew,1,manifest_blob(&prev),10,NULL,0);memset(&w,0,sizeof(w));be=backend(&w);CHECK(ta_revision_write_publish_generation(&be,&req,&out)==TA_REVISION_WRITE_INVALID);CHECK(w.count==0&&w.aborts==1); /* non-monotonic gen */
   req=make_request(6,newm,2,&bnew,1,(ta_revision_blob_t){NULL,0},10,NULL,0);memset(&w,0,sizeof(w));be=backend(&w);CHECK(ta_revision_write_publish_generation(&be,&req,&out)==TA_REVISION_WRITE_INVALID);CHECK(w.count==0&&w.aborts==1); /* CAS without previous manifest */
   return 0;
 }
 
 static int structural_validation(void){
-  ta_revision_generation_member_t unsorted[2]={member("B","r1","e",1),member("A","r2","e",1)};ta_revision_write_chunk_t ch={blob("p"),blob("t")};ta_revision_write_source_t staged[2]={{text("B"),text("r1"),text("e"),source_record(3),&ch,1},{text("A"),text("r2"),text("e"),source_record(4),&ch,1}};ta_revision_write_request_t req=make_request(1,unsorted,2,staged,2,(ta_revision_blob_t){NULL,0},0,NULL,0);fake_writer_t w={0};ta_revision_write_backend_t b=backend(&w);ta_revision_write_result_t out;
+  ta_revision_generation_member_t unsorted[2]={member("B","r1","e",1),member("A","r2","e",1)};ta_revision_write_chunk_t ch={blob("p"),blob("t")};ta_revision_write_source_t staged[2]={{text("B"),text("r1"),text("e"),source_record(3),&ch,1,0},{text("A"),text("r2"),text("e"),source_record(4),&ch,1,0}};ta_revision_write_request_t req=make_request(1,unsorted,2,staged,2,(ta_revision_blob_t){NULL,0},0,NULL,0);fake_writer_t w={0};ta_revision_write_backend_t b=backend(&w);ta_revision_write_result_t out;
   CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_INVALID);CHECK(w.count==0&&w.aborts==1);
-  ta_revision_generation_member_t sorted[2]={member("A","r1","e",1),member("B","r2","e",1)};staged[0]=(ta_revision_write_source_t){text("A"),text("r1"),text("e"),source_record(5),&ch,1};staged[1]=(ta_revision_write_source_t){text("B"),text("r2"),text("e"),source_record(6),&ch,1};req=make_request(1,sorted,2,staged,2,(ta_revision_blob_t){NULL,0},0,NULL,0);req.budget.max_chunks=1;memset(&w,0,sizeof(w));b=backend(&w);CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_LIMIT);CHECK(w.count==0&&w.aborts==1);
+  ta_revision_generation_member_t sorted[2]={member("A","r1","e",1),member("B","r2","e",1)};staged[0]=(ta_revision_write_source_t){text("A"),text("r1"),text("e"),source_record(5),&ch,1,0};staged[1]=(ta_revision_write_source_t){text("B"),text("r2"),text("e"),source_record(6),&ch,1,0};req=make_request(1,sorted,2,staged,2,(ta_revision_blob_t){NULL,0},0,NULL,0);req.budget.max_chunks=1;memset(&w,0,sizeof(w));b=backend(&w);CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_LIMIT);CHECK(w.count==0&&w.aborts==1);
   req=make_request(1,NULL,0,NULL,0,(ta_revision_blob_t){NULL,0},0,NULL,0);memset(&w,0,sizeof(w));w.publish_seq=1;b=backend(&w);CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_OK);CHECK(w.count==1&&!strcmp(w.ops[0].ns,TA_REVISION_NS_GENERATION)&&w.publishes==1);
   /* Legacy extracted-text hashes can never claim verified retained original bytes. */
   req=make_request(1,sorted,2,staged,2,(ta_revision_blob_t){NULL,0},0,NULL,0);
@@ -156,7 +212,7 @@ static int empty_chunk_without_fts(void){
   static const unsigned char empty[] = "";
   ta_revision_generation_member_t m=member("empty","r0","e0",1);
   ta_revision_write_chunk_t ch={{empty,0},{empty,0}};
-  ta_revision_write_source_t staged={text("empty"),text("r0"),text("e0"),source_record(44),&ch,1};
+  ta_revision_write_source_t staged={text("empty"),text("r0"),text("e0"),source_record(44),&ch,1,0};
   ta_revision_write_request_t req=make_request(2,&m,1,&staged,1,(ta_revision_blob_t){NULL,0},0,NULL,0);
   fake_writer_t w={0};w.publish_seq=12;ta_revision_write_backend_t b=backend(&w);ta_revision_write_result_t out={0};
   CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_OK);
@@ -166,4 +222,4 @@ static int empty_chunk_without_fts(void){
   return 0;
 }
 
-int main(void){if(initial_generation()||incremental_generation()||failures()||incremental_validation()||structural_validation()||reconcile()||empty_chunk_without_fts())return 1;puts("TurboAgent incremental revision write adapter PASS");return 0;}
+int main(void){if(initial_generation()||incremental_generation()||extractor_only_reuses_source_revision()||failures()||incremental_validation()||structural_validation()||reconcile()||empty_chunk_without_fts())return 1;puts("TurboAgent incremental revision write adapter PASS");return 0;}

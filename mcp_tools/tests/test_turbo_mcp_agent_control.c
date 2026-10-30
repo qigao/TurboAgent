@@ -543,15 +543,35 @@ spec("MCP Agent and context admission") {
         check_equal(probe.remote_calls, 0); check_null(output); check_null(result);
       }
     }
-    it("checks %s after started persistence and retains the stopped Journal result on replay", deadline ? "deadline" : "cancellation") {
+    it("stops %s after STARTED without committing or entering MCP transport", deadline ? "deadline" : "cancellation") {
       probe.stop_at_started = deadline ? 2 : 1;
       for (int replay = 0; replay < 2; ++replay) {
         ctx.state = replay ? pending : state;
         check_equal(turbo_agent_tool_node(&ctx, agent), 0);
-        check_equal(probe.remote_calls, 0); check_equal(probe.writes, 3);
+        /* PLANNED create + STARTED put only: the backend was never entered
+         * and cancellation must not invent a COMMITTED terminal result. */
+        check_equal(probe.remote_calls, 0); check_equal(probe.writes, 2);
         check_not_null(mcp_control_delivered(ctx.state));
-        check_not_null(strstr(mcp_control_delivered(ctx.state), deadline ? "tool_deadline_exceeded" : "tool_cancelled"));
+        check_not_null(strstr(mcp_control_delivered(ctx.state),
+            deadline ? "tool_deadline_exceeded" : "tool_cancelled"));
+        check_null(strstr(mcp_control_delivered(ctx.state), "mcp-success"));
+        check_equal(turbo_agent_runtime_store_list_json(runtime,
+            "agent_tool_journal", "call_id", "mcp-call", &records), SALTS_OK);
+        check_equal(json_array_size(records), 1u);
+        check_equal(json_get_string(json_array_get(records, 0), "phase"), "started");
+        check_null(json_object_get(json_array_get(records, 0), "output"));
+        check_null(json_object_get(json_array_get(records, 0), "detail"));
+        if (replay) journal_after = json_serialize(records, NULL);
+        else journal_before = json_serialize(records, NULL);
+        json_free(records); records = NULL;
       }
+      check_not_null(journal_before); check_not_null(journal_after);
+      check_equal(journal_after, journal_before);
+      check_equal(turbo_agent_runtime_store_list_json(runtime,
+          "agent_tool_claims", "call_id", "mcp-call", &records), SALTS_OK);
+      check_equal(json_array_size(records), 1u);
+      check_equal(json_get_string(json_array_get(records, 0), "phase"), "admitted");
+      json_free(records); records = NULL;
     }
     it("withholds %s late success while preserving the committed callback fact", deadline ? "expired" : "cancelled") {
       probe.stop_in_post = deadline ? 2 : 1;

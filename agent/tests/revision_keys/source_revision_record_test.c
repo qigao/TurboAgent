@@ -30,7 +30,7 @@ static int reject_claims(void){
   for(size_t n=0;n<p.size;++n){memset(&d,0xa5,sizeof(d));CHECK(ta_source_revision_record_decode(p.data,n,&d)!=TA_SOURCE_REVISION_RECORD_OK);CHECK(zero(&d,sizeof(d)));}
   unsigned char bad[TA_SOURCE_REVISION_RECORD_BYTES+1];memcpy(bad,p.data,p.size);bad[p.size]=0;
   CHECK(ta_source_revision_record_decode(bad,sizeof(bad),&d)==TA_SOURCE_REVISION_RECORD_MALFORMED);
-  memcpy(bad,p.data,p.size);bad[3]=2;CHECK(ta_source_revision_record_decode(bad,p.size,&d)==TA_SOURCE_REVISION_RECORD_MALFORMED);
+  memcpy(bad,p.data,p.size);bad[3]=1;CHECK(ta_source_revision_record_decode(bad,p.size,&d)==TA_SOURCE_REVISION_RECORD_MALFORMED);
   memcpy(bad,p.data,p.size);bad[14]=1;CHECK(ta_source_revision_record_decode(bad,p.size,&d)==TA_SOURCE_REVISION_RECORD_MALFORMED);
   memcpy(bad,p.data,p.size);bad[12]=99;CHECK(ta_source_revision_record_decode(bad,p.size,&d)==TA_SOURCE_REVISION_RECORD_MALFORMED);
   return 0;

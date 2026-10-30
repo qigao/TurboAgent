@@ -247,9 +247,52 @@ static int randomized_roundtrips(void) {
   return 0;
 }
 
+
+static int file_catalog_keys(void) {
+  ta_revision_scope_t scope = {text("tenant-A"), text("collection")};
+  ta_revision_key_t source, source_head, root_prefix, exact, neighbor, other_root;
+  ta_revision_catalog_path_t empty = {NULL, 0};
+  ta_revision_catalog_path_t dir = {(const unsigned char *)"dir/", 4};
+  ta_revision_catalog_path_t path = {(const unsigned char *)"dir/a.txt", 9};
+  ta_revision_catalog_path_t sibling = {(const unsigned char *)"dir2/a.txt", 10};
+  unsigned char binary_path[] = {'x',0,'y',255};
+  ta_revision_catalog_path_t binary = {binary_path, sizeof(binary_path)};
+  unsigned char too_long[TA_REVISION_CATALOG_PATH_MAX_BYTES + 1u];
+
+  OK(ta_revision_catalog_source_key(&scope, text("source-A"), &source));
+  OK(ta_revision_source_head_key(&scope, text("source-A"), &source_head));
+  REQUIRE(source.size && source_head.size &&
+          (source.size != source_head.size ||
+           memcmp(source.data, source_head.data, source.size)));
+
+  OK(ta_revision_catalog_path_prefix(&scope, text("root-A"), empty, &root_prefix));
+  OK(ta_revision_catalog_path_key(&scope, text("root-A"), path, &exact));
+  REQUIRE(prefix_of(&root_prefix, &exact));
+  OK(ta_revision_catalog_path_prefix(&scope, text("root-A"), dir, &neighbor));
+  REQUIRE(prefix_of(&neighbor, &exact));
+
+  OK(ta_revision_catalog_path_key(&scope, text("root-A"), sibling, &neighbor));
+  REQUIRE(!prefix_of(&exact, &neighbor));
+  OK(ta_revision_catalog_path_key(&scope, text("root-B"), path, &other_root));
+  REQUIRE(!prefix_of(&root_prefix, &other_root));
+
+  OK(ta_revision_catalog_path_key(&scope, text("root-A"), binary, &exact));
+  REQUIRE(prefix_of(&root_prefix, &exact));
+
+  REQUIRE(ta_revision_catalog_path_key(&scope, text("root-A"), empty, &exact) ==
+          TA_REVISION_KEY_INVALID);
+  REQUIRE(exact.size == 0);
+  memset(too_long, 'p', sizeof(too_long));
+  REQUIRE(ta_revision_catalog_path_key(&scope, text("root-A"),
+      (ta_revision_catalog_path_t){too_long, sizeof(too_long)}, &exact) ==
+      TA_REVISION_KEY_LIMIT);
+  REQUIRE(exact.size == 0);
+  return 0;
+}
+
 int main(void) {
   if (chunk_identity() || binary_and_order() || graph_directions() ||
-      reject_malformed() || randomized_roundtrips()) return 1;
+      file_catalog_keys() || reject_malformed() || randomized_roundtrips()) return 1;
   puts("TurboAgent revision-key contract PASS (10000 deterministic roundtrips)");
   return 0;
 }

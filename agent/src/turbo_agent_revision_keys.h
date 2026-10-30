@@ -10,11 +10,17 @@
  * Encoding or comparing a key never creates an authorization grant. */
 #define TA_REVISION_ID_MAX_BYTES 256u
 #define TA_REVISION_KEY_MAX_BYTES 4096u
+#define TA_REVISION_CATALOG_PATH_MAX_BYTES 2048u
 
 typedef struct ta_revision_id_s {
   const unsigned char *data;
   size_t size;
 } ta_revision_id_t;
+
+typedef struct ta_revision_catalog_path_s {
+  const unsigned char *data;
+  size_t size;
+} ta_revision_catalog_path_t;
 
 typedef struct ta_revision_scope_s {
   ta_revision_id_t authority;
@@ -73,6 +79,24 @@ ta_revision_key_status_t ta_revision_source_revision_prefix(
 ta_revision_key_status_t ta_revision_source_revision_key(
     const ta_revision_scope_t *scope, ta_revision_id_t source,
     ta_revision_id_t revision, ta_revision_key_t *out);
+
+/* FileCatalog identity only; these functions do NOT authorize a root/path.
+ * root_id must come from a Host-retained root capability. normalized_path is
+ * already validated/normalized by that root's policy. The path is the FINAL
+ * raw field so a component-safe byte prefix can drive one bounded B-tree scan.
+ * An empty path_prefix selects the whole root; an exact path key is nonempty. */
+ta_revision_key_status_t ta_revision_catalog_source_key(
+    const ta_revision_scope_t *scope, ta_revision_id_t source,
+    ta_revision_key_t *out);
+ta_revision_key_status_t ta_revision_catalog_path_prefix(
+    const ta_revision_scope_t *scope, ta_revision_id_t root_id,
+    ta_revision_catalog_path_t normalized_path_prefix,
+    ta_revision_key_t *out);
+ta_revision_key_status_t ta_revision_catalog_path_key(
+    const ta_revision_scope_t *scope, ta_revision_id_t root_id,
+    ta_revision_catalog_path_t normalized_path,
+    ta_revision_key_t *out);
+
 /* Mandatory exact SourceRevision + extraction prefix for an FTS query. */
 ta_revision_key_status_t ta_revision_chunk_prefix(
     const ta_revision_ref_t *ref, ta_revision_key_t *out);

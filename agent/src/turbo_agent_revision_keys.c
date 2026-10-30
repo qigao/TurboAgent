@@ -6,7 +6,8 @@
  * Lexicographic ordinal order equals numeric order via u64-BE encoding. */
 static const unsigned char key_magic[4] = {'T', 'A', 'I', 1};
 enum { KEY_CHUNK = 1, KEY_SOURCE_HEAD = 2, KEY_GENERATION = 3,
-       KEY_EDGE_OUT = 4, KEY_EDGE_IN = 5, KEY_SOURCE_REVISION = 6 };
+       KEY_EDGE_OUT = 4, KEY_EDGE_IN = 5, KEY_SOURCE_REVISION = 6,
+       KEY_CATALOG_SOURCE = 7, KEY_CATALOG_PATH = 8 };
 
 typedef struct key_reader_s {
   const unsigned char *data;
@@ -32,6 +33,19 @@ static ta_revision_key_status_t append_u64(ta_revision_key_t *key, uint64_t valu
   if (key->size > sizeof(key->data) - 8u) return TA_REVISION_KEY_LIMIT;
   for (i = 0; i < 8; ++i)
     key->data[key->size++] = (unsigned char)(value >> (56u - 8u * i));
+  return TA_REVISION_KEY_OK;
+}
+
+static ta_revision_key_status_t append_catalog_path(
+    ta_revision_key_t *key, ta_revision_catalog_path_t path, int allow_empty) {
+  if ((!path.data && path.size) || (!allow_empty && !path.size))
+    return TA_REVISION_KEY_INVALID;
+  if (path.size > TA_REVISION_CATALOG_PATH_MAX_BYTES)
+    return TA_REVISION_KEY_LIMIT;
+  if (key->size > sizeof(key->data) - path.size)
+    return TA_REVISION_KEY_LIMIT;
+  if (path.size) memcpy(key->data + key->size, path.data, path.size);
+  key->size += path.size;
   return TA_REVISION_KEY_OK;
 }
 
@@ -109,6 +123,45 @@ ta_revision_key_status_t ta_revision_source_revision_key(
   ta_revision_key_t key = {{0}, 0};
   ta_revision_key_status_t rc = source_revision_base(scope, source, &key);
   if (rc == TA_REVISION_KEY_OK) rc = append_id(&key, revision);
+  return finish_key(out, &key, rc);
+}
+
+ta_revision_key_status_t ta_revision_catalog_source_key(
+    const ta_revision_scope_t *scope, ta_revision_id_t source,
+    ta_revision_key_t *out) {
+  ta_revision_key_t key = {{0}, 0};
+  ta_revision_key_status_t rc = begin_key(&key, scope, KEY_CATALOG_SOURCE);
+  if (rc == TA_REVISION_KEY_OK) rc = append_id(&key, source);
+  return finish_key(out, &key, rc);
+}
+
+static ta_revision_key_status_t catalog_path_base(
+    const ta_revision_scope_t *scope, ta_revision_id_t root_id,
+    ta_revision_key_t *key) {
+  ta_revision_key_status_t rc = begin_key(key, scope, KEY_CATALOG_PATH);
+  if (rc == TA_REVISION_KEY_OK) rc = append_id(key, root_id);
+  return rc;
+}
+
+ta_revision_key_status_t ta_revision_catalog_path_prefix(
+    const ta_revision_scope_t *scope, ta_revision_id_t root_id,
+    ta_revision_catalog_path_t normalized_path_prefix,
+    ta_revision_key_t *out) {
+  ta_revision_key_t key = {{0}, 0};
+  ta_revision_key_status_t rc = catalog_path_base(scope, root_id, &key);
+  if (rc == TA_REVISION_KEY_OK)
+    rc = append_catalog_path(&key, normalized_path_prefix, 1);
+  return finish_key(out, &key, rc);
+}
+
+ta_revision_key_status_t ta_revision_catalog_path_key(
+    const ta_revision_scope_t *scope, ta_revision_id_t root_id,
+    ta_revision_catalog_path_t normalized_path,
+    ta_revision_key_t *out) {
+  ta_revision_key_t key = {{0}, 0};
+  ta_revision_key_status_t rc = catalog_path_base(scope, root_id, &key);
+  if (rc == TA_REVISION_KEY_OK)
+    rc = append_catalog_path(&key, normalized_path, 0);
   return finish_key(out, &key, rc);
 }
 

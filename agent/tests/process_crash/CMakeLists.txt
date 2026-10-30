@@ -24,13 +24,21 @@ add_executable(sqlite_owner_process_fixture sqlite_owner_process_fixture.c)
 target_link_libraries(sqlite_owner_process_fixture PRIVATE TurboAgent::Agent)
 set_target_properties(sqlite_owner_process_fixture PROPERTIES
   C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF FOLDER "Agent/tests")
-add_test(NAME test_tool_journal_sqlite_cross_process_owner
-  COMMAND "${CMAKE_COMMAND}"
-    "-DWORKER=$<TARGET_FILE:sqlite_owner_process_fixture>"
-    "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/sqlite_owner_cases"
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_sqlite_owner_process.cmake")
-set_tests_properties(test_tool_journal_sqlite_cross_process_owner PROPERTIES
-  TIMEOUT 60 LABELS "agent;recovery;sqlite;process;owner")
+foreach(profile IN ITEMS normal crash_after_effect)
+  if(profile STREQUAL "normal")
+    set(test_name test_tool_journal_sqlite_cross_process_owner)
+  else()
+    set(test_name test_tool_journal_sqlite_cross_process_owner_crash)
+  endif()
+  add_test(NAME ${test_name}
+    COMMAND "${CMAKE_COMMAND}"
+      "-DWORKER=$<TARGET_FILE:sqlite_owner_process_fixture>"
+      "-DROOT=${CMAKE_CURRENT_BINARY_DIR}/sqlite_owner_cases"
+      "-DCASE=${profile}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_sqlite_owner_process.cmake")
+  set_tests_properties(${test_name} PROPERTIES
+    TIMEOUT 60 LABELS "agent;recovery;sqlite;process;owner")
+endforeach()
 
 add_executable(session_inbox_process_fixture session_inbox_process_fixture.c)
 target_link_libraries(session_inbox_process_fixture PRIVATE TurboAgent::Agent)

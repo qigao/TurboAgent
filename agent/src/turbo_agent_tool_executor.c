@@ -582,6 +582,15 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
       task->call->replayed = 1;
       goto cleanup;
     }
+    /* The claim is already durable, but backend entry has not happened.
+     * A cancellation published by Store admission must not enter the tool.
+     * Leave the PLANNED record and ADMITTED claim untouched: a second owner
+     * conservatively reports UNKNOWN rather than redispatching this identity. */
+    cancel_status = turbo_agent_tool_cancel_status(task->cancel_token);
+    if (cancel_status != TURBO_TOOL_OK) {
+      task->call->status = cancel_status;
+      goto cleanup;
+    }
     if (turbo_agent_tool_journal_write(task->runtime, journal_id,
                                        task->context.thread_id, task->context.run_id,
                                        task->call, "started") != SALTS_OK) {
@@ -590,6 +599,16 @@ static void turbo_agent_tool_execute_one(turbo_agent_tool_task_t *task) {
       task->call->replayed = 1;
       goto cleanup;
     }
+  }
+  /* Recheck after durable STARTED and directly before synchronous backend
+   * dispatch. Cancellation during journal persistence previously passed the
+   * initial check and could enter a callback despite a stopped token.
+   * A STARTED+ADMITTED identity remains conservatively UNKNOWN on recovery;
+   * never erase the persisted fence or retry the effect automatically. */
+  cancel_status = turbo_agent_tool_cancel_status(task->cancel_token);
+  if (cancel_status != TURBO_TOOL_OK) {
+    task->call->status = cancel_status;
+    goto cleanup;
   }
   {
     turbo_tool_execution_context_t tool_context = {0};

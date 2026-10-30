@@ -112,6 +112,21 @@ parallel tools, compiled typed-Inspect recovery, Wasm/MCP/Praktor behavior or al
 effect conformance. Those remain #74/#213 acceptance work. Unknown effects continue
 to require explicit reconciliation; no globally exactly-once effect guarantee is made.
 
+The `test_turbo_agent_tool_cancel_entry` qualifies two deterministic
+cancellation cuts **after** real atomic Store writes, but **before** backend
+entry: after the ADMITTED claim (Journal still PLANNED), and after the STARTED
+Journal update. The Store fixture publishes a user cancellation only once its
+underlying atomic operation has succeeded. The Executor rechecks the token
+before STARTED and immediately before callback dispatch; both cuts must
+return CANCELLED with zero callback entries and no output. Their durable
+claim remains intact. A separate uncancelled Executor/Runtime owner must
+report UNKNOWN_SIDE_EFFECT for the same canonical identity without
+redispatching it, while an independently identified new call succeeds.
+This is a bounded admission cancellation gate, **not** an atomic guarantee
+against cancellation after the final check or an interrupt of an already
+entered backend. Retained PLANNED/ADMITTED and STARTED/ADMITTED evidence is
+deliberately conservative; there is no automatic UNKNOWN retry or rollback.
+
 The adjacent `test_turbo_agent_tool_claim` also forces two independent executor/Runtime
 handles over one serialized atomic test backend to read the same missing or PLANNED
 identity concurrently. It requires one callback, an EPROTO loser for conflicting fresh

@@ -178,3 +178,26 @@ staged failure aborts before publish. This is **not** yet a real TurboDB
 adapter, Host ACL revocation acceptance, source-byte retention proof, or
 process-kill durability qualification. Production KnowledgeStore remains
 unchanged.
+
+
+## Confirmed-commit pinned readback (private gate)
+
+After one confirmed publish (or COMMIT_UNKNOWN reconciled as COMMITTED using
+a clean request-ID inspector), the caller must open a **different** TurboDB
+read_at(commit_seq) owner. The private
+ta_legacy_knowledge_batch_verify_readback() checks that the backend reports
+the expected pinned sequence before and after retrieval, and compares the
+EXACT generation manifest, SourceRevision records, legacy document provenance,
+all Chunk KV text bytes and all chunk provenance records through that one
+owner. Read item/byte budgets count every physical get. Missing bytes,
+mutations, wrong commit, backend errors or exhaustion fail closed, with the
+entire result cleared. No repair/retry or broad-scoped retrieval is attempted.
+
+The existing native on-disk SQLite migration test adds a separate fake
+write/read owner: it proves byte-identical post-publish verification, missing
+provenance, corrupted metadata, mismatched commit sequence, limit rejection
+before any get and typed backend LIMIT. This is *not* proof of real TurboDB
+persistence. FTS tokenization, complete Graph projection/absence of ghosts,
+Host ACL/revocation, verified original source bytes and multi-process power
+loss remain independent, still-blocking acceptance gates. The batch is kept
+alive through readback.

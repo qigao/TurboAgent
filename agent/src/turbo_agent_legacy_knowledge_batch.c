@@ -196,6 +196,136 @@ ta_legacy_batch_status_t ta_legacy_knowledge_batch_initial_request(
   out->budget=b->budget;
   return TA_LEGACY_BATCH_OK;
 }
+
+typedef struct ta_readback_check_s {
+  const ta_legacy_readback_backend_t *backend;
+  const ta_legacy_readback_budget_t *budget;
+  uint32_t records;
+  uint64_t bytes;
+} ta_readback_check_t;
+static void release_readback_value(ta_revision_backend_value_t *v) {
+  if (v->owner && v->release) v->release(v->owner);
+  memset(v,0,sizeof(*v));
+}
+static ta_legacy_readback_status_t compare_readback(
+    ta_readback_check_t *check,const char *ns,const ta_revision_key_t *key,
+    ta_revision_blob_t expected) {
+  ta_revision_backend_value_t value={0};
+  ta_revision_backend_status_t bstatus;
+  ta_legacy_readback_status_t status=TA_LEGACY_READBACK_OK;
+  uint64_t bytes;
+  if (!ns || !key || !key->size || !expected.data ||
+      check->records>=check->budget->max_records ||
+      (uint64_t)key->size>check->budget->max_result_bytes-check->bytes)
+    return TA_LEGACY_READBACK_LIMIT;
+  ++check->records;
+  bstatus=check->backend->get(check->backend->read_owner,ns,
+      (ta_revision_id_t){key->data,key->size},&value);
+  if (bstatus!=TA_REVISION_BACKEND_OK) {
+    status=bstatus==TA_REVISION_BACKEND_NOT_FOUND?TA_LEGACY_READBACK_NOT_FOUND:
+        bstatus==TA_REVISION_BACKEND_LIMIT?TA_LEGACY_READBACK_LIMIT:
+        TA_LEGACY_READBACK_STORAGE_ERROR;
+    release_readback_value(&value);
+    return status;
+  }
+  if (!value.bytes.data || (value.owner && !value.release) ||
+      (!value.owner && value.release)) {
+    release_readback_value(&value);
+    return TA_LEGACY_READBACK_BACKEND_CONTRACT;
+  }
+  bytes=(uint64_t)key->size+(uint64_t)value.bytes.size;
+  if (bytes>check->budget->max_result_bytes-check->bytes)
+    status=TA_LEGACY_READBACK_LIMIT;
+  else {
+    check->bytes+=bytes;
+    if (value.bytes.size!=expected.size ||
+        (expected.size && memcmp(value.bytes.data,expected.data,expected.size)))
+      status=TA_LEGACY_READBACK_MISMATCH;
+  }
+  release_readback_value(&value);
+  return status;
+}
+
+ta_legacy_readback_status_t ta_legacy_knowledge_batch_verify_readback(
+    const ta_legacy_knowledge_batch_t *batch,
+    const ta_legacy_readback_backend_t *backend,
+    uint64_t confirmed_commit_seq,uint64_t expected_generation_id,
+    const ta_legacy_readback_budget_t *budget,
+    ta_legacy_readback_result_t *out) {
+  ta_owned_legacy_batch_t *b;
+  ta_revision_scope_t scope;
+  ta_revision_generation_payload_t generation;
+  ta_revision_key_t key;
+  ta_readback_check_t check;
+  ta_legacy_readback_status_t status;
+  uint64_t pinned=0;
+  size_t i,j;
+  if (out) memset(out,0,sizeof(*out));
+  if (!out || !batch || !batch->private_state || !backend || !backend->read_owner ||
+      !backend->pinned_commit_seq || !backend->get || !budget ||
+      !budget->max_records || !budget->max_result_bytes ||
+      !confirmed_commit_seq || !expected_generation_id)
+    return TA_LEGACY_READBACK_INVALID;
+  b=(ta_owned_legacy_batch_t *)batch->private_state;
+  if (UINT64_C(1)+UINT64_C(2)*(uint64_t)b->count+
+      UINT64_C(2)*(uint64_t)b->total_chunks>(uint64_t)budget->max_records)
+    return TA_LEGACY_READBACK_LIMIT;
+  scope.authority=(ta_revision_id_t){b->authority,b->authority_size};
+  scope.collection=(ta_revision_id_t){b->collection,b->collection_size};
+  if (ta_revision_generation_encode(&scope,expected_generation_id,
+        b->members,b->count,&generation)!=TA_REVISION_GENERATION_OK)
+    return TA_LEGACY_READBACK_INVALID;
+  if (backend->pinned_commit_seq(backend->read_owner,&pinned)!=TA_REVISION_BACKEND_OK)
+    return TA_LEGACY_READBACK_STORAGE_ERROR;
+  if (!pinned) return TA_LEGACY_READBACK_BACKEND_CONTRACT;
+  if (pinned!=confirmed_commit_seq) return TA_LEGACY_READBACK_MISMATCH;
+  check=(ta_readback_check_t){backend,budget,0,0};
+  if (ta_revision_generation_key(&scope,&key)!=TA_REVISION_KEY_OK)
+    return TA_LEGACY_READBACK_INVALID;
+  status=compare_readback(&check,TA_REVISION_NS_GENERATION,&key,
+      (ta_revision_blob_t){generation.data,generation.size});
+  if (status!=TA_LEGACY_READBACK_OK) return status;
+  for (i=0;i<b->count;++i) {
+    const ta_owned_legacy_source_t *src=&b->sources[i];
+    ta_revision_id_t source={src->source.data,src->source.size};
+    ta_revision_id_t revision={src->revision.data,src->revision.size};
+    ta_revision_id_t extraction={src->extraction.data,src->extraction.size};
+    ta_source_revision_record_payload_t rec;
+    ta_revision_ref_t ref={scope,source,revision,extraction};
+    if (ta_revision_source_revision_key(&scope,source,revision,&key)!=TA_REVISION_KEY_OK ||
+        ta_source_revision_record_encode(&src->record,&rec)!=TA_SOURCE_REVISION_RECORD_OK)
+      return TA_LEGACY_READBACK_INVALID;
+    status=compare_readback(&check,TA_REVISION_NS_SOURCE_REVISION,&key,
+        (ta_revision_blob_t){rec.data,rec.size});
+    if (status!=TA_LEGACY_READBACK_OK) return status;
+    status=compare_readback(&check,TA_REVISION_NS_LEGACY_DOCUMENT,&key,
+        (ta_revision_blob_t){src->document,src->document_size});
+    if (status!=TA_LEGACY_READBACK_OK) return status;
+    for (j=0;j<src->chunk_count;++j) {
+      if (ta_revision_chunk_key(&ref,(uint64_t)j,&key)!=TA_REVISION_KEY_OK)
+        return TA_LEGACY_READBACK_INVALID;
+      status=compare_readback(&check,TA_REVISION_NS_CHUNK,&key,
+          src->chunks[j].payload);
+      if (status!=TA_LEGACY_READBACK_OK) return status;
+      status=compare_readback(&check,TA_REVISION_NS_LEGACY_CHUNK,&key,
+          src->chunk_metadata[j]);
+      if (status!=TA_LEGACY_READBACK_OK) return status;
+    }
+  }
+  pinned=0;
+  if (backend->pinned_commit_seq(backend->read_owner,&pinned)!=TA_REVISION_BACKEND_OK)
+    return TA_LEGACY_READBACK_STORAGE_ERROR;
+  if (pinned!=confirmed_commit_seq)
+    return pinned?TA_LEGACY_READBACK_MISMATCH:TA_LEGACY_READBACK_BACKEND_CONTRACT;
+  out->commit_seq=confirmed_commit_seq;
+  out->generation_id=expected_generation_id;
+  out->documents=(uint32_t)b->count;
+  out->chunks=(uint32_t)b->total_chunks;
+  out->records=check.records;
+  out->checked_bytes=check.bytes;
+  return TA_LEGACY_READBACK_OK;
+}
+
 void ta_legacy_knowledge_batch_release(ta_legacy_knowledge_batch_t *batch) {
   if (!batch) return;
   release_owned((ta_owned_legacy_batch_t *)batch->private_state);

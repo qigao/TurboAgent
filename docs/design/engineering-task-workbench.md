@@ -5,6 +5,8 @@
 持久格式、授权或发布策略。下文的 Job 协调器、关系索引、审查记录和工作台界面是
 待实现能力。当前源码及公开头文件的实际契约优先于规划。
 
+> **2026-10-30 搜索架构更新（设计，尚未实现）：** 文件和代码检索采用 [Versioned Search / FTS5 / C11 CodeGraph ADR](versioned-search-fts5-codegraph.md)，统一由现有 KnowledgeStore/TurboDB 管理 SourceRevision、SQLite FTS5、Symbol Graph 与已发布代次。原始历史内容保存在不可变版本文件夹；fd/rg 风格 C11 提供精确文件搜索。本文较早的“独立关系 sidecar”描述不再作为新增权威数据库/独立检索 owner 的依据。相关实施跟踪为 [#306](https://github.com/qigao/TurboAgent/issues/306)、[#307](https://github.com/qigao/TurboAgent/issues/307)、[#308](https://github.com/qigao/TurboAgent/issues/308)。现有 Runtime、Journal、Host 授权和 Job 交付门禁不变。
+
 本设计细化已有的[资料关系与可审查 Job 提案](../../agent/docs/module-separation.md#proposed-artifact-relationships-and-reviewable-jobs)，
 复用其身份、所有权和存储边界，补充产品流程、首个交付切片及验收顺序。
 
@@ -90,7 +92,7 @@ M2 先核对实际验证结果，M3 再扩展多阶段生命周期；不以 YAML
 | 对象 | 权威来源/所有者 | 设计规则 |
 | --- | --- | --- |
 | SourceRevision / EvidenceRef | 实际资料源；KnowledgeStore 保存已索引快照 | 引用包含来源身份、内容摘要、精确定位和快照范围；URI/行号不充当稳定符号身份 |
-| 关系视图 | 独立、可重建的 SQLite sidecar 索引 | 边保留关系类型、来源版本、提取器版本及直接观察/推断标记；不拥有源内容或执行状态 |
+| 关系视图 | 同一 KnowledgeStore 中按 Generation 发布的 SQLite 可重建投影 | 边保留关系类型、来源版本、提取器版本及直接观察/推断标记；不拥有源内容或执行状态 |
 | Job / ProposalVersion | 未来 Agent/Harness 任务协调层 | 拥有目标、完成条件、不可变提案版本和生命周期；用户修改是持久记录，不随索引重建丢失 |
 | ExecutablePlan / Certificate | AgentCompiler，消费 RuntimeTools 和 Host 授权 | 冻结准入事实；提案和图中的关联均不能授予执行权限 |
 | Run / Checkpoint / Tool outcome | 现有 Runtime 和执行路径 | 任务引用现有记录；不得复制另一份可独立改写的持久工具结果 |
@@ -162,7 +164,7 @@ M1 不因 Inspect 成功而开放写入；M2 不因旧 DAG/backend 测试通过�
 
 1. 固定这个场景的输入/输出夹具、来源版本和用户可见结果，并核对现有 CLI/SDK 能力。
 2. 在 Agent 查询/投影层组合知识和执行证据；Runtime 不反向依赖知识或 Compiler。
-3. 只有需要持久关系时加入独立 sidecar；保留 schema 版本、来源范围和发布 generation。
+3. 只有需要持久关系时，才在现有 KnowledgeStore 的受控 SQLite 投影中加入版本化关系；保留 schema 版本、来源范围和发布 generation，不新建第二个权威索引库。
 4. 暴露有界 JSON 与现有 Mermaid 投影入口，原有聊天/编程命令行为不变。
 5. 再接入模型生成建议；建议必须带实际可解析的引用。先用离线注入 Provider 验证，真实模型评估单独执行。
 
@@ -213,7 +215,7 @@ M1 不因 Inspect 成功而开放写入；M2 不因旧 DAG/backend 测试通过�
 
 ## 10. 迁移与后续选择
 
-M0 采用新增查询投影和独立索引；禁用工作台或删除可重建索引可回退到现有 CLI/SDK，
+M0 采用既有 KnowledgeStore 的新增可重建检索投影；禁用工作台或删除派生索引可回退到现有 CLI/SDK，
 源资料和执行记录保留。M1 的 Job/审查记录是权威用户数据，须在实现前设计 schema、
 迁移、兼容拒绝和可恢复的回退方式，不能当缓存随意删除。公共 API 只有在对应切片实现和
 测试后才成为承诺；本文的领域名不是已经导出的 C API。

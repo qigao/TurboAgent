@@ -44,8 +44,9 @@ static const ta_revision_write_source_t *find_staged(
   return NULL;
 }
 static int valid_blob(ta_revision_blob_t b) { return b.data && b.size; }
+static int valid_chunk_blob(ta_revision_blob_t b) { return b.data != NULL; }
 static int valid_text(ta_revision_blob_t b) {
-  return valid_blob(b) && !memchr(b.data, 0, b.size);
+  return b.data && !memchr(b.data, 0, b.size);
 }
 static int valid_backend(const ta_revision_write_backend_t *b) {
   return b && b->write_owner && b->ops && b->ops->put && b->ops->project_text &&
@@ -158,7 +159,7 @@ static ta_revision_write_status_t validate_request(
     for (j = 0; j < staged->chunk_count; ++j) {
       ta_revision_ref_t ref = {r->scope, m->source, m->revision, m->extraction};
       const ta_revision_write_chunk_t *chunk = &staged->chunks[j];
-      if (!valid_blob(chunk->payload) || !valid_text(chunk->text) ||
+      if (!valid_chunk_blob(chunk->payload) || !valid_text(chunk->text) ||
           ta_revision_chunk_key(&ref, (uint64_t)j, &key) != TA_REVISION_KEY_OK)
         return TA_REVISION_WRITE_INVALID;
       if (!add_bytes(&bytes, key.size, r->budget.max_payload_bytes) ||
@@ -237,9 +238,11 @@ ta_revision_write_status_t ta_revision_write_publish_generation(
       brc = backend->ops->put(backend->write_owner, TA_REVISION_NS_CHUNK,
           (ta_revision_id_t){key.data, key.size}, chunk->payload, TA_REVISION_WRITE_EXPECT_ABSENT);
       if (brc != TA_REVISION_WRITE_BACKEND_OK) return abort_with(backend, stage_status(brc));
-      brc = backend->ops->project_text(backend->write_owner, TA_REVISION_NS_CHUNK,
-          (ta_revision_id_t){key.data, key.size}, chunk->text);
-      if (brc != TA_REVISION_WRITE_BACKEND_OK) return abort_with(backend, stage_status(brc));
+      if (chunk->text.size) {
+        brc = backend->ops->project_text(backend->write_owner, TA_REVISION_NS_CHUNK,
+            (ta_revision_id_t){key.data, key.size}, chunk->text);
+        if (brc != TA_REVISION_WRITE_BACKEND_OK) return abort_with(backend, stage_status(brc));
+      }
     }
   }
 

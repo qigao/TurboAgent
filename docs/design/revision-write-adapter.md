@@ -135,3 +135,11 @@ There is deliberately no replay/retry callback in this API. A zero commit
 sequence returned as a successful inspection is a backend-contract violation.
 Staging-time `COMMIT_UNKNOWN` is likewise a backend-contract violation because
 only SQLite COMMIT acknowledgement may be uncertain.
+
+## Empty legacy documents
+
+The current KnowledgeStore stores one zero-length chunk for an empty document.
+TurboDB's typed FTS projection rejects a zero-length body. The Agent adapter
+therefore stages the zero-length Chunk value but intentionally skips
+`project_text` for that chunk. This preserves the historical document/chunk
+shape without inventing searchable text or weakening TurboDB's FTS contract.

@@ -151,4 +151,19 @@ static int reconcile(void) {
   return 0;
 }
 
-int main(void){if(initial_generation()||incremental_generation()||failures()||incremental_validation()||structural_validation()||reconcile())return 1;puts("TurboAgent incremental revision write adapter PASS");return 0;}
+
+static int empty_chunk_without_fts(void){
+  static const unsigned char empty[] = "";
+  ta_revision_generation_member_t m=member("empty","r0","e0",1);
+  ta_revision_write_chunk_t ch={{empty,0},{empty,0}};
+  ta_revision_write_source_t staged={text("empty"),text("r0"),text("e0"),source_record(44),&ch,1};
+  ta_revision_write_request_t req=make_request(2,&m,1,&staged,1,(ta_revision_blob_t){NULL,0},0,NULL,0);
+  fake_writer_t w={0};w.publish_seq=12;ta_revision_write_backend_t b=backend(&w);ta_revision_write_result_t out={0};
+  CHECK(ta_revision_write_publish_generation(&b,&req,&out)==TA_REVISION_WRITE_OK);
+  CHECK(w.count==3);
+  CHECK(w.ops[0].kind==OP_PUT&&w.ops[1].kind==OP_PUT&&w.ops[2].kind==OP_PUT);
+  CHECK(out.commit_seq==12&&out.generation_id==2);
+  return 0;
+}
+
+int main(void){if(initial_generation()||incremental_generation()||failures()||incremental_validation()||structural_validation()||reconcile()||empty_chunk_without_fts())return 1;puts("TurboAgent incremental revision write adapter PASS");return 0;}

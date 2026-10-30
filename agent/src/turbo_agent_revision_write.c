@@ -140,8 +140,12 @@ static ta_revision_write_status_t validate_request(
     if (!staged || !id_equal(staged->revision, m->revision) ||
         !id_equal(staged->extraction, m->extraction) ||
         staged->chunk_count != (size_t)m->chunk_count ||
-        !valid_blob(staged->revision_metadata) ||
         (staged->chunk_count && !staged->chunks))
+      return TA_REVISION_WRITE_INVALID;
+    ta_source_revision_record_payload_t revision_record_payload;
+    if (ta_source_revision_record_encode(&staged->revision_record,
+                                         &revision_record_payload) !=
+        TA_SOURCE_REVISION_RECORD_OK)
       return TA_REVISION_WRITE_INVALID;
     if (m->chunk_count > r->budget.max_chunks - chunks)
       return TA_REVISION_WRITE_LIMIT;
@@ -149,7 +153,7 @@ static ta_revision_write_status_t validate_request(
     if (ta_revision_source_revision_key(&r->scope, m->source, m->revision, &key) !=
         TA_REVISION_KEY_OK ||
         !add_bytes(&bytes, key.size, r->budget.max_payload_bytes) ||
-        !add_bytes(&bytes, staged->revision_metadata.size, r->budget.max_payload_bytes))
+        !add_bytes(&bytes, revision_record_payload.size, r->budget.max_payload_bytes))
       return TA_REVISION_WRITE_LIMIT;
     for (j = 0; j < staged->chunk_count; ++j) {
       ta_revision_ref_t ref = {r->scope, m->source, m->revision, m->extraction};
@@ -215,10 +219,14 @@ ta_revision_write_status_t ta_revision_write_publish_generation(
 
   for (i = 0; i < r->staged_source_count; ++i) {
     const ta_revision_write_source_t *src = &r->staged_sources[i];
-    if (ta_revision_source_revision_key(&r->scope, src->source, src->revision, &key) != TA_REVISION_KEY_OK)
+    ta_source_revision_record_payload_t revision_record_payload;
+    if (ta_revision_source_revision_key(&r->scope, src->source, src->revision, &key) != TA_REVISION_KEY_OK ||
+        ta_source_revision_record_encode(&src->revision_record, &revision_record_payload) !=
+          TA_SOURCE_REVISION_RECORD_OK)
       return abort_with(backend, TA_REVISION_WRITE_INVALID);
     brc = backend->ops->put(backend->write_owner, TA_REVISION_NS_SOURCE_REVISION,
-        (ta_revision_id_t){key.data, key.size}, src->revision_metadata,
+        (ta_revision_id_t){key.data, key.size},
+        (ta_revision_blob_t){revision_record_payload.data, revision_record_payload.size},
         TA_REVISION_WRITE_EXPECT_ABSENT);
     if (brc != TA_REVISION_WRITE_BACKEND_OK) return abort_with(backend, stage_status(brc));
     for (j = 0; j < src->chunk_count; ++j) {
@@ -268,4 +276,26 @@ ta_revision_write_status_t ta_revision_write_publish_generation(
   out->generation_id = r->generation_id;
   out->commit_seq = commit_seq;
   return TA_REVISION_WRITE_OK;
+}
+
+
+ta_revision_reconcile_status_t ta_revision_write_reconcile_request(
+    const ta_revision_inspect_backend_t *backend, ta_revision_blob_t request_id,
+    uint64_t *out_commit_seq) {
+  uint64_t seq = 0;
+  ta_revision_inspect_backend_status_t rc;
+  if (out_commit_seq) *out_commit_seq = 0;
+  if (!backend || !backend->clean_owner || !backend->ops ||
+      !backend->ops->inspect_request || !out_commit_seq ||
+      !request_id.data || !request_id.size ||
+      request_id.size > TA_REVISION_WRITE_REQUEST_ID_MAX_BYTES)
+    return TA_REVISION_RECONCILE_INVALID;
+  rc = backend->ops->inspect_request(backend->clean_owner, request_id, &seq);
+  if (rc == TA_REVISION_INSPECT_BACKEND_NOT_FOUND)
+    return TA_REVISION_RECONCILE_NOT_COMMITTED;
+  if (rc != TA_REVISION_INSPECT_BACKEND_OK)
+    return TA_REVISION_RECONCILE_BACKEND_ERROR;
+  if (!seq) return TA_REVISION_RECONCILE_BACKEND_CONTRACT;
+  *out_commit_seq = seq;
+  return TA_REVISION_RECONCILE_COMMITTED;
 }

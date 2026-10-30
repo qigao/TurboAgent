@@ -103,3 +103,35 @@ Passing this test does not prove the real TurboDB bridge or crash durability.
 The real bridge remains blocked on upstream #221/#223/#224 merging and installed
 SDK qualification, then must reuse the existing SQLite VFS/process-crash
 fixtures before any production cutover.
+
+## SourceRevision record semantics
+
+SourceRevision metadata is no longer an opaque write payload. The private
+`ta_source_revision_record_t` encodes original-content length, explicit digest
+semantics and retention state into a fixed versioned record.
+
+`UNVERIFIED_LEGACY` means the legacy KnowledgeStore hash cannot be proven to
+be SHA-256 of the original source bytes (the current legacy path includes
+extracted-text FNV64). It therefore requires `CONTENT_UNAVAILABLE` and a zero
+SHA-256 field. It is invalid to reinterpret such a migrated value as retained,
+verified original content.
+
+`SHA256_ORIGINAL` means Host ingestion actually hashed the original source
+bytes. Only that digest semantic may carry `CONTENT_RETAINED_VERIFIED`.
+The codec records this assertion but does not compute the digest; original-byte
+verification remains the ingestion owner's responsibility.
+
+## Unknown-commit reconciliation
+
+A publish-time `COMMIT_UNKNOWN` is terminal for the original write owner. The
+private reconciliation API accepts only a **clean, newly opened/read-only
+owner** and the original bounded request ID. It returns exactly:
+
+- `COMMITTED(commit_seq)`,
+- `NOT_COMMITTED`,
+- typed invalid/backend/backend-contract failure.
+
+There is deliberately no replay/retry callback in this API. A zero commit
+sequence returned as a successful inspection is a backend-contract violation.
+Staging-time `COMMIT_UNKNOWN` is likewise a backend-contract violation because
+only SQLite COMMIT acknowledgement may be uncertain.

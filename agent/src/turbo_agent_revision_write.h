@@ -2,6 +2,7 @@
 #define TURBO_AGENT_REVISION_WRITE_H
 
 #include "turbo_agent_revision_generation.h"
+#include "turbo_agent_source_revision_record.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -56,7 +57,7 @@ typedef struct ta_revision_write_source_s {
   ta_revision_id_t source;
   ta_revision_id_t revision;
   ta_revision_id_t extraction;
-  ta_revision_blob_t revision_metadata;
+  ta_source_revision_record_t revision_record;
   const ta_revision_write_chunk_t *chunks;
   size_t chunk_count;
 } ta_revision_write_source_t;
@@ -116,6 +117,37 @@ typedef struct ta_revision_write_result_s {
   uint64_t generation_id;
   uint64_t commit_seq;
 } ta_revision_write_result_t;
+
+#define TA_REVISION_WRITE_REQUEST_ID_MAX_BYTES 256u
+
+typedef enum ta_revision_inspect_backend_status_e {
+  TA_REVISION_INSPECT_BACKEND_OK = 0,
+  TA_REVISION_INSPECT_BACKEND_NOT_FOUND = 1,
+  TA_REVISION_INSPECT_BACKEND_ERROR = 2
+} ta_revision_inspect_backend_status_t;
+
+typedef struct ta_revision_inspect_backend_ops_s {
+  ta_revision_inspect_backend_status_t (*inspect_request)(
+      void *clean_owner, ta_revision_blob_t request_id, uint64_t *out_commit_seq);
+} ta_revision_inspect_backend_ops_t;
+
+typedef struct ta_revision_inspect_backend_s {
+  void *clean_owner; /* newly opened/read-only owner; never the quarantined writer */
+  const ta_revision_inspect_backend_ops_t *ops;
+} ta_revision_inspect_backend_t;
+
+typedef enum ta_revision_reconcile_status_e {
+  TA_REVISION_RECONCILE_COMMITTED = 0,
+  TA_REVISION_RECONCILE_NOT_COMMITTED = 1,
+  TA_REVISION_RECONCILE_INVALID = 2,
+  TA_REVISION_RECONCILE_BACKEND_ERROR = 3,
+  TA_REVISION_RECONCILE_BACKEND_CONTRACT = 4
+} ta_revision_reconcile_status_t;
+
+/* Inspect only. There is intentionally no replay/retry operation here. */
+ta_revision_reconcile_status_t ta_revision_write_reconcile_request(
+    const ta_revision_inspect_backend_t *backend, ta_revision_blob_t request_id,
+    uint64_t *out_commit_seq);
 
 /* Consumes backend->write_owner on every return path. Request structure and
  * incremental membership are validated before the first backend mutation.

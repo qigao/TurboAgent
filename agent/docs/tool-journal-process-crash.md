@@ -151,8 +151,24 @@ committed Tool Journal without repeating the external effect marker, then admit
 one distinct identity with precisely two committed journals, two claims and
 two independent effect markers. This proves actual OS-process exclusive-owner
 locking and deterministic normal-close reopening, **not** concurrent SQLite
-writers, lease takeover after abrupt crash, power-loss durability or remote
-external-effect reconciliation.
+writers, power-loss durability or remote external-effect reconciliation.
+
+The adjacent `test_tool_journal_sqlite_cross_process_owner_crash` adds a
+controlled abnormal-owner-exit boundary using the **same real production
+Store**. Once the contender has observed `SALTS_EBUSY` and confirmed the
+exclusive Owner, the holder starts a distinct Tool effect. Its callback closes
+an externally visible second marker and then invokes exactly `_Exit(86)`
+before returning a result or committing the Tool Journal. CMake requires the
+independent holder/contender exit vector `86;0`; an unrelated failure is RED.
+A fresh process then opens SQLite without an Owner lease or fallback, verifies
+the exact original `COMMITTED` and interrupted `STARTED` records with both
+admitted claims, replays the interrupted identity as
+`UNKNOWN_SIDE_EFFECT` without a callback/output/new external marker, replays
+the old committed result, and executes one *different* identity exactly once.
+This proves selected clean OS crash/lock-release recovery with a committed
+external effect and uncertain Journal outcome. It does **not** qualify power
+loss, arbitrary instruction-boundary kills, an external effect transaction,
+automatic retry/reconciliation, remote lease takeover or multiple writers.
 
 The adjacent Journal suite also runs the Executor over the real bounded SQLite Store.
 An over-quota or database-full PLANNED record returns `SALTS_ENOSPC` before any callback and

@@ -1,6 +1,8 @@
 #include "turbo_agent_revision_write.h"
+#include "turbo_agent_legacy_provenance.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 static int valid_id(ta_revision_id_t id) {
   return id.data && id.size && id.size <= TA_REVISION_ID_MAX_BYTES;
@@ -34,6 +36,17 @@ static const ta_revision_generation_member_t *find_member(
 }
 static const ta_revision_write_source_t *find_staged(
     const ta_revision_write_source_t *sources, size_t count,
+    ta_revision_id_t source) {
+  size_t i;
+  for (i = 0; i < count; ++i) {
+    int cmp = id_compare(sources[i].source, source);
+    if (!cmp) return &sources[i];
+    if (cmp > 0) break;
+  }
+  return NULL;
+}
+static const ta_revision_write_legacy_source_t *find_legacy(
+    const ta_revision_write_legacy_source_t *sources, size_t count,
     ta_revision_id_t source) {
   size_t i;
   for (i = 0; i < count; ++i) {
@@ -79,12 +92,93 @@ static ta_revision_write_status_t abort_with(const ta_revision_write_backend_t *
   return rc;
 }
 
+
+/* Provenance validation is complete before the first backend put. It checks
+ * the exact legacy row identity by reusing the single pure migration planner,
+ * not by inventing a second hash/identity or trusting a caller's label. */
+static ta_revision_write_status_t validate_legacy_source(
+    const ta_revision_write_request_t *request,
+    const ta_revision_write_source_t *src,
+    const ta_revision_write_legacy_source_t *legacy,
+    uint64_t *bytes) {
+  ta_legacy_migration_document_t document;
+  ta_legacy_migration_chunk_t *rows;
+  ta_legacy_migration_plan_t plan;
+  ta_revision_key_t key;
+  size_t j;
+  ta_revision_write_status_t status = TA_REVISION_WRITE_INVALID;
+
+  if (!legacy || !valid_id(legacy->source) || !valid_id(legacy->revision) ||
+      !id_equal(src->source, legacy->source) ||
+      !id_equal(src->revision, legacy->revision) ||
+      !valid_blob(legacy->document) ||
+      legacy->chunk_count != src->chunk_count ||
+      (legacy->chunk_count && !legacy->chunks) ||
+      ta_legacy_provenance_document_decode(legacy->document.data,
+          legacy->document.size, &document) != TA_LEGACY_PROVENANCE_OK ||
+      src->revision_record.digest_kind != TA_SOURCE_REVISION_DIGEST_UNVERIFIED_LEGACY ||
+      src->revision_record.retention != TA_SOURCE_REVISION_CONTENT_UNAVAILABLE ||
+      src->revision_record.content_length != (uint64_t)document.size ||
+      src->revision_record.source_mtime_seconds != (uint64_t)document.mtime ||
+      src->revision_record.observed_at_seconds != (uint64_t)document.updated_at)
+    return TA_REVISION_WRITE_INVALID;
+
+  if (ta_revision_source_revision_key(&request->scope, src->source,
+          src->revision, &key) != TA_REVISION_KEY_OK)
+    return TA_REVISION_WRITE_INVALID;
+  if (!add_bytes(bytes, key.size, request->budget.max_payload_bytes) ||
+      !add_bytes(bytes, legacy->document.size, request->budget.max_payload_bytes))
+    return TA_REVISION_WRITE_LIMIT;
+
+  if (src->chunk_count > SIZE_MAX / sizeof(*rows)) return TA_REVISION_WRITE_LIMIT;
+  rows = (ta_legacy_migration_chunk_t *)calloc(
+      src->chunk_count ? src->chunk_count : 1u, sizeof(*rows));
+  if (!rows) return TA_REVISION_WRITE_LIMIT;
+  for (j = 0; j < src->chunk_count; ++j) {
+    const ta_revision_write_chunk_t *chunk = &src->chunks[j];
+    ta_revision_ref_t ref = {
+      request->scope, src->source, src->revision, src->extraction
+    };
+    if (!valid_blob(legacy->chunks[j]) ||
+        ta_legacy_provenance_chunk_decode(legacy->chunks[j].data,
+            legacy->chunks[j].size, &rows[j]) != TA_LEGACY_PROVENANCE_OK ||
+        !valid_chunk_blob(chunk->payload) || !valid_text(chunk->text) ||
+        chunk->payload.size != chunk->text.size ||
+        (chunk->payload.size &&
+            memcmp(chunk->payload.data, chunk->text.data, chunk->payload.size)) ||
+        ta_revision_chunk_key(&ref, (uint64_t)j, &key) != TA_REVISION_KEY_OK) {
+      goto done;
+    }
+    rows[j].text = (ta_legacy_migration_text_t){
+      chunk->payload.data, chunk->payload.size
+    };
+    if (!add_bytes(bytes, key.size, request->budget.max_payload_bytes) ||
+        !add_bytes(bytes, legacy->chunks[j].size, request->budget.max_payload_bytes)) {
+      status = TA_REVISION_WRITE_LIMIT;
+      goto done;
+    }
+  }
+  if (ta_legacy_knowledge_plan_document(&document, rows,
+          src->chunk_count, &plan) != TA_LEGACY_MIGRATION_OK ||
+      !id_equal(src->source,
+          (ta_revision_id_t){plan.source_id.data, plan.source_id.size}) ||
+      !id_equal(src->revision,
+          (ta_revision_id_t){plan.revision_id.data, plan.revision_id.size}) ||
+      !id_equal(src->extraction,
+          (ta_revision_id_t){plan.extraction_id.data, plan.extraction_id.size}))
+    goto done;
+  status = TA_REVISION_WRITE_OK;
+done:
+  free(rows);
+  return status;
+}
+
 static ta_revision_write_status_t validate_request(
     const ta_revision_write_request_t *r,
     ta_revision_generation_payload_t *manifest,
     ta_revision_generation_view_t *previous_view) {
   uint64_t bytes = 0, chunks = 0;
-  size_t i, j, expected_staged = 0;
+  size_t i, j, expected_staged = 0, expected_legacy = 0;
   ta_revision_key_t key;
   ta_revision_generation_status_t grc;
 
@@ -95,6 +189,7 @@ static ta_revision_write_status_t validate_request(
       r->member_count > TA_REVISION_GENERATION_MAX_SOURCES ||
       (r->member_count && !r->members) ||
       (r->staged_source_count && !r->staged_sources) ||
+      (r->legacy_source_count && !r->legacy_sources) ||
       (r->edge_count && !r->edges) ||
       !r->budget.max_chunks || !r->budget.max_edges || !r->budget.max_payload_bytes ||
       r->edge_count > r->budget.max_edges)
@@ -132,11 +227,13 @@ static ta_revision_write_status_t validate_request(
         find_member(previous_view->members, previous_view->member_count, m->source) : NULL;
     const ta_revision_write_source_t *staged =
         find_staged(r->staged_sources, r->staged_source_count, m->source);
+    const ta_revision_write_legacy_source_t *legacy =
+        find_legacy(r->legacy_sources, r->legacy_source_count, m->source);
     int unchanged = old && member_equal(old, m);
     int same_revision = old && id_equal(old->revision, m->revision);
     int same_extractor = old && id_equal(old->extraction, m->extraction);
     if (unchanged) {
-      if (staged) return TA_REVISION_WRITE_INVALID;
+      if (staged || legacy) return TA_REVISION_WRITE_INVALID;
       continue;
     }
     /* One extractor identity maps to one immutable chunk set. Changing its
@@ -156,12 +253,22 @@ static ta_revision_write_status_t validate_request(
                                            &revision_record_payload) !=
           TA_SOURCE_REVISION_RECORD_OK)
         return TA_REVISION_WRITE_INVALID;
+      if (staged->revision_record.digest_kind ==
+          TA_SOURCE_REVISION_DIGEST_UNVERIFIED_LEGACY) {
+        ta_revision_write_status_t status = validate_legacy_source(
+            r, staged, legacy, &bytes);
+        if (status != TA_REVISION_WRITE_OK) return status;
+        ++expected_legacy;
+      } else if (legacy) {
+        return TA_REVISION_WRITE_INVALID;
+      }
       if (ta_revision_source_revision_key(&r->scope, m->source, m->revision, &key) !=
           TA_REVISION_KEY_OK ||
           !add_bytes(&bytes, key.size, r->budget.max_payload_bytes) ||
           !add_bytes(&bytes, revision_record_payload.size, r->budget.max_payload_bytes))
         return TA_REVISION_WRITE_LIMIT;
     } else {
+      if (legacy) return TA_REVISION_WRITE_INVALID;
       /* Reuse an existing immutable record only when the Host supplied the
        * previous exact revision in the generation manifest. No new metadata
        * claim is accepted in this branch. */
@@ -188,7 +295,13 @@ static ta_revision_write_status_t validate_request(
         return TA_REVISION_WRITE_LIMIT;
     }
   }
-  if (expected_staged != r->staged_source_count) return TA_REVISION_WRITE_INVALID;
+  if (expected_staged != r->staged_source_count ||
+      expected_legacy != r->legacy_source_count)
+    return TA_REVISION_WRITE_INVALID;
+  for (i = 1; i < r->legacy_source_count; ++i)
+    if (id_compare(r->legacy_sources[i-1].source,
+                   r->legacy_sources[i].source) >= 0)
+      return TA_REVISION_WRITE_INVALID;
   for (i = 1; i < r->staged_source_count; ++i)
     if (id_compare(r->staged_sources[i-1].source, r->staged_sources[i].source) >= 0)
       return TA_REVISION_WRITE_INVALID;
@@ -240,6 +353,8 @@ ta_revision_write_status_t ta_revision_write_publish_generation(
 
   for (i = 0; i < r->staged_source_count; ++i) {
     const ta_revision_write_source_t *src = &r->staged_sources[i];
+    const ta_revision_write_legacy_source_t *legacy =
+        find_legacy(r->legacy_sources, r->legacy_source_count, src->source);
     if (!src->reuse_revision_metadata) {
       ta_source_revision_record_payload_t revision_record_payload;
       if (ta_revision_source_revision_key(&r->scope, src->source, src->revision, &key) !=
@@ -253,6 +368,14 @@ ta_revision_write_status_t ta_revision_write_publish_generation(
           TA_REVISION_WRITE_EXPECT_ABSENT);
       if (brc != TA_REVISION_WRITE_BACKEND_OK)
         return abort_with(backend, stage_status(brc));
+      if (legacy) {
+        brc = backend->ops->put(backend->write_owner,
+            TA_REVISION_NS_LEGACY_DOCUMENT,
+            (ta_revision_id_t){key.data, key.size},
+            legacy->document, TA_REVISION_WRITE_EXPECT_ABSENT);
+        if (brc != TA_REVISION_WRITE_BACKEND_OK)
+          return abort_with(backend, stage_status(brc));
+      }
     }
     for (j = 0; j < src->chunk_count; ++j) {
       ta_revision_ref_t ref = {r->scope, src->source, src->revision, src->extraction};
@@ -266,6 +389,13 @@ ta_revision_write_status_t ta_revision_write_publish_generation(
         brc = backend->ops->project_text(backend->write_owner, TA_REVISION_NS_CHUNK,
             (ta_revision_id_t){key.data, key.size}, chunk->text);
         if (brc != TA_REVISION_WRITE_BACKEND_OK) return abort_with(backend, stage_status(brc));
+      }
+      if (legacy) {
+        brc = backend->ops->put(backend->write_owner, TA_REVISION_NS_LEGACY_CHUNK,
+            (ta_revision_id_t){key.data, key.size},
+            legacy->chunks[j], TA_REVISION_WRITE_EXPECT_ABSENT);
+        if (brc != TA_REVISION_WRITE_BACKEND_OK)
+          return abort_with(backend, stage_status(brc));
       }
     }
   }

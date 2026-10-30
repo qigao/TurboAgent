@@ -155,3 +155,23 @@ TurboDB's typed FTS projection rejects a zero-length body. The Agent adapter
 therefore stages the zero-length Chunk value but intentionally skips
 `project_text` for that chunk. This preserves the historical document/chunk
 shape without inventing searchable text or weakening TurboDB's FTS contract.
+
+## Legacy provenance staging within the same owner
+
+For a **new** UNVERIFIED_LEGACY revision, `legacy_sources` must contain a
+byte-complete, sorted document and chunk provenance bundle. Preflight calls the
+existing legacy migration planner on decoded evidence to verify exact tagged
+row identity and chunk KV/text parity; malformed or missing provenance aborts
+before the first put. The backend then stages SourceRevision, document
+provenance, each Chunk/FTS and corresponding chunk provenance, Graph OUT/IN,
+generation-head CAS, and a **single** publish. This preserves the original
+KnowledgeStore's URI/kind/title/metadata_json and chunk metadata as immutable
+observations, with NULL/empty distinction. It grants no Host ACL or path
+authority and does not assert original-source byte retention.
+
+The bundle is forbidden when merely reusing an unchanged SourceRevision with
+a new extractor: immutable historical document metadata is not rewritten.
+SourceRevision digests remain UNVERIFIED_LEGACY and CONTENT_UNAVAILABLE until
+independent Host-authorized source-byte verification. This tests callback
+ordering and atomicity assumptions using a fake write owner; application-level
+crash recovery and the real qualified TurboDB SDK adapter are outstanding.

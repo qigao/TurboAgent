@@ -53,6 +53,8 @@ set_tests_properties(test_turbo_agent_revision_read PROPERTIES TIMEOUT 20)
 
 add_executable(test_turbo_agent_revision_write
   revision_write_test.c ../../src/turbo_agent_revision_write.c
+  ../../src/turbo_agent_legacy_provenance.c
+  ../../src/turbo_agent_legacy_knowledge_migration.c
   ../../src/turbo_agent_source_revision_record.c
   ../../src/turbo_agent_revision_generation.c ../../src/turbo_agent_revision_keys.c)
 target_include_directories(test_turbo_agent_revision_write PRIVATE ../../src)
@@ -123,3 +125,24 @@ if(_ta_revision_sqlite_target)
       "${CMAKE_CURRENT_BINARY_DIR}/legacy-knowledge.db")
   set_tests_properties(test_turbo_agent_legacy_knowledge_sqlite PROPERTIES TIMEOUT 20)
 endif()
+
+# Exercise exact-source legacy provenance and single-owner publication with
+# the real private C11 production codecs. No generated consumer/installer.
+add_executable(test_turbo_agent_legacy_provenance
+  legacy_provenance_test.c ../../src/turbo_agent_legacy_provenance.c
+  ../../src/turbo_agent_legacy_knowledge_migration.c
+  ../../src/turbo_agent_revision_write.c
+  ../../src/turbo_agent_source_revision_record.c
+  ../../src/turbo_agent_revision_generation.c ../../src/turbo_agent_revision_keys.c)
+target_include_directories(test_turbo_agent_legacy_provenance PRIVATE ../../src)
+set_target_properties(test_turbo_agent_legacy_provenance PROPERTIES
+  C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+if(MSVC)
+  target_compile_options(test_turbo_agent_legacy_provenance PRIVATE /W4 /WX)
+else()
+  target_compile_options(test_turbo_agent_legacy_provenance PRIVATE
+    -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(NAME test_turbo_agent_legacy_provenance
+  COMMAND test_turbo_agent_legacy_provenance)
+set_tests_properties(test_turbo_agent_legacy_provenance PROPERTIES TIMEOUT 20)

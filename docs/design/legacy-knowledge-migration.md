@@ -108,3 +108,37 @@ emission now share one pinned source transaction.
 These constraints admit the actual existing legacy KnowledgeStore DDL; they do
 not assert that historical extracted text is original-source content, establish
 path authority, or prove that a target migration was atomically published.
+
+## Lossless private provenance payload and atomic staging candidate
+
+The legacy scanner keeps borrowed row views only during its visitor. Before
+they expire, a migration coordinator must encode two versioned private payload
+kinds: one document payload per new SourceRevision and one chunk-metadata
+payload for each exact legacy ordinal. The document record retains **all**
+`id, uri, kind, title, mtime, size, content_hash, metadata_json, updated_at`
+values. The chunk record retains `id, document_id, ordinal, metadata_json`;
+the **exact original extracted** `chunks.text` bytes are separately stored
+as the immutable Chunk KV value. The FTS projection must use those exact bytes
+and is skipped only for a zero-length chunk. Nullable title/metadata retain
+SQL NULL versus present-empty, and neither metadata nor URI is interpreted as
+an ACL/path grant.
+
+The private `ta_revision_write_publish_generation` seam requires one
+provenance bundle for **every newly staged UNVERIFIED_LEGACY SourceRevision**.
+Before any backend mutation it decodes every payload, reconstructs the full
+legacy rows and calls the original migration planner to verify source/revision/
+extraction identity, contiguous chunk IDs, exact Chunk-KV versus indexed text,
+and TAR v2 observed timestamps and content length. Missing, corrupt, reordered,
+changed-hash, changed-chunk or unbounded provenance fails before any put.
+Document/chunk provenance keys use the same immutable SourceRevision/Chunk
+identities under disjoint private namespaces and are included in the byte
+budget. The adapter writes them with the same single backend owner **before**
+the generation-head CAS and exactly one publish. Any staging failure aborts;
+COMMIT_UNKNOWN still requires clean-owner request-id inspection, never replay.
+
+This is a **private, SDK-independent candidate**, not production cutover or a
+claim of completed TurboDB integration. A real TurboDB owner bridge, Host
+authorization/ACL mapping, retained original-byte evidence and process-kill
+recovery remain distinct RED gates. Do not synthesize authoritative FileCatalog
+paths from opaque legacy document ID or URI, and never promote FNV-shaped text
+hashes to original-byte SHA-256.

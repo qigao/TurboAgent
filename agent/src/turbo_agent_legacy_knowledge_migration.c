@@ -6,6 +6,7 @@ static const unsigned char extraction_id_bytes[]="legacy-knowledge-store/chunks-
 enum { LEGACY_ID_SOURCE=1, LEGACY_ID_REVISION=2 };
 
 static int valid_required(ta_legacy_migration_text_t v){return v.data&&v.size&&v.size<=TA_LEGACY_MIGRATION_FIELD_MAX_BYTES;}
+static int valid_chunk_text(ta_legacy_migration_text_t v){return v.data && v.size<=TA_LEGACY_MIGRATION_CHUNK_MAX_BYTES;}
 static int valid_optional(ta_legacy_migration_text_t v){return(!v.data&&v.size==0)||(v.data&&v.size<=TA_LEGACY_MIGRATION_FIELD_MAX_BYTES);}
 static int no_nul(ta_legacy_migration_text_t v){return !v.size||!memchr(v.data,0,v.size);}
 static int equal_text(ta_legacy_migration_text_t a,ta_legacy_migration_text_t b){return a.size==b.size&&(!a.size||(a.data&&b.data&&!memcmp(a.data,b.data,a.size)));}
@@ -36,7 +37,7 @@ ta_legacy_migration_status_t ta_legacy_knowledge_plan_document(
   if(!chunk_count)return TA_LEGACY_MIGRATION_MALFORMED;
   for(i=0;i<chunk_count;++i){
     const ta_legacy_migration_chunk_t*c=&chunks[i];
-    if(!valid_required(c->id)||!valid_required(c->document_id)||!valid_optional(c->text)||
+    if(!valid_required(c->id)||!valid_required(c->document_id)||!valid_chunk_text(c->text)||
        !valid_optional(c->metadata_json)||!no_nul(c->id)||!no_nul(c->document_id)||
        !no_nul(c->text)||!no_nul(c->metadata_json)||c->ordinal<0||
        (uint64_t)c->ordinal!=(uint64_t)i||!equal_text(c->document_id,d->id)||

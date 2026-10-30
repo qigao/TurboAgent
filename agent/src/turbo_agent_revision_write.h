@@ -14,6 +14,8 @@
 #define TA_REVISION_NS_CHUNK "agent.index.chunk"
 #define TA_REVISION_NS_GRAPH "agent.index.graph"
 #define TA_REVISION_NS_GENERATION "agent.index.generation"
+#define TA_REVISION_NS_LEGACY_DOCUMENT "agent.index.legacy.document"
+#define TA_REVISION_NS_LEGACY_CHUNK "agent.index.legacy.chunk"
 
 typedef struct ta_revision_blob_s {
   const unsigned char *data;
@@ -77,6 +79,16 @@ typedef struct ta_revision_write_edge_s {
   ta_revision_blob_t evidence;
 } ta_revision_write_edge_t;
 
+/* Exactly one provenance bundle per NEW migrated legacy SourceRevision.
+ * All bytes are immutable and staged in the SAME backend write owner.
+ * A future Host-authorized re-ingestion is NOT a legacy provenance bundle. */
+typedef struct ta_revision_write_legacy_source_s {
+  ta_revision_id_t source, revision;
+  ta_revision_blob_t document;
+  const ta_revision_blob_t *chunks; /* one per exact legacy ordinal */
+  size_t chunk_count;
+} ta_revision_write_legacy_source_t;
+
 typedef struct ta_revision_write_budget_s {
   uint32_t max_chunks; /* newly staged chunks */
   uint32_t max_edges;  /* current-generation logical edges */
@@ -105,6 +117,10 @@ typedef struct ta_revision_write_request_s {
   const ta_revision_write_edge_t *edges; /* full derived graph for new generation */
   size_t edge_count;
   ta_revision_write_budget_t budget;
+  /* Sorted by source; mandatory for newly staged UNVERIFIED_LEGACY records.
+   * Forbidden for reused revisions and SHA256_ORIGINAL records. */
+  const ta_revision_write_legacy_source_t *legacy_sources;
+  size_t legacy_source_count;
 } ta_revision_write_request_t;
 
 typedef enum ta_revision_write_status_e {

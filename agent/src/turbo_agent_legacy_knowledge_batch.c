@@ -233,14 +233,19 @@ static ta_legacy_readback_status_t compare_readback(
     release_readback_value(&value);
     return TA_LEGACY_READBACK_BACKEND_CONTRACT;
   }
-  bytes=(uint64_t)key->size+(uint64_t)value.bytes.size;
-  if (bytes>check->budget->max_result_bytes-check->bytes)
+  /* Reject impossible backend lengths before summing, not only after. */
+  if ((uint64_t)value.bytes.size>UINT64_MAX-(uint64_t)key->size)
     status=TA_LEGACY_READBACK_LIMIT;
   else {
-    check->bytes+=bytes;
-    if (value.bytes.size!=expected.size ||
-        (expected.size && memcmp(value.bytes.data,expected.data,expected.size)))
-      status=TA_LEGACY_READBACK_MISMATCH;
+    bytes=(uint64_t)key->size+(uint64_t)value.bytes.size;
+    if (bytes>check->budget->max_result_bytes-check->bytes)
+      status=TA_LEGACY_READBACK_LIMIT;
+    else {
+      check->bytes+=bytes;
+      if (value.bytes.size!=expected.size ||
+          (expected.size && memcmp(value.bytes.data,expected.data,expected.size)))
+        status=TA_LEGACY_READBACK_MISMATCH;
+    }
   }
   release_readback_value(&value);
   return status;

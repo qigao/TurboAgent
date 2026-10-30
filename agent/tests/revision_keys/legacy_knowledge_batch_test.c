@@ -78,8 +78,8 @@ typedef struct saved_backend_s {
   saved_row_t values[16];
   size_t count;
   uint64_t committed_seq;
-  unsigned get_calls,sequence_calls;
-  int return_limit;
+  unsigned get_calls,sequence_calls,releases;
+  int return_limit,oversized_value,missing_release,drift;
 } saved_backend_t;
 static void saved_close(saved_backend_t *db) {
   size_t i;
@@ -120,10 +120,13 @@ static ta_revision_write_backend_status_t saved_publish(
 static void saved_abort(void *owner) {(void)owner;}
 static const ta_revision_write_backend_ops_t saved_write_ops={
   saved_put,saved_project,saved_publish,saved_abort};
+static void saved_release(void *owner) {
+  ++((saved_backend_t *)owner)->releases;
+}
 static ta_revision_backend_status_t read_seq(void *owner,uint64_t *out) {
   saved_backend_t *db=(saved_backend_t *)owner;
   ++db->sequence_calls;
-  *out=db->committed_seq;
+  *out=db->committed_seq+(db->drift && db->sequence_calls==2u?1u:0u);
   return db->committed_seq?TA_REVISION_BACKEND_OK:TA_REVISION_BACKEND_NOT_FOUND;
 }
 static ta_revision_backend_status_t saved_get(void *owner,const char *ns,
@@ -136,7 +139,10 @@ static ta_revision_backend_status_t saved_get(void *owner,const char *ns,
     saved_row_t *row=&db->values[i];
     if (!strcmp(ns,row->ns) && row->key.size==key.size &&
         !memcmp(key.data,row->key.data,key.size)) {
-      out->bytes=(ta_revision_id_t){row->value,row->value_size};
+      out->bytes=(ta_revision_id_t){
+        row->value,db->oversized_value?SIZE_MAX:row->value_size};
+      out->owner=db;
+      out->release=db->missing_release?NULL:saved_release;
       return TA_REVISION_BACKEND_OK;
     }
   }
@@ -162,7 +168,7 @@ static int check_readback(const ta_legacy_knowledge_batch_t *batch,
       TA_LEGACY_READBACK_OK);
   CHECK(proof.commit_seq==77u && proof.generation_id==req->generation_id &&
         proof.documents==2u && proof.chunks==2u && proof.records==9u &&
-        proof.checked_bytes>0u);
+        proof.checked_bytes>0u && saved.releases==9u);
   CHECK(ta_legacy_knowledge_batch_verify_readback(
       batch,&reader,76u,req->generation_id,&budget,&proof)==
       TA_LEGACY_READBACK_MISMATCH);
@@ -191,6 +197,24 @@ static int check_readback(const ta_legacy_knowledge_batch_t *batch,
   CHECK(ta_legacy_knowledge_batch_verify_readback(
       batch,&reader,77u,req->generation_id,&budget,&proof)==
       TA_LEGACY_READBACK_LIMIT);
+  saved.return_limit=0;
+  saved.oversized_value=1;
+  CHECK(ta_legacy_knowledge_batch_verify_readback(
+      batch,&reader,77u,req->generation_id,&budget,&proof)==
+      TA_LEGACY_READBACK_LIMIT);
+  CHECK(!proof.checked_bytes);
+  saved.oversized_value=0;
+  saved.missing_release=1;
+  CHECK(ta_legacy_knowledge_batch_verify_readback(
+      batch,&reader,77u,req->generation_id,&budget,&proof)==
+      TA_LEGACY_READBACK_BACKEND_CONTRACT);
+  saved.missing_release=0;
+  saved.sequence_calls=0;
+  saved.drift=1;
+  CHECK(ta_legacy_knowledge_batch_verify_readback(
+      batch,&reader,77u,req->generation_id,&budget,&proof)==
+      TA_LEGACY_READBACK_MISMATCH);
+  CHECK(saved.sequence_calls==2u && !proof.checked_bytes);
   saved_close(&saved);
   return 0;
 }

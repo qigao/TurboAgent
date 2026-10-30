@@ -4,6 +4,7 @@
 **Canonical tracker:** [#306](https://github.com/qigao/TurboAgent/issues/306).
 **Delivery trackers:** [FTS5 #307](https://github.com/qigao/TurboAgent/issues/307), [CodeGraph #308](https://github.com/qigao/TurboAgent/issues/308), [identity #294](https://github.com/qigao/TurboAgent/issues/294), [ingest #295](https://github.com/qigao/TurboAgent/issues/295), [retrieval #297](https://github.com/qigao/TurboAgent/issues/297), [publication #298](https://github.com/qigao/TurboAgent/issues/298), [LocalDB #300](https://github.com/qigao/TurboAgent/issues/300).
 **Upstream dependency:** [TurboDB #220](https://github.com/qigao/turbodb/issues/220) and [same-transaction projections #222](https://github.com/qigao/turbodb/issues/222).
+**Filesystem prerequisite:** [SaltsCore FS #108](https://github.com/qigao/salts-core/issues/108) — durable no-replace directory publication; the existing file-only replacement API is insufficient.
 
 This ADR supersedes ANN-first or independent authoritative graph/file index-store designs for this product. It does **not** delete an existing vector API, approve production migration or a release, merge Draft PR #304/#305, or claim implementation/CI acceptance.
 
@@ -65,7 +66,7 @@ Stable `source_id` is not a path or content hash. A `revision_id` belongs to one
 5. Readers pin a single SQLite snapshot + generation and a retention lease, enforce current Host ACL, then read **immutable** version bytes under the retained root. Validate digest and parse/extraction identity. Do not load a historical document from the current mutable path.
 6. GC observes archived Generations, evidence, live readers, pending request inspection and retention. Orphan cleanup must never remove a folder referenced by any committed or pinned Generation.
 
-**Important API gap:** SaltsCore `salts_fs_replace_durable()` is a *file* replacement API. It is not proof of cross-platform no-replace durable **directory** publication. Qualification belongs to #298 (and any necessary Salts::FS primitive). No raw runtime SQLite schema changes, private SQLite B-tree use, or fake cross-system ACID claim.
+**Important API gap:** SaltsCore `salts_fs_replace_durable()` is a *file* replacement API. It is not proof of cross-platform no-replace durable **directory** publication. Qualification belongs to #298 and [SaltsCore #108](https://github.com/qigao/salts-core/issues/108). No raw runtime SQLite schema changes, private SQLite B-tree use, or fake cross-system ACID claim.
 
 ## 3. Data and index projection
 

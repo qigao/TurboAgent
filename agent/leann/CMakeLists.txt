@@ -4,6 +4,7 @@ add_library(turbo_leann_core STATIC
   src/graph.c
   src/binding.c
   src/search.c
+  src/pq.c
   src/segment.c)
 target_compile_features(turbo_leann_core PUBLIC c_std_11)
 target_include_directories(turbo_leann_core
@@ -21,5 +22,8 @@ if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
   add_executable(test_turbo_leann_binding tests/test_turbo_leann_binding.c)
   target_link_libraries(test_turbo_leann_binding PRIVATE turbo_leann_core)
   add_test(NAME turbo-leann-binding COMMAND test_turbo_leann_binding)
+  add_executable(test_turbo_leann_pq tests/test_turbo_leann_pq.c)
+  target_link_libraries(test_turbo_leann_pq PRIVATE turbo_leann_core)
+  add_test(NAME turbo-leann-pq COMMAND test_turbo_leann_pq)
   set_target_properties(test_turbo_leann_core PROPERTIES FOLDER "Agent/tests")
 endif()

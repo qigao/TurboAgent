@@ -142,3 +142,39 @@ authorization/ACL mapping, retained original-byte evidence and process-kill
 recovery remain distinct RED gates. Do not synthesize authoritative FileCatalog
 paths from opaque legacy document ID or URI, and never promote FNV-shaped text
 hashes to original-byte SHA-256.
+
+## Bounded owned snapshot before the write owner
+
+The private `ta_legacy_knowledge_batch_capture` reads the exact admitted
+legacy `documents/chunks` schema from one **read-only SQLite handle**. It
+uses the existing two-pass, pinned snapshot scan; the first pass validates
+all authoritative rows and chunk coverage. During the second pass, a
+mandatory Host admission callback accepts **every** source or rejects the
+**whole** batch. It must not derive the Host principal, root, or grant from
+legacy `document.id` or `uri`; this callback is a policy boundary, not a
+durable ACL or revocation proof.
+
+Before returning, capture **copies** all opaque IDs, SourceRevision metadata,
+document provenance, chunk provenance and exact extracted text into bounded
+owned memory, sorts source membership by binary IDs, and closes the source
+snapshot transaction. Any schema, visitor, admission, memory or size failure
+releases all partial copies; it cannot invoke a write owner. The budget
+limits cumulative retained bytes and chunk count. No borrowed SQLite cursor
+or temporary visitor view survives capture.
+
+`ta_legacy_knowledge_batch_initial_request` builds one complete generation
+request with `EXPECT_ABSENT` head CAS. The Host must independently revalidate
+grants/epoch and open the qualified TurboDB write owner, then call the existing
+`ta_revision_write_publish_generation`. Repeating a migration against a
+nonempty published generation must conflict rather than become an implicit
+second writer. Caller owns batch until publish returns, including uncertain
+commit reconciliation.
+
+The on-disk native C11 regression captures a two-document snapshot, checks a
+denied row aborts without a partial batch, exercises a finite capture limit,
+changes the legacy SQLite rows *after* capture, and proves the old provenance,
+text and metadata still reach one fake writer without dangling read views. A
+staged failure aborts before publish. This is **not** yet a real TurboDB
+adapter, Host ACL revocation acceptance, source-byte retention proof, or
+process-kill durability qualification. Production KnowledgeStore remains
+unchanged.

@@ -124,6 +124,30 @@ if(_ta_revision_sqlite_target)
     COMMAND test_turbo_agent_legacy_knowledge_sqlite
       "${CMAKE_CURRENT_BINARY_DIR}/legacy-knowledge.db")
   set_tests_properties(test_turbo_agent_legacy_knowledge_sqlite PROPERTIES TIMEOUT 20)
+  # Real on-disk read-only snapshot -> owned batch -> private single-writer seam.
+  # Reuses the existing native tests; no installer/consumer project or CI workflow.
+  add_executable(test_turbo_agent_legacy_knowledge_batch
+    legacy_knowledge_batch_test.c ../../src/turbo_agent_legacy_knowledge_batch.c
+    ../../src/turbo_agent_legacy_knowledge_sqlite.c
+    ../../src/turbo_agent_legacy_knowledge_migration.c
+    ../../src/turbo_agent_legacy_provenance.c
+    ../../src/turbo_agent_revision_write.c
+    ../../src/turbo_agent_source_revision_record.c
+    ../../src/turbo_agent_revision_generation.c ../../src/turbo_agent_revision_keys.c)
+  target_include_directories(test_turbo_agent_legacy_knowledge_batch PRIVATE ../../src)
+  target_link_libraries(test_turbo_agent_legacy_knowledge_batch PRIVATE ${_ta_revision_sqlite_target})
+  set_target_properties(test_turbo_agent_legacy_knowledge_batch PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  if(MSVC)
+    target_compile_options(test_turbo_agent_legacy_knowledge_batch PRIVATE /W4 /WX)
+  else()
+    target_compile_options(test_turbo_agent_legacy_knowledge_batch PRIVATE
+      -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  add_test(NAME test_turbo_agent_legacy_knowledge_batch
+    COMMAND test_turbo_agent_legacy_knowledge_batch
+      "${CMAKE_CURRENT_BINARY_DIR}/legacy-knowledge-batch.db")
+  set_tests_properties(test_turbo_agent_legacy_knowledge_batch PROPERTIES TIMEOUT 20)
 endif()
 
 # Exercise exact-source legacy provenance and single-owner publication with

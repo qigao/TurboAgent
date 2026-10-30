@@ -21,7 +21,9 @@ typedef enum ta_legacy_migration_sqlite_status_e {
   TA_LEGACY_SQLITE_STORAGE_ERROR = 4,
   TA_LEGACY_SQLITE_BUSY = 5,
   TA_LEGACY_SQLITE_PLAN_ERROR = 6,
-  TA_LEGACY_SQLITE_VISITOR_ABORTED = 7
+  TA_LEGACY_SQLITE_VISITOR_ABORTED = 7,
+  /* Authoritative rows exist that are not reachable from the admitted document set. */
+  TA_LEGACY_SQLITE_COVERAGE = 8
 } ta_legacy_migration_sqlite_status_t;
 /* Read-only scanner for the CURRENT legacy KnowledgeStore schema. Requires an
  * autocommit connection, pins one deferred read transaction, and never queries

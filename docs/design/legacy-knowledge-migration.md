@@ -67,3 +67,24 @@ connection; it cannot borrow the live mutable KnowledgeStore connection and
 upgrade its read into a write. Hard ceilings additionally cap one audit at 64
 documents, 65,536 chunks per document and 64 MiB copied row bytes per document,
 with callers allowed to select smaller limits.
+
+
+## Complete-snapshot preflight
+
+Migration planning is two-pass inside **one pinned read transaction**. The first
+pass validates every admitted document and all of its chunks without invoking
+the visitor. Only after the complete snapshot is structurally valid does a
+second pass emit migration plans. A malformed late document therefore cannot
+appear after earlier plans have already been handed to a target migration
+writer.
+
+A separate coverage check rejects orphan rows in `chunks` whose
+`document_id` has no matching `documents.id`. SQLite foreign-key enforcement
+is connection-local and may historically have been disabled, so the presence
+of a FOREIGN KEY clause alone is not sufficient evidence. Orphan authoritative
+rows return `TA_LEGACY_SQLITE_COVERAGE`; they are never silently dropped.
+
+The two passes share the same deferred read transaction, so validation and
+emission observe the same source snapshot. This does not itself make the target
+migration atomic; the target writer must still use the one-owner publication
+contract and abort on visitor/backend failure.

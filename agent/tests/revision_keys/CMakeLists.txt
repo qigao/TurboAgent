@@ -50,3 +50,18 @@ else()
 endif()
 add_test(NAME test_turbo_agent_revision_read COMMAND test_turbo_agent_revision_read)
 set_tests_properties(test_turbo_agent_revision_read PROPERTIES TIMEOUT 20)
+
+add_executable(test_turbo_agent_revision_write
+  revision_write_test.c ../../src/turbo_agent_revision_write.c
+  ../../src/turbo_agent_revision_generation.c ../../src/turbo_agent_revision_keys.c)
+target_include_directories(test_turbo_agent_revision_write PRIVATE ../../src)
+set_target_properties(test_turbo_agent_revision_write PROPERTIES
+  C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+if(MSVC)
+  target_compile_options(test_turbo_agent_revision_write PRIVATE /W4 /WX)
+else()
+  target_compile_options(test_turbo_agent_revision_write PRIVATE
+    -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(NAME test_turbo_agent_revision_write COMMAND test_turbo_agent_revision_write)
+set_tests_properties(test_turbo_agent_revision_write PROPERTIES TIMEOUT 20)

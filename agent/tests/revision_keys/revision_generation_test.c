@@ -80,7 +80,7 @@ static int selection_and_history(void) {
   ref.scope=s; ref.source=text("A");ref.revision=text("rev2");ref.extraction=text("ext3");
   KEY_OK(ta_revision_chunk_key(&ref,0,&chunk));
   OK(ta_revision_generation_accept_chunk(payload(&empty),&s,key_bytes(&chunk),&match)); CHECK(!match);
-  ta_revision_edge_t edge={s,text("A"),text("rev1"),text("B"),text("rev7"),text("READS"),text("edge-1")};
+  ta_revision_edge_t edge={s,11,text("A"),text("rev1"),text("B"),text("rev7"),text("READS"),text("edge-1")};
   KEY_OK(ta_revision_edge_key(&edge,TA_REVISION_EDGE_OUT,&out));
   KEY_OK(ta_revision_edge_key(&edge,TA_REVISION_EDGE_IN,&in));
   OK(ta_revision_generation_accept_edge(payload(&old),&s,key_bytes(&out),&match)); CHECK(match);
@@ -88,6 +88,9 @@ static int selection_and_history(void) {
   OK(ta_revision_generation_accept_edge(payload(&now),&s,key_bytes(&out),&match)); CHECK(!match);
   edge.to_revision=text("rev8");KEY_OK(ta_revision_edge_key(&edge,TA_REVISION_EDGE_IN,&in));
   OK(ta_revision_generation_accept_edge(payload(&old),&s,key_bytes(&in),&match)); CHECK(!match);
+  edge.to_revision=text("rev7"); edge.generation_id=10;
+  KEY_OK(ta_revision_edge_key(&edge,TA_REVISION_EDGE_OUT,&out));
+  OK(ta_revision_generation_accept_edge(payload(&old),&s,key_bytes(&out),&match)); CHECK(!match);
   CHECK(ta_revision_generation_accept_edge(payload(&old),&s,key_bytes(&chunk),&match)==TA_REVISION_GENERATION_MALFORMED);
   CHECK(!match);
   return 0;

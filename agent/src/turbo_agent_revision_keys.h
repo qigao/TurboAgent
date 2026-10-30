@@ -47,6 +47,7 @@ typedef enum ta_revision_edge_direction_e {
 
 typedef struct ta_revision_edge_s {
   ta_revision_scope_t scope;
+  uint64_t generation_id; /* nonzero index generation; stale edges stay isolated */
   ta_revision_id_t from_source;
   ta_revision_id_t from_revision;
   ta_revision_id_t to_source;
@@ -64,6 +65,14 @@ ta_revision_key_status_t ta_revision_generation_key(
 ta_revision_key_status_t ta_revision_source_head_key(
     const ta_revision_scope_t *scope, ta_revision_id_t source,
     ta_revision_key_t *out);
+/* Immutable SourceRevision metadata uses a different key class from the
+ * mutable source-head lookup. The prefix ends exactly after the source ID. */
+ta_revision_key_status_t ta_revision_source_revision_prefix(
+    const ta_revision_scope_t *scope, ta_revision_id_t source,
+    ta_revision_key_t *out);
+ta_revision_key_status_t ta_revision_source_revision_key(
+    const ta_revision_scope_t *scope, ta_revision_id_t source,
+    ta_revision_id_t revision, ta_revision_key_t *out);
 /* Mandatory exact SourceRevision + extraction prefix for an FTS query. */
 ta_revision_key_status_t ta_revision_chunk_prefix(
     const ta_revision_ref_t *ref, ta_revision_key_t *out);
@@ -79,8 +88,9 @@ int ta_revision_chunk_matches(ta_revision_id_t encoded,
 
 ta_revision_key_status_t ta_revision_edge_prefix(
     const ta_revision_scope_t *scope, ta_revision_edge_direction_t direction,
-    ta_revision_id_t focus_source, ta_revision_id_t focus_revision,
-    ta_revision_id_t relation, ta_revision_key_t *out);
+    uint64_t generation_id, ta_revision_id_t focus_source,
+    ta_revision_id_t focus_revision, ta_revision_id_t relation,
+    ta_revision_key_t *out);
 ta_revision_key_status_t ta_revision_edge_key(
     const ta_revision_edge_t *edge, ta_revision_edge_direction_t direction,
     ta_revision_key_t *out);

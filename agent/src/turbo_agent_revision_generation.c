@@ -191,7 +191,8 @@ ta_revision_generation_status_t ta_revision_generation_accept_edge(
   ta_revision_edge_direction_t dir;
   if (ta_revision_edge_decode(edge_key, &edge, &dir) != TA_REVISION_KEY_OK)
     return TA_REVISION_GENERATION_MALFORMED;
-  if (!same_scope(&view.scope, &edge.scope)) return TA_REVISION_GENERATION_OK;
+  if (!same_scope(&view.scope, &edge.scope) || edge.generation_id != view.generation_id)
+    return TA_REVISION_GENERATION_OK;
   const ta_revision_generation_member_t *from = find_member(&view, edge.from_source);
   const ta_revision_generation_member_t *to = find_member(&view, edge.to_source);
   if (from && to) *out_matches = !compare_id(from->revision, edge.from_revision) &&

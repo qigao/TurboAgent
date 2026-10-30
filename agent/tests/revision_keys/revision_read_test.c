@@ -73,8 +73,8 @@ static int add_chunk(fake_snapshot_t*db,const ta_revision_scope_t*s,const char*s
   i->value = value;
   return 0;
 }
-static int add_edge(fake_snapshot_t*db,const ta_revision_scope_t*s,const char*from,const char*fromrev,const char*to,const char*torev,const char*rel,const char*id,ta_revision_edge_direction_t d){
-  ta_revision_edge_t e={*s,text(from),text(fromrev),text(to),text(torev),text(rel),text(id)};fake_item_t*i=&db->edges[db->edge_count++];
+static int add_edge(fake_snapshot_t*db,const ta_revision_scope_t*s,uint64_t generation,const char*from,const char*fromrev,const char*to,const char*torev,const char*rel,const char*id,ta_revision_edge_direction_t d){
+  ta_revision_edge_t e={*s,generation,text(from),text(fromrev),text(to),text(torev),text(rel),text(id)};fake_item_t*i=&db->edges[db->edge_count++];
   if (ta_revision_edge_key(&e, d, &i->key) != TA_REVISION_KEY_OK)
     return 1;
   i->value = "evidence";
@@ -113,9 +113,10 @@ static int backend_contract_and_budgets(void){
 static int graph_generation_filter(void){
   ta_revision_scope_t s=scope();ta_revision_generation_member_t m[2]={member("A","rev1","ext1",1),member("B","rev7","ext2",1)};fake_snapshot_t db={0};ta_revision_read_backend_t r={&db,&ops};ta_revision_read_budget_t b=budget();seen_t seen={0};uint64_t gen=0;
   GOK(ta_revision_generation_encode(&s,31,m,2,&db.generation));
-  CHECK(!add_edge(&db,&s,"A","rev1","B","rev7","READS","current",TA_REVISION_EDGE_OUT));
-  CHECK(!add_edge(&db,&s,"A","rev1","B","rev6","READS","historical",TA_REVISION_EDGE_OUT));
-  CHECK(!add_edge(&db,&s,"A","rev1","B","rev7","OTHER","other",TA_REVISION_EDGE_OUT));
+  CHECK(!add_edge(&db,&s,31,"A","rev1","B","rev7","READS","current",TA_REVISION_EDGE_OUT));
+  CHECK(!add_edge(&db,&s,31,"A","rev1","B","rev6","READS","historical",TA_REVISION_EDGE_OUT));
+  CHECK(!add_edge(&db,&s,30,"A","rev1","B","rev7","READS","old-generation",TA_REVISION_EDGE_OUT));
+  CHECK(!add_edge(&db,&s,31,"A","rev1","B","rev7","OTHER","other",TA_REVISION_EDGE_OUT));
   CHECK(ta_revision_read_scan_edges(&r,&s,text("A"),text("READS"),TA_REVISION_EDGE_OUT,&b,collect,&seen,&gen)==TA_REVISION_READ_OK);
   CHECK(gen==31&&seen.count==1&&db.scan_calls==1&&db.close_calls==1);
   db.inject_bad_edge_key=1;seen.count=0;CHECK(ta_revision_read_scan_edges(&r,&s,text("A"),text("READS"),TA_REVISION_EDGE_OUT,&b,collect,&seen,&gen)==TA_REVISION_READ_BACKEND_CONTRACT);CHECK(gen==0);

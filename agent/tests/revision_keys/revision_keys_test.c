@@ -35,7 +35,7 @@ static ta_revision_ref_t reference(void) {
 
 static int chunk_identity(void) {
   ta_revision_ref_t ref = reference(), other, decoded_ref;
-  ta_revision_key_t key, prefix, changed, head, generation;
+  ta_revision_key_t key, prefix, changed, head, generation, source_rev, source_prefix;
   uint64_t ordinal = 0;
   OK(ta_revision_chunk_key(&ref, 17, &key));
   OK(ta_revision_chunk_prefix(&ref, &prefix));
@@ -65,6 +65,17 @@ static int chunk_identity(void) {
   OK(ta_revision_chunk_key(&other, 17, &changed));
   REQUIRE(!prefix_of(&prefix, &changed));
   OK(ta_revision_source_head_key(&ref.scope, ref.source, &head));
+  OK(ta_revision_source_revision_prefix(&ref.scope, ref.source, &source_prefix));
+  OK(ta_revision_source_revision_key(&ref.scope, ref.source, ref.revision, &source_rev));
+  REQUIRE(prefix_of(&source_prefix, &source_rev));
+  REQUIRE(!prefix_of(&source_prefix, &head) && !prefix_of(&source_prefix, &key));
+  other = ref; other.source = text("source-AA");
+  OK(ta_revision_source_revision_key(&other.scope, other.source, other.revision, &changed));
+  REQUIRE(!prefix_of(&source_prefix, &changed));
+  other = ref; other.revision = text("revision-2");
+  OK(ta_revision_source_revision_key(&other.scope, other.source, other.revision, &changed));
+  REQUIRE(prefix_of(&source_prefix, &changed));
+  REQUIRE(source_rev.size == changed.size && memcmp(source_rev.data, changed.data, source_rev.size));
   OK(ta_revision_generation_key(&ref.scope, &generation));
   REQUIRE(!prefix_of(&prefix, &head) && !prefix_of(&head, &key));
   REQUIRE(!prefix_of(&generation, &key) && !prefix_of(&generation, &head));
@@ -117,6 +128,7 @@ static int graph_directions(void) {
   ta_revision_edge_direction_t direction;
   ta_revision_key_t out, in, prefix, changed;
   edge.scope = ref.scope;
+  edge.generation_id = 42;
   edge.from_source = ref.source; edge.from_revision = ref.revision;
   edge.to_source = text("source-B"); edge.to_revision = text("revision-9");
   edge.relation = text("DERIVED_FROM"); edge.edge_id = text("edge-1");
@@ -124,10 +136,11 @@ static int graph_directions(void) {
   OK(ta_revision_edge_key(&edge, TA_REVISION_EDGE_IN, &in));
   REQUIRE(out.size == in.size && memcmp(out.data, in.data, out.size));
   OK(ta_revision_edge_prefix(&edge.scope, TA_REVISION_EDGE_OUT,
-      edge.from_source, edge.from_revision, edge.relation, &prefix));
+      edge.generation_id, edge.from_source, edge.from_revision, edge.relation, &prefix));
   REQUIRE(prefix_of(&prefix, &out) && !prefix_of(&prefix, &in));
   OK(ta_revision_edge_decode(encoded(&out), &parsed, &direction));
   REQUIRE(direction == TA_REVISION_EDGE_OUT);
+  REQUIRE(parsed.generation_id == edge.generation_id);
   REQUIRE(equal_id(parsed.from_source, edge.from_source));
   REQUIRE(equal_id(parsed.to_revision, edge.to_revision));
   OK(ta_revision_edge_decode(encoded(&in), &parsed, &direction));
@@ -137,9 +150,12 @@ static int graph_directions(void) {
   REQUIRE(equal_id(parsed.from_revision, edge.from_revision));
   REQUIRE(equal_id(parsed.edge_id, edge.edge_id));
   OK(ta_revision_edge_prefix(&edge.scope, TA_REVISION_EDGE_IN,
-      edge.to_source, edge.to_revision, edge.relation, &prefix));
+      edge.generation_id, edge.to_source, edge.to_revision, edge.relation, &prefix));
   REQUIRE(prefix_of(&prefix, &in) && !prefix_of(&prefix, &out));
   edge.to_revision = text("revision-10");
+  OK(ta_revision_edge_key(&edge, TA_REVISION_EDGE_IN, &changed));
+  REQUIRE(!prefix_of(&prefix, &changed));
+  edge.to_revision = text("revision-9"); edge.generation_id = 43;
   OK(ta_revision_edge_key(&edge, TA_REVISION_EDGE_IN, &changed));
   REQUIRE(!prefix_of(&prefix, &changed));
   /* Encoding only one direction is not a DB transaction. The future adapter
@@ -189,7 +205,9 @@ static int reject_malformed(void) {
   OK(ta_revision_chunk_key(&ref, 0, &key));
   REQUIRE(ta_revision_chunk_decode(encoded(&key), NULL, &ordinal) == TA_REVISION_KEY_INVALID);
   REQUIRE(ta_revision_edge_prefix(&ref.scope, (ta_revision_edge_direction_t)99,
-      ref.source, ref.revision, text("reads"), &invalid) == TA_REVISION_KEY_INVALID);
+      1, ref.source, ref.revision, text("reads"), &invalid) == TA_REVISION_KEY_INVALID);
+  REQUIRE(ta_revision_edge_prefix(&ref.scope, TA_REVISION_EDGE_OUT,
+      0, ref.source, ref.revision, text("reads"), &invalid) == TA_REVISION_KEY_INVALID);
   REQUIRE(invalid.size == 0);
   return 0;
 }

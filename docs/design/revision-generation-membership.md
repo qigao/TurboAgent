@@ -131,3 +131,8 @@ inputs. The unchanged key test retains its own 10,000 binary roundtrips.
 Both register under the existing normal native Agent CTest build. Existing
 macOS/Android jobs that disable general tests do not prove these tests ran.
 No production storage migration is enabled by passing this suite.
+
+
+### Graph generation identity
+
+Graph edge keys are generation-bound: OUT and IN keys encode the nonzero `index_generation` as part of their identity. Membership requires the edge generation to equal the manifest generation and both endpoint SourceRevision IDs to be selected. This makes edge removal between generations explicit even when endpoint revisions are unchanged.

@@ -293,8 +293,9 @@ ta_revision_read_status_t ta_revision_read_scan_edges(
     return rc;
   }
   if (ta_revision_edge_prefix(authorized_scope, direction,
-                              authorized_source, selection.ref.revision,
-                              relation, &edge_prefix) != TA_REVISION_KEY_OK) {
+                              selection.generation_id, authorized_source,
+                              selection.ref.revision, relation,
+                              &edge_prefix) != TA_REVISION_KEY_OK) {
     release_value(&generation);
     return TA_REVISION_READ_INVALID;
   }

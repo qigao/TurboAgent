@@ -40,7 +40,9 @@ filtered.
 A returned FTS key outside the exact selected revision/extractor prefix, or a
 graph key outside the requested focus/relation prefix, is a backend contract
 violation. Graph rows within the prefix but pointing to a revision outside the
-selected generation are ordinary retained history and are skipped. Missing or
+selected generation are ordinary retained history and are skipped. The edge key itself also carries the nonzero
+`index_generation`, so rows from an older generation cannot enter the requested
+prefix even when both endpoint SourceRevision IDs are unchanged. Missing or
 empty generation membership returns `NOT_FOUND` and never issues a broad FTS or
 graph query.
 

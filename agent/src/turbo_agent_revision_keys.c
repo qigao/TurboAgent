@@ -6,7 +6,7 @@
  * Lexicographic ordinal order equals numeric order via u64-BE encoding. */
 static const unsigned char key_magic[4] = {'T', 'A', 'I', 1};
 enum { KEY_CHUNK = 1, KEY_SOURCE_HEAD = 2, KEY_GENERATION = 3,
-       KEY_EDGE_OUT = 4, KEY_EDGE_IN = 5 };
+       KEY_EDGE_OUT = 4, KEY_EDGE_IN = 5, KEY_SOURCE_REVISION = 6 };
 
 typedef struct key_reader_s {
   const unsigned char *data;
@@ -24,6 +24,14 @@ static ta_revision_key_status_t append_id(ta_revision_key_t *key,
   key->data[key->size++] = (unsigned char)(id.size & 255u);
   memcpy(key->data + key->size, id.data, id.size);
   key->size += id.size;
+  return TA_REVISION_KEY_OK;
+}
+
+static ta_revision_key_status_t append_u64(ta_revision_key_t *key, uint64_t value) {
+  unsigned i;
+  if (key->size > sizeof(key->data) - 8u) return TA_REVISION_KEY_LIMIT;
+  for (i = 0; i < 8; ++i)
+    key->data[key->size++] = (unsigned char)(value >> (56u - 8u * i));
   return TA_REVISION_KEY_OK;
 }
 
@@ -79,6 +87,31 @@ ta_revision_key_status_t ta_revision_source_head_key(
   return finish_key(out, &key, rc);
 }
 
+static ta_revision_key_status_t source_revision_base(
+    const ta_revision_scope_t *scope, ta_revision_id_t source,
+    ta_revision_key_t *key) {
+  ta_revision_key_status_t rc = begin_key(key, scope, KEY_SOURCE_REVISION);
+  if (rc == TA_REVISION_KEY_OK) rc = append_id(key, source);
+  return rc;
+}
+
+ta_revision_key_status_t ta_revision_source_revision_prefix(
+    const ta_revision_scope_t *scope, ta_revision_id_t source,
+    ta_revision_key_t *out) {
+  ta_revision_key_t key = {{0}, 0};
+  ta_revision_key_status_t rc = source_revision_base(scope, source, &key);
+  return finish_key(out, &key, rc);
+}
+
+ta_revision_key_status_t ta_revision_source_revision_key(
+    const ta_revision_scope_t *scope, ta_revision_id_t source,
+    ta_revision_id_t revision, ta_revision_key_t *out) {
+  ta_revision_key_t key = {{0}, 0};
+  ta_revision_key_status_t rc = source_revision_base(scope, source, &key);
+  if (rc == TA_REVISION_KEY_OK) rc = append_id(&key, revision);
+  return finish_key(out, &key, rc);
+}
+
 ta_revision_key_status_t ta_revision_chunk_prefix(
     const ta_revision_ref_t *ref, ta_revision_key_t *out) {
   ta_revision_key_t key = {{0}, 0};
@@ -90,12 +123,7 @@ ta_revision_key_status_t ta_revision_chunk_key(
     const ta_revision_ref_t *ref, uint64_t ordinal, ta_revision_key_t *out) {
   ta_revision_key_t key = {{0}, 0};
   ta_revision_key_status_t rc = chunk_base(ref, &key);
-  if (rc == TA_REVISION_KEY_OK) {
-    unsigned i;
-    if (key.size > sizeof(key.data) - 8u) rc = TA_REVISION_KEY_LIMIT;
-    else for (i = 0; i < 8; ++i)
-      key.data[key.size++] = (unsigned char)(ordinal >> (56u - 8u * i));
-  }
+  if (rc == TA_REVISION_KEY_OK) rc = append_u64(&key, ordinal);
   return finish_key(out, &key, rc);
 }
 
@@ -110,6 +138,14 @@ static int read_id(key_reader_t *reader, ta_revision_id_t *id) {
   id->data = reader->data + reader->pos;
   id->size = n;
   reader->pos += n;
+  return 1;
+}
+
+static int read_u64(key_reader_t *reader, uint64_t *out) {
+  unsigned i;
+  if (reader->size - reader->pos < 8u) return 0;
+  *out = 0;
+  for (i = 0; i < 8; ++i) *out = (*out << 8) | reader->data[reader->pos++];
   return 1;
 }
 
@@ -134,15 +170,13 @@ ta_revision_key_status_t ta_revision_chunk_decode(
   key_reader_t r = {NULL, 0, 0};
   uint64_t ordinal = 0;
   unsigned char kind = 0;
-  unsigned i;
   if (out_ref) memset(out_ref, 0, sizeof(*out_ref));
   if (out_ordinal) *out_ordinal = 0;
   if (!out_ref || !out_ordinal) return TA_REVISION_KEY_INVALID;
   if (!read_start(encoded, &r, &ref.scope, &kind) || kind != KEY_CHUNK ||
       !read_id(&r, &ref.source) || !read_id(&r, &ref.revision) ||
-      !read_id(&r, &ref.extraction) || r.size - r.pos != 8u)
+      !read_id(&r, &ref.extraction) || !read_u64(&r, &ordinal) || r.pos != r.size)
     return TA_REVISION_KEY_MALFORMED;
-  for (i = 0; i < 8; ++i) ordinal = (ordinal << 8) | r.data[r.pos++];
   *out_ref = ref;
   *out_ordinal = ordinal;
   return TA_REVISION_KEY_OK;
@@ -167,15 +201,17 @@ int ta_revision_chunk_matches(ta_revision_id_t encoded,
 }
 
 static ta_revision_key_status_t edge_base(const ta_revision_scope_t *scope,
-    ta_revision_edge_direction_t direction, ta_revision_id_t focus_source,
-    ta_revision_id_t focus_revision, ta_revision_id_t relation,
-    ta_revision_key_t *key) {
+    ta_revision_edge_direction_t direction, uint64_t generation_id,
+    ta_revision_id_t focus_source, ta_revision_id_t focus_revision,
+    ta_revision_id_t relation, ta_revision_key_t *key) {
   ta_revision_key_status_t rc;
   unsigned char kind;
-  if (direction != TA_REVISION_EDGE_OUT && direction != TA_REVISION_EDGE_IN)
+  if ((direction != TA_REVISION_EDGE_OUT && direction != TA_REVISION_EDGE_IN) ||
+      !generation_id)
     return TA_REVISION_KEY_INVALID;
   kind = (unsigned char)(direction == TA_REVISION_EDGE_OUT ? KEY_EDGE_OUT : KEY_EDGE_IN);
   rc = begin_key(key, scope, kind);
+  if (rc == TA_REVISION_KEY_OK) rc = append_u64(key, generation_id);
   if (rc == TA_REVISION_KEY_OK) rc = append_id(key, focus_source);
   if (rc == TA_REVISION_KEY_OK) rc = append_id(key, focus_revision);
   if (rc == TA_REVISION_KEY_OK) rc = append_id(key, relation);
@@ -184,11 +220,12 @@ static ta_revision_key_status_t edge_base(const ta_revision_scope_t *scope,
 
 ta_revision_key_status_t ta_revision_edge_prefix(
     const ta_revision_scope_t *scope, ta_revision_edge_direction_t direction,
-    ta_revision_id_t focus_source, ta_revision_id_t focus_revision,
-    ta_revision_id_t relation, ta_revision_key_t *out) {
+    uint64_t generation_id, ta_revision_id_t focus_source,
+    ta_revision_id_t focus_revision, ta_revision_id_t relation,
+    ta_revision_key_t *out) {
   ta_revision_key_t key = {{0}, 0};
-  ta_revision_key_status_t rc = edge_base(scope, direction, focus_source,
-                                         focus_revision, relation, &key);
+  ta_revision_key_status_t rc = edge_base(scope, direction, generation_id,
+                                         focus_source, focus_revision, relation, &key);
   return finish_key(out, &key, rc);
 }
 
@@ -198,7 +235,7 @@ ta_revision_key_status_t ta_revision_edge_key(const ta_revision_edge_t *edge,
   ta_revision_key_status_t rc = TA_REVISION_KEY_INVALID;
   if (edge) {
     const int outgoing = direction == TA_REVISION_EDGE_OUT;
-    rc = edge_base(&edge->scope, direction,
+    rc = edge_base(&edge->scope, direction, edge->generation_id,
         outgoing ? edge->from_source : edge->to_source,
         outgoing ? edge->from_revision : edge->to_revision, edge->relation, &key);
     if (rc == TA_REVISION_KEY_OK)
@@ -222,6 +259,7 @@ ta_revision_key_status_t ta_revision_edge_decode(ta_revision_id_t encoded,
   if (!out_edge || !out_direction) return TA_REVISION_KEY_INVALID;
   if (!read_start(encoded, &r, &edge.scope, &kind) ||
       (kind != KEY_EDGE_OUT && kind != KEY_EDGE_IN) ||
+      !read_u64(&r, &edge.generation_id) || !edge.generation_id ||
       !read_id(&r, &focus) || !read_id(&r, &focus_rev) ||
       !read_id(&r, &edge.relation) || !read_id(&r, &other) ||
       !read_id(&r, &other_rev) || !read_id(&r, &edge.edge_id) || r.pos != r.size)

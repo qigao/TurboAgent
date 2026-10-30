@@ -552,8 +552,13 @@ spec("MCP Agent and context admission") {
          * and cancellation must not invent a COMMITTED terminal result. */
         check_equal(probe.remote_calls, 0); check_equal(probe.writes, 2);
         check_not_null(mcp_control_delivered(ctx.state));
+        /* The first call is stopped before backend entry. A subsequent
+         * attempt with the same canonical STARTED+ADMITTED identity is
+         * conservatively UNKNOWN, even if its original token is still
+         * cancelled/expired: cancellation cannot erase durable uncertainty. */
         check_not_null(strstr(mcp_control_delivered(ctx.state),
-            deadline ? "tool_deadline_exceeded" : "tool_cancelled"));
+            replay ? "tool_side_effect_unknown"
+                   : deadline ? "tool_deadline_exceeded" : "tool_cancelled"));
         check_null(strstr(mcp_control_delivered(ctx.state), "mcp-success"));
         check_equal(turbo_agent_runtime_store_list_json(runtime,
             "agent_tool_journal", "call_id", "mcp-call", &records), SALTS_OK);

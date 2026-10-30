@@ -147,6 +147,7 @@ endif()
 
 add_subdirectory(runtime)
 add_subdirectory(provider)
+add_subdirectory(agent/leann)
 add_subdirectory(agent)
 add_subdirectory(harness)
 

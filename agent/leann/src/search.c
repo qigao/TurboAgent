@@ -6,7 +6,7 @@
 static int tl_better(const turbo_leann_hit_t *a, const turbo_leann_hit_t *b) {
   if (a->cosine_similarity > b->cosine_similarity) return 1;
   if (a->cosine_similarity < b->cosine_similarity) return 0;
-  return memcmp(a->chunk_id, b->chunk_id, TURBO_LEANN_ID_BYTES) < 0;
+  return memcmp(a->chunk_label, b->chunk_label, TURBO_LEANN_ID_BYTES) < 0;
 }
 
 turbo_leann_status_t turbo_leann_search_exact(
@@ -39,8 +39,8 @@ turbo_leann_status_t turbo_leann_search_exact(
     if (score > 1.0) score = 1.0;
     if (score < -1.0) score = -1.0;
     turbo_leann_hit_t candidate;
-    memcpy(candidate.chunk_id, segment->ids+(size_t)i*32, 16);
-    memcpy(candidate.revision_id, segment->ids+(size_t)i*32+16, 16);
+    memcpy(candidate.chunk_label, segment->ids+(size_t)i*32, 16);
+    memcpy(candidate.revision_label, segment->ids+(size_t)i*32+16, 16);
     candidate.cosine_similarity = (float)score;
     size_t pos = 0;
     while (pos < used && !tl_better(&candidate, &out_hits[pos])) ++pos;

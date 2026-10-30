@@ -62,9 +62,9 @@ void turbo_leann_segment_destroy(turbo_leann_segment_t *segment) {
 static int tl_input_cmp(const void *a, const void *b) {
   const tl_input_t *x = (const tl_input_t *)a;
   const tl_input_t *y = (const tl_input_t *)b;
-  int c = memcmp(x->vector->chunk_id, y->vector->chunk_id, TURBO_LEANN_ID_BYTES);
+  int c = memcmp(x->vector->chunk_label, y->vector->chunk_label, TURBO_LEANN_ID_BYTES);
   if (c) return c;
-  return memcmp(x->vector->revision_id, y->vector->revision_id,
+  return memcmp(x->vector->revision_label, y->vector->revision_label,
                 TURBO_LEANN_ID_BYTES);
 }
 
@@ -166,12 +166,12 @@ turbo_leann_status_t turbo_leann_build(const turbo_leann_build_t *config,
   qsort(sorted, count, sizeof(*sorted), tl_input_cmp);
   for (size_t i = 0; i < count; ++i) {
     const turbo_leann_vector_t *v = sorted[i].vector;
-    if (i && memcmp(sorted[i-1].vector->chunk_id, v->chunk_id,
+    if (i && memcmp(sorted[i-1].vector->chunk_label, v->chunk_label,
                     TURBO_LEANN_ID_BYTES) == 0) {
       free(sorted); tl_release(s); return TURBO_LEANN_INVALID;
     }
-    memcpy(s->ids+i*32, v->chunk_id, 16);
-    memcpy(s->ids+i*32+16, v->revision_id, 16);
+    memcpy(s->ids+i*32, v->chunk_label, 16);
+    memcpy(s->ids+i*32+16, v->revision_label, 16);
     double norm = 0.0;
     (void)tl_valid_vector(v->components, s->dimensions, &norm);
     for (uint32_t j = 0; j < s->dimensions; ++j)

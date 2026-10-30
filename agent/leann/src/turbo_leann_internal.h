@@ -12,7 +12,7 @@ struct turbo_leann_segment_s {
   uint64_t generation;
   uint8_t model[TURBO_LEANN_FINGERPRINT_BYTES];
   uint8_t scope[TURBO_LEANN_FINGERPRINT_BYTES];
-  uint8_t *ids;       /* ordered (chunk_id[16], revision_id[16]) pairs */
+  uint8_t *ids;       /* ordered (chunk_label[16], revision_label[16]) pairs */
   uint32_t *offsets;  /* CSR, count+1 values */
   uint32_t *edges;    /* ascending node ordinals, no self or duplicate */
   float *vectors;     /* normalized row-major reference vectors, L0 only */

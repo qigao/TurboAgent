@@ -25,9 +25,17 @@ typedef enum turbo_leann_status_e {
 
 typedef struct turbo_leann_segment_s turbo_leann_segment_t;
 
+/* L0 node labels are opaque 128-bit, segment-local lookup keys. They are NOT
+ * TurboAgent SourceRevision/Chunk IDs: the latter are length-delimited
+ * (scope, source, revision, extraction, ordinal) binary keys in #304.
+ * A future trusted same-transaction TurboDB manifest maps each label to its
+ * FULL canonical key; no label alone grants authority or identifies content.
+ * Enforce collision-free uniqueness across the published generation, and
+ * validate every resolved key + generation + current Host ACL on lookup.
+ */
 typedef struct turbo_leann_vector_s {
-  uint8_t chunk_id[TURBO_LEANN_ID_BYTES];
-  uint8_t revision_id[TURBO_LEANN_ID_BYTES];
+  uint8_t chunk_label[TURBO_LEANN_ID_BYTES];
+  uint8_t revision_label[TURBO_LEANN_ID_BYTES];
   const float *components; /* borrowed, dimensions floats */
 } turbo_leann_vector_t;
 
@@ -64,9 +72,11 @@ typedef struct turbo_leann_query_s {
   uint32_t max_distance_evaluations; /* must cover all nodes for exact search */
 } turbo_leann_query_t;
 
+/* Returned labels must be resolved through the pinned owner map, never
+ * treated as source paths, global IDs or authorization tokens. */
 typedef struct turbo_leann_hit_s {
-  uint8_t chunk_id[TURBO_LEANN_ID_BYTES];
-  uint8_t revision_id[TURBO_LEANN_ID_BYTES];
+  uint8_t chunk_label[TURBO_LEANN_ID_BYTES];
+  uint8_t revision_label[TURBO_LEANN_ID_BYTES];
   float cosine_similarity;
 } turbo_leann_hit_t;
 

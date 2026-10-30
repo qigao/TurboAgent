@@ -47,8 +47,8 @@ int main(void) {
   const float *data[] = {x,y,z,diag};
   turbo_leann_vector_t v[4] = {0};
   for (size_t i=0;i<4;++i) {
-    v[i].chunk_id[15] = (uint8_t)(i+1);
-    v[i].revision_id[0] = (uint8_t)(200+i);
+    v[i].chunk_label[15] = (uint8_t)(i+1);
+    v[i].revision_label[0] = (uint8_t)(200+i);
     v[i].components = data[i];
   }
   turbo_leann_build_t c = test_config();
@@ -86,9 +86,9 @@ int main(void) {
   turbo_leann_hit_t hits[2] = {0};
   size_t count=99;
   CHECK(turbo_leann_search_exact(restored,&q,hits,2,&count)==TURBO_LEANN_OK);
-  CHECK(count==2 && hits[0].chunk_id[15]==1 && hits[0].revision_id[0]==200);
+  CHECK(count==2 && hits[0].chunk_label[15]==1 && hits[0].revision_label[0]==200);
   CHECK(fabs(hits[0].cosine_similarity-1.0f)<0.00001f);
-  CHECK(hits[1].chunk_id[15]==4);
+  CHECK(hits[1].chunk_label[15]==4);
 
   /* Scope/generation/model mismatches are never recovered by a fallback. */
   q.generation++;
@@ -120,9 +120,9 @@ int main(void) {
   c.max_pairwise_evaluations=1;
   CHECK(turbo_leann_build(&c,v,4,&invalid)==TURBO_LEANN_LIMIT && !invalid);
   c.max_pairwise_evaluations=65536;
-  v[1].chunk_id[15] = v[0].chunk_id[15];
+  v[1].chunk_label[15] = v[0].chunk_label[15];
   CHECK(turbo_leann_build(&c,v,4,&invalid)==TURBO_LEANN_INVALID && !invalid);
-  v[1].chunk_id[15] = 2;
+  v[1].chunk_label[15] = 2;
   const float zero[3]={0,0,0};
   v[0].components=zero;
   CHECK(turbo_leann_build(&c,v,4,&invalid)==TURBO_LEANN_INVALID && !invalid);

@@ -8,6 +8,14 @@
 
 The local L0 reference includes deterministic, bounded normalized-float32 kNN/CSR construction, exact cosine search, an immutable little-endian segment blob carrying scope/model/generation identities, and a CRC32 accidental-corruption guard. The full vectors remain in L0. It is **not** the LEANN paper's HNSW high-degree pruning/PQ/recompute implementation and is **not** a production TurboDB adapter. Host must verify a strong manifest digest and ACL before opening a segment. In-tree native tests must be compiled by existing root CTest; no extra installer/consumer project, CI workflow, or fallback runtime is introduced.
 
+## L0 label mapping to the SourceRevision codec in PR #304
+
+The L0 segment format stores opaque **16-byte chunk_label/revision_label pairs** for bounded, deterministic local graph coordinates. These are **not** the canonical TurboAgent identifiers: PR #304 source, revision, extraction and chunk keys are bounded **variable-length, length-delimited binary values**. The labels are lookup hints only, not global IDs, source paths, proof of authorization, or sufficient evidence references.
+
+The future KnowledgeStore-owned versioned manifest must map (authority_scope, collection, generation, segment_id, chunk_label) bijectively to the FULL canonical revision-aware chunk key (source, revision, extraction, ordinal), include a strong SHA-256 digest of the segment bytes, and refuse collisions/duplicate labels **across all segments in one published generation**. Query results resolve labels through that map using the **same pinned TurboDB read owner** that returned the generation head, then revalidate exact membership via ta_revision_generation_accept_chunk, retained-content state and current Host ACL. Unknown/corrupt/unauthorized labels fail closed. The 16-byte revision_label is a compact hint, not a substitute for source-qualified immutable revision identity.
+
+Until this node-map and SHA-256 manifest adapter are implemented, **L0 remains an isolated exact-reference kernel**. The existing PR #304 generation manifest does not yet contain an ANN node-map, so treating L0 labels directly as its keys would be incorrect.
+
 ## Decision
 
 Build a standalone, pure-C11 **LEANN-like** index kernel as an **optional, derived query projection** of the existing TurboAgent KnowledgeStore. Use the existing TurboDB **Revisioned SQLite** proposal for revision identity, native transactions, trusted same-transaction Graph/FTS projections, published generation manifest and recovery; do not create a parallel authoritative VectorStore, FileCatalog, source database or persistence engine.

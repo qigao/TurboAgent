@@ -2,10 +2,14 @@
 #define TURBO_AGENT_LEGACY_KNOWLEDGE_SQLITE_H
 #include "turbo_agent_legacy_knowledge_migration.h"
 #include <sqlite3.h>
+
+#define TA_LEGACY_SQLITE_MAX_DOCUMENTS 64u
+#define TA_LEGACY_SQLITE_MAX_CHUNKS_PER_DOCUMENT 65536u
+#define TA_LEGACY_SQLITE_MAX_COPIED_BYTES_PER_DOCUMENT (64u * 1024u * 1024u)
 typedef struct ta_legacy_migration_sqlite_limits_s {
   uint32_t max_documents;
   uint32_t max_chunks_per_document;
-  uint64_t max_copied_bytes;
+  uint64_t max_copied_bytes_per_document;
 } ta_legacy_migration_sqlite_limits_t;
 typedef int (*ta_legacy_migration_plan_visitor_fn)(
     void *context, const ta_legacy_migration_plan_t *plan);

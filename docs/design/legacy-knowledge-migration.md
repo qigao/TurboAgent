@@ -58,3 +58,12 @@ The fixture also proves the audit performs no data migration in place: it reads
 two legacy documents (including the one-empty-chunk representation), leaves
 their row count unchanged, rejects an already-active transaction, trips finite
 document bounds and fails closed after a schema injection.
+
+## Read-only handle gate
+
+The on-disk audit refuses read-write SQLite handles via
+`sqlite3_db_readonly(main)`. Migration must use a separate read-only legacy
+connection; it cannot borrow the live mutable KnowledgeStore connection and
+upgrade its read into a write. Hard ceilings additionally cap one audit at 64
+documents, 65,536 chunks per document and 64 MiB copied row bytes per document,
+with callers allowed to select smaller limits.

@@ -47,6 +47,27 @@
                 "CMAKE_C_COMPILER": "gcc-15",
                 "CMAKE_CXX_COMPILER": "g++-15"
             }
+        },
+        {
+            "name": "RunnerClang",
+            "hidden": true,
+            "description": "Host native LLVM/Clang action-selected compiler without compiler-version checks",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "$env{LLVM_NATIVE_CC}",
+                "CMAKE_CXX_COMPILER": "$env{LLVM_NATIVE_CXX}",
+                "CMAKE_AR": "$env{LLVM_NATIVE_AR}",
+                "CMAKE_RANLIB": "$env{LLVM_NATIVE_RANLIB}"
+            }
+        },
+        {
+            "name": "LlvmMingw",
+            "hidden": true,
+            "description": "Windows llvm-mingw/UCRT compiler (independent of MSVC)",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "$env{LLVM_MINGW_CC}",
+                "CMAKE_CXX_COMPILER": "$env{LLVM_MINGW_CXX}",
+                "CMAKE_TOOLCHAIN_FILE": "$env{QIGAO_VCPKG_TOOLCHAIN_FILE}"
+            }
         }
     ]
 }

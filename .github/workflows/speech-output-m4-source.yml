@@ -21,21 +21,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: gcc
-            cc: gcc
-            cxx: g++
-            flags: "-Wall -Wextra -Wpedantic -Werror -O2"
           - name: clang
             cc: clang
             cxx: clang++
             flags: "-Wall -Wextra -Wpedantic -Werror -O2"
           - name: address-undefined
-            cc: gcc
-            cxx: g++
+            cc: clang
+            cxx: clang++
             flags: "-Wall -Wextra -Wpedantic -Werror -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined"
           - name: thread
-            cc: gcc
-            cxx: g++
+            cc: clang
+            cxx: clang++
             flags: "-Wall -Wextra -Wpedantic -Werror -O1 -g -fno-omit-frame-pointer -fsanitize=thread"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

@@ -137,8 +137,8 @@ spec("turbo tool runtime") {
     check_equal(turbo_tool_registry_get_native_projection(
                     source, "native_increment", &observed),
                 TURBO_TOOL_OK);
-    check_equal(observed.function, native.function);
-    check_equal(observed.abi, native.abi);
+    check_true(observed.function == native.function);
+    check_true(observed.abi == native.abi);
     check_true(cmeta_callable_same(observed.callable, native.callable));
 
     check_equal(turbo_tool_registry_project(
@@ -148,7 +148,7 @@ spec("turbo tool runtime") {
     check_equal(turbo_tool_registry_get_native_projection(
                     projected, "native_increment", &observed),
                 TURBO_TOOL_OK);
-    check_equal(observed.function, native.function);
+    check_true(observed.function == native.function);
     check_true(cmeta_callable_same(observed.callable, native.callable));
 
     sources[0] = projected;
@@ -158,7 +158,7 @@ spec("turbo tool runtime") {
     check_equal(turbo_tool_registry_get_native_projection(
                     composite, "native_increment", &observed),
                 TURBO_TOOL_OK);
-    check_equal(observed.abi, native.abi);
+    check_true(observed.abi == native.abi);
     check_true(cmeta_callable_same(observed.callable, native.callable));
 
     turbo_tool_registry_destroy(composite);
@@ -245,8 +245,8 @@ spec("turbo tool runtime") {
     check_equal(turbo_tool_registry_get_native_projection(
                     bridge, "native_runtime_increment", &observed),
                 TURBO_TOOL_OK);
-    check_equal(observed.function, native.function);
-    check_equal(observed.abi, native.abi);
+    check_true(observed.function == native.function);
+    check_true(observed.abi == native.abi);
     check_true(cmeta_callable_same(observed.callable, native.callable));
 
     turbo_tool_registry_destroy(bridge);

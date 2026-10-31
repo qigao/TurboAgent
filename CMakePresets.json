@@ -10,38 +10,59 @@
             "hidden": true,
             "displayName": "Developer Build (Windows, Base)",
             "inherits": "dev-win-msvc-ninja",
-            "cacheVariables": { "ENABLE_SANITIZER_ADDRESS": "ON" }
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "ON"
+            }
         },
         {
             "name": "base-win-release-user",
             "hidden": true,
             "displayName": "Release Build (Windows, Base)",
             "inherits": "release-win-msvc-ninja",
-            "cacheVariables": { "ENABLE_TESTS": true, "BUILD_TESTS": true, "BUILD_BENCHMARKS": false }
+            "cacheVariables": {
+                "ENABLE_TESTS": true,
+                "BUILD_TESTS": true,
+                "BUILD_BENCHMARKS": false
+            }
         },
         {
             "name": "base-linux-dev-user",
             "hidden": true,
             "displayName": "Developer Build (Linux, Base)",
             "inherits": "dev-linux-ninja",
-            "cacheVariables": { "ENABLE_SANITIZER_ADDRESS": "ON" }
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "ON"
+            }
         },
         {
             "name": "base-linux-release-user",
             "hidden": true,
             "inherits": "release-linux-ninja",
-            "cacheVariables": { "ENABLE_TESTS": true, "BUILD_TESTS": true, "BUILD_TESTING": true, "BUILD_BENCHMARKS": false }
+            "cacheVariables": {
+                "ENABLE_TESTS": true,
+                "BUILD_TESTS": true,
+                "BUILD_TESTING": true,
+                "BUILD_BENCHMARKS": false
+            }
         },
         {
             "name": "base-linux-sdk-package",
             "hidden": true,
             "inherits": "release-linux-ninja",
-            "cacheVariables": { "ENABLE_SANITIZER_ADDRESS": "OFF", "ENABLE_TESTS": "OFF", "BUILD_TESTS": "OFF", "BUILD_EXAMPLES": "OFF" }
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "OFF",
+                "ENABLE_TESTS": "OFF",
+                "BUILD_TESTS": "OFF",
+                "BUILD_EXAMPLES": "OFF"
+            }
         },
         {
             "name": "base-ci-release",
             "hidden": true,
-            "inherits": ["release-mode", "base-ninja"],
+            "inherits": [
+                "release-mode",
+                "base-ninja"
+            ],
             "cacheVariables": {
                 "ENABLE_TESTS": true,
                 "BUILD_TESTS": true,
@@ -60,22 +81,40 @@
             "name": "base-ci-praktor",
             "hidden": true,
             "inherits": "base-ci-release",
-            "cacheVariables": { "ENABLE_PRAKTOR_TOOLS": true }
+            "cacheVariables": {
+                "ENABLE_PRAKTOR_TOOLS": true
+            }
         },
         {
             "name": "base-ci-windows-release",
             "hidden": true,
-            "inherits": ["base-ci-release", "ISWindows", "Msvc", "flags-msvc"],
+            "inherits": [
+                "base-ci-release",
+                "ISWindows",
+                "LlvmMingw",
+                "flags-mingw"
+            ],
             "environment": {
                 "TURBOAGENT_PROFILE": "ci-windows-release",
-                "TURBOAGENT_SDK_RID": "windows-x64"
+                "TURBOAGENT_SDK_RID": "windows-x64",
+                "VCPKG_TARGET_TRIPLET": "qigao-x64-windows-llvm-mingw",
+                "VCPKG_HOST_TRIPLET": "qigao-x64-windows-llvm-mingw"
             },
-            "cacheVariables": { "ENABLE_PRAKTOR_TOOLS": false }
+            "cacheVariables": {
+                "ENABLE_PRAKTOR_TOOLS": false,
+                "VCPKG_TARGET_TRIPLET": "qigao-x64-windows-llvm-mingw",
+                "VCPKG_HOST_TRIPLET": "qigao-x64-windows-llvm-mingw"
+            }
         },
         {
             "name": "base-ci-linux-release",
             "hidden": true,
-            "inherits": ["base-ci-praktor", "ISLinux", "Gcc", "flags-gnu"],
+            "inherits": [
+                "base-ci-praktor",
+                "ISLinux",
+                "RunnerClang",
+                "flags-gnu"
+            ],
             "environment": {
                 "TURBOAGENT_PROFILE": "ci-linux-release",
                 "TURBOAGENT_SDK_RID": "linux-x64",
@@ -86,19 +125,35 @@
         {
             "name": "base-ci-macos-release",
             "hidden": true,
-            "inherits": ["base-ci-praktor", "ISMac", "AppleClang", "flags-darwin"],
+            "inherits": [
+                "base-ci-praktor",
+                "ISMac",
+                "RunnerClang",
+                "flags-darwin"
+            ],
             "environment": {
                 "TURBOAGENT_PROFILE": "ci-macos-release",
                 "TURBOAGENT_SDK_RID": "macos-arm64",
                 "VCPKG_TARGET_TRIPLET": "arm64-osx",
                 "VCPKG_HOST_TRIPLET": "arm64-osx"
             },
-            "cacheVariables": { "CMAKE_OSX_ARCHITECTURES": "arm64", "ENABLE_TESTS": false, "BUILD_TESTS": false, "BUILD_TESTING": false, "TURBOAGENT_SQLITE_VFS_CONFORMANCE": true, "TURBOAGENT_JOB_FILE_CONFORMANCE": true }
+            "cacheVariables": {
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "ENABLE_TESTS": false,
+                "BUILD_TESTS": false,
+                "BUILD_TESTING": false,
+                "TURBOAGENT_SQLITE_VFS_CONFORMANCE": true,
+                "TURBOAGENT_JOB_FILE_CONFORMANCE": true
+            }
         },
         {
             "name": "base-ci-android-release",
             "hidden": true,
-            "inherits": ["base-ci-praktor", "ISLinux", "android-base"],
+            "inherits": [
+                "base-ci-praktor",
+                "ISLinux",
+                "android-base"
+            ],
             "environment": {
                 "TURBOAGENT_PROFILE": "ci-android-release",
                 "TURBOAGENT_SDK_RID": "android-arm64-v8a",

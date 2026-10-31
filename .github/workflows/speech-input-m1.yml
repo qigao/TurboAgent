@@ -24,8 +24,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Select installed host LLVM/Clang
+        if: runner.os != 'Windows'
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@1360926924904fdc9f13767885cea5bde50a7887
+        with:
+          build-type: toolchain-only
+      - name: Select Windows llvm-mingw UCRT
+        if: runner.os == 'Windows'
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@1360926924904fdc9f13767885cea5bde50a7887
+        with:
+          version: "20261020"
+          target: x64
+          build-type: toolchain-only
       - name: Configure standalone C11 SpeechInput (no SDK or ASR model)
-        run: cmake -S speech_input -B build/speech-m1 -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cmake -S speech_input -B build/speech-m1 -DCMAKE_TOOLCHAIN_FILE="$LLVM_MINGW_TOOLCHAIN_FILE" -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+          else
+            cmake -S speech_input -B build/speech-m1 -DCMAKE_TOOLCHAIN_FILE="$LLVM_NATIVE_TOOLCHAIN_FILE" -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+          fi
       - name: Compile exactly the standalone SpeechInput C11 targets
         run: cmake --build build/speech-m1 --config Release --parallel 2
       - name: Execute real M1 conformance (no skipped tests)
@@ -40,7 +59,7 @@ jobs:
       matrix:
         kind: [address, thread]
     env:
-      CC: gcc
+      CC: clang
       SAN_KIND: ${{ matrix.kind }}
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1

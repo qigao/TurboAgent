@@ -35,6 +35,29 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Reject unprotected source targets before native SDK publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="dist/TurboAgent.Native.${{ needs.native-sdk.outputs.version }}.nupkg"
+          test -s "$package"
+          # This is a product Release admission check on metadata emitted by
+          # the real product CMake build, not a Clang version or IR smoke CI.
+          # The current unprotected MSVC/GCC/AppleClang presets must fail here
+          # until their genuine source-owner protected builds are activated.
+          for rid in linux-x64 windows-x64 macos-arm64 android-arm64-v8a; do
+            manifest="sdk/$rid/turboagent-sdk-manifest.txt"
+            entry="$(unzip -p "$package" "$manifest")" || {
+              echo "Unprotected Release denied: missing manifest for $rid" >&2
+              exit 1
+            }
+            if ! grep -Fxq 'source_protection=enabled' <<< "$entry"; then
+              echo "Unprotected Release denied: $rid lacks protected source targets" >&2
+              exit 1
+            fi
+          done
+          echo 'All published RIDs declare opted-in protected first-party source builds'
+
       - name: Publish to GitHub Packages
         shell: bash
         env:

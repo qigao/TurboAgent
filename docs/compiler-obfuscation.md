@@ -45,10 +45,13 @@ to the RID manifest only then. Tag publication rejects any RID
 without a source-protection receipt. This is admission based on the
 ordinary product compilation, not proof of irreversibility.
 
-Remaining blockers: a host LLVM development package is needed to
-source-build the native pass. In particular, Windows llvm-mingw may
-not contain LLVMConfig.cmake; the normal workflow must fail
-unless an appropriate host plugin is provided. Existing Salts/CHttp
+Windows source setup now generates the stripped LLVM development headers
+from the selected MinGW release's exact LLVM source, and links the pass
+through an import library generated from the installed host LLVM DLL.
+This builds the required header/TableGen dependency, not another compiler
+or LLVM runtime. Real Windows plugin build/load acceptance is still pending;
+all preparation and product compilation failures remain hard errors.
+Linux/macOS retain their installed host LLVM development packages. Existing Salts/CHttp
 SDKS and vcpkg packages compiled under old ABIs cannot be relabeled
 as native Clang/llvm-mingw. Android NDK Clang has not yet been
 connected to the opt-in obfuscator action, so Android remains

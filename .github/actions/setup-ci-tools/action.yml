@@ -10,7 +10,7 @@ runs:
       uses: actions/checkout@v4
       with:
         repository: qigao/vcpkg-cache
-        ref: 93acb25cc3073e19f6c175a5be1a9f922e48f61b
+        ref: e3117d190ec2dbb3cf615a501b884c6e2fc19c6c
         path: build/ci-vcpkg-infrastructure
         persist-credentials: false
     - name: Bootstrap canonical vcpkg without NuGet

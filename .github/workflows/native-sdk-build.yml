@@ -130,16 +130,18 @@ jobs:
       # Android uses NDK Clang; no extra Clang/smoke/version CI is created.
       - name: Select Linux/macOS runner LLVM/Clang
         if: matrix.rid == 'linux-x64' || matrix.rid == 'macos-arm64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@6b5297d202a82b0292a69c99c3743e446858db09
         with:
           build-type: toolchain-only
+          obfuscator: "true"
       - name: Select Windows llvm-mingw UCRT
         if: matrix.rid == 'windows-x64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@6b5297d202a82b0292a69c99c3743e446858db09
         with:
           version: "20261020"
           target: x64
           build-type: toolchain-only
+          obfuscator: "true"
       - name: Expose Windows native paths to existing SDK and CMake build
         if: matrix.rid == 'windows-x64'
         shell: pwsh
@@ -403,7 +405,7 @@ jobs:
           configuration="$(sed -n 's/^CMAKE_BUILD_TYPE:[A-Za-z_]*=//p' "$cache")"
           case "$configuration" in
             Release|MinSizeRel|RelWithDebInfo)
-              if grep -Fxq 'TURBOAGENT_PROTECTED_RELEASE:BOOL=ON' "$cache"; then
+              if grep -Fxq 'QIGAO_COMPILER_OBFUSCATION_ENABLED:BOOL=ON' "$cache"; then
                 protection=enabled
               fi
               ;;
@@ -518,7 +520,7 @@ jobs:
 
       - name: Select Windows llvm-mingw for real NuGet consumption
         if: matrix.rid == 'windows-x64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@6b5297d202a82b0292a69c99c3743e446858db09
         with:
           version: "20261020"
           target: x64

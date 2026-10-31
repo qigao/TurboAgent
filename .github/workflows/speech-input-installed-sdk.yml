@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-ci-tools
       - name: Select installed Linux LLVM/Clang
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@6b5297d202a82b0292a69c99c3743e446858db09
         with:
           build-type: toolchain-only
       - name: Install exact native Linux tools

@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-ci-tools
       - name: Select Windows llvm-mingw UCRT
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@6b5297d202a82b0292a69c99c3743e446858db09
         with:
           version: "20261020"
           target: x64

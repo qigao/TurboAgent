@@ -16,12 +16,6 @@ cmake_dependent_option(
 #     add_compile_options(/bigobj)
 # endif()
 
-# Opt in only with the upstream vcpkg-cache compiler action and an
-# actual source-built obfuscator-llvm plugin. A request with missing inputs is
-# an error, not a silent compiler/obfuscator fallback.
-option(TURBOAGENT_PROTECTED_RELEASE
-  "Apply the shared first-party sensitive target policy during product Release"
-  OFF)
 option(BUILD_EXAMPLES "Build example programs" ON)
 option(BUILD_TESTS "Build test suite" ${BUILD_TESTS_DEFAULT})
 option(TURBOAGENT_SQLITE_VFS_CONFORMANCE "Build native SQLite VFS recovery tests without the full suite" OFF)

@@ -121,23 +121,32 @@ jobs:
         shell: bash
         run: brew install ninja nasm
 
-      - name: Locate MSVC toolchain
-        if: runner.os == 'Windows'
+      # Use the same compiler choice as the actual first-party product build.
+      # Android uses NDK Clang; no extra Clang/smoke/version CI is created.
+      - name: Select Linux/macOS runner LLVM/Clang
+        if: matrix.rid == 'linux-x64' || matrix.rid == 'macos-arm64'
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        with:
+          build-type: toolchain-only
+      - name: Select Windows llvm-mingw UCRT
+        if: matrix.rid == 'windows-x64'
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        with:
+          version: "20261020"
+          target: x64
+          build-type: toolchain-only
+      - name: Expose Windows native paths to existing SDK and CMake build
+        if: matrix.rid == 'windows-x64'
         shell: pwsh
         run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
-            throw "MSVC x64 toolchain is required"
-          }
-          "VSDEVCMD_BAT=$vs\Common7\Tools\VsDevCmd.bat" >> $env:GITHUB_ENV
-          # The setup actions expose Windows-native paths; presets consume CMake paths.
+          $ErrorActionPreference = 'Stop'
           foreach ($name in @('VCPKG_ROOT', 'VCPKG_CACHE_REPOSITORY_ROOT', 'RE2C_ROOT')) {
             $path = [Environment]::GetEnvironmentVariable($name)
-            if ([string]::IsNullOrWhiteSpace($path)) { throw "$name is required" }
+            if ([string]::IsNullOrWhiteSpace($path)) { throw "$name must be installed" }
             "$name=$($path.Replace('\', '/'))" >> $env:GITHUB_ENV
           }
-
+          "CC=$env:LLVM_MINGW_CC" >> $env:GITHUB_ENV
+          "CXX=$env:LLVM_MINGW_CXX" >> $env:GITHUB_ENV
       - name: Restore native SDKs on Unix
         if: runner.os != 'Windows'
         shell: bash
@@ -170,9 +179,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          call cmake\ci\run-vsdevcmd.cmd python cmake/ci/restore-vcpkg-cache.py ci-windows-release
+          python cmake/ci/restore-vcpkg-cache.py ci-windows-release
           if errorlevel 1 exit /b 1
-          call cmake\ci\run-vsdevcmd.cmd cmake --preset ci-windows-release -DVCPKG_INSTALL_OPTIONS=--only-binarycaching
+          cmake --preset ci-windows-release -DVCPKG_INSTALL_OPTIONS=--only-binarycaching
 
       - name: Build on Unix
         if: runner.os != 'Windows'
@@ -198,7 +207,7 @@ jobs:
       - name: Build on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call cmake\ci\run-vsdevcmd.cmd cmake --build --preset ci-windows-release
+        run: cmake --build --preset ci-windows-release
 
       - name: Verify Linux PraktorTools has no executable-bound CSTL hash dependency
         if: success() && matrix.rid == 'linux-x64'
@@ -282,12 +291,12 @@ jobs:
         if: matrix.rid == 'windows-x64' && matrix.tests && github.event_name == 'workflow_dispatch'
         shell: cmd
         run: |
-          call cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release --no-tests=error --output-on-failure --repeat until-fail:20 -R "^test_turbo_coding_workspace$"
+          ctest --preset ci-windows-release --no-tests=error --output-on-failure --repeat until-fail:20 -R "^test_turbo_coding_workspace$"
 
       - name: Test on Windows
         if: runner.os == 'Windows' && matrix.tests
         shell: cmd
-        run: call cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release
+        run: ctest --preset ci-windows-release
 
       # #180 qualified the suite budget using recorded fresh-process runs.
       # Keep extended timing on manual acceptance; ordinary CI runs the full
@@ -320,7 +329,7 @@ jobs:
           foreach ($iteration in 1..5) {
             Write-Host "CLI storage iteration $iteration/5"
             $watch = [Diagnostics.Stopwatch]::StartNew()
-            & .\cmake\ci\run-vsdevcmd.cmd ctest --preset ci-windows-release `
+            & ctest --preset ci-windows-release `
               --no-tests=error --verbose -R "^test_turbo_cli_storage$" `
               --output-log "$directory/iteration-$iteration.log" `
               --output-junit "$directory/iteration-$iteration.xml"
@@ -353,7 +362,7 @@ jobs:
       - name: Install on Windows
         if: runner.os == 'Windows'
         shell: cmd
-        run: call cmake\ci\run-vsdevcmd.cmd cmake --build --preset install-ci-windows-release
+        run: cmake --build --preset install-ci-windows-release
 
       - name: Verify relocated installed SDK consumers on Linux
         if: matrix.rid == 'linux-x64'
@@ -367,7 +376,7 @@ jobs:
         shell: cmd
         env:
           SDK_RID: ${{ matrix.rid }}
-        run: call cmake\ci\run-vsdevcmd.cmd cmake -P cmake/ci/verify-installed-sdk.cmake
+        run: cmake -P cmake/ci/verify-installed-sdk.cmake
 
       - name: Record SDK provenance
         shell: bash
@@ -502,17 +511,19 @@ jobs:
           name: turboagent-consumer-context-${{ matrix.rid }}
           path: build/final-nuget-context
 
-      - name: Locate MSVC toolchain
-        if: runner.os == 'Windows'
+      - name: Select Windows llvm-mingw for real NuGet consumption
+        if: matrix.rid == 'windows-x64'
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        with:
+          version: "20261020"
+          target: x64
+          build-type: toolchain-only
+      - name: Export Windows Clang compiler for package consumption
+        if: matrix.rid == 'windows-x64'
         shell: pwsh
         run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
-            throw "MSVC x64 toolchain is required"
-          }
-          "VSDEVCMD_BAT=$vs\Common7\Tools\VsDevCmd.bat" >> $env:GITHUB_ENV
-
+          "CC=$env:LLVM_MINGW_CC" >> $env:GITHUB_ENV
+          "CXX=$env:LLVM_MINGW_CXX" >> $env:GITHUB_ENV
       - name: Consume final NuGet on Linux
         if: runner.os == 'Linux'
         shell: bash
@@ -524,5 +535,5 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: >-
-          call cmake\ci\run-vsdevcmd.cmd python cmake/ci/verify-nuget-sdk.py consume --rid windows-x64
+          python cmake/ci/verify-nuget-sdk.py consume --rid windows-x64
           --package-dir build/final-nuget --context-dir build/final-nuget-context

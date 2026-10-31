@@ -19,6 +19,12 @@ prepare the source-pinned upstream obfuscator-llvm host plugin when enabled,
 or accept an existing host `plugin-path`. LLVM does not have a global
 version restriction. Windows llvm-mingw tag is independent of this plugin.
 
+Windows compiler setup exports separate product and dependency toolchain files.
+The shared vcpkg triplets chainload the dependency file, while the product
+entry point activates the launcher. The host plugin compiler follows the
+runner CPU, independently of the product target. Compiler Actions and the
+shared cache contract are pinned to the same revision.
+
 The ordinary product CMake toolchain wrapper activates
 `QigaoCompilerObfuscation.cmake`. It installs C/C++ compiler launchers
 for *all* product source compilations in Release/MinSizeRel/RelWithDebInfo.

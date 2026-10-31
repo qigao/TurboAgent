@@ -388,11 +388,15 @@ jobs:
           cache="build/${{ matrix.preset }}/CMakeCache.txt"
           test -s "$cache"
           protection=disabled
-          # The option must belong to a real protected build configuration,
-          # not a Debug package mistakenly labeled as protected.
-          if grep -Fxq 'TURBOAGENT_PROTECTED_RELEASE:BOOL=ON' "$cache" &&
-             grep -Eq '^CMAKE_BUILD_TYPE:[A-Z]+=(Release|MinSizeRel|RelWithDebInfo)          printf 'source_protection=%s\n' "$protection" \
-            >> "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
+          configuration="$(sed -n 's/^CMAKE_BUILD_TYPE:[A-Za-z_]*=//p' "$cache")"
+          case "$configuration" in
+            Release|MinSizeRel|RelWithDebInfo)
+              if grep -Fxq 'TURBOAGENT_PROTECTED_RELEASE:BOOL=ON' "$cache"; then
+                protection=enabled
+              fi
+              ;;
+          esac
+          echo "source_protection=$protection" >> "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
           # Dependency selection uses Release Tags, never commit SHAs.
           # The manifest records exactly which release assets and bytes were used.
           release_manifest="build/release-provenance/$SDK_RID.txt"

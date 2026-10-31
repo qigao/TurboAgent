@@ -30,34 +30,35 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-ci-tools
-      - name: Find exact Visual Studio C11 toolchain
+      - name: Select Windows llvm-mingw UCRT
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        with:
+          version: "20261020"
+          target: x64
+          build-type: toolchain-only
+      - name: Normalize source/toolchain paths for CMake
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
-            throw 'Required MSVC toolchain not found'
-          }
-          "VSDEVCMD_BAT=$vs\Common7\Tools\VsDevCmd.bat" >> $env:GITHUB_ENV
           foreach ($name in @('VCPKG_ROOT','VCPKG_CACHE_REPOSITORY_ROOT','RE2C_ROOT')) {
             $path = [Environment]::GetEnvironmentVariable($name)
             if ([string]::IsNullOrWhiteSpace($path)) { throw "$name required" }
             "$name=$($path.Replace('\','/'))" >> $env:GITHUB_ENV
           }
+          "CC=$env:LLVM_MINGW_CC" >> $env:GITHUB_ENV
+          "CXX=$env:LLVM_MINGW_CXX" >> $env:GITHUB_ENV
       - name: Restore official native Salts/SaltsUtils/CHttp Windows SDKs
         shell: bash
         run: bash cmake/ci/restore-native-sdk.sh windows-x64 0 0
       - name: Require actual installed Salts::Capture native target and compile adapter
         shell: cmd
         run: |
-          call cmake\ci\run-vsdevcmd.cmd python cmake/ci/restore-vcpkg-cache.py ci-windows-release
+          python cmake/ci/restore-vcpkg-cache.py ci-windows-release
           if errorlevel 1 exit /b 1
-          call cmake\ci\run-vsdevcmd.cmd cmake --preset ci-windows-release -DVCPKG_INSTALL_OPTIONS=--only-binarycaching -DENABLE_SPEECH_INPUT=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DENABLE_SPEECH_CAPTURE_NATIVE=ON -DENABLE_WASM_TOOLS=OFF -DENABLE_PRAKTOR_TOOLS=OFF -DENABLE_CODING_TOOLS=OFF -DENABLE_CODEX_BRIDGE=OFF -DENABLE_MCP_TOOLS=OFF -DBUILD_TESTS=ON
+          cmake --preset ci-windows-release -DVCPKG_INSTALL_OPTIONS=--only-binarycaching -DENABLE_SPEECH_INPUT=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DENABLE_SPEECH_CAPTURE_NATIVE=ON -DENABLE_WASM_TOOLS=OFF -DENABLE_PRAKTOR_TOOLS=OFF -DENABLE_CODING_TOOLS=OFF -DENABLE_CODEX_BRIDGE=OFF -DENABLE_MCP_TOOLS=OFF -DBUILD_TESTS=ON
           if errorlevel 1 exit /b 1
-          call cmake\ci\run-vsdevcmd.cmd cmake --build --preset ci-windows-release
+          cmake --build --preset ci-windows-release
           if errorlevel 1 exit /b 1
-          call cmake\ci\run-vsdevcmd.cmd ctest --test-dir build/ci-windows-release -C Release --no-tests=error -R "^turbo_agent_speech_capture_bridge_core$" --output-on-failure --timeout 30
+          ctest --test-dir build/ci-windows-release -C Release --no-tests=error -R "^turbo_agent_speech_capture_bridge_core$" --output-on-failure --timeout 30
       - name: Require feature/owner metadata without starting a microphone
         shell: pwsh
         run: |
@@ -67,7 +68,7 @@ jobs:
             if (-not $cache.Contains($flag)) { throw "Feature flag not active: $flag" }
           }
           $library = Get-ChildItem 'build/ci-windows-release' -Recurse -File |
-            Where-Object { $_.Name -eq 'turbo_agent_speech_capture_salts.lib' } |
+            Where-Object { $_.Name -eq 'libturbo_agent_speech_capture_salts.a' } |
             Select-Object -First 1
           if (-not $library) { throw 'Missing native Salts Capture adapter archive' }
           Get-FileHash -Path $library.FullName -Algorithm SHA256 | Format-List | Out-String | Write-Host

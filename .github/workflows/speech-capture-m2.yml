@@ -23,8 +23,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Select installed host LLVM/Clang
+        if: runner.os != 'Windows'
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        with:
+          build-type: toolchain-only
+      - name: Select Windows llvm-mingw UCRT
+        if: runner.os == 'Windows'
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        with:
+          version: "20261020"
+          target: x64
+          build-type: toolchain-only
       - name: Configure exact S16LE callback bridge without microphone or backend
-        run: cmake -S speech_input -B build/speech-capture-m2 -DBUILD_TESTING=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cmake -S speech_input -B build/speech-capture-m2 -DCMAKE_TOOLCHAIN_FILE="$LLVM_MINGW_TOOLCHAIN_FILE" -DBUILD_TESTING=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DCMAKE_BUILD_TYPE=Release
+          else
+            cmake -S speech_input -B build/speech-capture-m2 -DCMAKE_TOOLCHAIN_FILE="$LLVM_NATIVE_TOOLCHAIN_FILE" -DBUILD_TESTING=ON -DENABLE_SPEECH_CAPTURE_BRIDGE=ON -DCMAKE_BUILD_TYPE=Release
+          fi
       - name: Compile C11 production bridge and deterministic PCM fixture
         run: cmake --build build/speech-capture-m2 --config Release --parallel 2
       - name: Reject audio format mismatch, stale callback, overflow, and partial tool submission
@@ -39,7 +58,7 @@ jobs:
       matrix:
         kind: [address, thread]
     env:
-      CC: gcc
+      CC: clang
       SAN_KIND: ${{ matrix.kind }}
       TSAN_OPTIONS: halt_on_error=1:exitcode=66
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1

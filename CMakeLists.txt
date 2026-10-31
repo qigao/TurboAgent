@@ -161,6 +161,14 @@ add_subdirectory(cli)
 if(ENABLE_WASM_TOOLS)
   add_subdirectory(llm_sandbox)
 endif()
+
+# Exact first-party source-ownership classification for an explicitly selected
+# protected product Release. Ordinary SDK CI is unchanged until the upstream
+# shared action and product Release compilers are enabled together.
+if(TURBOAGENT_PROTECTED_RELEASE)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ProtectionTargets.cmake")
+endif()
+
 # Package Configuration
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)

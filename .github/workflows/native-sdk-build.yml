@@ -381,10 +381,8 @@ jobs:
           printf 'version=%s\ncommit=%s\nrid=%s\npraktor_tools=%s\n' \
             "$SDK_VERSION" "$GITHUB_SHA" "$SDK_RID" "$praktor" \
             > "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
-          # Read the actual CMake option from this product build's cache.
-          # This is package provenance, NOT a Clang/LLVM/plugin probe.
-          # The current legacy Release presets correctly record disabled;
-          # the tag publisher below must reject those existing artifacts.
+          # Source-owner protection is derived from this product build CMake cache.
+          # This metadata is not a Clang, plugin ABI or IR validation step.
           cache="build/${{ matrix.preset }}/CMakeCache.txt"
           test -s "$cache"
           protection=disabled
@@ -397,142 +395,6 @@ jobs:
               ;;
           esac
           echo "source_protection=$protection" >> "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
-          # Dependency selection uses Release Tags, never commit SHAs.
-          # The manifest records exactly which release assets and bytes were used.
-          release_manifest="build/release-provenance/$SDK_RID.txt"
-          test -s "$release_manifest"
-          cat "$release_manifest" >> "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
-
-      - name: Export final NuGet consumer dependencies
-        if: matrix.tests
-        shell: bash
-        run: python cmake/ci/verify-nuget-sdk.py stage --rid '${{ matrix.rid }}'
-
-      - uses: actions/upload-artifact@v4
-        if: matrix.tests
-        with:
-          name: turboagent-consumer-context-${{ matrix.rid }}
-          path: build/nuget-consumer-context/${{ matrix.rid }}.tar.gz
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: turboagent-sdk-${{ matrix.rid }}
-          path: build/sdk
-          if-no-files-found: error
-          compression-level: 9
-
-  pack:
-    name: Pack TurboAgent.Native
-    needs: [metadata, build]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: turboagent-sdk-*
-          path: package/sdk
-          merge-multiple: true
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Configure offline NuGet packaging
-        shell: bash
-        run: |
-          set -euo pipefail
-          config="$RUNNER_TEMP/nuget.config"
-          printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
-          echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
-
-      - name: Create NuGet package
-        shell: bash
-        env:
-          PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
-        run: |
-          set -euo pipefail
-          dotnet restore packaging/nuget/TurboAgent.Native.csproj \
-            --configfile "$NUGET_CONFIG" --packages "$RUNNER_TEMP/pack-nuget"
-          dotnet pack packaging/nuget/TurboAgent.Native.csproj \
-            --no-restore --configuration Release --output dist \
-            -p:PackageVersion="$PACKAGE_VERSION" \
-            -p:PackageRoot="$GITHUB_WORKSPACE/package" \
-            -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: turboagent-native-nuget
-          path: dist/*.nupkg
-          if-no-files-found: error
-
-  consume-package:
-    name: Final NuGet consumer (${{ matrix.rid }})
-    needs: [metadata, pack]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rid: linux-x64
-            runner: ubuntu-24.04
-          - rid: windows-x64
-            runner: windows-2025
-    env:
-      PACKAGE_VERSION: ${{ needs.metadata.outputs.package_version }}
-      SDK_VERSION: ${{ needs.metadata.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: turboagent-native-nuget
-          path: build/final-nuget
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: turboagent-consumer-context-${{ matrix.rid }}
-          path: build/final-nuget-context
-
-      - name: Locate MSVC toolchain
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) {
-            throw "MSVC x64 toolchain is required"
-          }
-          "VSDEVCMD_BAT=$vs\Common7\Tools\VsDevCmd.bat" >> $env:GITHUB_ENV
-
-      - name: Consume final NuGet on Linux
-        if: runner.os == 'Linux'
-        shell: bash
-        run: >-
-          python cmake/ci/verify-nuget-sdk.py consume --rid linux-x64
-          --package-dir build/final-nuget --context-dir build/final-nuget-context
-
-      - name: Consume final NuGet on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: >-
-          call cmake\ci\run-vsdevcmd.cmd python cmake/ci/verify-nuget-sdk.py consume --rid windows-x64
-          --package-dir build/final-nuget --context-dir build/final-nuget-context
- "$cache"; then
-            protection=enabled
-          fi
-          printf 'source_protection=%s\n' "$protection" \
-            >> "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
           # Dependency selection uses Release Tags, never commit SHAs.
           # The manifest records exactly which release assets and bytes were used.
           release_manifest="build/release-provenance/$SDK_RID.txt"

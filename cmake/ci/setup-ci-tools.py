@@ -62,8 +62,8 @@ def main():
         "VCPKG_OVERLAY_PORTS": (assets / "ports").as_posix(),
         "VCPKG_OVERLAY_TRIPLETS": (assets / "triplets").as_posix(),
         "QIGAO_VCPKG_TOOLCHAIN_FILE": (assets / "cmake/QigaoVcpkgToolchain.cmake").as_posix(),
-        "QIGAO_VCPKG_WINDOWS_TRIPLET": "qigao-x64-windows-v145",
-        "QIGAO_VCPKG_WINDOWS_HOST_TRIPLET": "qigao-x64-windows-v145",
+        "QIGAO_VCPKG_WINDOWS_TRIPLET": "qigao-x64-windows-llvm-mingw",
+        "QIGAO_VCPKG_WINDOWS_HOST_TRIPLET": "qigao-x64-windows-llvm-mingw",
         "VCPKG_BINARY_CACHE": cache.as_posix(), "VCPKG_BINARY_SOURCES": f"clear;files,{cache.as_posix()},read",
         "VCPKG_NUGET_REPOSITORY": "https://github.com/qigao/vcpkg-cache",
     }

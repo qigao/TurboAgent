@@ -121,16 +121,21 @@ jobs:
         shell: bash
         run: brew install ninja nasm
 
+      - name: Prepare Windows Ninja for llvm-mingw SDK builds
+        if: matrix.rid == 'windows-x64'
+        shell: pwsh
+        run: choco install ninja -y --no-progress
+
       # Use the same compiler choice as the actual first-party product build.
       # Android uses NDK Clang; no extra Clang/smoke/version CI is created.
       - name: Select Linux/macOS runner LLVM/Clang
         if: matrix.rid == 'linux-x64' || matrix.rid == 'macos-arm64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
         with:
           build-type: toolchain-only
       - name: Select Windows llvm-mingw UCRT
         if: matrix.rid == 'windows-x64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
         with:
           version: "20261020"
           target: x64
@@ -513,7 +518,7 @@ jobs:
 
       - name: Select Windows llvm-mingw for real NuGet consumption
         if: matrix.rid == 'windows-x64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
         with:
           version: "20261020"
           target: x64

@@ -26,12 +26,12 @@ jobs:
           persist-credentials: false
       - name: Select installed host LLVM/Clang
         if: runner.os != 'Windows'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
         with:
           build-type: toolchain-only
       - name: Select Windows llvm-mingw UCRT
         if: runner.os == 'Windows'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@35dc0f8ac0c7e880a5126fac516d7258b6fea15b
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@c8e2045f0f18cd3ca3320afcd0e79a5fc0513174
         with:
           version: "20261020"
           target: x64

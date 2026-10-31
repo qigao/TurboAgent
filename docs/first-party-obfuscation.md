@@ -56,3 +56,26 @@ sensitive-source classification to that repository's own CMake source
 target rather than relying on final `turboagent` linking. Obfuscation
 increases reverse-engineering cost; it is not a substitute for server-side
 secrets and authorization.
+
+## Existing SDK publication gate
+
+The **existing** native SDK builder now writes `source_protection=enabled`
+or `source_protection=disabled` into each RID's
+`turboagent-sdk-manifest.txt`, derived from the **actual product**
+`TURBOAGENT_PROTECTED_RELEASE` CMakeCache entry. This is a source-build
+classification receipt, not a separate Clang version test or proof of
+complete reverse-engineering resistance.
+
+The **existing tag publisher** rejects any `TurboAgent.Native` NuGet
+package that lacks `source_protection=enabled` for **all** packaged
+RIDs: Linux x64, Windows x64, macOS ARM64 and Android ARM64-v8a.
+This gate is intentionally fail-closed: currently published/packaged
+legacy SDK presets remain unprotected and therefore cannot be newly
+published as compliant Release artifacts. No actual package is
+published by this Draft PR.
+
+Only after each RID's actual compiler/toolchain and product-owned
+first-party plugin have been migrated and the normal build compiles
+successfully may its Release manifest set `source_protection=enabled`.
+No new compiler-validation workflow, CMake probe, consumer project
+or fallback is allowed.

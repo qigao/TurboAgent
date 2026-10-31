@@ -381,6 +381,18 @@ jobs:
           printf 'version=%s\ncommit=%s\nrid=%s\npraktor_tools=%s\n' \
             "$SDK_VERSION" "$GITHUB_SHA" "$SDK_RID" "$praktor" \
             > "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
+          # Read the actual CMake option from this product build's cache.
+          # This is package provenance, NOT a Clang/LLVM/plugin probe.
+          # The current legacy Release presets correctly record disabled;
+          # the tag publisher below must reject those existing artifacts.
+          cache="build/${{ matrix.preset }}/CMakeCache.txt"
+          test -s "$cache"
+          protection=disabled
+          if grep -Fxq 'TURBOAGENT_PROTECTED_RELEASE:BOOL=ON' "$cache"; then
+            protection=enabled
+          fi
+          printf 'source_protection=%s\n' "$protection" \
+            >> "build/sdk/$SDK_RID/turboagent-sdk-manifest.txt"
           # Dependency selection uses Release Tags, never commit SHAs.
           # The manifest records exactly which release assets and bytes were used.
           release_manifest="build/release-provenance/$SDK_RID.txt"

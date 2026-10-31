@@ -79,3 +79,14 @@ first-party plugin have been migrated and the normal build compiles
 successfully may its Release manifest set `source_protection=enabled`.
 No new compiler-validation workflow, CMake probe, consumer project
 or fallback is allowed.
+
+## SDK compiler paths in existing CI
+
+Current PR CI presets explicitly choose the shared `RunnerClang` selector
+on Linux/macOS and `LlvmMingw` on Windows x64. The action checkout is pinned
+to [vcpkg-cache PR #244](https://github.com/qigao/vcpkg-cache/pull/244)
+commit `35dc0f8ac0c7e880a5126fac516d7258b6fea15b`, which provides the new distinct MinGW triplets.
+Android retains its own NDK Clang. This does not rewrite old published MSVC,
+GCC or AppleClang dependency SDKs, and old ABI artifacts cannot substitute for
+MinGW/Clang Release packages. Missing correct ABI packages remain a real build
+blocker, not a reason to reenable MSVC or GCC. No new Clang validation jobs.

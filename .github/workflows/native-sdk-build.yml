@@ -130,13 +130,13 @@ jobs:
       # Android uses NDK Clang; no extra Clang/smoke/version CI is created.
       - name: Select Linux/macOS runner LLVM/Clang
         if: matrix.rid == 'linux-x64' || matrix.rid == 'macos-arm64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@6b5297d202a82b0292a69c99c3743e446858db09
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-native@b8cb01227c4b2a336673bee43f0ce7dfabedc3eb
         with:
           build-type: toolchain-only
           obfuscator: "true"
       - name: Select Windows llvm-mingw UCRT
         if: matrix.rid == 'windows-x64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@6b5297d202a82b0292a69c99c3743e446858db09
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@b8cb01227c4b2a336673bee43f0ce7dfabedc3eb
         with:
           version: "20261020"
           target: x64
@@ -520,7 +520,7 @@ jobs:
 
       - name: Select Windows llvm-mingw for real NuGet consumption
         if: matrix.rid == 'windows-x64'
-        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@6b5297d202a82b0292a69c99c3743e446858db09
+        uses: qigao/vcpkg-cache/.github/actions/setup-llvm-mingw@b8cb01227c4b2a336673bee43f0ce7dfabedc3eb
         with:
           version: "20261020"
           target: x64
